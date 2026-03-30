@@ -39,9 +39,10 @@ Spawns 4 parallel specialist agents that each examine the code through a differe
 
 ## Install
 
-```
-/install-plugin paulbaranowski/wild-horses
-```
+1. Run `/plugin` in Claude Code
+2. Select **Marketplaces**
+3. Select **Add marketplace**
+4. Enter `paulbaranowski/wild-horses`
 
 ## License
 
