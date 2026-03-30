@@ -1,0 +1,15 @@
+{
+  "name": "wild-horses",
+  "owner": {
+    "name": "Paul Baranowski"
+  },
+  "plugins": [
+    {
+      "name": "wild-horses",
+      "source": "./",
+      "description": "Make your code Harness-ready, so AI can iterate based on ground truth.",
+      "version": "1.0.0",
+      "license": "MIT"
+    }
+  ]
+}
