@@ -5,7 +5,7 @@
   },
   "plugins": [
     {
-      "name": "wild-horses",
+      "name": "harness-review",
       "source": "./plugins/wild-horses",
       "description": "Make your code Harness-ready, so AI can iterate based on ground truth.",
       "license": "MIT"

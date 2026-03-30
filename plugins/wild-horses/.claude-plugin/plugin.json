@@ -5,8 +5,5 @@
   "author": {
     "name": "Paul Baranowski"
   },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/paulbaranowski/wild-horses"
-  }
+  "repository": "https://github.com/paulbaranowski/wild-horses"
 }
