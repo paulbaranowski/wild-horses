@@ -1,7 +1,7 @@
 ---
 name: harness-review
 description: Analyze code for encapsulation, OOP design, testability, and harness-friendliness (agent feedback loops). Spawns 4 parallel specialist agents, merges findings, and proposes the highest-impact refactor. Use when you want to improve code quality for maintainability and agent-assisted development.
-user_invocable: true
+user-invocable: true
 argument-hint: "[file or directory path] [--scope changed|module|full]"
 ---
 
