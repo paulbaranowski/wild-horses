@@ -21,7 +21,7 @@ plugins/harness-review/            -- plugin root
 ## Rules
 
 ### Marketplace Structure
-- marketplace.json goes in `.claude-plugin/` at the repo root. Add `"$schema": "https://anthropic.com/claude-code/marketplace.schema.json"` for validation.
+- marketplace.json goes in `.claude-plugin/` at the repo root. Do NOT add `"$schema"` — the validator rejects unrecognized keys.
 - Each plugin lives in its own directory under `plugins/`. The plugin's `.claude-plugin/plugin.json` goes inside that directory, NOT at the repo root.
 - Skills, agents, commands, and hooks go at the **plugin root** level, NOT inside `.claude-plugin/`.
 - Validate with: `claude plugin validate .` or `/plugin validate .`
