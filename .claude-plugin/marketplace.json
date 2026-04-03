@@ -17,6 +17,17 @@
       },
       "category": "development",
       "license": "MIT"
+    },
+    {
+      "name": "harness-setup",
+      "source": "./plugins/harness-setup",
+      "description": "Set up the harness engineering directory structure in any repo. Analyzes existing files, proposes moves and generations, executes after approval.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
     }
   ]
 }
