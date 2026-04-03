@@ -1,0 +1,8 @@
+{
+  "name": "harness-setup",
+  "description": "Set up the harness engineering directory structure in any repo. Analyzes existing files, proposes moves and generations, executes after approval. Never deletes files.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Paul Baranowski"
+  }
+}
