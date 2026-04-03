@@ -2,6 +2,7 @@
 name: harness-setup
 description: Set up the harness engineering directory structure in any repo. Analyzes existing files, proposes moves and generations, executes after approval. Never deletes files.
 user-invocable: true
+disable-model-invocation: true
 argument-hint: "[project root path]"
 ---
 
@@ -17,7 +18,7 @@ Set up the **harness engineering** directory structure (from OpenAI's "Harness E
 
 ## Target Directory Structure
 
-```
+```text
 project-root/
 ├── CLAUDE.md                      ← Entry point (~100 lines max)
 │                                    Table of contents pointing to deeper docs.
@@ -64,10 +65,10 @@ Run these searches to understand the repo:
 2. List all markdown files repo-wide: `find <root> -name "*.md" -type f -not -path "*/.git/*" -not -path "*/node_modules/*" -not -path "*/.venv/*"`
 3. Check for existing docs directory: `ls -la <root>/docs/ 2>/dev/null`
 4. Find agent instruction files: search for CLAUDE.md, AGENTS.md, .cursorrules, COPILOT.md, .github/copilot-instructions.md
-5. Find architecture/design docs: search for ARCHITECTURE*, DESIGN*, ADR-*, adr-*, *-design.md, *-architecture.md
+5. Find architecture/design docs: search for `ARCHITECTURE*`, `DESIGN*`, `ADR-*`, `adr-*`, `*-design.md`, `*-architecture.md`
 6. Find execution plans: search in paths containing plans/, exec-plans/, roadmap/, todo/
 7. Find product specs: search in paths containing specs/, product-specs/, requirements/, features/
-8. Find generated docs: search in paths containing generated/, and for schema.md, db-schema*, api-spec*, openapi*
+8. Find generated docs: search in paths containing `generated/`, and for `schema.md`, `db-schema*`, `api-spec*`, `openapi*`
 9. Find reference docs: search in paths containing references/, vendor-docs/, external-docs/
 10. Read CLAUDE.md (or AGENTS.md) if it exists — assess whether it's table-of-contents style (~100 lines, mostly pointers) or contains inline content
 
@@ -95,7 +96,7 @@ Present a clear, actionable proposal. Use these exact sections:
 ### 1. Directories to Create
 
 List each directory that doesn't already exist:
-```
+```bash
 mkdir -p docs/design-docs
 mkdir -p docs/exec-plans/active
 mkdir -p docs/exec-plans/completed
@@ -107,7 +108,7 @@ mkdir -p docs/references
 ### 2. Files to Move
 
 For each file relocation:
-```
+```text
 MOVE: current/path.md → docs/design-docs/path.md
       Reason: This is an architecture decision record
 ```
@@ -117,7 +118,7 @@ If no files need moving, say so.
 ### 3. Files to Generate
 
 For each file to create:
-```
+```text
 GENERATE: ARCHITECTURE.md
           How: Analyze codebase to produce a domain map
           Sections: modules, layers, dependency flow, key interfaces
@@ -127,7 +128,7 @@ GENERATE: docs/exec-plans/active/TEMPLATE.md
 ```
 
 For files that aren't relevant:
-```
+```text
 SKIP: docs/generated/db-schema.md
       Reason: No database detected in this project
 ```
@@ -140,7 +141,7 @@ SKIP: docs/generated/db-schema.md
 
 ### 4. Summary Table
 
-```
+```markdown
 | Action   | Count | Details                     |
 |----------|-------|-----------------------------|
 | Create   | N     | directories                 |
@@ -242,6 +243,8 @@ Draft | Approved | Implemented | Deprecated
 ```
 
 ### Step 4: Final Report
+
+Present a completion summary following this structure:
 
 ```markdown
 # Harness Setup Complete
