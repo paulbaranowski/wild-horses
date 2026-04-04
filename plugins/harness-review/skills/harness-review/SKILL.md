@@ -58,6 +58,7 @@ Read each file and analyze for encapsulation quality. Look for:
 For each finding, report:
 - Severity: critical / important / minor
 - File path and line number
+- Actual code (quote the exact lines you are flagging — verbatim, not paraphrased)
 - What the issue is and the concrete harm (not just "could be better")
 - A brief suggested fix direction (1 sentence)
 
@@ -106,6 +107,7 @@ Read each file and analyze for OOP design quality. Look for:
 For each finding, report:
 - Severity: critical / important / minor
 - File path and line number
+- Actual code (quote the exact lines you are flagging — verbatim, not paraphrased)
 - What the issue is and the concrete harm
 - A brief suggested fix direction (1 sentence)
 
@@ -156,6 +158,7 @@ Look for:
 For each finding, report:
 - Severity: critical / important / minor
 - File path and line number
+- Actual code (quote the exact lines you are flagging — verbatim, not paraphrased)
 - What the issue is and what it prevents you from testing
 - A brief suggested fix direction (1 sentence)
 
@@ -205,6 +208,7 @@ Read each file and analyze for harness-friendliness. Look for:
 For each finding, report:
 - Severity: critical / important / minor
 - File path and line number
+- Actual code (quote the exact lines you are flagging — verbatim, not paraphrased)
 - What the issue is and how it degrades the feedback loop
 - A brief suggested fix direction (1 sentence)
 
@@ -235,11 +239,17 @@ IMPORTANT: This is NOT a general code review. Only flag issues that specifically
 
 Wait for all 4 agents to return. Then synthesize their findings into a unified report:
 
-1. **Collect ratings** from each agent into the summary table
-2. **Deduplicate findings** — if two agents flagged the same file:line, merge into one finding noting which pillars it affects (this is a signal of high impact)
-3. **Cross-pillar findings are gold** — when the same code location appears in 2+ agent reports, flag it prominently. These are the highest-leverage fixes because one change improves multiple dimensions.
-4. **Compute overall score** — weighted average: Encapsulation 20%, OOP Design 20%, Testability 30%, Harness-Friendliness 30% (testability and harness-friendliness weighted higher because they directly affect development velocity)
-5. **Identify the Highest-Impact Refactor** — the single change that appears across the most pillars or addresses the highest-severity finding. Prefer changes that improve testability AND harness-friendliness simultaneously.
+1. **Verify every finding before including it.** For each finding from each agent:
+   - Read the cited file at the cited line number
+   - Confirm the quoted code in the finding matches what is actually in the file
+   - If the finding references content that does not exist at the cited location, **discard it silently** — do not include it in the report
+   - If the description is slightly inaccurate but the underlying issue is real, correct the description
+2. **Collect ratings** from each agent into the summary table
+3. **Deduplicate findings** — if two agents flagged the same file:line, merge into one finding noting which pillars it affects (this is a signal of high impact)
+4. **Cross-pillar findings are gold** — when the same code location appears in 2+ agent reports, flag it prominently. These are the highest-leverage fixes because one change improves multiple dimensions.
+5. **Compute overall score** — weighted average: Encapsulation 20%, OOP Design 20%, Testability 30%, Harness-Friendliness 30% (testability and harness-friendliness weighted higher because they directly affect development velocity)
+6. **Identify the Highest-Impact Refactor** — the single change that appears across the most pillars or addresses the highest-severity finding. Prefer changes that improve testability AND harness-friendliness simultaneously.
+7. **Final check** — re-read the merged report. Every finding must have a file:line that exists and code that matches. If you cannot verify a finding, drop it.
 
 Present the merged report:
 
@@ -323,4 +333,5 @@ Then prompt the user with these three options:
 - **One refactor at a time.** Phase 4 proposes exactly ONE change. Run the skill again for more.
 - **No gold-plating.** Every suggestion must solve a concrete, present problem. No "for the future" abstractions.
 - **High confidence only.** Skip stylistic preferences and subjective observations. Every finding must cite file:line and explain concrete harm.
+- **Verify before reporting.** Every finding must quote the actual code at the cited file:line. During Phase 3, re-read each cited location and discard any finding whose quoted code does not match what is in the file. Never report findings about content you have not verified exists.
 - **Cross-pillar signals matter most.** When multiple agents flag the same location, that's where the highest leverage is.
