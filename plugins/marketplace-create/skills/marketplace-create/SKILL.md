@@ -2,6 +2,7 @@
 name: marketplace-create
 description: Scaffold a Claude Code plugin marketplace with proper structure, schema validation, and CLAUDE.md conventions. Asks for the marketplace name and whether to import an existing skill. Use when starting a new marketplace repo or adding marketplace structure to an existing repo.
 user-invocable: true
+disable-model-invocation: true
 argument-hint: "[marketplace-name]"
 ---
 
@@ -56,7 +57,7 @@ Before creating anything:
 
 Present a summary and ask for confirmation:
 
-```
+```text
 Marketplace: <name>
 Owner: <owner>
 Import: <skill/plugin name or "none — empty marketplace">
@@ -95,7 +96,6 @@ If importing a skill/plugin, add it to the `plugins` array:
   "name": "<plugin-name>",
   "source": "./plugins/<plugin-name>",
   "description": "<from imported skill/plugin>",
-  "version": "0.1.0",
   "author": {
     "name": "<owner-name>"
   },
@@ -106,9 +106,15 @@ If importing a skill/plugin, add it to the `plugins` array:
 
 ### Step 2: Create or update CLAUDE.md
 
-If CLAUDE.md does not exist, create it. If it does exist, append marketplace conventions to it.
+Read CLAUDE.md if it exists. Then choose one of three paths:
 
-Use this template, filling in the marketplace name:
+**Path A — No CLAUDE.md exists:** Create it with the full template below.
+
+**Path B — CLAUDE.md exists but has no `<!-- marketplace: <marketplace-name> -->` delimiter:** Append only the marketplace section block (the delimited block from the append template below) to the end of the existing file.
+
+**Path C — CLAUDE.md already contains `<!-- marketplace: <marketplace-name> -->` :** The marketplace block was already added (previous run). Do nothing — skip this step and tell the user CLAUDE.md is already configured.
+
+#### Full template (Path A — new file)
 
 ```markdown
 # <Marketplace Display Name> - Claude Code Plugin Marketplace
@@ -131,30 +137,66 @@ plugins/<name>/                    -- plugin root (one per plugin)
 - Plugins Reference (schemas, validation, caching): https://code.claude.com/docs/en/plugins-reference
 - Skills Reference (frontmatter fields): https://code.claude.com/docs/en/skills
 
-## Rules
+<!-- marketplace: <marketplace-name> -->
 
-### Marketplace Structure
-- marketplace.json goes in `.claude-plugin/` at the repo root. It may only contain `name`, `owner`, `plugins`, and optional `metadata` fields. Do NOT add `$schema` — the validator rejects unrecognized keys.
-- Each plugin lives in its own directory under `plugins/`. The plugin's `.claude-plugin/plugin.json` goes inside that directory, NOT at the repo root.
-- Skills, agents, commands, and hooks go at the **plugin root** level, NOT inside `.claude-plugin/`.
-- Validate with: `claude plugin validate .` or `/plugin validate .`
-
-### plugin.json
-- Keep it minimal: `name`, `description`, `version`, `author`. That's it for most plugins.
-- `repository` must be a **string** (URL), not an object.
-- `name` determines the skill namespace (e.g., plugin name `my-plugin` + skill name `my-skill` = `/my-plugin:my-skill`).
+## Marketplace Rules
 
 ### marketplace.json
+- marketplace.json goes in `.claude-plugin/` at the repo root. It may only contain `name`, `owner`, `plugins`, and optional `metadata` fields. Do NOT add `$schema` — the validator rejects unrecognized keys.
 - The marketplace `name` is the brand (`<marketplace-name>`). The plugin entry `name` is the install identifier.
 - Install command: `/plugin install <plugin-name>@<marketplace-name>`
 - Plugin `source` for local plugins must start with `./` and is relative to the repo root.
-- Set `version` in the marketplace entry OR plugin.json, not both. Plugin.json wins silently.
 - Optional useful fields on plugin entries: `category`, `homepage`, `license`, `keywords`.
+
+### plugin.json
+- Keep it minimal: `name`, `description`, `version`, `author`. That's it for most plugins.
+- Set `version` in plugin.json only — do not duplicate it in the marketplace entry.
+- `repository` must be a **string** (URL), not an object.
+- `name` determines the skill namespace (e.g., plugin name `my-plugin` + skill name `my-skill` = `/my-plugin:my-skill`).
 
 ### SKILL.md
 - Frontmatter uses **hyphens** (e.g., `user-invocable`, `disable-model-invocation`), not underscores.
 - `user-invocable: true` (default) makes the skill appear in the `/` menu.
 - `disable-model-invocation: true` prevents Claude from auto-triggering the skill.
+- Each plugin lives in its own directory under `plugins/`. The plugin's `.claude-plugin/plugin.json` goes inside that directory, NOT at the repo root.
+- Skills, agents, commands, and hooks go at the **plugin root** level, NOT inside `.claude-plugin/`.
+- Validate with: `claude plugin validate .` or `/plugin validate .`
+
+<!-- /marketplace: <marketplace-name> -->
+```
+
+#### Append template (Path B — existing file)
+
+Append this block to the end of the existing CLAUDE.md:
+
+```markdown
+
+<!-- marketplace: <marketplace-name> -->
+
+## Marketplace: <Marketplace Display Name>
+
+This repo is a Claude Code **plugin marketplace** (`<marketplace-name>`).
+
+### marketplace.json
+- marketplace.json goes in `.claude-plugin/` at the repo root. It may only contain `name`, `owner`, `plugins`, and optional `metadata` fields. Do NOT add `$schema` — the validator rejects unrecognized keys.
+- The marketplace `name` is the brand (`<marketplace-name>`). The plugin entry `name` is the install identifier.
+- Install command: `/plugin install <plugin-name>@<marketplace-name>`
+- Plugin `source` for local plugins must start with `./` and is relative to the repo root.
+- Optional useful fields on plugin entries: `category`, `homepage`, `license`, `keywords`.
+
+### plugin.json
+- Keep it minimal: `name`, `description`, `version`, `author`.
+- Set `version` in plugin.json only — do not duplicate it in the marketplace entry.
+- `repository` must be a **string** (URL), not an object.
+- `name` determines the skill namespace (e.g., plugin name `my-plugin` + skill name `my-skill` = `/my-plugin:my-skill`).
+
+### SKILL.md
+- Frontmatter uses **hyphens** (e.g., `user-invocable`, `disable-model-invocation`), not underscores.
+- Each plugin lives in its own directory under `plugins/`, NOT at the repo root.
+- Skills go at the **plugin root** level, NOT inside `.claude-plugin/`.
+- Validate with: `claude plugin validate .` or `/plugin validate .`
+
+<!-- /marketplace: <marketplace-name> -->
 ```
 
 ### Step 3: Import existing skill (if provided)
@@ -220,7 +262,7 @@ After creating all files:
 - **No `$schema` in marketplace.json.** The validator rejects unrecognized keys. Only use `name`, `owner`, `plugins`, and optional `metadata`.
 - **Source paths must start with `./`** — relative to repo root.
 - **Names are lowercase, hyphen-separated.** Normalize silently but tell the user what you changed.
-- **Version starts at 0.1.0** for new plugins. Only the marketplace entry OR plugin.json should set the version, not both.
+- **Version starts at 0.1.0** for new plugins. Set version in plugin.json only.
 - **Keep plugin.json minimal.** Don't add fields that aren't needed yet.
 - **SKILL.md frontmatter uses hyphens**, not underscores. This is a common mistake — always double-check.
 - **Default to empty marketplace.** Don't pressure the user to import a skill. An empty marketplace is a perfectly valid starting point.
