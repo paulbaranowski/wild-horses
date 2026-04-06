@@ -2,6 +2,7 @@
 name: reasoning-gaps
 description: Analyze code for AI reasoning gaps — untyped signatures, implicit control flow, hidden state, missing docs, and structural complexity that prevent agents from tracing data flow and predicting behavior. Spawns 3 parallel specialist agents, merges findings, and produces a prioritized remediation plan. Use when AI agents keep misunderstanding code, making wrong edits, or needing excessive exploration to complete tasks.
 user-invocable: true
+disable-model-invocation: true
 argument-hint: "[file or directory path] [--scope changed|module|full|imports <file>]"
 ---
 
@@ -41,7 +42,7 @@ Each agent receives the same file list but analyzes through a different lens. Ea
 
 Use the Agent tool with this prompt:
 
-```
+```text
 You are a type and data contract specialist. You evaluate whether an AI agent can determine WHAT DATA flows through this code — what types functions accept, what they return, what shape data has at each point.
 
 PROJECT CONVENTIONS:
@@ -100,7 +101,7 @@ IMPORTANT: Prioritize findings at module boundaries, public APIs, and cross-file
 
 Use the Agent tool with this prompt:
 
-```
+```text
 You are an implicit flow and state specialist. You evaluate whether an AI agent can PREDICT WHAT WILL HAPPEN when this code runs — specifically, behavior that is invisible from reading the code linearly.
 
 PROJECT CONVENTIONS:
@@ -161,7 +162,7 @@ IMPORTANT: This is about INVISIBLE BEHAVIOR, not code quality. A decorator that 
 
 Use the Agent tool with this prompt:
 
-```
+```text
 You are a structure and documentation specialist. You evaluate whether an AI agent can ORIENT ITSELF — understand what a file does, how it fits in the system, and navigate the codebase structure.
 
 PROJECT CONVENTIONS:

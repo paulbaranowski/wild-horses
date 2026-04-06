@@ -53,7 +53,7 @@ Spawns 3 parallel specialist agents that examine code through different lenses, 
 
 #### Usage
 
-```
+```text
 /reasoning-gaps:reasoning-gaps                            # analyze files changed in current PR branch
 /reasoning-gaps:reasoning-gaps src/auth/                  # analyze a specific directory
 /reasoning-gaps:reasoning-gaps src/api.py                 # analyze a specific file
