@@ -28,6 +28,17 @@
       },
       "category": "development",
       "license": "MIT"
+    },
+    {
+      "name": "reasoning-gaps",
+      "source": "./plugins/reasoning-gaps",
+      "description": "Analyze code for AI reasoning gaps — places where agents struggle to trace data flow, control flow, and state. Recommends concrete fixes to make code AI-readable.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
     }
   ]
 }

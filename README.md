@@ -1,6 +1,6 @@
 # wild-horses
 
-A [Claude Code](https://claude.ai/code) plugin for engineering-quality code reviews.
+A [Claude Code](https://claude.ai/code) plugin marketplace for harness engineering — making code AI-readable and agent-friendly.
 
 ## Skills
 
@@ -36,6 +36,39 @@ Spawns 4 parallel specialist agents that each examine the code through a differe
 - Weighted overall score (testability and harness-friendliness weighted 30% each, others 20%)
 - A single highest-impact refactor proposal with trade-offs
 - Options to save the plan, implement it, or revise
+
+### reasoning-gaps
+
+Analyzes code for **AI reasoning gaps** — places where AI agents struggle to trace data flow, predict control flow, or understand state mutations. Focuses on making code **AI-readable**: can an agent confidently determine what data flows where, what happens at runtime, and how the code is structured?
+
+Spawns 3 parallel specialist agents that examine code through different lenses, then merges findings into a prioritized remediation plan.
+
+#### What it evaluates
+
+| Dimension | What it looks for |
+|---|---|
+| **Type & Data Contracts** | Untyped signatures, dict-based data passing, missing return types, `Any` usage, stringly-typed interfaces, missing boundary validation |
+| **Implicit Flow & State** | Decorator side effects, dynamic dispatch, magic methods, signal/event systems, global mutable state, hidden mutations |
+| **Structure & Documentation** | Missing module/class docstrings, long functions, deep nesting, circular imports, undocumented protocols |
+
+#### Usage
+
+```text
+/reasoning-gaps:reasoning-gaps                            # analyze files changed in current PR branch
+/reasoning-gaps:reasoning-gaps src/auth/                  # analyze a specific directory
+/reasoning-gaps:reasoning-gaps src/api.py                 # analyze a specific file
+/reasoning-gaps:reasoning-gaps --scope module             # analyze the current module/package
+/reasoning-gaps:reasoning-gaps --scope full               # analyze all source files (slow)
+/reasoning-gaps:reasoning-gaps --scope imports src/api.py # analyze file + its import graph
+```
+
+#### Output
+
+- Per-dimension ratings (X/10) with findings by severity
+- Cross-dimension findings highlighted (same code flagged by multiple agents = highest leverage)
+- Weighted overall score with letter grade (A-F)
+- Top 5 prioritized interventions with effort estimates
+- Options to save the plan, implement the top fix, or revise
 
 ## Install
 
