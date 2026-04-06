@@ -39,6 +39,17 @@
       },
       "category": "development",
       "license": "MIT"
+    },
+    {
+      "name": "marketplace-create",
+      "source": "./plugins/marketplace-create",
+      "description": "Scaffold a Claude Code plugin marketplace with proper structure, schema validation, and CLAUDE.md conventions.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
     }
   ]
 }
