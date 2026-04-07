@@ -4,7 +4,7 @@
 
 This is a Claude Code **plugin marketplace** containing harness engineering plugins.
 
-```
+```text
 .claude-plugin/marketplace.json    -- marketplace catalog (points to plugins)
 plugins/harness/                   -- plugin root
   .claude-plugin/plugin.json       -- plugin manifest
