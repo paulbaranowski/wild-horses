@@ -301,8 +301,8 @@ After presenting the merged report, explain the **Highest-Impact Refactor**:
 Then prompt the user with these three options:
 
 > **What would you like to do?**
-> 1. **Save plan and implement** -- Write the plan to `docs/plans/active/` and start implementing it
-> 2. **Save plan** -- Write the plan to `docs/plans/active/` for later
+> 1. **Save plan and implement** -- Write the plan to `docs/plans/active/YYYY-MM-DD-harness-review-<short-description>.md` and start implementing it
+> 2. **Save plan** -- Write the plan to `docs/plans/active/YYYY-MM-DD-harness-review-<short-description>.md` for later
 > 3. **Revise** -- Provide feedback to refine the proposal
 
 ### Option 1: Save plan and implement

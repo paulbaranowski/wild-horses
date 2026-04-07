@@ -295,7 +295,7 @@ After presenting the merged report, briefly explain the Top 5 Interventions with
 
 > **What would you like to do?**
 > 1. **Save plan and fix top intervention** — Write the full remediation plan to `docs/plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md` and implement intervention #1
-> 2. **Save full remediation plan** — Write the plan to `docs/plans/active/` for incremental work
+> 2. **Save full remediation plan** — Write the plan to `docs/plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md` for incremental work
 > 3. **Revise** — Provide feedback to refine the analysis or change focus
 
 ### Option 1: Save plan and fix top intervention
