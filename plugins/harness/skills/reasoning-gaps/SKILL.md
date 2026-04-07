@@ -294,13 +294,13 @@ Present the merged report:
 After presenting the merged report, briefly explain the Top 5 Interventions with trade-offs for each. Then prompt the user:
 
 > **What would you like to do?**
-> 1. **Save plan and fix top intervention** — Write the full remediation plan to `docs/plans/reasoning-gaps-<short-description>.md` and implement intervention #1
-> 2. **Save full remediation plan** — Write the plan to `docs/plans/` for incremental work
+> 1. **Save plan and fix top intervention** — Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md` and implement intervention #1
+> 2. **Save full remediation plan** — Write the plan to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md` for incremental work
 > 3. **Revise** — Provide feedback to refine the analysis or change focus
 
 ### Option 1: Save plan and fix top intervention
 
-- Write the full remediation plan to `docs/plans/reasoning-gaps-<short-description>.md` including scope, all findings, all 5 interventions with details
+- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md` (where YYYY-MM-DD is today's date) including scope, all findings, all 5 interventions with details
 - Implement intervention #1
 - Run existing tests (check CLAUDE.md for the test command, fallback to `uv run pytest` or `npm test`) to verify nothing breaks
 - If tests fail, fix forward or revert and explain what went wrong
@@ -308,7 +308,7 @@ After presenting the merged report, briefly explain the Top 5 Interventions with
 
 ### Option 2: Save full remediation plan
 
-- Write the full remediation plan to `docs/plans/reasoning-gaps-<short-description>.md` including scope, all findings, all 5 interventions with details and effort estimates
+- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md` (where YYYY-MM-DD is today's date) including scope, all findings, all 5 interventions with details and effort estimates
 - Do NOT implement anything
 
 ### Option 3: Revise

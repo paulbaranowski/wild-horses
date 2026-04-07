@@ -1,5 +1,5 @@
 ---
-name: marketplace-create
+name: create
 description: Scaffold a Claude Code plugin marketplace with proper structure, schema validation, and CLAUDE.md conventions. Asks for the marketplace name and whether to import an existing skill. Use when starting a new marketplace repo or adding marketplace structure to an existing repo.
 user-invocable: true
 disable-model-invocation: true
@@ -125,9 +125,10 @@ This is a Claude Code **plugin marketplace**.
 
 \```
 .claude-plugin/marketplace.json    -- marketplace catalog (points to plugins)
-plugins/<name>/                    -- plugin root (one per plugin)
+plugins/<plugin-name>/             -- plugin root (one per plugin)
   .claude-plugin/plugin.json       -- plugin manifest
-  skills/<skill-name>/SKILL.md     -- skill definitions
+  skills/<skill-a>/SKILL.md        -- a plugin can contain multiple skills
+  skills/<skill-b>/SKILL.md        -- each skill gets its own directory
 \```
 
 ## Key References
@@ -152,7 +153,8 @@ plugins/<name>/                    -- plugin root (one per plugin)
 - Keep it minimal: `name`, `description`, `version`, `author`. That's it for most plugins.
 - Set `version` in plugin.json only — do not duplicate it in the marketplace entry.
 - `repository` must be a **string** (URL), not an object.
-- `name` determines the skill namespace (e.g., plugin name `my-plugin` + skill name `my-skill` = `/my-plugin:my-skill`).
+- `name` determines the skill namespace. A plugin can contain **multiple skills** — each becomes `/plugin-name:skill-name` (e.g., plugin `harness` with skills `audit`, `setup`, `reasoning-gaps` → `/harness:audit`, `/harness:setup`, `/harness:reasoning-gaps`).
+- Group related skills under one plugin rather than creating one plugin per skill. This is the established convention (see Anthropic's `plugin-dev`, `feature-dev`).
 
 ### SKILL.md
 - Frontmatter uses **hyphens** (e.g., `user-invocable`, `disable-model-invocation`), not underscores.
@@ -160,6 +162,7 @@ plugins/<name>/                    -- plugin root (one per plugin)
 - `disable-model-invocation: true` prevents Claude from auto-triggering the skill.
 - Each plugin lives in its own directory under `plugins/`. The plugin's `.claude-plugin/plugin.json` goes inside that directory, NOT at the repo root.
 - Skills, agents, commands, and hooks go at the **plugin root** level, NOT inside `.claude-plugin/`.
+- A plugin can have multiple skills: `plugins/<plugin>/skills/<skill-a>/SKILL.md`, `plugins/<plugin>/skills/<skill-b>/SKILL.md`, etc.
 - Validate with: `claude plugin validate .` or `/plugin validate .`
 
 <!-- /marketplace: <marketplace-name> -->
@@ -188,12 +191,14 @@ This repo is a Claude Code **plugin marketplace** (`<marketplace-name>`).
 - Keep it minimal: `name`, `description`, `version`, `author`.
 - Set `version` in plugin.json only — do not duplicate it in the marketplace entry.
 - `repository` must be a **string** (URL), not an object.
-- `name` determines the skill namespace (e.g., plugin name `my-plugin` + skill name `my-skill` = `/my-plugin:my-skill`).
+- `name` determines the skill namespace. A plugin can contain **multiple skills** — each becomes `/plugin-name:skill-name` (e.g., plugin `harness` with skills `audit`, `setup` → `/harness:audit`, `/harness:setup`).
+- Group related skills under one plugin rather than creating one plugin per skill.
 
 ### SKILL.md
 - Frontmatter uses **hyphens** (e.g., `user-invocable`, `disable-model-invocation`), not underscores.
 - Each plugin lives in its own directory under `plugins/`, NOT at the repo root.
 - Skills go at the **plugin root** level, NOT inside `.claude-plugin/`.
+- A plugin can have multiple skills under `skills/`.
 - Validate with: `claude plugin validate .` or `/plugin validate .`
 
 <!-- /marketplace: <marketplace-name> -->
@@ -203,12 +208,14 @@ This repo is a Claude Code **plugin marketplace** (`<marketplace-name>`).
 
 If the user provided a skill to import:
 
-1. Create `plugins/<plugin-name>/.claude-plugin/plugin.json`:
+1. **Determine the plugin name.** Ask the user what plugin this skill belongs to. Related skills should be grouped under one plugin (e.g., `audit`, `setup`, and `reasoning-gaps` all under a `harness` plugin → `/harness:audit`, `/harness:setup`, `/harness:reasoning-gaps`).
+
+2. **Create the plugin** (if it doesn't exist yet). Create `plugins/<plugin-name>/.claude-plugin/plugin.json`:
 
 ```json
 {
   "name": "<plugin-name>",
-  "description": "<from imported skill>",
+  "description": "<from imported skill — or broader description if multiple skills planned>",
   "version": "0.1.0",
   "author": {
     "name": "<owner-name>"
@@ -216,9 +223,11 @@ If the user provided a skill to import:
 }
 ```
 
-2. Copy the SKILL.md into `plugins/<plugin-name>/skills/<skill-name>/SKILL.md`
+3. **Add the skill** to `plugins/<plugin-name>/skills/<skill-name>/SKILL.md`
+   - The skill name becomes the second part of the slash command: `/plugin-name:skill-name`
    - If the source was already a full plugin directory, copy its entire structure into `plugins/<plugin-name>/`
    - Preserve the original SKILL.md content exactly — do not modify it
+   - If adding to an existing plugin, just create the new `skills/<skill-name>/` directory
 
 ---
 
@@ -246,12 +255,13 @@ After creating all files:
 1. Push this repo to GitHub
 2. Others install plugins with: `/plugin install <plugin-name>@<marketplace-name>`
 3. Add more plugins by creating new directories under `plugins/`
-4. Validate anytime with: `claude plugin validate .` or `/plugin validate .`
+4. Add more skills to an existing plugin by creating new directories under `plugins/<plugin-name>/skills/`
+5. Validate anytime with: `claude plugin validate .` or `/plugin validate .`
 ```
 
 3. **Offer to continue:**
 
-> Would you like to add a plugin to this marketplace?
+> Would you like to add a plugin or a skill to this marketplace?
 
 ---
 
@@ -265,4 +275,5 @@ After creating all files:
 - **Version starts at 0.1.0** for new plugins. Set version in plugin.json only.
 - **Keep plugin.json minimal.** Don't add fields that aren't needed yet.
 - **SKILL.md frontmatter uses hyphens**, not underscores. This is a common mistake — always double-check.
+- **Group related skills under one plugin.** Don't create one plugin per skill. Related skills belong in the same plugin (e.g., `harness` with `audit`, `setup`, `reasoning-gaps`). This matches the convention in Anthropic's official marketplace.
 - **Default to empty marketplace.** Don't pressure the user to import a skill. An empty marketplace is a perfectly valid starting point.

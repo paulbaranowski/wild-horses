@@ -1,0 +1,8 @@
+{
+  "name": "harness",
+  "description": "Harness engineering tools: audit code for AI-validatability, find AI reasoning gaps, and set up the harness directory structure.",
+  "version": "2.0.0",
+  "author": {
+    "name": "Paul Baranowski"
+  }
+}

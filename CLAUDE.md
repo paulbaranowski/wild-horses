@@ -2,13 +2,15 @@
 
 ## Project Structure
 
-This is a Claude Code **plugin marketplace** containing the `harness-review` plugin.
+This is a Claude Code **plugin marketplace** containing harness engineering plugins.
 
-```
+```text
 .claude-plugin/marketplace.json    -- marketplace catalog (points to plugins)
-plugins/harness-review/            -- plugin root
+plugins/harness/                   -- plugin root
   .claude-plugin/plugin.json       -- plugin manifest
-  skills/harness-review/SKILL.md   -- the harness-review skill
+  skills/audit/SKILL.md            -- the harness audit skill (/harness:audit)
+  skills/setup/SKILL.md            -- the harness setup skill (/harness:setup)
+  skills/reasoning-gaps/SKILL.md   -- the reasoning gaps skill (/harness:reasoning-gaps)
 ```
 
 ## Key References
@@ -29,11 +31,11 @@ plugins/harness-review/            -- plugin root
 ### plugin.json
 - Keep it minimal: `name`, `description`, `version`, `author`. That's it for most plugins.
 - `repository` must be a **string** (URL), not an object.
-- `name` determines the skill namespace (e.g., plugin name `harness-review` + skill name `harness-review` = `/harness-review:harness-review`).
+- `name` determines the skill namespace (e.g., plugin name `harness` + skill name `audit` = `/harness:audit`).
 
 ### marketplace.json
-- The marketplace `name` is the brand (`wild-horses`). The plugin entry `name` is the install identifier (`harness-review`).
-- Install command: `/plugin install harness-review@wild-horses`
+- The marketplace `name` is the brand (`wild-horses`). The plugin entry `name` is the install identifier (`harness`).
+- Install command: `/plugin install harness@wild-horses`
 - Plugin `source` for local plugins must start with `./` and is relative to the repo root.
 - Set `version` in the marketplace entry OR plugin.json, not both. Plugin.json wins silently.
 - Optional useful fields on plugin entries: `category`, `homepage`, `license`, `keywords`.
