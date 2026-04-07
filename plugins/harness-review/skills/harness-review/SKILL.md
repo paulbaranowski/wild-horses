@@ -301,13 +301,13 @@ After presenting the merged report, explain the **Highest-Impact Refactor**:
 Then prompt the user with these three options:
 
 > **What would you like to do?**
-> 1. **Save plan and implement** -- Write the plan to `docs/plans/` and start implementing it
-> 2. **Save plan** -- Write the plan to `docs/plans/` for later
+> 1. **Save plan and implement** -- Write the plan to `docs/plans/active/` and start implementing it
+> 2. **Save plan** -- Write the plan to `docs/plans/active/` for later
 > 3. **Revise** -- Provide feedback to refine the proposal
 
 ### Option 1: Save plan and implement
 
-- Write the full refactor plan to `docs/plans/harness-review-<short-description>.md` including scope, findings, proposed changes, affected files, and trade-offs
+- Write the full refactor plan to `docs/plans/active/YYYY-MM-DD-harness-review-<short-description>.md` (where YYYY-MM-DD is today's date) including scope, findings, proposed changes, affected files, and trade-offs
 - Implement the change
 - Run existing tests (check CLAUDE.md for the test command, fallback to `uv run pytest` or `npm test`) to verify nothing breaks
 - If tests fail, fix forward or revert and explain what went wrong
@@ -315,7 +315,7 @@ Then prompt the user with these three options:
 
 ### Option 2: Save plan
 
-- Write the full refactor plan to `docs/plans/harness-review-<short-description>.md` including scope, findings, proposed changes, affected files, and trade-offs
+- Write the full refactor plan to `docs/plans/active/YYYY-MM-DD-harness-review-<short-description>.md` (where YYYY-MM-DD is today's date) including scope, findings, proposed changes, affected files, and trade-offs
 - Do NOT implement anything
 
 ### Option 3: Revise
