@@ -8,10 +8,10 @@
   },
   "plugins": [
     {
-      "name": "harness-review",
-      "source": "./plugins/harness-review",
-      "description": "Make your code Harness-ready, so AI can iterate based on ground truth.",
-      "version": "1.2.0",
+      "name": "harness",
+      "source": "./plugins/harness",
+      "description": "Harness engineering tools: audit code for AI-validatability, find AI reasoning gaps, and set up the harness directory structure.",
+      "version": "2.0.0",
       "author": {
         "name": "Paul Baranowski"
       },
@@ -19,30 +19,8 @@
       "license": "MIT"
     },
     {
-      "name": "harness-setup",
-      "source": "./plugins/harness-setup",
-      "description": "Set up the harness engineering directory structure in any repo. Analyzes existing files, proposes moves and generations, executes after approval.",
-      "version": "1.0.0",
-      "author": {
-        "name": "Paul Baranowski"
-      },
-      "category": "development",
-      "license": "MIT"
-    },
-    {
-      "name": "reasoning-gaps",
-      "source": "./plugins/reasoning-gaps",
-      "description": "Analyze code for AI reasoning gaps — places where agents struggle to trace data flow, control flow, and state. Recommends concrete fixes to make code AI-readable.",
-      "version": "1.0.0",
-      "author": {
-        "name": "Paul Baranowski"
-      },
-      "category": "development",
-      "license": "MIT"
-    },
-    {
-      "name": "marketplace-create",
-      "source": "./plugins/marketplace-create",
+      "name": "marketplace",
+      "source": "./plugins/marketplace",
       "description": "Scaffold a Claude Code plugin marketplace with proper structure, schema validation, and CLAUDE.md conventions.",
       "version": "1.0.0",
       "author": {
