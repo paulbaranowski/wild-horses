@@ -4,7 +4,7 @@ A [Claude Code](https://claude.ai/code) plugin marketplace for harness engineeri
 
 ## Skills
 
-### harness-review
+### harness:audit
 
 Analyzes code for **encapsulation**, **OOP design**, **testability**, and **harness-friendliness** (how well code supports tight feedback loops for agents and automated tooling).
 
@@ -22,11 +22,11 @@ Spawns 4 parallel specialist agents that each examine the code through a differe
 #### Usage
 
 ```
-/wild-horses:harness-review                          # review files changed in current PR branch
-/wild-horses:harness-review src/auth/                 # review a specific directory
-/wild-horses:harness-review src/api.py                # review a specific file
-/wild-horses:harness-review --scope module            # review the current module/package
-/wild-horses:harness-review --scope full              # review all source files (slow)
+/harness:audit                          # audit files changed in current PR branch
+/harness:audit src/auth/                # audit a specific directory
+/harness:audit src/api.py               # audit a specific file
+/harness:audit --scope module           # audit the current module/package
+/harness:audit --scope full             # audit all source files (slow)
 ```
 
 #### Output
@@ -37,7 +37,18 @@ Spawns 4 parallel specialist agents that each examine the code through a differe
 - A single highest-impact refactor proposal with trade-offs
 - Options to save the plan, implement it, or revise
 
-### reasoning-gaps
+### harness:setup
+
+Sets up the **harness engineering directory structure** in any repo. Analyzes existing files, proposes moves and generations, executes after approval. Never deletes files.
+
+#### Usage
+
+```
+/harness:setup                          # set up harness structure in current repo
+/harness:setup /path/to/project         # set up in a specific project root
+```
+
+### harness:reasoning-gaps
 
 Analyzes code for **AI reasoning gaps** — places where AI agents struggle to trace data flow, predict control flow, or understand state mutations. Focuses on making code **AI-readable**: can an agent confidently determine what data flows where, what happens at runtime, and how the code is structured?
 
@@ -54,12 +65,12 @@ Spawns 3 parallel specialist agents that examine code through different lenses, 
 #### Usage
 
 ```text
-/reasoning-gaps:reasoning-gaps                            # analyze files changed in current PR branch
-/reasoning-gaps:reasoning-gaps src/auth/                  # analyze a specific directory
-/reasoning-gaps:reasoning-gaps src/api.py                 # analyze a specific file
-/reasoning-gaps:reasoning-gaps --scope module             # analyze the current module/package
-/reasoning-gaps:reasoning-gaps --scope full               # analyze all source files (slow)
-/reasoning-gaps:reasoning-gaps --scope imports src/api.py # analyze file + its import graph
+/harness:reasoning-gaps                            # analyze files changed in current PR branch
+/harness:reasoning-gaps src/auth/                  # analyze a specific directory
+/harness:reasoning-gaps src/api.py                 # analyze a specific file
+/harness:reasoning-gaps --scope module             # analyze the current module/package
+/harness:reasoning-gaps --scope full               # analyze all source files (slow)
+/harness:reasoning-gaps --scope imports src/api.py # analyze file + its import graph
 ```
 
 #### Output
