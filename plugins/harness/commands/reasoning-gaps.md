@@ -1,8 +1,5 @@
 ---
-name: reasoning-gaps
 description: Analyze code for AI reasoning gaps — untyped signatures, implicit control flow, hidden state, missing docs, and structural complexity that prevent agents from tracing data flow and predicting behavior. Spawns 3 parallel specialist agents, merges findings, and produces a prioritized remediation plan. Use when AI agents keep misunderstanding code, making wrong edits, or needing excessive exploration to complete tasks.
-user-invocable: true
-disable-model-invocation: true
 argument-hint: "[file or directory path] [--scope changed|module|full|imports <file>]"
 ---
 
