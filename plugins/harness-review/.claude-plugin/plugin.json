@@ -1,8 +1,0 @@
-{
-  "name": "harness-review",
-  "description": "Make your code Harness-ready, so AI can iterate based on ground truth.",
-  "version": "1.2.0",
-  "author": {
-    "name": "Paul Baranowski"
-  }
-}

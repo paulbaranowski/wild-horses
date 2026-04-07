@@ -1,8 +1,0 @@
-{
-  "name": "reasoning-gaps",
-  "description": "Analyze code for AI reasoning gaps — places where agents struggle to trace data flow, control flow, and state. Recommends concrete fixes.",
-  "version": "1.0.0",
-  "author": {
-    "name": "Paul Baranowski"
-  }
-}
