@@ -31,7 +31,6 @@ The mapping produces a JSON file with this structure:
   "run": {
     "cli": {},
     "api": {},
-    "ui": {},
     "tests": [],
     "code": {}
   },
@@ -133,18 +132,6 @@ Include ALL parameter access methods — a parameter may be settable via CLI fla
     "body_format": "description of response shape and key fields"
   },
   "notes": "authentication requirements, rate limits, etc."
-}
-```
-
-**run.ui** — Browser or mobile app invocation:
-```json
-{
-  "url": "URL or screen to navigate to",
-  "steps": [
-    "human-readable step-by-step interaction (e.g., 'Click Create Link', 'Enter message in text field', 'Select image from dropdown', 'Click Submit')"
-  ],
-  "automation": "browser automation command if available (e.g., playwright, selenium, xctest)",
-  "notes": "any prerequisites (login, specific browser, device)"
 }
 ```
 
@@ -293,12 +280,6 @@ Identify every way to invoke this workflow. Not all mechanisms will exist for ev
 - Document: method, URL, headers, request body, response format
 - Write a complete `curl` example
 - Note authentication requirements, rate limits, or required headers
-
-### UI (Web / Mobile)
-- Find web pages, forms, or mobile screens that trigger this workflow
-- Document the step-by-step user interaction (navigate to URL, fill form, click button)
-- If browser automation exists (Playwright, Selenium, Cypress, XCTest), document the automation command
-- If no automation exists, note this as a gap — the agent can only invoke via other mechanisms
 
 ### Tests
 - Search for test files that exercise this workflow:
