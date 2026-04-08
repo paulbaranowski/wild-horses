@@ -1,8 +1,5 @@
 ---
-name: setup
 description: Set up the harness engineering directory structure in any repo. Analyzes existing files, proposes moves and generations, executes after approval. Never deletes files.
-user-invocable: true
-disable-model-invocation: true
 argument-hint: "[project root path]"
 ---
 
