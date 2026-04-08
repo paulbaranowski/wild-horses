@@ -366,7 +366,8 @@ Define how an agent verifies changes to this workflow haven't broken it:
    - Confirm the function/class exists at the stated location
    - Confirm CLI flags are spelled correctly
    - If possible, run the verification command to confirm it works
-4. **Write the file** to `docs/workflows/{name}.json`
+4. **Create `docs/workflows/`** if it doesn't already exist
+5. **Write the file** to `docs/workflows/{name}.json`
 5. **Update CLAUDE.md** — if CLAUDE.md exists, add a reference to the workflow map under a `## Workflows` section. If the section already exists, append to it:
    ```markdown
    ## Workflows
