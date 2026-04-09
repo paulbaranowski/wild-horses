@@ -1,11 +1,11 @@
 ---
-description: Map an application workflow so AI agents can run it, observe outputs, evaluate quality, and iterate. Produces a structured JSON artifact that enables agent self-verification loops. Use when you want an agent to be able to autonomously work on a feature by understanding inputs, run mechanisms, outputs, and success criteria.
+description: Map an application workflow into a static knowledge artifact that orchestration skills (e.g., ralph-loop, automated agents) consume to run, verify, and evaluate the workflow. Produces a structured JSON file capturing inputs, run mechanisms, outputs, and quality criteria — the declarative spec, not the execution runtime.
 argument-hint: "<workflow description>"
 ---
 
 # Map Workflow
 
-Map an application workflow into a structured artifact that enables AI agents to **run it, observe the results, evaluate quality, and iterate autonomously**. The mapping captures everything an agent needs to close the feedback loop: inputs, run mechanisms, outputs, and quality criteria.
+Map an application workflow into a **static knowledge artifact** that orchestration skills consume to run, verify, and evaluate the workflow autonomously. This is the declarative spec — it captures inputs, run mechanisms, outputs, and quality criteria. A separate orchestration skill (e.g., a Ralph loop) reads this artifact to drive execution, manage iteration state, and make runtime decisions.
 
 **Workflow to map:** "$ARGUMENTS"
 
