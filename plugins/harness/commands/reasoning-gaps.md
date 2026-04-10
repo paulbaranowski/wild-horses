@@ -294,11 +294,135 @@ Present the merged report:
 After presenting the merged report, briefly explain the interventions with trade-offs for each. Then prompt the user:
 
 > **What would you like to do?**
-> 1. **Save plan and fix top intervention** — Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md` and implement intervention #1
-> 2. **Save full remediation plan** — Write the plan to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md` for incremental work
-> 3. **Revise** — Provide feedback to refine the analysis or change focus
+> 1. **Save plan and implement with Ralph loop** — Write plan and implement ALL interventions iteratively via Ralph loop (requires ralph-wiggum plugin)
+> 2. **Save plan and fix top intervention** — Write the full remediation plan and implement intervention #1
+> 3. **Save full remediation plan** — Write the plan for incremental work
+> 4. **Revise** — Provide feedback to refine the analysis or change focus
 
-### Option 1: Save plan and fix top intervention
+### Option 1: Save plan and implement with Ralph loop
+
+Save the analysis as two files and activate a Ralph Wiggum loop to implement all interventions one at a time.
+
+**Step 1 — Discover the test command.** Check CLAUDE.md for the project's test command. Fall back to `uv run pytest` or `npm test`.
+
+**Step 2 — Write the markdown report** to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md` (where YYYY-MM-DD is today's date).
+
+Use YAML frontmatter for metadata:
+
+```yaml
+---
+status: in-progress
+ralph_loop: true
+task_file: "docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>-tasks.json"
+generated: "YYYY-MM-DDTHH:MM:SSZ"
+---
+```
+
+The body contains the full report: Scope (with absolute file paths), Ratings Summary, Cross-Dimension Findings, Findings by Severity, Interventions (with full details), and Coverage Check. This is the human-readable artifact — the Ralph loop does NOT modify this file.
+
+**Step 3 — Write the JSON task file** to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>-tasks.json`.
+
+This is the machine-readable task list that the Ralph loop reads and writes for state tracking. Extract each intervention into a task:
+
+```json
+{
+  "plan": "docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md",
+  "completionPromise": "ALL REASONING GAP INTERVENTIONS COMPLETE",
+  "testCommand": "<discovered test command>",
+  "scope": ["<absolute file paths from Phase 1>"],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "<intervention title>",
+      "what": "<intervention What field — the specific change to make>",
+      "resolves": ["<file:line references from the intervention's Resolves field>"],
+      "effort": "<low/medium/high>",
+      "status": "pending",
+      "acceptanceCriteria": [
+        "<concrete, verifiable criterion derived from the What and Resolves fields>",
+        "Tests pass"
+      ],
+      "log": null
+    }
+  ]
+}
+```
+
+Field definitions:
+- `testCommand` — project test command, discovered once and reused every iteration
+- `scope` — absolute file paths from Phase 1, preserved for potential re-analysis
+- `acceptanceCriteria` — derived from the intervention's What and Resolves fields. Each criterion should be concrete and verifiable (e.g., "PipelineConfig model exists with typed fields for host, port, and timeout" not "types are added")
+- `status` — `"pending"` | `"complete"` | `"failed"`
+- `log` — `null` when pending, a string describing what was done (or what went wrong) when complete/failed
+
+**Step 4 — Write the Ralph loop state file** directly to `.claude/ralph-loop.local.md`.
+
+Do NOT invoke `/ralph-wiggum:ralph-loop` — the prompt is too long for CLI arguments. Writing the state file directly is sufficient; the ralph-wiggum stop hook only checks for this file's existence.
+
+YAML frontmatter:
+
+```yaml
+---
+active: true
+iteration: 1
+max_iterations: <number of tasks + 2>
+completion_promise: "ALL REASONING GAP INTERVENTIONS COMPLETE"
+started_at: "<current ISO 8601 timestamp>"
+---
+```
+
+Set `max_iterations` to the number of tasks plus 2 (buffer for test failures or edge cases).
+
+Prompt body (everything after the closing `---`). Replace `TASK_FILE_PATH` with the actual path to the JSON task file:
+
+```
+You are implementing reasoning-gap interventions from a task file.
+
+TASK FILE: TASK_FILE_PATH
+
+Each iteration, implement exactly ONE task:
+
+1. Read the task file (JSON).
+2. Find the first task with "status": "pending".
+3. If no pending tasks remain:
+   - Output: <promise>ALL REASONING GAP INTERVENTIONS COMPLETE</promise>
+   - Exit.
+4. Read the task's "what" field and "resolves" list.
+5. Read all files referenced in "resolves" to understand current state.
+6. Implement the change described in "what".
+7. Run tests using the "testCommand" from the task file.
+8. If tests pass:
+   - Set the task's "status" to "complete"
+   - Set the task's "log" to a brief summary of changes made
+   - Commit with message: reasoning-gaps: <task title>
+9. If tests fail:
+   - Fix forward — do not leave failing tests
+   - If you cannot fix within this iteration, set "status" to "failed"
+     and "log" to what went wrong
+   - Commit with message: reasoning-gaps: <task title> (partial)
+10. Exit.
+
+Rules:
+- Implement exactly ONE task per iteration. Do not batch.
+- Always commit before exiting.
+- Do not skip tasks — implement in order by id.
+- The task file JSON is your ONLY source of truth.
+- Read the linked plan markdown if you need more context about a task.
+```
+
+**Step 5 — Inform the user and exit.**
+
+Tell the user:
+- Plan saved to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md`
+- Task file saved to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>-tasks.json`
+- Ralph loop activated with N max iterations
+- Each iteration implements one intervention and updates the task file
+- Monitor progress: `cat <task-file-path> | jq '.tasks[] | {id, title, status}'`
+- Cancel anytime with `/ralph-wiggum:cancel-ralph`
+
+Then **exit the session**. The ralph-wiggum stop hook will intercept the exit, read the state file, and start the loop by feeding the prompt back.
+
+### Option 2: Save plan and fix top intervention
 
 - Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md` (where YYYY-MM-DD is today's date) including scope, all findings, all interventions with details
 - Implement intervention #1
@@ -306,16 +430,16 @@ After presenting the merged report, briefly explain the interventions with trade
 - If tests fail, fix forward or revert and explain what went wrong
 - Present a before/after summary showing the AI-readability improvement
 
-### Option 2: Save full remediation plan
+### Option 3: Save full remediation plan
 
 - Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md` (where YYYY-MM-DD is today's date) including scope, all findings, all interventions with details and effort estimates
 - Do NOT implement anything
 
-### Option 3: Revise
+### Option 4: Revise
 
 - Ask the user for feedback (different focus area, scope change, alternative priorities, additional context)
 - Revise the analysis based on their input
-- Present the updated report and prompt with the same three options
+- Present the updated report and prompt with the same four options
 
 ---
 
