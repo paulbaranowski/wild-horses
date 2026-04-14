@@ -31,10 +31,10 @@ If `$ARGUMENTS` contains `--resume`, skip all analysis and restart a Ralph loop 
    - Total / complete / in-progress / pending / failed task counts
    - Ask the user to confirm resuming.
 
-4. **On confirmation:** Count remaining tasks (`pending` + `in-progress`). Then jump directly to **Option 1's Step 4** (write the Ralph loop state file) using:
-   - The existing task file path (hardcoded into the prompt body)
-   - `max_iterations` = remaining tasks + 2
-   - Then **Step 5** (inform user and exit)
+4. **On confirmation:** Count remaining tasks (`pending` + `in-progress`). Then:
+   - Write (or overwrite) `.claude/reasoning-gaps-loop.md` with the instructions from **Option 1's Step 4**, using the existing task file path.
+   - Start the Ralph loop using **Option 1's Step 5**: `/ralph-wiggum:ralph-loop` with `max_iterations` = remaining tasks + 2.
+   - Then **Step 6** (inform user).
 
 5. **Skip Phases 1–4 entirely** — no analysis, no report generation, no options menu.
 
@@ -382,24 +382,11 @@ Field definitions:
 - `status` — `"pending"` | `"in-progress"` | `"complete"` | `"failed"`
 - `log` — `null` when pending, a string describing what was done (or what went wrong) when in-progress/complete/failed
 
-**Step 4 — CRITICAL: Write the Ralph loop state file.**
+**Step 4 — Write the loop instructions file.**
 
-This step is what actually activates the loop. If this file is not written, the loop will NOT start and Claude will just exit normally.
+Write the full iteration instructions to `.claude/reasoning-gaps-loop.md` using the Write tool. Replace `TASK_FILE_PATH` with the actual path to the JSON task file written in Step 3:
 
-Do NOT invoke `/ralph-wiggum:ralph-loop` — the prompt is too long for CLI arguments. Write `.claude/ralph-loop.local.md` directly using the Write tool. The ralph-wiggum stop hook only checks for this file's existence.
-
-Use the Bash tool to create the file. Replace `TASK_FILE_PATH` with the actual path to the JSON task file written in Step 3, and `NUM_TASKS_PLUS_2` with the actual number of tasks plus 2:
-
-```bash
-mkdir -p .claude && cat > .claude/ralph-loop.local.md << 'RALPH_EOF'
----
-active: true
-iteration: 1
-max_iterations: NUM_TASKS_PLUS_2
-completion_promise: "ALL REASONING GAP INTERVENTIONS COMPLETE"
-started_at: "CURRENT_ISO_TIMESTAMP"
----
-
+```markdown
 You are implementing reasoning-gap interventions from a task file.
 
 TASK FILE: TASK_FILE_PATH
@@ -438,28 +425,30 @@ Rules:
 - Do not skip tasks — implement in order by id.
 - The task file JSON is your ONLY source of truth.
 - Read the linked plan markdown if you need more context about a task.
-RALPH_EOF
 ```
 
-**After writing, VERIFY the file exists:**
+**Step 5 — CRITICAL: Start the Ralph loop.**
 
-```bash
-test -f .claude/ralph-loop.local.md && echo "✅ Ralph loop state file created" || echo "❌ FAILED: State file not created"
+This step activates the loop. You MUST use the `/ralph-wiggum:ralph-loop` command — do NOT write `.claude/ralph-loop.local.md` directly.
+
+Replace `NUM_TASKS_PLUS_2` with the actual number of tasks plus 2:
+
+```text
+/ralph-wiggum:ralph-loop Read and follow the instructions in .claude/reasoning-gaps-loop.md --max-iterations NUM_TASKS_PLUS_2 --completion-promise 'ALL REASONING GAP INTERVENTIONS COMPLETE'
 ```
 
-If the verification fails, retry the write. Do NOT proceed to Step 5 until the state file exists.
+The ralph-loop command will create the state file and activate the stop hook. The short prompt ("Read and follow the instructions in .claude/reasoning-gaps-loop.md") is fed back each iteration; Claude reads the full instructions from the file.
 
-**Step 5 — Inform the user and exit.**
+**Step 6 — Inform the user.**
 
-Tell the user:
+After the ralph loop is activated, tell the user:
 - Plan saved to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.md`
 - Task file saved to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.json`
+- Instructions at `.claude/reasoning-gaps-loop.md`
 - Ralph loop activated with N max iterations
 - Each iteration implements one intervention and updates the task file
 - Monitor progress: `cat <task-file-path> | jq '.tasks[] | {id, title, status}'`
 - Cancel anytime with `/ralph-wiggum:cancel-ralph`
-
-Then **exit the session**. The ralph-wiggum stop hook will intercept the exit, read the state file, and start the loop by feeding the prompt back.
 
 ### Option 2: Save plan and fix top intervention
 
