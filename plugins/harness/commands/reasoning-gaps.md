@@ -375,7 +375,7 @@ Set `max_iterations` to the number of tasks plus 2 (buffer for test failures or 
 
 Prompt body (everything after the closing `---`). Replace `TASK_FILE_PATH` with the actual path to the JSON task file:
 
-```
+```text
 You are implementing reasoning-gap interventions from a task file.
 
 TASK FILE: TASK_FILE_PATH

@@ -14,7 +14,7 @@ The reasoning-gaps command (`/harness:reasoning-gaps`) currently offers 3 option
 
 Ralph loop becomes option 1. Current options shift down:
 
-```
+```text
 > 1. **Save plan and implement with Ralph loop** — Write plan and implement ALL interventions iteratively via Ralph loop (requires ralph-wiggum plugin)
 > 2. **Save plan and fix top intervention** — Write the full remediation plan and implement intervention #1
 > 3. **Save full remediation plan** — Write the plan for incremental work
@@ -95,7 +95,7 @@ started_at: "<ISO 8601 timestamp>"
 
 **Prompt body** — self-contained instructions repeated each iteration:
 
-```
+```text
 You are implementing reasoning-gap interventions from a task file.
 
 TASK FILE: docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<desc>-tasks.json
