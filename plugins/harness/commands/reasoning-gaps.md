@@ -33,7 +33,7 @@ If `$ARGUMENTS` contains `--resume`, skip all analysis and restart a Ralph loop 
 
 4. **On confirmation:** Count remaining tasks (`pending` + `in-progress`). Then:
    - Write (or overwrite) `.claude/reasoning-gaps-loop.md` with the instructions from **Option 1's Step 4**, using the existing task file path.
-   - Start the Ralph loop using **Option 1's Step 5**: `/ralph-wiggum:ralph-loop` with `max_iterations` = remaining tasks + 2.
+   - Start the Ralph loop using **Option 1's Step 5**: `/ralph-wiggum:ralph-loop` with `max_iterations` = remaining tasks × 1.5 (rounded up) + 1.
    - Then **Step 6** (inform user).
 
 5. **Skip Phases 1–4 entirely** — no analysis, no report generation, no options menu.
@@ -397,12 +397,13 @@ Each iteration, implement exactly ONE task:
 2. Find the first task with "status": "in-progress" (crashed previous iteration) or "pending".
 3. If no "in-progress" or "pending" tasks remain:
    a. If ALL tasks have "status": "complete":
-      - Output: <promise>ALL REASONING GAP INTERVENTIONS COMPLETE</promise>
+      - Output the completion promise (the Ralph loop system message shows the exact format).
       - Exit.
    b. If ANY task has "status": "failed":
       - List the failed tasks with their "log" entries.
       - Do NOT output the completion promise.
       - Exit. (The loop will end via max_iterations, surfacing the failures to the user.)
+   IMPORTANT: Do NOT include the completion promise text anywhere in your output until all tasks are genuinely complete. The stop hook scans your entire output for the promise tags.
 4. Set the task's "status" to "in-progress" and write the task file immediately.
 5. Read the task's "what" field and "resolves" list.
 6. Read all files referenced in "resolves" to understand current state.
@@ -431,10 +432,10 @@ Rules:
 
 This step activates the loop. You MUST use the `/ralph-wiggum:ralph-loop` command — do NOT write `.claude/ralph-loop.local.md` directly.
 
-Replace `NUM_TASKS_PLUS_2` with the actual number of tasks plus 2:
+Set `max_iterations` to the number of tasks multiplied by 1.5 (rounded up) plus 1. For example, 10 tasks → 16 max iterations. This gives each task ~1.5 iterations on average (50% retry budget for test failures) plus 1 for the final completion check.
 
 ```text
-/ralph-wiggum:ralph-loop Read and follow the instructions in .claude/reasoning-gaps-loop.md --max-iterations NUM_TASKS_PLUS_2 --completion-promise 'ALL REASONING GAP INTERVENTIONS COMPLETE'
+/ralph-wiggum:ralph-loop Read and follow the instructions in .claude/reasoning-gaps-loop.md --max-iterations MAX_ITERATIONS --completion-promise 'ALL REASONING GAP INTERVENTIONS COMPLETE'
 ```
 
 The ralph-loop command will create the state file and activate the stop hook. The short prompt ("Read and follow the instructions in .claude/reasoning-gaps-loop.md") is fed back each iteration; Claude reads the full instructions from the file.

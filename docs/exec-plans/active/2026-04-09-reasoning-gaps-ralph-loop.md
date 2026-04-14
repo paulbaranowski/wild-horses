@@ -88,7 +88,7 @@ Write the full iteration instructions to `.claude/reasoning-gaps-loop.md`. This 
 Use `/ralph-wiggum:ralph-loop` to activate the loop (do NOT write the state file directly — the setup script handles hook registration correctly):
 
 ```text
-/ralph-wiggum:ralph-loop Read and follow the instructions in .claude/reasoning-gaps-loop.md --max-iterations <tasks + 2> --completion-promise 'ALL REASONING GAP INTERVENTIONS COMPLETE'
+/ralph-wiggum:ralph-loop Read and follow the instructions in .claude/reasoning-gaps-loop.md --max-iterations <ceil(tasks * 1.5) + 1> --completion-promise 'ALL REASONING GAP INTERVENTIONS COMPLETE'
 ```
 
 The short prompt is repeated each iteration. Claude reads the full instructions from the file.
@@ -112,7 +112,7 @@ Then exit — the stop hook intercepts and starts the loop.
 - **Direct state file write**: Writing `.claude/ralph-loop.local.md` directly is valid — the stop hook only checks for the file's existence.
 - **One task per iteration**: Prevents compounding errors, each change is tested and committed independently. Git commits are the real checkpoints.
 - **Acceptance criteria in JSON**: Each task has explicit criteria, not just "implement the What field."
-- **`max_iterations` = task count + 2**: Buffer for edge cases.
+- **`max_iterations` = ceil(task count × 1.5) + 1**: 50% retry budget per task plus 1 for the final completion check. Example: 10 tasks → 16 iterations.
 
 ## Verification
 
