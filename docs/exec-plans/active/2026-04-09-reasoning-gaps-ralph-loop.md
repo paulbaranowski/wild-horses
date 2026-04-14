@@ -29,7 +29,7 @@ Insert before current Option 1 (which becomes Option 2). This section instructs 
 
 #### A. Save two files
 
-**Markdown report** — `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md`
+**Markdown report** — `docs/exec-plans/active/YYYY-MM-DD-<short-description>.md`
 
 Same format as Option 3 (full remediation plan) with YAML frontmatter:
 
@@ -37,20 +37,20 @@ Same format as Option 3 (full remediation plan) with YAML frontmatter:
 ---
 status: in-progress
 ralph_loop: true
-task_file: "docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>-tasks.json"
+task_file: "docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.json"
 generated: "YYYY-MM-DDTHH:MM:SSZ"
 ---
 ```
 
 Body contains the full report: Scope, Ratings Summary, Cross-Dimension Findings, Findings by Severity, Interventions, Coverage Check. This is the human-readable artifact — the ralph loop does NOT modify this file.
 
-**JSON task file** — `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>-tasks.json`
+**JSON task file** — `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.json`
 
 Machine-readable task list extracted from the interventions. The ralph loop reads and writes this file:
 
 ```json
 {
-  "plan": "docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md",
+  "plan": "docs/exec-plans/active/YYYY-MM-DD-<short-description>.md",
   "completionPromise": "ALL REASONING GAP INTERVENTIONS COMPLETE",
   "testCommand": "uv run pytest",
   "scope": ["src/file1.py", "src/file2.py"],
@@ -100,7 +100,7 @@ started_at: "<ISO 8601 timestamp>"
 ```text
 You are implementing reasoning-gap interventions from a task file.
 
-TASK FILE: docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<desc>-tasks.json
+TASK FILE: docs/exec-plans/active/YYYY-MM-DD-<desc>.reasoning-gaps.json
 
 Each iteration, implement exactly ONE task:
 
@@ -142,7 +142,7 @@ Rules:
 
 Tell the user:
 - Plan saved to `docs/exec-plans/active/...`
-- Task file saved to `docs/exec-plans/active/...-tasks.json`
+- Task file saved to `docs/exec-plans/active/....reasoning-gaps.json`
 - Ralph loop activated with N max iterations
 - Each iteration implements one intervention and updates the task file
 - Monitor: `cat <task-file> | jq '.tasks[] | {id, title, status}'`

@@ -1,6 +1,6 @@
 ---
 description: Analyze code for AI reasoning gaps — untyped signatures, implicit control flow, hidden state, missing docs, and structural complexity that prevent agents from tracing data flow and predicting behavior. Spawns 3 parallel specialist agents, merges findings, and produces a prioritized remediation plan. Use when AI agents keep misunderstanding code, making wrong edits, or needing excessive exploration to complete tasks.
-argument-hint: "[file or directory path] [--scope changed|module|full|imports <file>]"
+argument-hint: "[file or directory path] [--scope changed|module|full|imports <file>] [--resume [task-file-path]]"
 ---
 
 # AI Reasoning Gap Analysis
@@ -10,6 +10,33 @@ Analyze code for **AI reasoning gaps** — places where an AI agent cannot confi
 This is NOT a code quality review. Code can be well-written and still be opaque to AI reasoning. This skill answers: **"If an AI agent read this code, what would it get wrong?"**
 
 **Target:** "$ARGUMENTS"
+
+---
+
+## Resume Check (before Phase 1)
+
+If `$ARGUMENTS` contains `--resume`, skip all analysis and restart a Ralph loop from an existing task file:
+
+1. **Locate the task file:**
+   - If a path follows `--resume` (e.g., `--resume docs/exec-plans/active/2026-04-14-user-endpoints.reasoning-gaps.json`): read that file directly.
+   - If no path provided (just `--resume`): scan `docs/exec-plans/active/*.reasoning-gaps.json` for files with any task where `status` is `"pending"` or `"in-progress"`.
+     - If exactly one match: use it.
+     - If multiple matches: list them with progress summaries (complete/pending/failed counts) and ask the user to pick one.
+     - If no matches: report "No in-progress reasoning-gaps task files found" and stop.
+
+2. **Validate the task file:** Confirm it has a `tasks` array, `completionPromise`, and `testCommand` fields. If invalid, report the error and stop.
+
+3. **Show resume summary:**
+   - Task file path
+   - Total / complete / in-progress / pending / failed task counts
+   - Ask the user to confirm resuming.
+
+4. **On confirmation:** Count remaining tasks (`pending` + `in-progress`). Then jump directly to **Option 1's Step 4** (write the Ralph loop state file) using:
+   - The existing task file path (hardcoded into the prompt body)
+   - `max_iterations` = remaining tasks + 2
+   - Then **Step 5** (inform user and exit)
+
+5. **Skip Phases 1–4 entirely** — no analysis, no report generation, no options menu.
 
 ---
 
@@ -305,7 +332,7 @@ Save the analysis as two files and activate a Ralph Wiggum loop to implement all
 
 **Step 1 — Discover the test command.** Check CLAUDE.md for the project's test command. Fall back to `uv run pytest` or `npm test`.
 
-**Step 2 — Write the markdown report** to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md` (where YYYY-MM-DD is today's date).
+**Step 2 — Write the markdown report** to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.md` (where YYYY-MM-DD is today's date).
 
 Use YAML frontmatter for metadata:
 
@@ -313,20 +340,20 @@ Use YAML frontmatter for metadata:
 ---
 status: in-progress
 ralph_loop: true
-task_file: "docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>-tasks.json"
+task_file: "docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.json"
 generated: "YYYY-MM-DDTHH:MM:SSZ"
 ---
 ```
 
 The body contains the full report: Scope (with repo-relative file paths), Ratings Summary, Cross-Dimension Findings, Findings by Severity, Interventions (with full details), and Coverage Check. This is the human-readable artifact — the Ralph loop does NOT modify this file.
 
-**Step 3 — Write the JSON task file** to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>-tasks.json`.
+**Step 3 — Write the JSON task file** to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.json`.
 
 This is the machine-readable task list that the Ralph loop reads and writes for state tracking. Extract each intervention into a task:
 
 ```json
 {
-  "plan": "docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md",
+  "plan": "docs/exec-plans/active/YYYY-MM-DD-<short-description>.md",
   "completionPromise": "ALL REASONING GAP INTERVENTIONS COMPLETE",
   "testCommand": "<discovered test command>",
   "scope": ["<repo-relative file paths from Phase 1>"],
@@ -425,8 +452,8 @@ If the verification fails, retry the write. Do NOT proceed to Step 5 until the s
 **Step 5 — Inform the user and exit.**
 
 Tell the user:
-- Plan saved to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md`
-- Task file saved to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>-tasks.json`
+- Plan saved to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.md`
+- Task file saved to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.json`
 - Ralph loop activated with N max iterations
 - Each iteration implements one intervention and updates the task file
 - Monitor progress: `cat <task-file-path> | jq '.tasks[] | {id, title, status}'`
@@ -436,7 +463,7 @@ Then **exit the session**. The ralph-wiggum stop hook will intercept the exit, r
 
 ### Option 2: Save plan and fix top intervention
 
-- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md` (where YYYY-MM-DD is today's date) including scope, all findings, all interventions with details
+- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.md` (where YYYY-MM-DD is today's date) including scope, all findings, all interventions with details
 - Implement intervention #1
 - Run existing tests (check CLAUDE.md for the test command, fallback to `uv run pytest` or `npm test`) to verify nothing breaks
 - If tests fail, fix forward or revert and explain what went wrong
@@ -444,7 +471,7 @@ Then **exit the session**. The ralph-wiggum stop hook will intercept the exit, r
 
 ### Option 3: Save full remediation plan
 
-- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md` (where YYYY-MM-DD is today's date) including scope, all findings, all interventions with details and effort estimates
+- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.md` (where YYYY-MM-DD is today's date) including scope, all findings, all interventions with details and effort estimates
 - Do NOT implement anything
 
 ### Option 4: Revise
