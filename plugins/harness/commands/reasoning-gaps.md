@@ -18,11 +18,11 @@ This is NOT a code quality review. Code can be well-written and still be opaque 
 If `$ARGUMENTS` contains `--resume`, skip all analysis and restart the loop from an existing task file:
 
 1. **Locate the task file:**
-   - If a path follows `--resume` (e.g., `--resume docs/exec-plans/active/2026-04-14-user-endpoints.reasoning-gaps.json`): read that file directly.
-   - If no path provided (just `--resume`): scan `docs/exec-plans/active/*.reasoning-gaps.json` for files with any task where `status` is `"pending"` or `"in-progress"`.
-     - If exactly one match: use it.
-     - If multiple matches: list them with progress summaries (complete/pending/failed counts) and ask the user to pick one.
-     - If no matches: report "No in-progress reasoning-gaps task files found" and stop.
+   - If a path follows `--resume` (e.g., `--resume docs/exec-plans/active/2026-04-14-user-endpoints.reasoning-gaps.json`): read that file directly. If the path ends in `.reasoning-gaps.md`, read its YAML frontmatter `task_file` field and open that JSON file instead.
+   - If no path provided (just `--resume`): scan `docs/exec-plans/active/*.reasoning-gaps.json` for files with any task where `status` is `"pending"` or `"in-progress"`. If no JSON matches, fall back to scanning `docs/exec-plans/active/*.reasoning-gaps.md` — for each `.md` candidate, read its YAML frontmatter `task_file` field, then validate the pointer: the path must exist, be readable, parse as valid JSON, and contain at least one task with `status` `"pending"` or `"in-progress"`. Discard any candidate that fails any of these checks.
+     - If exactly one validated match (from either scan): use it.
+     - If multiple validated matches: list them with progress summaries (complete/pending/failed counts) and ask the user to pick one.
+     - If no validated matches: report "No in-progress reasoning-gaps task files found" and stop.
 
 2. **Validate the task file:** Confirm it has a `tasks` array and `testCommand` fields. If invalid, report the error and stop.
 
@@ -338,7 +338,7 @@ Save the analysis and implement all interventions iteratively. Each intervention
 
 **Step 1 — Discover the test command.** Check CLAUDE.md for the project's test command. Fall back to `uv run pytest` or `npm test`.
 
-**Step 2 — Write the markdown report** to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.md` (where YYYY-MM-DD is today's date).
+**Step 2 — Write the markdown report** to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.md` (where YYYY-MM-DD is today's date).
 
 Use YAML frontmatter for metadata:
 
@@ -358,7 +358,7 @@ This is the machine-readable task list that the Ralph loop reads and writes for 
 
 ```json
 {
-  "plan": "docs/exec-plans/active/YYYY-MM-DD-<short-description>.md",
+  "plan": "docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.md",
   "testCommand": "<discovered test command>",
   "scope": ["<repo-relative file paths from Phase 1>"],
   "tasks": [
@@ -438,14 +438,14 @@ The loop runs in the foreground. Each iteration spawns a fresh `claude -p` call 
 **Step 5 — After the loop completes.**
 
 The loop runs to completion automatically. When it finishes, the user will see the final status. Tell the user:
-- Plan at `docs/exec-plans/active/YYYY-MM-DD-<short-description>.md`
+- Plan at `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.md`
 - Task file at `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.json`
 - Check results: `cat <task-file-path> | jq '.tasks[] | {id, title, status}'`
 - Re-run failed tasks with `--resume`
 
 ### Option 2: Save plan and fix top intervention
 
-- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.md` (where YYYY-MM-DD is today's date) including scope, all findings, all interventions with details
+- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.md` (where YYYY-MM-DD is today's date) including scope, all findings, all interventions with details
 - Implement intervention #1
 - Run existing tests (check CLAUDE.md for the test command, fallback to `uv run pytest` or `npm test`) to verify nothing breaks
 - If tests fail, fix forward or revert and explain what went wrong
@@ -453,7 +453,7 @@ The loop runs to completion automatically. When it finishes, the user will see t
 
 ### Option 3: Save full remediation plan
 
-- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.md` (where YYYY-MM-DD is today's date) including scope, all findings, all interventions with details and effort estimates
+- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.md` (where YYYY-MM-DD is today's date) including scope, all findings, all interventions with details and effort estimates
 - Do NOT implement anything
 
 ### Option 4: Revise
