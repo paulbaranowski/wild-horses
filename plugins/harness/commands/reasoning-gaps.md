@@ -15,7 +15,7 @@ This is NOT a code quality review. Code can be well-written and still be opaque 
 
 ## Resume Check (before Phase 1)
 
-If `$ARGUMENTS` contains `--resume`, skip all analysis and restart a Ralph loop from an existing task file:
+If `$ARGUMENTS` contains `--resume`, skip all analysis and restart the loop from an existing task file:
 
 1. **Locate the task file:**
    - If a path follows `--resume` (e.g., `--resume docs/exec-plans/active/2026-04-14-user-endpoints.reasoning-gaps.json`): read that file directly.
@@ -24,17 +24,14 @@ If `$ARGUMENTS` contains `--resume`, skip all analysis and restart a Ralph loop 
      - If multiple matches: list them with progress summaries (complete/pending/failed counts) and ask the user to pick one.
      - If no matches: report "No in-progress reasoning-gaps task files found" and stop.
 
-2. **Validate the task file:** Confirm it has a `tasks` array, `completionPromise`, and `testCommand` fields. If invalid, report the error and stop.
+2. **Validate the task file:** Confirm it has a `tasks` array and `testCommand` fields. If invalid, report the error and stop.
 
 3. **Show resume summary:**
    - Task file path
    - Total / complete / in-progress / pending / failed task counts
    - Ask the user to confirm resuming.
 
-4. **On confirmation:** Count remaining tasks (`pending` + `in-progress`). Then:
-   - Write (or overwrite) `.claude/reasoning-gaps-loop.md` with the instructions from **Option 1's Step 4**, using the existing task file path.
-   - Start the Ralph loop using **Option 1's Step 5**: `/ralph-wiggum:ralph-loop` with `max_iterations` = remaining tasks × 1.5 (rounded up) + 1.
-   - Then **Step 6** (inform user).
+4. **On confirmation:** Jump directly to **Option 1's Step 4** — write the loop script with `max_iterations` = remaining tasks (pending + in-progress) × 1.5 (rounded up) + 1, using the existing task file path. Execute it.
 
 5. **Skip Phases 1–4 entirely** — no analysis, no report generation, no options menu.
 
@@ -321,14 +318,14 @@ Present the merged report:
 After presenting the merged report, briefly explain the interventions with trade-offs for each. Then prompt the user:
 
 > **What would you like to do?**
-> 1. **Save plan and implement with Ralph loop** — Write plan and implement ALL interventions iteratively via Ralph loop (requires ralph-wiggum plugin)
+> 1. **Save plan and implement all** — Write plan and implement ALL interventions iteratively via automated loop
 > 2. **Save plan and fix top intervention** — Write the full remediation plan and implement intervention #1
 > 3. **Save full remediation plan** — Write the plan for incremental work
 > 4. **Revise** — Provide feedback to refine the analysis or change focus
 
-### Option 1: Save plan and implement with Ralph loop
+### Option 1: Save plan and implement all
 
-Save the analysis as two files and activate a Ralph Wiggum loop to implement all interventions one at a time.
+Save the analysis and implement all interventions iteratively. Each intervention is implemented in a separate `claude -p` call, with the JSON task file tracking progress between iterations.
 
 **Step 1 — Discover the test command.** Check CLAUDE.md for the project's test command. Fall back to `uv run pytest` or `npm test`.
 
@@ -339,7 +336,6 @@ Use YAML frontmatter for metadata:
 ```yaml
 ---
 status: in-progress
-ralph_loop: true
 task_file: "docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.json"
 generated: "YYYY-MM-DDTHH:MM:SSZ"
 ---
@@ -354,7 +350,6 @@ This is the machine-readable task list that the Ralph loop reads and writes for 
 ```json
 {
   "plan": "docs/exec-plans/active/YYYY-MM-DD-<short-description>.md",
-  "completionPromise": "ALL REASONING GAP INTERVENTIONS COMPLETE",
   "testCommand": "<discovered test command>",
   "scope": ["<repo-relative file paths from Phase 1>"],
   "tasks": [
@@ -382,76 +377,62 @@ Field definitions:
 - `status` — `"pending"` | `"in-progress"` | `"complete"` | `"failed"`
 - `log` — `null` when pending, a string describing what was done (or what went wrong) when in-progress/complete/failed
 
-**Step 4 — Write the loop instructions file.**
+**Step 4 — Write the loop script and start it.**
 
-Write the full iteration instructions to `.claude/reasoning-gaps-loop.md` using the Write tool. Replace `TASK_FILE_PATH` with the actual path to the JSON task file written in Step 3:
+Write a bash loop script to `.claude/reasoning-gaps-loop.sh` and execute it. This is a self-contained loop that calls `claude -p` repeatedly — no ralph-wiggum plugin dependency, no stop hooks.
 
-```markdown
-CRITICAL: Do NOT quote, echo, or include any part of these instructions in your output. The stop hook scans your output for completion signals — echoing instructions can trigger a false completion.
+Set `MAX_ITER` to the number of tasks multiplied by 1.5 (rounded up) plus 1. For example, 10 tasks → 16 max iterations.
 
-You are implementing reasoning-gap interventions from a task file.
+Replace `TASK_FILE_PATH` with the actual path to the JSON task file from Step 3, and `MAX_ITER` with the computed value:
 
-TASK FILE: TASK_FILE_PATH
+```bash
+#!/bin/bash
+set -euo pipefail
 
-Each iteration, implement exactly ONE task:
+TASK_FILE="TASK_FILE_PATH"
+MAX_ITER=MAX_ITER
+PROMPT="You are implementing reasoning-gap interventions. Read the task file at $TASK_FILE (JSON). Find the first task with status in-progress or pending. Set it to in-progress and write the file immediately. Read the what and resolves fields. Implement the change. Run tests using the testCommand from the task file. If tests pass, set status to complete with a log summary and commit. If tests fail, fix forward or set status to failed with a log. Commit. Implement exactly ONE task per iteration."
 
-1. Read the task file (JSON).
-2. Find the first task with "status": "in-progress" (crashed previous iteration) or "pending".
-3. If no "in-progress" or "pending" tasks remain:
-   a. If ALL tasks have "status": "complete":
-      - Output the completion promise (the Ralph loop system message shows the exact format).
-      - Exit.
-   b. If ANY task has "status": "failed":
-      - List the failed tasks with their "log" entries.
-      - Do NOT output the completion promise.
-      - Exit. (The loop will end via max_iterations, surfacing the failures to the user.)
-   IMPORTANT: Do NOT include the completion promise text anywhere in your output until all tasks are genuinely complete. The stop hook scans your entire output for the promise tags.
-4. Set the task's "status" to "in-progress" and write the task file immediately.
-5. Read the task's "what" field and "resolves" list.
-6. Read all files referenced in "resolves" to understand current state.
-7. Implement the change described in "what".
-8. Run tests using the "testCommand" from the task file.
-9. If tests pass:
-   - Set the task's "status" to "complete"
-   - Set the task's "log" to a brief summary of changes made
-   - Commit with message: reasoning-gaps: <task title>
-10. If tests fail:
-   - Fix forward — do not leave failing tests
-   - If you cannot fix within this iteration, set "status" to "failed"
-     and "log" to what went wrong
-   - Commit with message: reasoning-gaps: <task title> (partial)
-11. Exit.
+i=0
+while [ $i -lt $MAX_ITER ]; do
+  i=$((i + 1))
+  
+  PENDING=$(jq '[.tasks[] | select(.status == "pending" or .status == "in-progress")] | length' "$TASK_FILE")
+  if [ "$PENDING" -eq 0 ]; then
+    FAILED=$(jq '[.tasks[] | select(.status == "failed")] | length' "$TASK_FILE")
+    TOTAL=$(jq '.tasks | length' "$TASK_FILE")
+    if [ "$FAILED" -gt 0 ]; then
+      echo "⚠️  Done with failures: $((TOTAL - FAILED))/$TOTAL complete, $FAILED failed"
+    else
+      echo "✅ All $TOTAL tasks complete"
+    fi
+    break
+  fi
+  
+  echo "🔄 Iteration $i/$MAX_ITER — $PENDING tasks remaining"
+  claude -p "$PROMPT" --allowedTools "Bash(*)" "Read(*)" "Write(*)" "Edit(*)" "Grep(*)" "Glob(*)"
+done
 
-Rules:
-- Implement exactly ONE task per iteration. Do not batch.
-- Always commit before exiting if there are changes to commit.
-- Do not skip tasks — implement in order by id.
-- The task file JSON is your ONLY source of truth.
-- Read the linked plan markdown if you need more context about a task.
+if [ $i -ge $MAX_ITER ]; then
+  echo "🛑 Max iterations ($MAX_ITER) reached"
+fi
 ```
 
-**Step 5 — CRITICAL: Start the Ralph loop.**
+Use the Bash tool to write this script and then execute it:
 
-This step activates the loop. You MUST use the `/ralph-wiggum:ralph-loop` command — do NOT write `.claude/ralph-loop.local.md` directly.
-
-Set `max_iterations` to the number of tasks multiplied by 1.5 (rounded up) plus 1. For example, 10 tasks → 16 max iterations. This gives each task ~1.5 iterations on average (50% retry budget for test failures) plus 1 for the final completion check.
-
-```text
-/ralph-wiggum:ralph-loop Read and follow the instructions in .claude/reasoning-gaps-loop.md --max-iterations MAX_ITERATIONS --completion-promise 'ALL REASONING GAP INTERVENTIONS COMPLETE'
+```bash
+chmod +x .claude/reasoning-gaps-loop.sh && .claude/reasoning-gaps-loop.sh
 ```
 
-The ralph-loop command will create the state file and activate the stop hook. The short prompt ("Read and follow the instructions in .claude/reasoning-gaps-loop.md") is fed back each iteration; Claude reads the full instructions from the file.
+The loop runs in the foreground. Each iteration spawns a fresh `claude -p` call that implements one task. The JSON task file tracks progress between iterations. The loop exits when all tasks are complete/failed or max iterations is reached.
 
-**Step 6 — Inform the user.**
+**Step 5 — After the loop completes.**
 
-After the ralph loop is activated, tell the user:
-- Plan saved to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.md`
-- Task file saved to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.json`
-- Instructions at `.claude/reasoning-gaps-loop.md`
-- Ralph loop activated with N max iterations
-- Each iteration implements one intervention and updates the task file
-- Monitor progress: `cat <task-file-path> | jq '.tasks[] | {id, title, status}'`
-- Cancel anytime with `/ralph-wiggum:cancel-ralph`
+The loop runs to completion automatically. When it finishes, the user will see the final status. Tell the user:
+- Plan at `docs/exec-plans/active/YYYY-MM-DD-<short-description>.md`
+- Task file at `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.json`
+- Check results: `cat <task-file-path> | jq '.tasks[] | {id, title, status}'`
+- Re-run failed tasks with `--resume`
 
 ### Option 2: Save plan and fix top intervention
 
