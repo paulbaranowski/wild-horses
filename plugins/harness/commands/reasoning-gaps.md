@@ -19,10 +19,10 @@ If `$ARGUMENTS` contains `--resume`, skip all analysis and restart the loop from
 
 1. **Locate the task file:**
    - If a path follows `--resume` (e.g., `--resume docs/exec-plans/active/2026-04-14-user-endpoints.reasoning-gaps.json`): read that file directly. If the path ends in `.reasoning-gaps.md`, read its YAML frontmatter `task_file` field and open that JSON file instead.
-   - If no path provided (just `--resume`): scan `docs/exec-plans/active/*.reasoning-gaps.json` for files with any task where `status` is `"pending"` or `"in-progress"`. If no JSON matches, fall back to scanning `docs/exec-plans/active/*.reasoning-gaps.md` for files with `status: in-progress` in YAML frontmatter, then read each file's `task_file` field to locate the JSON.
-     - If exactly one match (from either scan): use it.
-     - If multiple matches: list them with progress summaries (complete/pending/failed counts) and ask the user to pick one.
-     - If no matches: report "No in-progress reasoning-gaps task files found" and stop.
+   - If no path provided (just `--resume`): scan `docs/exec-plans/active/*.reasoning-gaps.json` for files with any task where `status` is `"pending"` or `"in-progress"`. If no JSON matches, fall back to scanning `docs/exec-plans/active/*.reasoning-gaps.md` — for each `.md` candidate, read its YAML frontmatter `task_file` field, then validate the pointer: the path must exist, be readable, parse as valid JSON, and contain at least one task with `status` `"pending"` or `"in-progress"`. Discard any candidate that fails any of these checks.
+     - If exactly one validated match (from either scan): use it.
+     - If multiple validated matches: list them with progress summaries (complete/pending/failed counts) and ask the user to pick one.
+     - If no validated matches: report "No in-progress reasoning-gaps task files found" and stop.
 
 2. **Validate the task file:** Confirm it has a `tasks` array and `testCommand` fields. If invalid, report the error and stop.
 
