@@ -318,7 +318,7 @@ generated: "YYYY-MM-DDTHH:MM:SSZ"
 ---
 ```
 
-The body contains the full report: Scope (with absolute file paths), Ratings Summary, Cross-Dimension Findings, Findings by Severity, Interventions (with full details), and Coverage Check. This is the human-readable artifact — the Ralph loop does NOT modify this file.
+The body contains the full report: Scope (with repo-relative file paths), Ratings Summary, Cross-Dimension Findings, Findings by Severity, Interventions (with full details), and Coverage Check. This is the human-readable artifact — the Ralph loop does NOT modify this file.
 
 **Step 3 — Write the JSON task file** to `docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>-tasks.json`.
 
@@ -329,7 +329,7 @@ This is the machine-readable task list that the Ralph loop reads and writes for 
   "plan": "docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md",
   "completionPromise": "ALL REASONING GAP INTERVENTIONS COMPLETE",
   "testCommand": "<discovered test command>",
-  "scope": ["<absolute file paths from Phase 1>"],
+  "scope": ["<repo-relative file paths from Phase 1>"],
   "tasks": [
     {
       "id": 1,
@@ -350,7 +350,7 @@ This is the machine-readable task list that the Ralph loop reads and writes for 
 
 Field definitions:
 - `testCommand` — project test command, discovered once and reused every iteration
-- `scope` — absolute file paths from Phase 1, preserved for potential re-analysis
+- `scope` — repo-relative file paths from Phase 1, preserved for potential re-analysis. Use paths relative to the repository root (e.g., `src/pipeline.py` not `/Users/name/project/src/pipeline.py`) to avoid leaking local machine structure if the file is committed
 - `acceptanceCriteria` — derived from the intervention's What and Resolves fields. Each criterion should be concrete and verifiable (e.g., "PipelineConfig model exists with typed fields for host, port, and timeout" not "types are added")
 - `status` — `"pending"` | `"complete"` | `"failed"`
 - `log` — `null` when pending, a string describing what was done (or what went wrong) when complete/failed
@@ -404,7 +404,7 @@ Each iteration, implement exactly ONE task:
 
 Rules:
 - Implement exactly ONE task per iteration. Do not batch.
-- Always commit before exiting.
+- Always commit before exiting if there are changes to commit.
 - Do not skip tasks — implement in order by id.
 - The task file JSON is your ONLY source of truth.
 - Read the linked plan markdown if you need more context about a task.

@@ -53,7 +53,7 @@ Machine-readable task list extracted from the interventions. The ralph loop read
   "plan": "docs/exec-plans/active/YYYY-MM-DD-reasoning-gaps-<short-description>.md",
   "completionPromise": "ALL REASONING GAP INTERVENTIONS COMPLETE",
   "testCommand": "uv run pytest",
-  "scope": ["absolute/path/to/file1.py", "absolute/path/to/file2.py"],
+  "scope": ["src/file1.py", "src/file2.py"],
   "tasks": [
     {
       "id": 1,
@@ -74,7 +74,7 @@ Machine-readable task list extracted from the interventions. The ralph loop read
 ```
 
 - `testCommand`: discovered once during plan creation (check CLAUDE.md, fall back to `uv run pytest` or `npm test`)
-- `scope`: absolute file paths from Phase 1
+- `scope`: repo-relative file paths from Phase 1 (avoids leaking local machine paths if committed)
 - Each task's `acceptanceCriteria` are derived from the intervention's What and Resolves fields
 - `status`: `"pending"` | `"complete"` | `"failed"`
 - `log`: null when pending, string with details when complete/failed
@@ -124,7 +124,7 @@ Each iteration, implement exactly ONE task:
 
 Rules:
 - Implement exactly ONE task per iteration. Do not batch.
-- Always commit before exiting.
+- Always commit before exiting if there are changes to commit.
 - Do not skip tasks — implement in order by id.
 - The task file JSON is your ONLY source of truth.
 - Read the linked plan markdown if you need more context about a task.
