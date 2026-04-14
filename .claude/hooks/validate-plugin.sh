@@ -9,7 +9,7 @@ INPUT=$(cat)
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.file // empty')
 
 # Only validate when the edited file is inside a plugin directory
-if [[ -z "$FILE_PATH" ]] || [[ "$FILE_PATH" != *"/plugins/"* ]]; then
+if [[ -z "$FILE_PATH" ]] || ! [[ "$FILE_PATH" =~ (^|/)plugins/ ]]; then
   exit 0
 fi
 
