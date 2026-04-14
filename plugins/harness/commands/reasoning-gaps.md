@@ -352,8 +352,8 @@ Field definitions:
 - `testCommand` — project test command, discovered once and reused every iteration
 - `scope` — repo-relative file paths from Phase 1, preserved for potential re-analysis. Use paths relative to the repository root (e.g., `src/pipeline.py` not `/Users/name/project/src/pipeline.py`) to avoid leaking local machine structure if the file is committed
 - `acceptanceCriteria` — derived from the intervention's What and Resolves fields. Each criterion should be concrete and verifiable (e.g., "PipelineConfig model exists with typed fields for host, port, and timeout" not "types are added")
-- `status` — `"pending"` | `"complete"` | `"failed"`
-- `log` — `null` when pending, a string describing what was done (or what went wrong) when complete/failed
+- `status` — `"pending"` | `"in-progress"` | `"complete"` | `"failed"`
+- `log` — `null` when pending, a string describing what was done (or what went wrong) when in-progress/complete/failed
 
 **Step 4 — CRITICAL: Write the Ralph loop state file.**
 
@@ -380,24 +380,30 @@ TASK FILE: TASK_FILE_PATH
 Each iteration, implement exactly ONE task:
 
 1. Read the task file (JSON).
-2. Find the first task with "status": "pending".
-3. If no pending tasks remain:
-   - Output: <promise>ALL REASONING GAP INTERVENTIONS COMPLETE</promise>
-   - Exit.
-4. Read the task's "what" field and "resolves" list.
-5. Read all files referenced in "resolves" to understand current state.
-6. Implement the change described in "what".
-7. Run tests using the "testCommand" from the task file.
-8. If tests pass:
+2. Find the first task with "status": "in-progress" (crashed previous iteration) or "pending".
+3. If no "in-progress" or "pending" tasks remain:
+   a. If ALL tasks have "status": "complete":
+      - Output: <promise>ALL REASONING GAP INTERVENTIONS COMPLETE</promise>
+      - Exit.
+   b. If ANY task has "status": "failed":
+      - List the failed tasks with their "log" entries.
+      - Do NOT output the completion promise.
+      - Exit. (The loop will end via max_iterations, surfacing the failures to the user.)
+4. Set the task's "status" to "in-progress" and write the task file immediately.
+5. Read the task's "what" field and "resolves" list.
+6. Read all files referenced in "resolves" to understand current state.
+7. Implement the change described in "what".
+8. Run tests using the "testCommand" from the task file.
+9. If tests pass:
    - Set the task's "status" to "complete"
    - Set the task's "log" to a brief summary of changes made
    - Commit with message: reasoning-gaps: <task title>
-9. If tests fail:
+10. If tests fail:
    - Fix forward — do not leave failing tests
    - If you cannot fix within this iteration, set "status" to "failed"
      and "log" to what went wrong
    - Commit with message: reasoning-gaps: <task title> (partial)
-10. Exit.
+11. Exit.
 
 Rules:
 - Implement exactly ONE task per iteration. Do not batch.
