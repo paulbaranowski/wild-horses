@@ -28,6 +28,9 @@ plugins/harness/                   -- plugin root
 - Skills, agents, commands, and hooks go at the **plugin root** level, NOT inside `.claude-plugin/`.
 - Validate with: `claude plugin validate .` or `/plugin validate .`
 
+### Versioning
+- **Every change to a plugin's content (commands, skills, agents, hooks) requires a version bump in that plugin's `plugin.json`.** Bump patch for fixes, minor for new features/improvements, major for breaking changes.
+
 ### plugin.json
 - Keep it minimal: `name`, `description`, `version`, `author`. That's it for most plugins.
 - `repository` must be a **string** (URL), not an object.
