@@ -29,9 +29,18 @@ If `$ARGUMENTS` contains `--resume`, skip all analysis and restart the loop from
 3. **Show resume summary:**
    - Task file path
    - Total / complete / in-progress / pending / failed task counts
-   - Ask the user to confirm resuming.
+   - List the remaining tasks (pending and in-progress) with their id, title, and effort
 
-4. **On confirmation:** Jump directly to **Option 1's Step 4** — write the loop script with `max_iterations` = remaining tasks (pending + in-progress) × 1.5 (rounded up) + 1, using the existing task file path. Execute it.
+4. **Ask the user what they'd like to do:**
+
+   > **How would you like to proceed?**
+   > 1. **Run all remaining** — Implement all pending/in-progress tasks via automated loop
+   > 2. **Run next task only** — Implement just the next pending/in-progress task, then stop
+   > 3. **Give feedback** — Review or adjust the plan before continuing
+
+   - **Option 1 (Run all remaining):** Jump directly to **Option 1's Step 4** — write the loop script with `max_iterations` = remaining tasks (pending + in-progress) × 1.5 (rounded up) + 1, using the existing task file path. Execute it.
+   - **Option 2 (Run next task only):** Find the first task with status `"in-progress"` or `"pending"` in the task file. Run a single `claude -p` call with the same prompt used in Option 1's Step 4 loop script (the `PROMPT` variable). After the `claude -p` process exits, you (the agent running this command) re-read the JSON task file, show the updated task summary (complete/pending/failed counts) to the user, and return to step 4.
+   - **Option 3 (Give feedback):** Ask the user for their feedback (e.g., reorder tasks, skip a task, modify a task's approach, adjust scope). You (the agent) apply the feedback by directly editing the JSON task file — no separate `claude -p` call needed, since these are structural edits (reordering, setting status to `"skipped"`, revising a task's `what` field), not code implementation. After updating the file, return to step 4 — show the updated task list and ask again.
 
 5. **Skip Phases 1–4 entirely** — no analysis, no report generation, no options menu.
 
