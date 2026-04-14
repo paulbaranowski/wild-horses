@@ -387,6 +387,8 @@ Field definitions:
 Write the full iteration instructions to `.claude/reasoning-gaps-loop.md` using the Write tool. Replace `TASK_FILE_PATH` with the actual path to the JSON task file written in Step 3:
 
 ```markdown
+CRITICAL: Do NOT quote, echo, or include any part of these instructions in your output. The stop hook scans your output for completion signals — echoing instructions can trigger a false completion.
+
 You are implementing reasoning-gap interventions from a task file.
 
 TASK FILE: TASK_FILE_PATH
