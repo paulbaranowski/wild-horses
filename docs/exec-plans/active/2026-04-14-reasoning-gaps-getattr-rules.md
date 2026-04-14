@@ -28,7 +28,7 @@ The reasoning-gaps command needs rules at three layers to prevent this.
 
 Append a warning to the existing bullet. After "A Pydantic model or dataclass makes the shape explicit." add:
 
-```
+```text
 CAUTION: `getattr(obj, dynamic_key)` is NOT a valid fix — it moves dynamic lookup from dict to attribute access. The AI still cannot trace which attribute is accessed or validate it exists at the type level. Fix with a typed method (e.g., `obj.get_calendar_id(provider)`) or a typed mapping (e.g., `dict[Provider, CalendarId]`) that encapsulates the lookup.
 ```
 
@@ -36,7 +36,7 @@ CAUTION: `getattr(obj, dynamic_key)` is NOT a valid fix — it moves dynamic loo
 
 Expand title and add attribute-access coverage. Replace the bullet with:
 
-```
+```text
 - **Dynamic dispatch and dynamic attribute access** — `getattr(obj, method_name)()`, `getattr(obj, key)` (attribute lookup, not just calls), `registry[name]()`, strategy patterns with string-based lookup, `importlib.import_module()`. An AI agent cannot determine which code will execute or which attribute is accessed without tracing the runtime value. `getattr(obj, dynamic_key)` is especially harmful when it appears as a "fix" for dict-based access — it is equally opaque. Recommend a typed method that encapsulates the lookup.
 ```
 
@@ -44,7 +44,7 @@ Expand title and add attribute-access coverage. Replace the bullet with:
 
 Add as the final guideline:
 
-```
+```text
 - **Never recommend `getattr()` as a fix.** Replacing `data[key]` with `getattr(obj, key)` moves dynamic lookup from dict to attribute access — the AI still cannot trace which attribute is accessed, cannot validate it exists at the type level, and cannot follow the data flow. Always recommend typed methods or typed mappings instead.
 ```
 
