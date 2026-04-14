@@ -18,7 +18,7 @@ This is NOT a code quality review. Code can be well-written and still be opaque 
 If `$ARGUMENTS` contains `--resume`, skip all analysis and restart the loop from an existing task file:
 
 1. **Locate the task file:**
-   - If a path follows `--resume` (e.g., `--resume docs/exec-plans/active/2026-04-14-user-endpoints.reasoning-gaps.json`): read that file directly. If the path ends in `.reasoning-gaps.md`, read its YAML frontmatter `task_file` field and open that JSON file instead.
+   - If a path follows `--resume` (e.g., `--resume docs/exec-plans/active/2026-04-14-a3f2-user-endpoints.reasoning-gaps.json`): read that file directly. If the path ends in `.reasoning-gaps.md`, read its YAML frontmatter `task_file` field and open that JSON file instead.
    - If no path provided (just `--resume`): scan `docs/exec-plans/active/*.reasoning-gaps.json` for files with any task where `status` is `"pending"` or `"in-progress"`. If no JSON matches, fall back to scanning `docs/exec-plans/active/*.reasoning-gaps.md` — for each `.md` candidate, read its YAML frontmatter `task_file` field, then validate the pointer: the path must exist, be readable, parse as valid JSON, and contain at least one task with `status` `"pending"` or `"in-progress"`. Discard any candidate that fails any of these checks.
      - If exactly one validated match (from either scan): use it.
      - If multiple validated matches: list them with progress summaries (complete/pending/failed counts) and ask the user to pick one.
@@ -332,33 +332,35 @@ After presenting the merged report, briefly explain the interventions with trade
 > 3. **Save full remediation plan** — Write the plan for incremental work
 > 4. **Revise** — Provide feedback to refine the analysis or change focus
 
+Before executing any option below, generate a **run ID** by running `openssl rand -hex 2` to produce a 4-character hex string (e.g., `a3f2`). Use this same run ID in all file names produced by this run — this prevents collisions when the command is run multiple times on the same day.
+
 ### Option 1: Save plan and implement all
 
 Save the analysis and implement all interventions iteratively. Each intervention is implemented in a separate `claude -p` call, with the JSON task file tracking progress between iterations.
 
 **Step 1 — Discover the test command.** Check CLAUDE.md for the project's test command. Fall back to `uv run pytest` or `npm test`.
 
-**Step 2 — Write the markdown report** to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.md` (where YYYY-MM-DD is today's date).
+**Step 2 — Write the markdown report** to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.reasoning-gaps.md` (where YYYY-MM-DD is today's date and `<run-id>` is the 4-character hex run ID).
 
 Use YAML frontmatter for metadata:
 
 ```yaml
 ---
 status: in-progress
-task_file: "docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.json"
+task_file: "docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.reasoning-gaps.json"
 generated: "YYYY-MM-DDTHH:MM:SSZ"
 ---
 ```
 
 The body contains the full report: Scope (with repo-relative file paths), Ratings Summary, Cross-Dimension Findings, Findings by Severity, Interventions (with full details), and Coverage Check. This is the human-readable artifact — the Ralph loop does NOT modify this file.
 
-**Step 3 — Write the JSON task file** to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.json`.
+**Step 3 — Write the JSON task file** to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.reasoning-gaps.json`.
 
 This is the machine-readable task list that the Ralph loop reads and writes for state tracking. Extract each intervention into a task:
 
 ```json
 {
-  "plan": "docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.md",
+  "plan": "docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.reasoning-gaps.md",
   "testCommand": "<discovered test command>",
   "scope": ["<repo-relative file paths from Phase 1>"],
   "tasks": [
@@ -438,14 +440,14 @@ The loop runs in the foreground. Each iteration spawns a fresh `claude -p` call 
 **Step 5 — After the loop completes.**
 
 The loop runs to completion automatically. When it finishes, the user will see the final status. Tell the user:
-- Plan at `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.md`
-- Task file at `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.json`
+- Plan at `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.reasoning-gaps.md`
+- Task file at `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.reasoning-gaps.json`
 - Check results: `cat <task-file-path> | jq '.tasks[] | {id, title, status}'`
 - Re-run failed tasks with `--resume`
 
 ### Option 2: Save plan and fix top intervention
 
-- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.md` (where YYYY-MM-DD is today's date) including scope, all findings, all interventions with details
+- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.reasoning-gaps.md` (where YYYY-MM-DD is today's date and `<run-id>` is the hex run ID) including scope, all findings, all interventions with details
 - Implement intervention #1
 - Run existing tests (check CLAUDE.md for the test command, fallback to `uv run pytest` or `npm test`) to verify nothing breaks
 - If tests fail, fix forward or revert and explain what went wrong
@@ -453,7 +455,7 @@ The loop runs to completion automatically. When it finishes, the user will see t
 
 ### Option 3: Save full remediation plan
 
-- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-<short-description>.reasoning-gaps.md` (where YYYY-MM-DD is today's date) including scope, all findings, all interventions with details and effort estimates
+- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.reasoning-gaps.md` (where YYYY-MM-DD is today's date and `<run-id>` is the hex run ID) including scope, all findings, all interventions with details and effort estimates
 - Do NOT implement anything
 
 ### Option 4: Revise
