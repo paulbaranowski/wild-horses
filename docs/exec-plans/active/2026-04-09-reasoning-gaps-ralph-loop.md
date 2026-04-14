@@ -79,9 +79,11 @@ Machine-readable task list extracted from the interventions. The ralph loop read
 - `status`: `"pending"` | `"complete"` | `"failed"`
 - `log`: null when pending, string with details when complete/failed
 
-#### B. Write the ralph loop state file
+#### B. CRITICAL: Write the ralph loop state file
 
-Write `.claude/ralph-loop.local.md` directly (not via `/ralph-loop` — prompt is too long for CLI args):
+This step activates the loop. If the file is not written, the loop will NOT start.
+
+Write `.claude/ralph-loop.local.md` directly using Bash `cat` heredoc (not via `/ralph-loop` — prompt is too long for CLI args). Verify the file exists after writing. Do NOT proceed to Step C until verification passes.
 
 ```yaml
 ---

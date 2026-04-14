@@ -355,27 +355,24 @@ Field definitions:
 - `status` — `"pending"` | `"complete"` | `"failed"`
 - `log` — `null` when pending, a string describing what was done (or what went wrong) when complete/failed
 
-**Step 4 — Write the Ralph loop state file** directly to `.claude/ralph-loop.local.md`.
+**Step 4 — CRITICAL: Write the Ralph loop state file.**
 
-Do NOT invoke `/ralph-wiggum:ralph-loop` — the prompt is too long for CLI arguments. Writing the state file directly is sufficient; the ralph-wiggum stop hook only checks for this file's existence.
+This step is what actually activates the loop. If this file is not written, the loop will NOT start and Claude will just exit normally.
 
-YAML frontmatter:
+Do NOT invoke `/ralph-wiggum:ralph-loop` — the prompt is too long for CLI arguments. Write `.claude/ralph-loop.local.md` directly using the Write tool. The ralph-wiggum stop hook only checks for this file's existence.
 
-```yaml
+Use the Bash tool to create the file. Replace `TASK_FILE_PATH` with the actual path to the JSON task file written in Step 3, and `NUM_TASKS_PLUS_2` with the actual number of tasks plus 2:
+
+```bash
+mkdir -p .claude && cat > .claude/ralph-loop.local.md << 'RALPH_EOF'
 ---
 active: true
 iteration: 1
-max_iterations: <number of tasks + 2>
+max_iterations: NUM_TASKS_PLUS_2
 completion_promise: "ALL REASONING GAP INTERVENTIONS COMPLETE"
-started_at: "<current ISO 8601 timestamp>"
+started_at: "CURRENT_ISO_TIMESTAMP"
 ---
-```
 
-Set `max_iterations` to the number of tasks plus 2 (buffer for test failures or edge cases).
-
-Prompt body (everything after the closing `---`). Replace `TASK_FILE_PATH` with the actual path to the JSON task file:
-
-```text
 You are implementing reasoning-gap interventions from a task file.
 
 TASK FILE: TASK_FILE_PATH
@@ -408,7 +405,16 @@ Rules:
 - Do not skip tasks — implement in order by id.
 - The task file JSON is your ONLY source of truth.
 - Read the linked plan markdown if you need more context about a task.
+RALPH_EOF
 ```
+
+**After writing, VERIFY the file exists:**
+
+```bash
+test -f .claude/ralph-loop.local.md && echo "✅ Ralph loop state file created" || echo "❌ FAILED: State file not created"
+```
+
+If the verification fails, retry the write. Do NOT proceed to Step 5 until the state file exists.
 
 **Step 5 — Inform the user and exit.**
 
