@@ -1,6 +1,6 @@
 ---
 description: Analyze code for AI reasoning gaps — untyped signatures, implicit control flow, hidden state, missing docs, and structural complexity that prevent agents from tracing data flow and predicting behavior. Spawns 3 parallel specialist agents, merges findings, and produces a prioritized remediation plan. Use when AI agents keep misunderstanding code, making wrong edits, or needing excessive exploration to complete tasks.
-argument-hint: "[file or directory path] [--scope changed|module|full|imports <file>] [--resume [task-file-path]]"
+argument-hint: "[path or description] [--full] [--resume [task-file-path]]"
 ---
 
 # AI Reasoning Gap Analysis
@@ -50,11 +50,10 @@ If `$ARGUMENTS` contains `--resume`, skip all analysis and restart the loop from
 
 Based on arguments and context, determine what files to analyze:
 
-1. **If a specific file/directory is given** — collect those file paths
-2. **If no arguments (DEFAULT)** — get only the files changed in the current PR branch: `git diff --name-only main...HEAD` plus any uncommitted changes via `git diff --name-only`. Exclude test files. This should typically yield 3-10 files. If it yields more than 15, ask the user to narrow scope.
-3. **If `--scope module`** — collect all source files in the module/package containing the current directory
-4. **If `--scope full`** — collect all source files in `src/` or the main package directory (warn: may be slow)
-5. **If `--scope imports <file>`** — collect the specified file, all files it imports, and all files that import it. Use grep for import statements to trace the graph. Cap at 20 files; if more, ask the user to narrow scope.
+1. **If a specific file/directory path is given** — collect those file paths
+2. **If a free-form description is given** (e.g., "the cli code", "the decoder pipeline", "authentication logic") — search the codebase to identify matching files. Use directory names, module names, class/function names, and file contents to resolve the description to a concrete list of files. Confirm the resolved scope with the user if ambiguous.
+3. **If no arguments (DEFAULT)** — get only the files changed in the current PR branch: `git diff --name-only main...HEAD` plus any uncommitted changes via `git diff --name-only`. Exclude test files. This should typically yield 3-10 files. If it yields more than 15, ask the user to narrow scope.
+4. **If `--full`** — collect all source files in `src/` or the main package directory (warn: may be slow)
 
 Build a newline-separated list of absolute file paths. This is the **file list** you will pass to each agent.
 

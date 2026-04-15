@@ -24,15 +24,17 @@ Make the code AI-readable — add types, decompose long functions, document impl
 
 ```
 /harness:reasoning-gaps src/pipeline/
+/harness:reasoning-gaps the authentication layer
 ```
 
 Then fix the feedback loops — testability, opaque errors, tight coupling. This matters for any language:
 
 ```
 /harness:feedback-blockers src/pipeline/
+/harness:feedback-blockers the decoder pipeline
 ```
 
-Both analysis commands default to files changed on the current branch when run without arguments. In practice, you'll usually point them at the module or directory you're working on. Each produces a remediation plan with ranked interventions that can be implemented automatically — you review the plan, choose "implement all," and the agent loop works through each task, running tests after every change.
+Both analysis commands accept file paths, directory paths, or free-form descriptions of what to analyze. They default to files changed on the current branch when run without arguments. Each produces a remediation plan with ranked interventions that can be implemented automatically — you review the plan, choose "implement all," and the agent loop works through each task, running tests after every change.
 
 ---
 
@@ -61,6 +63,7 @@ Progress is tracked in a JSON task file that supports `--resume`, so you can sto
 ```
 /harness:reasoning-gaps src/auth/
 /harness:reasoning-gaps src/api.py
+/harness:reasoning-gaps the cli code
 /harness:reasoning-gaps
 /harness:reasoning-gaps --resume
 ```
@@ -85,6 +88,7 @@ The report ranks interventions by impact and can optionally be implemented via a
 ```
 /harness:feedback-blockers src/auth/
 /harness:feedback-blockers src/api.py
+/harness:feedback-blockers the ingestion service
 /harness:feedback-blockers
 /harness:feedback-blockers --resume
 ```

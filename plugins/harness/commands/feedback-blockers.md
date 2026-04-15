@@ -1,6 +1,6 @@
 ---
 description: Analyze code for feedback-loop blockers — encapsulation gaps, OOP design issues, testability barriers, and harness-unfriendly patterns that prevent fast, clear change-test-fix cycles. Spawns 4 parallel specialist agents, merges findings, and produces a prioritized remediation plan. Use when code changes cause unexpected failures, tests are hard to write, or the change-test-fix cycle is slow.
-argument-hint: "[file or directory path] [--scope changed|module|full] [--resume [task-file-path]]"
+argument-hint: "[path or description] [--full] [--resume [task-file-path]]"
 ---
 
 # Feedback Blockers Review
@@ -48,10 +48,10 @@ If `$ARGUMENTS` contains `--resume`, skip all analysis and restart the loop from
 
 Based on arguments and context, determine what files to analyze:
 
-1. **If a specific file/directory is given** — collect those file paths
-2. **If no arguments (DEFAULT)** — get only the files changed in the current PR branch: `git diff --name-only main...HEAD` plus any uncommitted changes via `git diff --name-only`. Exclude test files and non-Python files. This should typically yield 3-10 files. If it yields more than 15, ask the user to narrow scope.
-3. **If `--scope module`** — collect all source files in the module/package containing the current directory
-4. **If `--scope full`** — collect all source files in `src/` or the main package directory (warn: may be slow)
+1. **If a specific file/directory path is given** — collect those file paths
+2. **If a free-form description is given** (e.g., "the cli code", "the decoder pipeline", "authentication logic") — search the codebase to identify matching files. Use directory names, module names, class/function names, and file contents to resolve the description to a concrete list of files. Confirm the resolved scope with the user if ambiguous.
+3. **If no arguments (DEFAULT)** — get only the files changed in the current PR branch: `git diff --name-only main...HEAD` plus any uncommitted changes via `git diff --name-only`. Exclude test files and non-source files. This should typically yield 3-10 files. If it yields more than 15, ask the user to narrow scope.
+4. **If `--full`** — collect all source files in `src/` or the main package directory (warn: may be slow)
 
 Build a newline-separated list of absolute file paths. This is the **file list** you will pass to each agent.
 
