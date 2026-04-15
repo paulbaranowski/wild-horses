@@ -264,7 +264,7 @@ Present a completion summary following this structure:
 - Create execution plans in docs/exec-plans/active/ for current work
 - Add product specs for upcoming features
 - Drop external library docs into docs/references/ as needed
-- Run `/harness:audit` to analyze code quality against this structure
+- Run `/harness:feedback-blockers` to analyze code for feedback-loop blockers
 ```
 
 ---
