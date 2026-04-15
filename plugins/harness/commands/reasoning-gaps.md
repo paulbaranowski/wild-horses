@@ -410,7 +410,6 @@ This is the machine-readable task list that the Ralph loop reads and writes for 
       "status": "pending",
       "acceptanceCriteria": [
         "All public functions in auth.py have parameter and return type annotations",
-        "All public functions in auth.py have return type annotations",
         "Tests pass"
       ],
       "log": null
