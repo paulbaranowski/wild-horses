@@ -8,7 +8,7 @@ A [Claude Code](https://claude.ai/code) plugin marketplace for making code AI-re
 
 Harness engineering tools — find AI reasoning gaps, audit code for feedback-loop blockers, and set up the harness directory structure.
 
-```
+```text
 /plugin install harness@wild-horses
 ```
 
@@ -16,20 +16,20 @@ Harness engineering tools — find AI reasoning gaps, audit code for feedback-lo
 
 Set up the documentation structure so agents can orient themselves:
 
-```
+```text
 /harness:setup
 ```
 
 Make the code AI-readable — add types, decompose long functions, document implicit flow. This is the highest-leverage starting point for dynamically typed codebases (Python, Ruby, JavaScript):
 
-```
+```text
 /harness:reasoning-gaps src/pipeline/
 /harness:reasoning-gaps the authentication layer
 ```
 
 Then fix the feedback loops — testability, opaque errors, tight coupling. This matters for any language:
 
-```
+```text
 /harness:feedback-blockers src/pipeline/
 /harness:feedback-blockers the decoder pipeline
 ```
@@ -60,7 +60,7 @@ The report produces ranked interventions. Each intervention is a coherent change
 
 Progress is tracked in a JSON task file that supports `--resume`, so you can stop and pick up where you left off across sessions.
 
-```
+```text
 /harness:reasoning-gaps src/auth/
 /harness:reasoning-gaps src/api.py
 /harness:reasoning-gaps the cli code
@@ -85,7 +85,7 @@ Findings from all four agents are deduplicated and merged. When the same code lo
 
 The report ranks interventions by impact and can optionally be implemented via an automated agent loop: each intervention becomes a task, agents implement them one at a time, and progress is tracked in a JSON task file that supports `--resume` across sessions.
 
-```
+```text
 /harness:feedback-blockers src/auth/
 /harness:feedback-blockers src/api.py
 /harness:feedback-blockers the ingestion service
@@ -99,7 +99,7 @@ The report ranks interventions by impact and can optionally be implemented via a
 
 Analyzes existing files, proposes moves and generations, executes after approval. Never deletes files.
 
-```
+```text
 /harness:setup
 /harness:setup /path/to/project
 ```
@@ -108,7 +108,7 @@ Analyzes existing files, proposes moves and generations, executes after approval
 
 Scaffold a new Claude Code plugin marketplace with proper structure, schema validation, and CLAUDE.md conventions.
 
-```
+```text
 /plugin install marketplace@wild-horses
 ```
 
@@ -118,7 +118,7 @@ Scaffold a new Claude Code plugin marketplace with proper structure, schema vali
 
 Walks you through creating a marketplace repo: asks for a name, checks for an existing skill to import, and generates `marketplace.json`, `plugin.json`, and `CLAUDE.md` with marketplace conventions.
 
-```
+```text
 /create
 /create my-marketplace
 ```
