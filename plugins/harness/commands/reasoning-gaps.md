@@ -267,8 +267,8 @@ Wait for all 3 agents to return. Then synthesize their findings into a unified r
    - 5-6: **C** — significant gaps, agents will make mistakes
    - 3-4: **D** — agents cannot reliably reason about this code
    - 1-2: **F** — opaque to AI reasoning
-7. **Create interventions with full coverage** — generate a ranked list of interventions that **collectively cover every critical and important finding**. Do NOT cap at a fixed number. If 3 interventions cover everything, list 3. If 8 are needed, list 8. Rank by impact: cross-dimension findings first, then by number of findings resolved. Each intervention should be a coherent change (e.g., "Create a PipelineConfig Pydantic model" or "Add module docstrings to the auth package"). Prefer interventions that resolve findings across multiple dimensions. For each intervention, determine whether it **creates new callable code** (new functions, classes, methods, models, enums with methods) or **annotates/documents existing code** (type hints, docstrings, comments, renames). Tag each with `createsNewCode: true` or `createsNewCode: false`.
-8. **Coverage verification** — after creating the intervention list, verify that every critical and important finding from the Findings by Severity section maps to at least one intervention's "Resolves" list. If any critical or important finding is uncovered, add an intervention for it. This step is non-negotiable — no critical or important finding may exist in the report without a corresponding intervention.
+7. **Create interventions with full coverage** — generate a ranked list of interventions that **collectively cover every critical, important, and minor finding**. Do NOT cap at a fixed number. If 3 interventions cover everything, list 3. If 8 are needed, list 8. Rank by impact: cross-dimension findings first, then by number of findings resolved. Each intervention should be a coherent change (e.g., "Create a PipelineConfig Pydantic model" or "Add module docstrings to the auth package"). Prefer interventions that resolve findings across multiple dimensions. For each intervention, determine whether it **creates new callable code** (new functions, classes, methods, models, enums with methods) or **annotates/documents existing code** (type hints, docstrings, comments, renames). Tag each with `createsNewCode: true` or `createsNewCode: false`.
+8. **Coverage verification** — after creating the intervention list, verify that every critical, important, and minor finding from the Findings by Severity section maps to at least one intervention's "Resolves" list. If any critical, important, or minor finding is uncovered, add an intervention for it. This step is non-negotiable — no critical, important, or minor finding may exist in the report without a corresponding intervention.
 9. **Generate paired test tasks** — for each intervention where `createsNewCode` is `true`, generate a companion test task placed immediately after it in the task ordering. The test task must:
    - Have a title prefixed with "Write tests for" followed by the name of what was created
    - Have a `what` field that specifies: (a) the exact new functions/classes/methods to test, (b) specific test cases to write (at minimum: happy path, edge cases, and error handling), (c) where to put the test file (follow existing project test conventions)
@@ -311,7 +311,7 @@ Present the merged report:
 
 ## Interventions (ranked by impact)
 
-> Every critical and important finding MUST appear in at least one intervention's Resolves list.
+> Every critical, important, and minor finding MUST appear in at least one intervention's Resolves list.
 
 ### 1. [Intervention title]
 **What:** [specific change — files to modify, models to create, annotations to add]
@@ -320,11 +320,12 @@ Present the merged report:
 **Effort:** low / medium / high
 
 ### 2. ...
-[continue until ALL critical and important findings are covered — no fixed cap]
+[continue until ALL critical, important, and minor findings are covered — no fixed cap]
 
 ## Coverage Check
 - Critical findings covered: X/X
 - Important findings covered: X/X
+- Minor findings covered: X/X
 - [List any findings NOT covered — this section should be empty. If it is not, add more interventions above.]
 ```
 
@@ -523,6 +524,6 @@ The loop runs to completion automatically. When it finishes, the user will see t
 - **High confidence only.** Skip stylistic preferences and subjective observations. Every finding must cite file:line and explain concrete AI reasoning harm.
 - **Verify before reporting.** Every finding must quote the actual code at the cited file:line. During Phase 3, re-read each cited location and discard any finding whose quoted code does not match what is in the file. Never report findings about content you have not verified exists.
 - **Cross-dimension signals matter most.** When multiple agents flag the same location, that is where the highest leverage is.
-- **Interventions must cover all critical and important findings.** Design interventions as coherent changes that resolve multiple findings at once — "Add a PipelineConfig Pydantic model" resolves 12 type-gap findings in one change. But never sacrifice coverage for brevity: if a critical or important finding doesn't fit into an existing intervention, create a new one. No finding left behind.
+- **Interventions must cover all critical, important, and minor findings.** Design interventions as coherent changes that resolve multiple findings at once — "Add a PipelineConfig Pydantic model" resolves 12 type-gap findings in one change. But never sacrifice coverage for brevity: if a critical, important, or minor finding doesn't fit into an existing intervention, create a new one. No finding left behind.
 - **This is not a code quality review.** Code can be well-written and still opaque to AI reasoning. A clean, idiomatic function with no type annotations is a reasoning gap. An ugly function with full type annotations and a clear docstring is AI-readable.
 - **Never recommend `getattr()` or `hasattr()` as a fix.** Replacing `data[key]` with `getattr(obj, key)` or `key in data` with `hasattr(obj, key)` moves dynamic lookup from dict to attribute access — the AI still cannot trace which attribute is accessed or checked, cannot validate it exists at the type level, and cannot follow the data flow. Always recommend typed methods or typed mappings instead.
