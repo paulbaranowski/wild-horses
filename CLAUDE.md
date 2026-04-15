@@ -8,7 +8,7 @@ This is a Claude Code **plugin marketplace** containing harness engineering plug
 .claude-plugin/marketplace.json    -- marketplace catalog (points to plugins)
 plugins/harness/                   -- plugin root
   .claude-plugin/plugin.json       -- plugin manifest
-  commands/audit.md                -- /harness:audit
+  commands/feedback-blockers.md    -- /harness:feedback-blockers
   commands/setup.md                -- /harness:setup
   commands/reasoning-gaps.md       -- /harness:reasoning-gaps
 ```
@@ -34,7 +34,7 @@ plugins/harness/                   -- plugin root
 ### plugin.json
 - Keep it minimal: `name`, `description`, `version`, `author`. That's it for most plugins.
 - `repository` must be a **string** (URL), not an object.
-- `name` determines the command namespace (e.g., plugin name `harness` + command name `audit` = `/harness:audit`).
+- `name` determines the command namespace (e.g., plugin name `harness` + command name `feedback-blockers` = `/harness:feedback-blockers`).
 
 ### marketplace.json
 - The marketplace `name` is the brand (`wild-horses`). The plugin entry `name` is the install identifier (`harness`).
@@ -44,7 +44,7 @@ plugins/harness/                   -- plugin root
 - Optional useful fields on plugin entries: `category`, `homepage`, `license`, `keywords`.
 
 ### Commands vs Skills (slash menu namespacing)
-- **Use `commands/` for user-invoked slash commands.** Commands get the `plugin-name:command-name` prefix in the `/` autocomplete menu (e.g., `/harness:audit`).
+- **Use `commands/` for user-invoked slash commands.** Commands get the `plugin-name:command-name` prefix in the `/` autocomplete menu (e.g., `/harness:feedback-blockers`).
 - **Skills (`skills/name/SKILL.md`) do NOT get the namespace prefix in the UI.** A skill named `setup` in a plugin named `harness` shows as just `/setup` with `(harness)` in the description — not `/harness:setup`. This is a Claude Code UI behavior as of v2.1.
 - If you need model auto-invocation (`disable-model-invocation: false`), you must use skills — commands cannot be auto-triggered by Claude. Otherwise prefer commands.
 - Command frontmatter: `description` (required), `argument-hint`, `allowed-tools`. No `name:` field — the filename is the command name.

@@ -1,11 +1,11 @@
 ---
-description: Analyze code for encapsulation, OOP design, testability, and harness-friendliness (agent feedback loops). Spawns 4 parallel specialist agents, merges findings, and proposes the highest-impact refactor. Use when you want to improve code quality for maintainability and agent-assisted development.
+description: Analyze code for feedback-loop blockers — encapsulation gaps, OOP design issues, testability barriers, and harness-unfriendly patterns that prevent fast, clear change-test-fix cycles. Spawns 4 parallel specialist agents, merges findings, and proposes the highest-impact refactor.
 argument-hint: "[file or directory path] [--scope changed|module|full]"
 ---
 
-# Harness Engineering Review
+# Feedback Blockers Review
 
-Analyze code for **encapsulation**, **OOP design**, **testability**, and **harness-friendliness** (code that enables tight feedback loops for agents and automated tooling). Uses 4 parallel specialist agents, then synthesizes findings and proposes the single highest-impact refactor.
+Analyze code for **feedback-loop blockers** — encapsulation gaps, OOP design issues, testability barriers, and harness-unfriendly patterns that prevent fast, clear change-test-fix cycles. Uses 4 parallel specialist agents, then synthesizes findings and proposes the single highest-impact refactor.
 
 **Target:** "$ARGUMENTS"
 
@@ -49,7 +49,7 @@ Read each file and analyze for encapsulation quality. Look for:
 
 - **Public fields that should be private** — fields accessed only internally but exposed publicly. Check: are there fields that no external caller references? In Python, look for attributes that lack a leading underscore but are only used within the class.
 - **Leaky abstractions** — callers reaching into implementation details (e.g., accessing .data, ._internal, or internal structure directly instead of using methods). Check cross-file references.
-- **Missing boundary validation** — constructors (__init__) or factory methods that accept invalid state. Can you create an instance that violates the class's assumptions?
+- **Missing boundary validation** — constructors (__init__) or factory methods that accept invalid state. Can you create an instance that violates the class's own invariants? Focus on object construction integrity, not public API input validation (that is a type/contract concern covered elsewhere).
 - **Mutable state exposure** — methods returning mutable internals (lists, dicts, sets) that callers could modify, breaking invariants. Look for properties or getters that return self._list directly.
 - **God objects** — classes with too many attributes (>7-8) or methods (>10-12) suggesting multiple responsibilities merged into one.
 
@@ -99,7 +99,7 @@ Read each file and analyze for OOP design quality. Look for:
 - **Procedural code hiding in classes** — classes that are just namespaces for functions with no real object identity or state. The methods don't use self meaningfully. These should either be standalone functions or redesigned as proper objects.
 - **Inheritance vs composition mismatches** — deep inheritance hierarchies (>2 levels) that should be composition; OR duplicated code across sibling classes that would benefit from a shared base or mixin.
 - **Single Responsibility violations** — classes doing more than one thing. Signs: methods that cluster into unrelated groups, __init__ that sets up multiple unrelated subsystems, class name requires "and" to describe.
-- **Missing polymorphism** — long if/elif chains or isinstance() checks dispatching on type. These often indicate a missing base class or protocol with polymorphic methods.
+- **Missing polymorphism** — long if/elif chains or isinstance() checks dispatching on type, causing duplicated logic across branches. Adding a new type requires modifying every dispatch site instead of adding one class. Violates the open/closed principle — the code is not extensible without editing existing branches.
 - **Anemic domain models** — data classes or dataclasses with no behavior, where all logic lives in external functions that take the data class as a parameter. The behavior should live with the data.
 
 For each finding, report:
@@ -148,9 +148,8 @@ Read each file and analyze for testability. Also read any corresponding test fil
 Look for:
 
 - **Hard-wired dependencies** — classes that construct their own collaborators inside __init__ or methods (e.g., `self.db = Database()`) instead of accepting them as parameters. This makes it impossible to substitute test doubles.
-- **Hidden side effects** — functions that read/write files, make network calls, access databases, or mutate global state without this being obvious from the signature. The caller cannot predict or control these effects.
+- **Untestable side effects** — functions that perform I/O (file, network, database) or mutate shared state as a side effect of their primary purpose, making it impossible to test the core logic without triggering the side effect. The test is forced to become an integration test when a unit test should suffice. Look for: side effects you cannot stub out, side effects that make tests slow or flaky, logic buried behind I/O that cannot be exercised in isolation.
 - **Non-determinism** — use of datetime.now(), time.time(), random, uuid, or os.environ reads without injection points. Tests become flaky or require monkeypatching.
-- **Large indivisible units** — functions over ~40 lines that do multiple sequential things (fetch, transform, validate, persist). You cannot test one step without running them all.
 - **Missing seams** — no way to substitute a dependency for testing. No constructor parameter, no protocol/ABC, no configuration mechanism. The only option is monkeypatching, which is brittle.
 
 For each finding, report:
@@ -197,10 +196,9 @@ FILES TO ANALYZE:
 Read each file and analyze for harness-friendliness. Look for:
 
 - **Opaque failures** — exceptions or error paths that lose context. Bare `except:` or `except Exception:` that swallow the original error. Generic error messages like "something went wrong" instead of including the actual values and state. An agent seeing this error cannot diagnose what happened.
-- **Large blast radius** — changing one behavior requires touching many files. Look for: a single constant used across 5+ files, tightly coupled modules that import each other's internals, changes that require coordinated updates. Well-factored code lets an agent change one thing in one place.
+- **Large blast radius** — changing one behavior requires touching many files. Look for: a single constant or configuration value used across 5+ files without a central definition, changes that require coordinated updates across multiple modules with no automated enforcement (e.g., renaming a status value requires updating 4 files manually). Well-factored code lets an agent change one thing in one place.
 - **Missing observability** — functions that take input and produce output with no way to inspect intermediate state. No logging, no debug methods, no way to see what happened inside when the output is wrong. Look for complex multi-step functions with no intermediate visibility.
-- **Implicit contracts** — behavior that depends on ordering (must call A before B), naming conventions (file must be named X), global state (reads from module-level variable), or undocumented type expectations. Agents work best with explicit, typed, enforced interfaces.
-- **Non-incremental design** — code that must be understood as a whole to be modified safely. A function where you must read all 100 lines to change line 50. A class where methods have hidden interdependencies. Agents work best with local reasoning.
+- **Noisy feedback from local changes** — code where a small, local change triggers failures in distant, seemingly-unrelated tests or modules. The feedback signal is noisy — the agent cannot tell if its change was wrong or if the failure is unrelated coupling. Look for: test suites where changing one function breaks tests for a different feature, shared setup/fixtures that create invisible dependencies between test cases, modules where editing one method requires updating assertions in 3+ unrelated test files.
 - **Poor error locality** — when something goes wrong, can you tell WHERE and WHY from the error alone? Or do you need to trace through 3+ layers? Look for: re-raised exceptions without context, error messages that don't include the triggering input, validation errors that don't say which field failed.
 
 For each finding, report:
@@ -252,7 +250,7 @@ Wait for all 4 agents to return. Then synthesize their findings into a unified r
 Present the merged report:
 
 ```markdown
-# Harness Engineering Review
+# Feedback Blockers Review
 
 ## Scope
 [What was analyzed and why]
@@ -299,15 +297,15 @@ After presenting the merged report, explain the **Highest-Impact Refactor**:
 Then prompt the user with these three options:
 
 > **What would you like to do?**
-> 1. **Save plan and implement** -- Write the plan to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-harness-review-<short-description>.md` and start implementing it
-> 2. **Save plan** -- Write the plan to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-harness-review-<short-description>.md` for later
+> 1. **Save plan and implement** -- Write the plan to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-feedback-blockers-<short-description>.md` and start implementing it
+> 2. **Save plan** -- Write the plan to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-feedback-blockers-<short-description>.md` for later
 > 3. **Revise** -- Provide feedback to refine the proposal
 
 Before executing any option below, generate a **run ID** by running `openssl rand -hex 2` to produce a 4-character hex string (e.g., `a3f2`). Use this same run ID in all file names produced by this run — this prevents collisions when the command is run multiple times on the same day.
 
 ### Option 1: Save plan and implement
 
-- Write the full refactor plan to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-harness-review-<short-description>.md` (where YYYY-MM-DD is today's date and `<run-id>` is the hex run ID) including scope, findings, proposed changes, affected files, and trade-offs
+- Write the full refactor plan to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-feedback-blockers-<short-description>.md` (where YYYY-MM-DD is today's date and `<run-id>` is the hex run ID) including scope, findings, proposed changes, affected files, and trade-offs
 - Implement the change
 - Run existing tests (check CLAUDE.md for the test command, fallback to `uv run pytest` or `npm test`) to verify nothing breaks
 - If tests fail, fix forward or revert and explain what went wrong
@@ -315,7 +313,7 @@ Before executing any option below, generate a **run ID** by running `openssl ran
 
 ### Option 2: Save plan
 
-- Write the full refactor plan to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-harness-review-<short-description>.md` (where YYYY-MM-DD is today's date and `<run-id>` is the hex run ID) including scope, findings, proposed changes, affected files, and trade-offs
+- Write the full refactor plan to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-feedback-blockers-<short-description>.md` (where YYYY-MM-DD is today's date and `<run-id>` is the hex run ID) including scope, findings, proposed changes, affected files, and trade-offs
 - Do NOT implement anything
 
 ### Option 3: Revise
