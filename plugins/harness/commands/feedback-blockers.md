@@ -381,7 +381,7 @@ The body contains the full report: Scope (with repo-relative file paths), Rating
 
 **Step 3 — Write the JSON task file** to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.feedback-blockers.json`.
 
-This is the machine-readable task list that the loop reads and writes for state tracking. Extract each intervention into a task. For interventions tagged `createsNewCode: true`, place a paired test task immediately after:
+This is the machine-readable task list that the loop reads and writes for state tracking. Convert the absolute file paths from Phase 1 to repo-relative paths for the `scope` array (strip the repository root prefix — e.g., `/Users/name/project/src/pipeline.py` becomes `src/pipeline.py`). Extract each intervention into a task. For interventions tagged `createsNewCode: true`, place a paired test task immediately after:
 
 ```json
 {
