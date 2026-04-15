@@ -267,9 +267,17 @@ Wait for all 3 agents to return. Then synthesize their findings into a unified r
    - 5-6: **C** — significant gaps, agents will make mistakes
    - 3-4: **D** — agents cannot reliably reason about this code
    - 1-2: **F** — opaque to AI reasoning
-7. **Create interventions with full coverage** — generate a ranked list of interventions that **collectively cover every critical and important finding**. Do NOT cap at a fixed number. If 3 interventions cover everything, list 3. If 8 are needed, list 8. Rank by impact: cross-dimension findings first, then by number of findings resolved. Each intervention should be a coherent change (e.g., "Create a PipelineConfig Pydantic model" or "Add module docstrings to the auth package"). Prefer interventions that resolve findings across multiple dimensions.
+7. **Create interventions with full coverage** — generate a ranked list of interventions that **collectively cover every critical and important finding**. Do NOT cap at a fixed number. If 3 interventions cover everything, list 3. If 8 are needed, list 8. Rank by impact: cross-dimension findings first, then by number of findings resolved. Each intervention should be a coherent change (e.g., "Create a PipelineConfig Pydantic model" or "Add module docstrings to the auth package"). Prefer interventions that resolve findings across multiple dimensions. For each intervention, determine whether it **creates new callable code** (new functions, classes, methods, models, enums with methods) or **annotates/documents existing code** (type hints, docstrings, comments, renames). Tag each with `createsNewCode: true` or `createsNewCode: false`.
 8. **Coverage verification** — after creating the intervention list, verify that every critical and important finding from the Findings by Severity section maps to at least one intervention's "Resolves" list. If any critical or important finding is uncovered, add an intervention for it. This step is non-negotiable — no critical or important finding may exist in the report without a corresponding intervention.
-9. **Final check** — re-read the merged report. Every finding must have a file:line that exists and code that matches. If you cannot verify a finding, drop it.
+9. **Generate paired test tasks** — for each intervention where `createsNewCode` is `true`, generate a companion test task placed immediately after it in the task ordering. The test task must:
+   - Have a title prefixed with "Write tests for" followed by the name of what was created
+   - Have a `what` field that specifies: (a) the exact new functions/classes/methods to test, (b) specific test cases to write (at minimum: happy path, edge cases, and error handling), (c) where to put the test file (follow existing project test conventions)
+   - Set `createsNewCode: false` (it does not create new production code)
+   - Set `resolves: []` (it supports the preceding implementation task, not a finding)
+   - Have concrete `acceptanceCriteria` specifying minimum test count and coverage areas
+   - Set `effort: "low"`
+   Do NOT generate test tasks for interventions that only add type annotations, docstrings, comments, or renames. These are verified by their own acceptance criteria.
+10. **Final check** — re-read the merged report. Every finding must have a file:line that exists and code that matches. If you cannot verify a finding, drop it.
 
 Present the merged report:
 
@@ -356,7 +364,7 @@ The body contains the full report: Scope (with repo-relative file paths), Rating
 
 **Step 3 — Write the JSON task file** to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.reasoning-gaps.json`.
 
-This is the machine-readable task list that the Ralph loop reads and writes for state tracking. Extract each intervention into a task:
+This is the machine-readable task list that the Ralph loop reads and writes for state tracking. Extract each intervention into a task. For interventions tagged `createsNewCode: true`, place a paired test task immediately after:
 
 ```json
 {
@@ -366,13 +374,44 @@ This is the machine-readable task list that the Ralph loop reads and writes for 
   "tasks": [
     {
       "id": 1,
-      "title": "<intervention title>",
-      "what": "<intervention What field — the specific change to make>",
-      "resolves": ["<file:line references from the intervention's Resolves field>"],
-      "effort": "<low/medium/high>",
+      "title": "Create PipelineConfig Pydantic model",
+      "what": "Extract dict-based config access into a PipelineConfig Pydantic model with typed fields for host (str), port (int), timeout (float). Replace all config['host'] style access in pipeline.py.",
+      "resolves": ["pipeline.py:23", "pipeline.py:45", "pipeline.py:67"],
+      "effort": "medium",
+      "createsNewCode": true,
       "status": "pending",
       "acceptanceCriteria": [
-        "<concrete, verifiable criterion derived from the What and Resolves fields>",
+        "PipelineConfig model exists with typed fields for host, port, and timeout",
+        "All config dict access in pipeline.py replaced with model attribute access",
+        "Tests pass"
+      ],
+      "log": null
+    },
+    {
+      "id": 2,
+      "title": "Write tests for PipelineConfig model",
+      "what": "Write unit tests for the PipelineConfig model created in task 1. Test: (1) valid construction with all required fields, (2) default values for optional fields, (3) type validation rejects invalid input (string for port), (4) pipeline functions that consume the model work correctly.",
+      "resolves": [],
+      "effort": "low",
+      "createsNewCode": false,
+      "status": "pending",
+      "acceptanceCriteria": [
+        "Test file follows project test conventions",
+        "At least 4 test cases covering construction, defaults, validation, and integration",
+        "Tests pass"
+      ],
+      "log": null
+    },
+    {
+      "id": 3,
+      "title": "Add type annotations to auth module",
+      "what": "Add parameter and return type annotations to all public functions in auth.py",
+      "resolves": ["auth.py:12", "auth.py:34", "auth.py:56"],
+      "effort": "low",
+      "createsNewCode": false,
+      "status": "pending",
+      "acceptanceCriteria": [
+        "All public functions in auth.py have parameter and return type annotations",
         "Tests pass"
       ],
       "log": null
@@ -381,9 +420,12 @@ This is the machine-readable task list that the Ralph loop reads and writes for 
 }
 ```
 
+Note: Task 1 (`createsNewCode: true`) has a paired test task (task 2) immediately after it. Task 3 (`createsNewCode: false`, annotation-only) does not.
+
 Field definitions:
 - `testCommand` — project test command, discovered once and reused every iteration
 - `scope` — repo-relative file paths from Phase 1, preserved for potential re-analysis. Use paths relative to the repository root (e.g., `src/pipeline.py` not `/Users/name/project/src/pipeline.py`) to avoid leaking local machine structure if the file is committed
+- `createsNewCode` — `true` if the intervention creates new callable code (functions, classes, methods, models), `false` if it only annotates or documents existing code. Determines whether a paired test task is generated
 - `acceptanceCriteria` — derived from the intervention's What and Resolves fields. Each criterion should be concrete and verifiable (e.g., "PipelineConfig model exists with typed fields for host, port, and timeout" not "types are added")
 - `status` — `"pending"` | `"in-progress"` | `"complete"` | `"failed"`
 - `log` — `null` when pending, a string describing what was done (or what went wrong) when in-progress/complete/failed
@@ -402,7 +444,7 @@ set -euo pipefail
 
 TASK_FILE="TASK_FILE_PATH"
 MAX_ITER=MAX_ITER
-PROMPT="You are implementing reasoning-gap interventions. Read the task file at $TASK_FILE (JSON). Find the first task with status in-progress or pending. Set it to in-progress and write the file immediately. Read the what and resolves fields. Implement the change. Run tests using the testCommand from the task file. If tests pass, set status to complete with a log summary and commit. If tests fail, fix forward or set status to failed with a log. Commit. Implement exactly ONE task per iteration. IMPORTANT: When committing, stage only the source files you changed — do NOT stage the task file ($TASK_FILE) or any docs/exec-plans/ files. These are metadata for loop tracking, not deliverables."
+PROMPT="You are implementing reasoning-gap interventions. Read the task file at $TASK_FILE (JSON). Find the first task with status in-progress or pending. Set it to in-progress and write the file immediately. Read the what, resolves, and acceptanceCriteria fields. Implement the change. Verify all acceptance criteria are met. Run tests using the testCommand from the task file. If tests pass, set status to complete with a log summary and commit. If tests fail, fix forward or set status to failed with a log. Commit. Implement exactly ONE task per iteration. IMPORTANT: When committing, stage only the source files you changed — do NOT stage the task file ($TASK_FILE) or any docs/exec-plans/ files. These are metadata for loop tracking, not deliverables."
 
 i=0
 while [ $i -lt $MAX_ITER ]; do
