@@ -36,8 +36,8 @@ If `$ARGUMENTS` contains `--resume`, skip all analysis and restart the loop from
    > 2. **Run next task only** — Implement just the next pending/in-progress task, then stop
    > 3. **Give feedback** — Review or adjust the plan before continuing
 
-   - **Option 1 (Run all remaining):** Jump directly to **Option 1's Step 4** — write the loop script with `max_iterations` = remaining tasks (pending + in-progress) × 1.5 (rounded up) + 1, using the existing task file path. Execute it.
-   - **Option 2 (Run next task only):** Find the first task with status `"in-progress"` or `"pending"` in the task file. Run a single `claude -p` call with the same prompt used in Option 1's Step 4 loop script (the `PROMPT` variable). After the `claude -p` process exits, you (the agent running this command) re-read the JSON task file, show the updated task summary (complete/pending/failed counts) to the user, and return to step 4.
+   - **Option 1 (Run all remaining):** Jump directly to **Option 1's Step 4** — start the Agent loop with `MAX_ITER` = remaining tasks (pending + in-progress) × 1.5 (rounded up) + 1, using the existing task file path.
+   - **Option 2 (Run next task only):** Find the first task with status `"in-progress"` or `"pending"` in the task file. Use a single foreground **Agent tool** call with the **Task Implementation Prompt** from Option 1's Step 4, substituting the task file path. After the Agent returns, re-read the JSON task file, show the updated task summary (complete/pending/failed counts) to the user, and return to step 4.
    - **Option 3 (Give feedback):** Ask the user for their feedback (e.g., reorder tasks, skip a task, modify a task's approach, adjust scope). You (the agent) apply the feedback by directly editing the JSON task file — no separate `claude -p` call needed, since these are structural edits (reordering, setting status to `"skipped"`, revising a task's `what` field), not code implementation. After updating the file, return to step 4 — show the updated task list and ask again.
 
 5. **Skip Phases 1–4 entirely** — no analysis, no report generation, no options menu.
@@ -361,7 +361,7 @@ Before executing any option below, generate a **run ID** by running `openssl ran
 
 ### Option 1: Save plan and implement all
 
-Save the analysis and implement all interventions iteratively. Each intervention is implemented in a separate `claude -p` call, with the JSON task file tracking progress between iterations.
+Save the analysis and implement all interventions iteratively. Each intervention is implemented by a foreground Agent tool call within this conversation — you will see every file read, edit, and test run as it happens. The JSON task file tracks progress between iterations.
 
 **Step 1 — Discover the test command.** Check CLAUDE.md for the project's test command. Fall back to `uv run pytest` or `npm test`.
 
@@ -450,67 +450,39 @@ Field definitions:
 - `status` — `"pending"` | `"in-progress"` | `"complete"` | `"failed"`
 - `log` — `null` when pending, a string describing what was done (or what went wrong) when in-progress/complete/failed
 
-**Step 4 — Write the loop script and start it.**
+**Step 4 — Implement tasks via Agent loop.**
 
-Write a bash loop script to `.claude/feedback-blockers-loop.sh` and execute it. This is a self-contained loop that calls `claude -p` repeatedly — no external plugin dependency, no stop hooks.
+Implement each task using sequential foreground Agent tool calls. Each iteration dispatches one task to an Agent that runs within this conversation, so the user sees every file read, edit, and test run in real time.
 
 Set `MAX_ITER` to the number of tasks multiplied by 1.5 (rounded up) plus 1. For example, 10 tasks → 16 max iterations.
 
-Replace `TASK_FILE_PATH` with the actual path to the JSON task file from Step 3, and `MAX_ITER` with the computed value:
+Execute the following loop. On each iteration:
 
-```bash
-#!/bin/bash
-set -euo pipefail
+1. Read the JSON task file. Count tasks with status `"pending"` or `"in-progress"`.
+2. If none remain, the loop is done. Show final status:
+   - If any tasks have status `"failed"`: "Done with failures: X/Y complete, Z failed"
+   - Otherwise: "All Y tasks complete"
+3. If `MAX_ITER` is reached, show "Max iterations (MAX_ITER) reached" and stop.
+4. Show a progress header to the user: "Iteration X/MAX_ITER — N tasks remaining"
+5. Use the **Agent tool** (foreground, not background) with the **Task Implementation Prompt** below, substituting the actual task file path.
+6. After the Agent returns, re-read the JSON task file. If the task that was in-progress was not updated (status is still `"in-progress"` with no log change), log a warning: "Agent did not update task status on iteration X, continuing" and proceed to the next iteration.
+7. Repeat from step 1.
 
-TASK_FILE="TASK_FILE_PATH"
-MAX_ITER=MAX_ITER
-PROMPT="You are implementing feedback-blocker interventions. Read the task file at $TASK_FILE (JSON). Find the first task with status in-progress or pending. Set it to in-progress and write the file immediately. Read the what, resolves, and acceptanceCriteria fields. Implement the change. Verify all acceptance criteria are met. Run tests using the testCommand from the task file. If tests pass, set status to complete with a log summary and commit. If tests fail, fix forward or set status to failed with a log. Commit. Implement exactly ONE task per iteration. IMPORTANT: When committing, stage only the source files you changed — do NOT stage the task file ($TASK_FILE) or any docs/exec-plans/ files. These are metadata for loop tracking, not deliverables."
+**IMPORTANT:** You MUST issue Agent tool calls **one at a time, sequentially**. Do NOT launch multiple Agent calls in parallel for task implementation — each task may depend on changes from the previous task. Wait for each Agent to complete before starting the next iteration.
 
-i=0
-while [ $i -lt $MAX_ITER ]; do
-  i=$((i + 1))
-  
-  PENDING=$(jq '[.tasks[] | select(.status == "pending" or .status == "in-progress")] | length' "$TASK_FILE")
-  if [ "$PENDING" -eq 0 ]; then
-    FAILED=$(jq '[.tasks[] | select(.status == "failed")] | length' "$TASK_FILE")
-    TOTAL=$(jq '.tasks | length' "$TASK_FILE")
-    if [ "$FAILED" -gt 0 ]; then
-      echo "⚠️  Done with failures: $((TOTAL - FAILED))/$TOTAL complete, $FAILED failed"
-    else
-      echo "✅ All $TOTAL tasks complete"
-    fi
-    break
-  fi
-  
-  echo "🔄 Iteration $i/$MAX_ITER — $PENDING tasks remaining"
-  rc=0
-  claude -p "$PROMPT" --allowedTools "Bash(*)" "Read(*)" "Write(*)" "Edit(*)" "Grep(*)" "Glob(*)" || rc=$?
-  if [ "$rc" -ne 0 ]; then
-    echo "⚠️  claude exited with rc=$rc on iteration $i, continuing to next iteration"
-    continue
-  fi
-done
+#### Task Implementation Prompt
 
-if [ $i -ge $MAX_ITER ]; then
-  echo "🛑 Max iterations ($MAX_ITER) reached"
-fi
-```
+Use this prompt for each Agent tool call, replacing `TASK_FILE_PATH` with the actual path to the JSON task file from Step 3:
 
-Use the Bash tool to write this script and then execute it:
+> You are implementing feedback-blocker interventions. Read the task file at TASK_FILE_PATH (JSON). Find the first task with status "in-progress" or "pending". Set it to "in-progress" and write the file immediately. Read the `what`, `resolves`, and `acceptanceCriteria` fields. Implement the change. Verify all acceptance criteria are met. Run tests using the `testCommand` from the task file. If tests pass, set status to "complete" with a log summary and commit. If tests fail, fix forward or set status to "failed" with a log. Commit. Implement exactly ONE task per iteration. IMPORTANT: When committing, stage only the source files you changed — do NOT stage the task file (TASK_FILE_PATH) or any docs/exec-plans/ files. These are metadata for loop tracking, not deliverables.
 
-```bash
-chmod +x .claude/feedback-blockers-loop.sh && .claude/feedback-blockers-loop.sh
-```
+**Step 5 — Show final summary.**
 
-The loop runs in the foreground. Each iteration spawns a fresh `claude -p` call that implements one task. The JSON task file tracks progress between iterations. The loop exits when all tasks are complete/failed or max iterations is reached.
-
-**Step 5 — After the loop completes.**
-
-The loop runs to completion automatically. When it finishes, the user will see the final status. Tell the user:
-- Plan at `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.feedback-blockers.md`
-- Task file at `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.feedback-blockers.json`
-- Check results: `cat <task-file-path> | jq '.tasks[] | {id, title, status}'`
-- Re-run failed tasks with `--resume`
+After the loop completes (all tasks done or max iterations reached), read the JSON task file and show the user:
+- A task status table: each task's id, title, and status
+- Plan location: `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.feedback-blockers.md`
+- Task file location: `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.feedback-blockers.json`
+- If any tasks failed or remain pending: suggest re-running with `--resume`
 
 ### Option 2: Save plan and fix top intervention
 
