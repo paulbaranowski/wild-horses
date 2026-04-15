@@ -2,15 +2,18 @@
 
 ## Project Structure
 
-This is a Claude Code **plugin marketplace** containing harness engineering plugins.
+This is a Claude Code **plugin marketplace**.
 
 ```text
 .claude-plugin/marketplace.json    -- marketplace catalog (points to plugins)
-plugins/harness/                   -- plugin root
+plugins/harness/                   -- plugin root (commands-based)
   .claude-plugin/plugin.json       -- plugin manifest
   commands/feedback-blockers.md    -- /harness:feedback-blockers
   commands/setup.md                -- /harness:setup
   commands/reasoning-gaps.md       -- /harness:reasoning-gaps
+plugins/marketplace/               -- plugin root (skills-based)
+  .claude-plugin/plugin.json       -- plugin manifest
+  skills/create/SKILL.md           -- /create (marketplace scaffolding)
 ```
 
 ## Key References
