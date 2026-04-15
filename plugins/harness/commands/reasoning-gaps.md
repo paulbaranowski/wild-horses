@@ -364,7 +364,7 @@ The body contains the full report: Scope (with repo-relative file paths), Rating
 
 **Step 3 — Write the JSON task file** to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.reasoning-gaps.json`.
 
-This is the machine-readable task list that the Ralph loop reads and writes for state tracking. Extract each intervention into a task. For interventions tagged `createsNewCode: true`, place a paired test task immediately after:
+This is the machine-readable task list that the Ralph loop reads and writes for state tracking. Convert the absolute file paths from Phase 1 to repo-relative paths for the `scope` array (strip the repository root prefix — e.g., `/Users/name/project/src/pipeline.py` becomes `src/pipeline.py`). Extract each intervention into a task. For interventions tagged `createsNewCode: true`, place a paired test task immediately after:
 
 ```json
 {
@@ -463,7 +463,12 @@ while [ $i -lt $MAX_ITER ]; do
   fi
   
   echo "🔄 Iteration $i/$MAX_ITER — $PENDING tasks remaining"
-  claude -p "$PROMPT" --allowedTools "Bash(*)" "Read(*)" "Write(*)" "Edit(*)" "Grep(*)" "Glob(*)"
+  rc=0
+  claude -p "$PROMPT" --allowedTools "Bash(*)" "Read(*)" "Write(*)" "Edit(*)" "Grep(*)" "Glob(*)" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "⚠️  claude exited with rc=$rc on iteration $i, continuing to next iteration"
+    continue
+  fi
 done
 
 if [ $i -ge $MAX_ITER ]; then

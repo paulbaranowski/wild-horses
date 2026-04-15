@@ -1,7 +1,7 @@
 {
   "name": "harness",
   "description": "Harness engineering tools: find feedback-loop blockers, find AI reasoning gaps, and set up the harness directory structure.",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "author": {
     "name": "Paul Baranowski"
   }
