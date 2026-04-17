@@ -26,6 +26,16 @@
       },
       "category": "development",
       "license": "MIT"
+    },
+    {
+      "name": "pyright",
+      "source": "./plugins/pyright",
+      "description": "Run pyright on a Python codebase and fix its findings. Supports optional strictness override (basic/standard/strict), persisting the level to config, and progressive ratcheting.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
     }
   ]
 }
