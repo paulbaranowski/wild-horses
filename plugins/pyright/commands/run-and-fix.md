@@ -1,6 +1,6 @@
 ---
-description: Run pyright on the Python code in this project and systematically fix the errors using documented fix patterns. Supports optional strictness override (basic/standard/strict), persisting the level to config, progressive ratcheting, and scoped runs.
-argument-hint: "[basic|standard|strict] [--persist] [--ratchet] [--scope <path>]"
+description: Run pyright on the Python code in this project and systematically fix the errors using documented fix patterns. Supports optional strictness override (basic/standard/strict), persisting the level to config, progressive ratcheting, scoped runs, fix-intent selection, and an optional "suggested improvements" section at the end.
+argument-hint: "[basic|standard|strict] [--persist] [--ratchet] [--scope <path>] [--intent silence|improve|bugs-only] [--no-suggestions]"
 ---
 
 # Pyright: Run and Fix
@@ -30,11 +30,14 @@ Expected tokens, all optional:
 - **`--persist`** — if a level is given and the run reaches zero errors, write that level back to config.
 - **`--ratchet`** — climb `basic` → `standard` → `strict`, fixing to zero at each rung. Mutually exclusive with an explicit `level`; implies `--persist` at each rung.
 - **`--scope <path>`** — restrict pyright invocation and fix work to a subpath. Default: the config's `include`.
+- **`--intent <silence|improve|bugs-only>`** — declares the lean Phase 3 should take when fixing errors. `silence` favors rule-specific suppressions and casts; `improve` prefers widening, annotations, and flagging design decisions; `bugs-only` fixes only `bugs.md`-class items and batch-suppresses the rest. If omitted, the command prompts in Phase 2 after showing triage.
+- **`--no-suggestions`** — skip the "Suggested improvements" section in Phase 5. Default: include it.
 
 Validation:
 - If `--ratchet` is given with an explicit `level`, stop and ask the user to clarify.
 - If `level` is given but not in the allowed set, stop and ask.
-- If no args, proceed with the current config's level, no persistence, no ratchet.
+- If `--intent` is given with a value not in `{silence, improve, bugs-only}`, stop and ask.
+- If no args, proceed with the current config's level, no persistence, no ratchet, and prompt for intent in Phase 2.
 
 ### Step 2: verify pyright is installed
 
@@ -75,6 +78,8 @@ Pyright has **no CLI flag** for `typeCheckingMode`. The only way to override is 
 Show the user the effective parameters before proceeding:
 ```
 Effective level:   <level>
+Fix intent:        <silence | improve | bugs-only | "will prompt in Phase 2">
+Suggestions:       <yes | no>
 Persist on zero:   yes/no
 Ratchet:           yes/no
 Scope:             <path or "project include">
@@ -117,11 +122,33 @@ Top files:     <file>  <count>   ...
 
 If total is 0, skip to Phase 4.
 
-Otherwise **stop and show the user** before beginning fixes. Briefly describe the planned strategy (inline vs. parallel dispatch) so the user can course-correct.
+Otherwise **stop and show the user** before beginning fixes.
+
+### Confirm fix intent
+
+If `--intent` was supplied in Phase 1, echo the chosen lean and skip the prompt. Otherwise ask the user to choose an approach:
+
+> **How would you like me to approach these errors?**
+>
+> - **`silence`** — suppress with rule-specific `# pyright: ignore[rule]` + one-line why; cast at boundaries where the recipe allows; still flag `bugs.md`-class items. Fastest path to zero. Leaves suppressions behind that a later improvement pass can address (Phase 5 will list them).
+> - **`improve`** — prefer widening over coercion, add annotations, extract factories over repeated casts, and pause to ask before changing anything semantically loaded (e.g., `bool | None → bool`). Slower, larger diff, fewer suppressions, more durable.
+> - **`bugs-only`** — fix only items matching `bugs.md` patterns (real bugs pyright uncovered). Batch-suppress everything else with `# TODO(types): revisit under --intent improve`. Risk-averse — zero type churn, but the suppression count will be high.
+
+Record the chosen intent for use in Phase 3 and Phase 5.
+
+Briefly describe the planned strategy (inline vs. parallel dispatch) so the user can course-correct before dispatch.
 
 ---
 
 ## Phase 3 — Fix
+
+### Apply the chosen intent
+
+The intent from Phase 2 (or `--intent`) shapes how Phase 3 fixes are written. This is the primary lean; the per-rule recipes in `rules.md` / `libraries.md` still apply within that lean.
+
+- **`silence`** — default to rule-specific suppressions (`# pyright: ignore[rule]` + one-line why) and `cast()` at boundaries when the recipe allows it. Still prefer documented-API alternatives where they exist (e.g., `cookies.pop()` over `cookies.set(name, None)`) and still flag `bugs.md`-class items. **Do not** rewrite signatures, widen types, or introduce new factories under this intent — those belong to `improve`.
+- **`improve`** — prefer the semantically richer fix: widen over coerce, annotate over cast, extract a factory over repeated `cast(T, ...)` (see `rules.md` § "When to extract a test factory"). Pause and ask the user before changing anything semantically loaded (e.g., `bool | None → bool`, tristate collapses). Expect a larger diff and fewer suppressions.
+- **`bugs-only`** — fix only rules matching patterns in `bugs.md`. For every other error, add a rule-specific suppression with the trailing marker `# TODO(types): revisit under --intent improve` so the locations are grep-able later. No widenings, no casts beyond what the suppression needs.
 
 ### Decide strategy by error count
 
@@ -137,6 +164,7 @@ Otherwise **stop and show the user** before beginning fixes. Briefly describe th
 - Each agent prompt includes:
   - Its file list. **Hard rule: the agent MUST NOT touch any file outside this list.**
   - Path to its pre-split error file (`/tmp/pyright_group_<N>.txt`).
+  - **The fix intent** selected in Phase 2 (`silence` / `improve` / `bugs-only`) and a brief description of the lean it implies (quote or paraphrase the matching bullet from "Apply the chosen intent" above). Agents operating under different intents produce very different diffs — this is not optional.
   - Pointers to `${CLAUDE_PLUGIN_ROOT}/rules.md` and `${CLAUDE_PLUGIN_ROOT}/libraries.md` for recipes. The agent should read only the files its errors require — an agent fixing rule-keyed errors can skip `libraries.md` and vice versa. `${CLAUDE_PLUGIN_ROOT}/reference.md` for suppression policy and assert-vs-raise if suppression comes up.
   - Project conventions: read `CLAUDE.md`, `AGENTS.md`, or the project's contributor guide and summarize line length, naming, formatting.
   - Validation: run `pyright <files>` before finishing; re-run if errors remain.
@@ -244,6 +272,7 @@ Always produce a final summary, even if zero fixes were applied:
 
 Scope:              <scope>
 Level(s) run:       <level> (<before> → <after>)   [repeat per ratchet rung]
+Fix intent:         <silence | improve | bugs-only>
 Config persisted:   <level> → <config-file>        [or "restored to <original>"]
 
 ### Files changed (N)
@@ -262,6 +291,68 @@ Config persisted:   <level> → <config-file>        [or "restored to <original>
 - <file>:<line>  <description>  — <why deferred>
 ...
 ```
+
+### Suggested improvements
+
+Unless `--no-suggestions` was given, produce a list of structural improvements the run did **not** apply. This is *advice*, not actions — no edits are made in this phase. The sourcing is cheap: reuse data the orchestrator already has, plus two small greps.
+
+**Signals to combine (no artificial cap — include every item they surface):**
+
+1. **Phase 3.5 repetition counts re-applied to the full touched set.** Every suppression rule with ≥ 5 sites, and every `cast(T, ...)` target type with ≥ 3 sites, becomes a suggestion — even if it was under the Phase 3.5 "pause" threshold. This is where `silence` runs produce the longest list: items you chose to defer now surface as actionable.
+2. **`Any` escapes in touched files:**
+   ```bash
+   files=$(git diff --name-only -- '*.py')
+   grep -nE ': Any\b|-> Any\b|cast\(Any,' $files
+   ```
+   Each hit is a candidate for narrowing to `TypeVar`, `TypedDict`, or a concrete type.
+3. **Unannotated public `def` in touched files:**
+   ```bash
+   grep -nE '^def [a-z]|^    def [a-z]' $files \
+     | grep -v '->' | grep -v '__'
+   ```
+   Public callables without return annotations are low-cost annotation wins — especially if a downstream caller had to `cast()` the result.
+4. **Intent-scoped additions:**
+   - Under `silence`: every site tagged with `# pyright: ignore[...]` in this run's diff appears as a "suggested future widening" entry, rule-grouped.
+   - Under `bugs-only`: every site tagged with `# TODO(types): revisit under --intent improve` appears as a suggestion, file-grouped.
+   - Under `improve`: the list is usually short — most suggestions were acted on inline.
+
+**Format each suggestion as:**
+
+```
+N. <file>:<line>  —  <one-line what>
+   How: <one-line how>
+   Impact: <concrete outcome — e.g., "removes 14 reportOptionalMemberAccess suppressions",
+           "unlocks standard mode on workers/ package", "single source of truth for FastAPI app cast">
+```
+
+Sort by impact: suppressions-removed first, then `Any` escapes, then missing annotations. No cap on length — the list is for reading, not for acting on in one session.
+
+### Offer to save the suggestions
+
+After printing the suggestions, ask the user:
+
+> **Save these suggestions to a planning file?**
+>
+> Default path: `docs/exec-plans/active/pyright-improvements-<YYYY-MM-DD-HHMM>.md`
+>
+> This is a handoff artifact, not source. The project convention is that files under `docs/exec-plans/active/` are NOT committed — they're consumed, then deleted or moved out of `active/`.
+
+If the user accepts:
+
+1. Verify `docs/exec-plans/active/` exists. If it doesn't, create it with `mkdir -p`.
+2. Write the suggestion list (verbatim, preserving the numbered format above) to the path, prefaced with a header:
+   ```
+   # Pyright improvement suggestions
+   Run: <YYYY-MM-DD HH:MM>
+   Scope: <scope>
+   Level: <level>
+   Intent: <intent>
+   Source: /harness:pyright (or whichever command was invoked)
+   ```
+3. Report the absolute path to the user.
+4. Do **not** `git add` the file. Do **not** suggest committing it. This rule is non-negotiable — see the project convention on exec plans.
+
+If the user declines, do not persist anything. The suggestions are already in the conversation and can be re-generated by re-running the command.
 
 ---
 
@@ -283,3 +374,5 @@ If the command was interrupted with the config overridden but no `--persist`:
 6. **Restore an overridden level if the run didn't reach zero** (unless `--persist` AND zero).
 7. **Do not silently "fix" genuine bugs pyright uncovers.** Dead attributes, shadowed methods, repeated side-effectful calls — flag for user review.
 8. **Run Phase 3.5 after every parallel dispatch.** Partition agents can't see cross-partition repetition; the orchestrator must. See Phase 3.5 for the counts and thresholds.
+9. **Resolve fix intent before dispatching.** Phase 3 must know whether the user wants `silence`, `improve`, or `bugs-only` — either from `--intent` or from the Phase 2 prompt. Dispatched agents receive the intent in their prompt and lean accordingly.
+10. **Never commit the suggestions planning file.** `docs/exec-plans/active/pyright-improvements-*.md` is a handoff artifact, not source. Do not `git add` it, do not include it in a summary of "files to commit," do not suggest committing it. This matches the project-wide convention for exec plans.
