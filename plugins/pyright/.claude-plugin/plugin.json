@@ -1,7 +1,7 @@
 {
   "name": "pyright",
   "description": "Run pyright on a Python codebase and fix the errors it finds. Supports optional strictness override (basic/standard/strict), persisting the level to config, and progressive ratcheting from basic to strict.",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "author": {
     "name": "Paul Baranowski"
   }

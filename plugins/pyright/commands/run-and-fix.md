@@ -7,7 +7,14 @@ argument-hint: "[basic|standard|strict] [--persist] [--ratchet] [--scope <path>]
 
 Run pyright on the Python code in this project and fix the errors it finds, following the rule-specific patterns in the bundled playbook.
 
-**Pattern catalog:** `${CLAUDE_PLUGIN_ROOT}/reference.md` — the full rule catalog, library-stub workarounds, suppression policy, and bug-class signals. Read it once at the start, and re-consult it for any rule that shows up in triage. If `${CLAUDE_PLUGIN_ROOT}` isn't substituted in this context, find the file with `Glob "**/pyright/reference.md"`.
+**Pattern catalog.** The playbook is split across four files at `${CLAUDE_PLUGIN_ROOT}`:
+
+- `reference.md` — index, setup, triage, suppression policy, narrowing artifacts, documented-API preference, CI, parallel dispatch, external-finding verification, editor-autofix warning, serialization compat, config-intent principle, assert-vs-raise.
+- `rules.md` — fix recipes keyed on pyright rule name (`reportOptionalMemberAccess`, `reportArgumentType`, `reportTypedDictNotRequiredAccess`, …).
+- `libraries.md` — library-stub workarounds (bitstring, scipy, tornado, matplotlib, Beanie, Supabase, litellm, pydantic, PIL, tenacity, pymongo, …).
+- `bugs.md` — signals that pyright has uncovered a *real bug* (to flag for the user, not silence).
+
+Read `reference.md` at the start of the run for the index and the triage/policy framework. Re-consult `rules.md` and `libraries.md` when triage surfaces specific rules or library names. If `${CLAUDE_PLUGIN_ROOT}` isn't substituted in this context, find the files with `Glob "**/pyright/reference.md"` and read the siblings alongside it.
 
 **Arguments:** "$ARGUMENTS"
 
@@ -49,7 +56,7 @@ include = ["<detected-source-dirs>"]    # src, lib, or the top-level package dir
 typeCheckingMode = "basic"
 pythonVersion = "<detected>"             # match the project's runtime
 ```
-Ask for approval before writing. `basic` is the right starting mode for adopting pyright — see `reference.md` ("Setup" section) for the reasoning.
+Ask for approval before writing. `basic` is the right starting mode for adopting pyright — see `reference.md` § "Setup" for the reasoning.
 
 ### Step 4: resolve effective level
 
@@ -120,7 +127,7 @@ Otherwise **stop and show the user** before beginning fixes. Briefly describe th
 
 **< 20 errors — inline.**
 - Fix production code first, tests after. Production fixes cascade into tests; the reverse would mean redoing work.
-- For each file: read it, read the relevant error lines from `/tmp/pyright_full.txt`, consult `reference.md` for the specific rule(s), apply fixes.
+- For each file: read it, read the relevant error lines from `/tmp/pyright_full.txt`, consult `rules.md` / `libraries.md` for the specific rule(s) or library, apply fixes.
 - After each file: `pyright <file>` to verify before moving on.
 
 **≥ 20 errors — parallel dispatch.**
@@ -130,7 +137,7 @@ Otherwise **stop and show the user** before beginning fixes. Briefly describe th
 - Each agent prompt includes:
   - Its file list. **Hard rule: the agent MUST NOT touch any file outside this list.**
   - Path to its pre-split error file (`/tmp/pyright_group_<N>.txt`).
-  - Pointer to `${CLAUDE_PLUGIN_ROOT}/reference.md` for rule-specific recipes.
+  - Pointers to `${CLAUDE_PLUGIN_ROOT}/rules.md` and `${CLAUDE_PLUGIN_ROOT}/libraries.md` for recipes. The agent should read only the files its errors require — an agent fixing rule-keyed errors can skip `libraries.md` and vice versa. `${CLAUDE_PLUGIN_ROOT}/reference.md` for suppression policy and assert-vs-raise if suppression comes up.
   - Project conventions: read `CLAUDE.md`, `AGENTS.md`, or the project's contributor guide and summarize line length, naming, formatting.
   - Validation: run `pyright <files>` before finishing; re-run if errors remain.
 - Wait for all agents to complete, then re-run `pyright` over the touched file set.
@@ -138,9 +145,9 @@ Otherwise **stop and show the user** before beginning fixes. Briefly describe th
 
 ### Fix principles
 
-These apply throughout Phase 3, in inline and dispatched modes. Many expand on recipes in `reference.md`:
+These apply throughout Phase 3, in inline and dispatched modes. Many expand on recipes in `rules.md` / `libraries.md`:
 
-1. **Consult `reference.md` for the specific rule.** Don't guess at fixes — each rule has a documented recipe.
+1. **Consult `rules.md` (or `libraries.md` for library-stub issues) for the specific rule.** Don't guess at fixes — each rule has a documented recipe.
 2. **Production code before tests.** Production type fixes cascade; tests-first means redoing work.
 3. **Rule-specific suppressions only.** `# pyright: ignore[reportOptionalMemberAccess]` — never bare `# pyright: ignore`, never `# type: ignore` (that's mypy syntax).
 4. **Prefer documented API alternatives** over `cast` or `# pyright: ignore`. Example: `cookies.pop(name)` beats `cookies.set(name, None)` — the pop form is type-clean and semantically identical.
@@ -160,9 +167,9 @@ Full `pyright [<scope>]` run at the effective level.
 
 **If the count is non-zero,** classify the residual:
 
-- **Library-stub gaps** (see `reference.md` → "Library typing gaps"): stubs are wrong but runtime works. Add `# pyright: ignore[specificRule]` with a one-line why. Iterate on these without user input.
+- **Library-stub gaps** (see `libraries.md`): stubs are wrong but runtime works. Add `# pyright: ignore[specificRule]` with a one-line why. Iterate on these without user input.
 - **Design decisions** needing user input: e.g. a tristate `bool | None` where the consumer currently treats it as `bool`. Semantically loaded — flag for the user before changing.
-- **Genuine bugs pyright uncovered** (see `reference.md` → "Bug classes pyright uncovers"): dead attribute reads, method shadowing, repeated side-effectful calls. Do NOT silently fix these — flag with `file:line` pointers for the user.
+- **Genuine bugs pyright uncovered** (see `bugs.md`): dead attribute reads, method shadowing, repeated side-effectful calls. Do NOT silently fix these — flag with `file:line` pointers for the user.
 
 After another pass at the auto-resolvable items, re-run pyright. If the residual is now entirely "design decisions" and "genuine bugs," present it to the user and ask which to take on.
 
@@ -230,7 +237,7 @@ If the command was interrupted with the config overridden but no `--persist`:
 
 ## Rules
 
-1. **Consult `reference.md` before inventing a fix.** Every common rule has a documented recipe.
+1. **Consult `rules.md` / `libraries.md` before inventing a fix.** Every common rule has a documented recipe; `reference.md` holds the index and policy.
 2. **Never bare-suppress.** Always `# pyright: ignore[specificRule]` with a one-line why when the rule isn't self-explanatory.
 3. **`--persist` only fires on zero errors.** Never commit a level the code doesn't actually pass.
 4. **No agent touches a file outside its partition.** The partitioning is a contract; violations produce merge conflicts.
