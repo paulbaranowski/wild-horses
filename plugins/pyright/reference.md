@@ -1,6 +1,75 @@
-# Pyright Learnings
+# Pyright learnings
 
 Notes from adopting pyright (`typeCheckingMode = "basic"`) on a large existing Python codebase. Captures what worked, what bit us, and the patterns to reuse next time.
+
+This file is the entry point: it holds the index, the setup/triage process, policy, and dispatch guidance. Rule-specific and library-specific recipes live in sibling files so agents fixing a narrow set of errors don't have to load the whole playbook.
+
+## Quick index
+
+### By pyright rule → `rules.md`
+
+- `reportOptionalMemberAccess` / `reportOptionalSubscript`
+- `reportArgumentType` (includes `cast()` vs `isinstance()` decision rule)
+- TypedDict ↔ `dict[str, Any]` asymmetry
+- `reportCallIssue` / no overloads match
+- `reportTypedDictNotRequiredAccess`
+- Reading *undeclared* keys on a TypedDict
+- `reportAttributeAccessIssue` on class-level fields
+- Attribute typing in `__init__` (starts-None, conditional-init)
+- The `def f(x: str = None)` antipattern
+- Dataclass mutable defaults
+- `Protocol` methods missing `self`
+- `asyncio.gather(..., return_exceptions=True)` returns `BaseException | T`
+- Pydantic v1 → v2 field-argument renames
+- `cast(Model, payload)` at pydantic list boundaries
+- `reportGeneralTypeIssues` / `"None" is not iterable` (also see libraries.md for bitstring, PIL, tornado variants)
+- `reportOptionalOperand`
+- `reportMissingImports` (also see libraries.md § "Optional-runtime dependencies")
+- Assigning `bool | None` to a `bool` field
+- When `Optional[T] → T` coercion *is* fine
+- Stale `@overload` stacks become noise under strict
+
+### By library / package → `libraries.md`
+
+- `bitstring` (iteration stubs wrong)
+- `scipy.stats` (result types are `_`)
+- `tornado` (missing `connection.stream`, `RequestHandler` mixin attributes)
+- `matplotlib` (`plt.hist(bins=...)` rejects `np.ndarray`)
+- Beanie (MongoDB ODM) — `Indexed`, sort syntax, delete results, Document construction, `.collection`, `List[Self]`
+- Supabase — auth narrowing, `.data` cast, `SignInWithIdTokenCredentials`
+- `litellm` (`completion()` union return)
+- `pic_prompt` (return-type lies)
+- Dynaconf (`Validator(messages={...})`)
+- PIL (`ImageCms.profileToProfile` Optional)
+- Tenacity (`retry_state.outcome` Optional)
+- `pymongo` (`has_error_label` over private attr)
+- Optional-runtime dependencies (inline import + suppress)
+
+### Bug classes pyright uncovers → `bugs.md`
+
+Real bugs pyright surfaces (not recipes — flag these for user review, don't silence):
+
+- Attribute read that never existed
+- Subclass attribute shadows inherited method
+- Repeated side-effectful call in a loop
+- Dead field referenced through a suppressed `# pyright: ignore`
+- Dead module / class constants
+- Reversed dict-direction lookups
+- Parameter the callee doesn't accept
+
+### By topic → this file
+
+- [Setup](#setup)
+- [Triage process for a large error count](#triage-process-for-a-large-error-count)
+- [Prefer a documented API over "works at runtime" tricks](#prefer-a-documented-api-over-works-at-runtime-tricks)
+- [Suppression policy](#suppression-policy)
+- [Narrowing artifacts vs runtime checks](#narrowing-artifacts-vs-runtime-checks)
+- [Harness / CI integration](#harness--ci-integration) (includes Assert vs raise)
+- [Parallel agent dispatch pattern](#parallel-agent-dispatch-pattern)
+- [Verifying external type findings before acting](#verifying-external-type-findings-before-acting)
+- [If your editor / hook auto-fixes on save](#if-your-editor--hook-auto-fixes-on-save)
+- [Serialization backward compat when removing fields](#serialization-backward-compat-when-removing-fields)
+- [Configuration intent as source of truth](#configuration-intent-as-source-of-truth)
 
 ## Setup
 
@@ -25,183 +94,10 @@ When facing hundreds of errors, don't dive in. Bucket first.
 2. **Count by rule:** `grep -oE 'report[A-Za-z]+\)' /tmp/pyright_full.txt | sort | uniq -c | sort -rn`. Reveals which patterns dominate.
 3. **Count by file:** `grep -E '^  /' /tmp/pyright_full.txt | sed 's|:[0-9].*||' | sort | uniq -c | sort -rn`. Reveals concentration.
 4. **Split into disjoint file groups** of roughly equal error count.
-5. **Fix production code first, then tests.** Production fixes can cascade: when a function's return type becomes precise, tests destructuring that return often start type-checking without further changes. Tests-first would mean redoing work.
+5. **Fix production code first, then tests.** Two reasons:
+   - **Cascade savings (project-shape-dependent).** When a function's return type becomes precise, tests destructuring that return often start type-checking without further changes. Strong cascades appear in projects with fixture-heavy tests built from prod types; weak or zero cascades in projects where tests hand-build dicts/mocks inline. Don't size Phase B on the cascade assumption — measure the residual after Phase A. One observed adoption moved 290 prod errors → 0 with zero change to the 536 test errors.
+   - **Ordering a moving target.** Even when cascades are small, prod-first prevents test agents from encoding whatever prod types exist at their dispatch time — which would then change under them. Test fixes should land against final prod signatures, not in-flight ones.
 6. **Parallelize across contributors or agents.** The critical constraint is *disjointness*: two workers editing the same file will conflict. One file per worker is the simplest partition; for big files, one rule per worker on that file also works.
-
-## Fix patterns by rule
-
-### `reportOptionalMemberAccess` / `reportOptionalSubscript`
-
-Access on a value that might be `None`.
-
-- **In tests:** `assert x is not None` before the use. Pyright narrows through a bare `assert`; unittest's `self.assertIsNotNone(x)` does NOT narrow, it just fails the test at runtime. Different tools. Use both if you want the nice test failure message AND the narrowing, but the bare assert is what gives pyright what it needs.
-- **In production:** prefer an explicit guard that raises a descriptive error, not an `assert`. Example:
-  ```python
-  if self._delegate is None:
-      raise RuntimeError("delegate not set before replay")
-  ```
-  Reason: `python -O` strips asserts. Asserts are for invariants pyright needs to see; raises are for genuine runtime safety. See the "assert vs raise" section below.
-- **If the declared type is wrong:** fix the declaration (e.g. field was `Foo | None` but is always set in `__init__` so should be `Foo`).
-
-### `reportArgumentType`
-
-Passing the wrong type to a function.
-
-- Narrow with `assert x is not None`.
-- Cast with `typing.cast(TargetType, value)` at API boundaries where the runtime value is known to match but the declared type is wider.
-- **`click.Choice(['a','b'])`** returns `str` at the type level even though values are constrained. Cast to the `Literal` at the CLI boundary: `cast(Literal['a','b'], value)`.
-- **Passing a `TypedDict` / pydantic model where `dict[str, Any]` is expected:** `dict(td)` for TypedDict, `model_dump()` for pydantic, or widen the callee's signature if you own it.
-
-**`cast()` vs `isinstance()` narrowing — decision rule.** Both silence `reportArgumentType` at a wide-type boundary, but they have different runtime semantics. Use `cast(T, x)` when the producer is an internal contract you control — e.g. a `Dict[str, Any]` returned by your own API client that you know matches a specific `TypedDict`. Use `isinstance(x, T)` (or `isinstance(x, str)` + conditional reassign) when the value crosses a real trust boundary: HTTP response field, user input, subprocess output. The `isinstance` adds a runtime check that catches producer regressions a `cast` would silently swallow. Rule of thumb: cast when the shape is your own invariant; isinstance when an external producer might break the invariant.
-
-### `reportCallIssue` / no overloads match
-
-Often caused by `assertAlmostEqual(x, y)` when `x: float | None`. The protocol requires both operands be non-None numbers. Fix by narrowing `x` first:
-
-```python
-assert result.some_field is not None
-self.assertAlmostEqual(result.some_field, 0.5)
-```
-
-If a whole block reads the same `result`, one `assert result is not None` at the top of the block narrows for everything below it.
-
-### `reportTypedDictNotRequiredAccess`
-
-`td["key"]` when `key: NotRequired` in the TypedDict. Two fixes, and they are **not** interchangeable:
-
-- `if "key" in td: td["key"]` — pyright narrows the subscript inside the `if` body.
-- `x = td.get("key"); if x: ... x ...` — bind the `.get()` result to a local and use the local.
-
-What doesn't work: a truthy `if td.get("key"):` followed by a `td["key"]` subscript. Pyright does **not** propagate the truthiness check from the `.get()` call to a re-subscript of the same key, so the second access still triggers `reportTypedDictNotRequiredAccess`. Either use the `in`-based form, or keep the `.get()` form but bind it to a local and never re-subscript.
-
-### `reportAttributeAccessIssue` on class-level fields
-
-When a subclass or related object reads `Cls.some_field` and pyright says "unknown attribute": declare the field as a `ClassVar` in the base class so pyright can see it.
-
-### Attribute typing in `__init__`
-
-Two `__init__` patterns that confuse pyright and produce misleading follow-on errors:
-
-**"Starts `None`, filled in later."** Raw `self.auth_code = None` in `__init__` makes pyright infer the attribute's type as literal `None` — any later `self.auth_code = "abc"` becomes `reportAttributeAccessIssue` ("Expression of type `str` cannot be assigned to attribute of type `None`"). Fix: annotate the attribute at the assignment site.
-
-```python
-# Wrong — pyright infers self.auth_code as None-only
-self.auth_code = None
-self.error_message = None
-
-# Right — annotation unlocks later assignment
-self.auth_code: Optional[str] = None
-self.error_message: Optional[str] = None
-```
-
-The annotation lives inside `__init__` on the assignment line; no separate class-body declaration is required.
-
-**Conditional init with different subtypes per branch.** When both branches of an `if/else` assign `self.x` with different types, pyright infers the *union* of the two branch types, not the type you intended. Example: one branch sets `self.client_id = config.google_client_id` (typed `str`), the other sets `self.client_id = os.getenv("HERDS_GOOGLE_CLIENT_ID")` (typed `Optional[str]`). Downstream code that expects a consistent `Optional[str]` sees a messy union. Fix by forward-declaring the attribute's type before the `if/else`:
-
-```python
-self.client_id: Optional[str]
-if config:
-    self.client_id = config.google_client_id        # narrows str → Optional[str]
-else:
-    self.client_id = os.getenv("HERDS_GOOGLE_CLIENT_ID")
-```
-
-The forward declaration gives pyright a single target type; both branch assignments widen into it.
-
-### `reportGeneralTypeIssues` / `"None" is not iterable`
-
-`for x in maybe_none:` when `maybe_none: list[...] | None`. Add `assert maybe_none is not None` before the loop, or use `for x in maybe_none or []:` if empty-iteration is the desired fallback.
-
-### `reportOptionalOperand`
-
-`result + 1` when `result: int | None`. Same fix: narrow with an assert first.
-
-### `reportMissingImports`
-
-Real issue. Usually `sys.path`-manipulated imports, or genuinely-missing modules. If the `sys.path` manipulation is intentional, `# pyright: ignore[reportMissingImports]` is acceptable.
-
-### Assigning `bool | None` to a `bool` field
-
-The tempting shortcut is `dst.field = bool(src.field)` (or `src.field or False`) to silence the type error. This destroys the tristate: `None` (unknown) collapses into `False` (invalid), which matters if any consumer distinguishes the two — JSON reports serialize `false` instead of `null`, aggregates over "unknown" get lumped into "failed", and `x is False` comparisons lose information.
-
-The correct fix is to widen the destination field to `bool | None` and drop the coercion. Pair with any `from_dict`-style loader: `d.get("field")` not `d.get("field", False)`, so a missing key round-trips as `None` rather than silently upgrading to `False`. Truthy consumers (`if r.field:`, `sum(1 for r in runs if r.field)`) behave identically under `None` and `False` — only strict-equality or JSON serialization surfaces the distinction.
-
-```python
-# Wrong — silences pyright, destroys information
-record.flag = bool(source.flag)
-
-# Right — widen destination to match source
-@dataclass
-class Record:
-    flag: bool | None = None   # not bool = False
-```
-
-Applies to any `Optional[T]` → `T` assignment where the `None` case carries meaning (not just "absent"). Before coercing, ask: does `None` mean something different from the falsy value of `T`? If yes, widen.
-
-### When `Optional[T] → T` coercion *is* fine
-
-The inverse case of the `bool | None` warning: when `None` genuinely means "unset, use sensible default," a simple `x or default` at the assignment site is clean and preserves information. Example: a `Config.timezone: Optional[str]` flowing into a TypedDict field `timezone: str`.
-
-```python
-ctx: HerdsContext = {
-    "timezone": config.timezone or "UTC",
-    ...
-}
-```
-
-This is safe because the fallback (`"UTC"`) is semantically meaningful — it's the intended default when the user hasn't configured a timezone — not a coerced placeholder that destroys a meaningful `None`. Same question as the `bool | None` section, different answer: *does `None` carry different meaning than the falsy value?* Here, no — "unset" and "UTC" are the intended same-state. Coerce.
-
-The distinction between the two sections collapses into one rule: coerce `Optional[T] → T` when the default is the intended treatment of `None`; widen the destination to `Optional[T]` when `None` carries a distinct meaning that downstream consumers rely on.
-
-## Library typing gaps
-
-These are pyright-facing bugs in third-party stubs or packages, not your code. The right move is a targeted `# pyright: ignore[specificRule]` with a short comment if the rule isn't self-explanatory.
-
-### `bitstring.BitArray` iteration
-
-The library's own type stubs declare `BitArray.__iter__ -> Iterable[bool]` instead of `Iterator[bool]`, so pyright sees `for bit in ba:` as iterating a non-iterable. At runtime it works fine.
-
-```python
-for bit in bits:  # pyright: ignore[reportGeneralTypeIssues]
-    ...
-```
-
-Alternative: `for i in range(len(ba)): bit = ba[i]` or `iter(ba)`.
-
-### `scipy.stats` results typed as `_`
-
-Functions like `ks_2samp`, `ttest_ind` return an under-annotated `_` placeholder instead of the real `KstestResult` / `TtestResult`. Accessing `.statistic` / `.pvalue` trips pyright even though they exist at runtime (namedtuple fields).
-
-Options (preferred first):
-1. Cast to `Any` then access: `res = cast(Any, ks_2samp(...))`.
-2. Cast to the specific result class if you can import it: `cast(scipy.stats._stats_py.TtestResult, res)`.
-3. `# pyright: ignore[reportAttributeAccessIssue]` if both feel worse than just suppressing.
-
-When using option 1, remember to import `cast` and `Any` from `typing`. It's an easy miss because the cast "feels like syntax" — and the resulting errors cascade. An undefined `cast(Any, ...)` produces a downstream `Cannot access attribute "statistic" for class "_"` on the result, which reads like a separate problem until you notice the root `reportUndefinedVariable` at the call site. Fix root errors first, recheck, then chase what remains.
-
-### `tornado.httputil.HTTPConnection.stream` missing from stubs
-
-Tornado's stubs omit `connection.stream`, which exists at runtime. Pattern:
-
-```python
-stream = self.request.connection.stream  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
-```
-
-If the access is already defended by `try/except AttributeError`, the suppression doesn't hide a bug.
-
-### `matplotlib` `plt.hist(bins=...)` expects `int | Sequence[float] | str | None`, rejects `np.ndarray`
-
-Even though `NDArray[float64]` is a `Sequence[float]` at runtime, matplotlib's stubs don't accept it. Cast:
-
-```python
-plt.hist(data, bins=cast(Sequence[float], edges))
-```
-
-Or pre-convert: `bins=edges.tolist()`.
-
-### Tornado `RequestHandler` mixin attributes
-
-If a class is declared as a bare `class FooMixin:` but uses `self.request`, `self.set_status`, `self.write` assuming it will be mixed into `RequestHandler`, pyright can't see those attributes. Fix by inheriting directly from `tornado.web.RequestHandler` (making it a concrete base, not just a mixin), or protocol-type the `self` via an intersection (overkill for most cases).
 
 ## Prefer a documented API over "works at runtime" tricks
 
@@ -263,35 +159,6 @@ The `isinstance(data, dict)` on the first line looks defensive against a non-dic
 
 **Implication for review:** a finding that says "this guard is asymmetric, add matching guards elsewhere" is often wrong when the guard is an artifact. Adding more `isinstance` checks to match the artifact's style doesn't improve safety, it spreads the artifact. The right response is to notice the pattern, verify via blame/ignore-comment, and push back on the finding.
 
-## Bug classes pyright uncovers
-
-Documenting these because they're the return on investment. Each is a bug class that sits dormant until pyright forces you to look at it.
-
-### Attribute read that never existed
-
-Code reads `obj.some_field` in multiple places, but `some_field` was never declared on the class (perhaps removed during a refactor, or renamed, or only ever planned). Every read would raise `AttributeError` at runtime. The bug persists because the code path isn't exercised by tests.
-
-Lesson: when pyright flags an attribute as missing, check whether the code reaches that attribute via a pathway tests cover. Often it doesn't, which is why the bug survived.
-
-### Subclass attribute shadows inherited method
-
-Inside a `unittest.TestCase` subclass, assigning `self.run = some_value` clobbers the inherited `TestCase.run()` method. Tests still pass because they don't invoke the shadowed method after assignment, but the shadowing is a latent landmine. Pyright flags it as a type mismatch (method vs. data value).
-
-More generally: assigning a plain attribute with the same name as an inherited method is almost always a bug. Rename the attribute.
-
-### Repeated side-effectful call in a loop
-
-`while data[next_point()] is not None: use(next_point())` calls `next_point()` twice per iteration because the result is read in the condition AND consumed in the body. Pyright's "subscript of None" complaint on the second call often makes the pattern visible. Bind the result once:
-
-```python
-while (p := next_point()) is not None:
-    use(p)
-```
-
-### Dead field referenced through a `# type: ignore` or `# pyright: ignore`
-
-A `# pyright: ignore[reportAttributeAccessIssue]` on a line that reads a nonexistent field is a signal, not a fix. Investigate whether the field should exist on the class, or whether the reference is dead code to be removed. Suppressions can mask the "attribute never existed" bug class above.
-
 ## Harness / CI integration
 
 ### CI
@@ -342,9 +209,13 @@ For large bulk fixes, the reusable pattern:
 
 1. Bucket errors by rule and file.
 2. Define disjoint file groups for each parallel agent. Each agent must own its files end-to-end.
-3. Give each agent: (a) the specific file list, (b) a pointer to pre-split per-file error lists on disk, (c) the fix-pattern recipes, (d) project conventions (line length, naming, formatting), (e) validation steps (`pyright <files>`, the project's linter, the test runner).
+3. Give each agent: (a) the specific file list, (b) a pointer to pre-split per-file error lists on disk, (c) the fix-pattern recipes (`rules.md`, `libraries.md`), (d) project conventions (line length, naming, formatting), (e) validation steps (`pyright <files>`, the project's linter, the test runner).
 4. Dispatch agents in parallel rather than sequentially so they start together.
 5. Wait for all to complete before the next phase. Check overall pyright count in between phases, not just trust the reports.
+6. **Foundational files need a stability constraint, not just disjointness.** When one agent owns `api.py`, `core/base.py`, or an exception module that the other agents' files import, disjointness alone isn't enough — a "local" signature widening ripples into the other partitions. Add to the foundational-file agent's prompt: *prefer adding types over changing them; do not widen or narrow public signatures*. Otherwise a change like `def f(x: str) -> T` → `def f(x: str | None) -> T` looks safe locally but requires every caller in the other partitions to be updated, and those files are off-limits. The contract: partition owns the right to *edit*, but public signatures are frozen for the duration of the dispatch. This matters most under strict mode, where the dominant "Unknown" rule family fires at definition sites and tempts signature-widening fixes.
+7. **Require each agent to return a "cascading changes" section.** Agents that change public signatures, widen return types, or modify shared Protocols inside their partition *will* affect files outside it — disjointness doesn't eliminate type cascades. Ask each agent to list, in its final report: "signature/schema changes worth noting because they may cascade to other groups." This gives the orchestrator a decision point *before* the full-project re-run rather than hunting down surprise errors afterwards. Observed value: one refactor's agents independently flagged Protocol-method changes, `List→Sequence` widenings, and exception-constant call-site rewrites that would have otherwise surfaced as unexplained errors in the verification run.
+8. **Dispatch granularity: ~70–80 errors per agent × 4 agents is a good default for mid-sized projects.** Smaller groups (3 × ~100 errors) give less parallelism and each agent takes longer; larger (6 × ~50 errors) increases cross-partition conflict risk as agents make structurally similar schema changes independently (e.g., two agents both updating the same Protocol from different sides). 4 agents is also the sweet spot for monitoring — you can read each final report without losing track.
+9. **Split the error file with `grep -F` (fixed-string), not `-E`.** File paths contain `.` and `/` characters that pattern-grep interprets as regex. `grep -F "/${file}:" /tmp/pyright_full.txt` pins the filename literally and avoids silent under-matches that produce empty per-group files. Also guard against blank/comment lines in the file list: `case "$f" in ""|"#"*) continue;; esac`.
 
 ## Verifying external type findings before acting
 
@@ -391,4 +262,4 @@ Sometimes the codebase has two contradictory statements about a field:
 
 When these conflict, the docstring is usually a deliberate design statement and the code is vestigial. Match the code to the docstring (remove the vestigial references), not the other way around (add `x` to the dataclass just to make the code valid). The docstring represents intent; the code may represent history.
 
-Corollary: when you see `# pyright: ignore` suppressing "attribute does not exist" on a field that should exist, investigate whether the field belongs on the class or whether the reference is dead code. The suppression is a signal, not a fix.
+Corollary: when you see `# pyright: ignore` suppressing "attribute does not exist" on a field that should exist, investigate whether the field belongs on the class or whether the reference is dead code. The suppression is a signal, not a fix. See `bugs.md` § "Dead field referenced through a `# type: ignore` or `# pyright: ignore`" for the bug-class framing.
