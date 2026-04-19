@@ -159,6 +159,44 @@ These apply throughout Phase 3, in inline and dispatched modes. Many expand on r
 
 ---
 
+## Phase 3.5 — Consolidation pass
+
+Before running full verification, check whether the fix work produced high-repetition point-fixes that should be root-cause fixes instead. Individual agents in a parallel dispatch can't see cross-partition repetition; the orchestrator can.
+
+Scan the changed files (not the whole project — this is about *what the run produced*, not pre-existing suppressions):
+
+```bash
+# list Python files the run touched
+files=$(git diff --name-only -- '*.py')
+
+# count suppressions added, by rule
+grep -rhE "pyright: ignore\[[a-zA-Z]+\]" $files \
+  | grep -oE "pyright: ignore\[[a-zA-Z]+\]" \
+  | sort | uniq -c | sort -rn | head
+
+# count casts added, by target type
+grep -rhE "cast\([A-Z][A-Za-z_]+," $files \
+  | grep -oE "cast\([A-Z][A-Za-z_]+," \
+  | sort | uniq -c | sort -rn | head
+```
+
+**Thresholds (pause and investigate if any fire):**
+
+- **Same suppression rule ≥ 10 sites** → probable single upstream cause (pydantic/Beanie `Field(None, ...)`, a class missing a type annotation, a library-stub gap that could be fixed with one root-cause edit). See `reference.md` § "Repetition as a signal."
+- **Same `cast(T, ...)` target type ≥ 5 sites** → probable missing factory. See `rules.md` § "When to extract a test factory."
+- **Inconsistency across partitions**: if two agents' reports describe the same problem with different fixes (e.g., one used `cast(FastAPI, self.client.app)`, another used `from app.main import app`), unify on one approach before committing. Diverging solutions to the same problem age badly.
+
+If a threshold fires:
+
+1. Present the counts to the user with `file:line` pointers to a representative sample.
+2. Propose the root-cause fix as a separate commit (often a 10-line production change that deletes dozens of downstream suppressions).
+3. Once the user decides, either apply the root-cause fix (and remove the now-dead suppressions) or mark explicitly as "accepted, will revisit at ratchet time."
+4. Re-run Phase 4 verification after any consolidation.
+
+If no threshold fires, log "consolidation pass: clean" in the summary and proceed to Phase 4.
+
+---
+
 ## Phase 4 — Verify
 
 Full `pyright [<scope>]` run at the effective level.
@@ -244,3 +282,4 @@ If the command was interrupted with the config overridden but no `--persist`:
 5. **Stop and ask before writing to `pyproject.toml` or `pyrightconfig.json`.** Config changes are user-visible commits-in-waiting.
 6. **Restore an overridden level if the run didn't reach zero** (unless `--persist` AND zero).
 7. **Do not silently "fix" genuine bugs pyright uncovers.** Dead attributes, shadowed methods, repeated side-effectful calls — flag for user review.
+8. **Run Phase 3.5 after every parallel dispatch.** Partition agents can't see cross-partition repetition; the orchestrator must. See Phase 3.5 for the counts and thresholds.
