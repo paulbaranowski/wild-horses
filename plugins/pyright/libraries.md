@@ -208,7 +208,37 @@ class ProcessingResult(BaseModel):
 
 **Diagnostic.** If tightening `field: dict` to `field: SomeTypedDict` in a `BaseModel` is followed by test failures with `type=missing` validation errors on partial-dict fixtures, this is the cause — not your test changes.
 
-**Fix.** Union with `Dict[str, Any]` to keep static tightness without runtime enforcement:
+**Fix.** Two options depending on your investment level.
+
+### Principled fix (preferred): add a test factory for the TypedDict
+
+The test failures are symptoms of partial-dict fixtures; the factory produces complete records that satisfy the TypedDict validator:
+
+```python
+# tests/factories.py
+def make_image_record(**overrides) -> ImageRecord:
+    base: ImageRecord = {
+        "id": "test-id",
+        "user_id": "test-user",
+        "path": None,
+        # ... all required keys with realistic defaults
+    }
+    return {**base, **overrides}
+
+# Before — partial dict, fails pydantic TypedDict validation
+ProcessingResult(image_record={"id": "x", "user_id": "y"})
+
+# After — complete record; test overrides only the fields it cares about
+ProcessingResult(image_record=make_image_record(id="x", user_id="y"))
+```
+
+This keeps the schema annotation tight (`image_record: ImageRecord`), removes partial-dict fixtures in one place rather than annotating around them, and gets pyright checking of the shape at fixture-construction time. See `rules.md` § "When to extract a test factory" for the factory pattern itself.
+
+**Migration shape when adopting the factory retroactively.** Change the central fixture (e.g. `sample_image_record`) to call the factory, not every callsite — downstream tests that depend on the fixture inherit the complete record automatically. Changing one fixture definition can fix a dozen failing tests in one edit.
+
+### Stopgap: union with `Dict[str, Any]`
+
+Ship-it compromise when migrating fixtures would widen the PR scope beyond what you want:
 
 ```python
 class ProcessingResult(BaseModel):
@@ -218,6 +248,8 @@ class ProcessingResult(BaseModel):
 **Why the union works at runtime.** Pydantic tries union branches in declared order and accepts the first that validates. `Dict[str, Any]` accepts any dict, so partial-dict fixtures pass validation against that branch without invoking the TypedDict's per-key checks. Production code matching `ImageRecord` validates against the stricter branch first and retains full schema enforcement.
 
 **Static-typing side.** Pyright narrows to `ImageRecord` at call sites where the value matches it, and to `Dict[str, Any]` otherwise — so the union doesn't lose static precision for well-formed callers.
+
+**Why it's a stopgap.** The `Dict[str, Any]` branch accepts *any* dict, including structurally invalid shapes the factory would have rejected. And it tends to require narrowing casts (`cast(ImageRecord, x)`) at production call sites that pass the union back into functions expecting the TypedDict — which is exactly the "repetition as a signal" pattern (`reference.md`) in another form. Revisit when ratcheting to `standard`/`strict` or when adding enough factory callers that migrating the fixtures is cheap.
 
 **Not applicable to.** Function parameters, function return types, *vanilla* `@dataclasses.dataclass` fields, and raw module-level annotations — the runtime enforcement only happens through pydantic's model-construction pathway. Note: `@pydantic.dataclasses.dataclass` *does* enforce at runtime, so the same union workaround applies there. Tightening `def foo(x: dict)` to `def foo(x: SomeTypedDict)` is a pure type-checker change with no runtime effect.
 

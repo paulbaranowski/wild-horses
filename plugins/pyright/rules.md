@@ -32,10 +32,30 @@ Neither direction is assignable without a cast. That's the surprise — intuitio
 
 Practical fixes:
 
-- **`TypedDict → dict[str, Any]`** (passing a typed response to a generic sink like a formatter, JSON encoder, or a helper that takes `dict[str, Any]`): `cast(dict[str, Any], td)` at the call site, or `dict(td)` if a runtime copy is acceptable. Widening the callee's signature is also an option if you own it.
+- **`TypedDict → dict[str, Any]`** (passing a typed response to a generic sink like a formatter, JSON encoder, or a helper that takes `dict[str, Any]`): `cast(dict[str, Any], td)` at the call site, or `dict(td)` if a runtime copy is acceptable. Widening the callee's signature is also an option if you own it — see below.
 - **`dict[str, Any] → TypedDict`** (e.g. casting `response.json()` to the declared response schema): `cast(SomeTypedDict, raw)`. Expected direction, but note the cast is *unchecked* — downstream `td.get("key")` will succeed statically and fail at runtime if the server doesn't actually send `key`.
 
 The asymmetry means a `reportArgumentType` at a `dict[str, Any]`-typed sink has the *same fix shape* as one at a `TypedDict`-typed sink: a `cast`. Without this in mind, you'll spend time looking for a structural-subtype path that doesn't exist.
+
+### If you own the consumer, widen to `Mapping[str, Any]`, not `Dict[str, Any]`
+
+The natural instinct when a function keeps collecting casts at its callers is "widen the parameter." The trap: widening `Dict[str, Any]` → `Dict[str, Any]` changes nothing because the original asymmetry is about `Dict`. **`Mapping[str, Any]` is different** — every TypedDict *is* assignable to it, because `Mapping` is the read-only protocol every dict (including TypedDicts) satisfies.
+
+```python
+# Before — callers need cast(Dict[str, Any], ...) every time
+def generate_url(self, image: Dict[str, Any], path_key: str) -> Optional[str]:
+    if image.get(path_key):
+        ...
+
+# After — callers pass TypedDicts directly; function body unchanged
+def generate_url(self, image: Mapping[str, Any], path_key: str) -> Optional[str]:
+    if image.get(path_key):
+        ...
+```
+
+Works when the function only *reads* the dict (`.get()`, `[]`, iteration, `in`). If the function mutates the dict (`image["new_key"] = ...`, `.pop()`, `.update()`), you need `Dict[str, Any]` or a specific TypedDict instead — TypedDicts don't cleanly support arbitrary-key mutation at the type level.
+
+This is the consumer-side analog of "fix the producer's return type" — and it's often the better leverage when you own the consumer but not the producers. One signature change deletes N casts at callers. See `reference.md` § "Repetition as a signal" — when multiple call sites cast the same value through to the same function, widening the function's parameter to `Mapping[str, Any]` is usually the right move.
 
 ## `reportCallIssue` / no overloads match
 

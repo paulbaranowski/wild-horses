@@ -30,7 +30,7 @@ Expected tokens, all optional:
 - **`--persist`** — if a level is given and the run reaches zero errors, write that level back to config.
 - **`--ratchet`** — climb `basic` → `standard` → `strict`, fixing to zero at each rung. Mutually exclusive with an explicit `level`; implies `--persist` at each rung.
 - **`--scope <path>`** — restrict pyright invocation and fix work to a subpath. Default: the config's `include`.
-- **`--intent <silence|improve|bugs-only>`** — declares the lean Phase 3 should take when fixing errors. `silence` favors rule-specific suppressions and casts; `improve` prefers widening, annotations, and flagging design decisions; `bugs-only` fixes only `bugs.md`-class items and batch-suppresses the rest. If omitted, the command prompts in Phase 2 after showing triage.
+- **`--intent <silence|improve|bugs-only>`** — declares the lean Phase 3 should take when fixing errors. See Phase 3 § "Apply the chosen intent" for the full, authoritative definitions. If omitted, the command prompts in Phase 2 after showing triage.
 - **`--no-suggestions`** — skip the "Suggested improvements" section in Phase 5. Default: include it.
 
 Validation:
@@ -130,9 +130,11 @@ If `--intent` was supplied in Phase 1, echo the chosen lean and skip the prompt.
 
 > **How would you like me to approach these errors?**
 >
-> - **`silence`** — suppress with rule-specific `# pyright: ignore[rule]` + one-line why; cast at boundaries where the recipe allows; still flag `bugs.md`-class items. Fastest path to zero. Leaves suppressions behind that a later improvement pass can address (Phase 5 will list them).
-> - **`improve`** — prefer widening over coercion, add annotations, extract factories over repeated casts, and pause to ask before changing anything semantically loaded (e.g., `bool | None → bool`). Slower, larger diff, fewer suppressions, more durable.
-> - **`bugs-only`** — fix only items matching `bugs.md` patterns (real bugs pyright uncovered). Batch-suppress everything else with `# TODO(types): revisit under --intent improve`. Risk-averse — zero type churn, but the suppression count will be high.
+> - **`silence`** — suppress and cast; fastest to zero. Leaves suppressions for a later improvement pass (Phase 5 will list them).
+> - **`improve`** — widen, annotate, extract factories; pause for semantically loaded decisions. Slower, larger diff, more durable.
+> - **`bugs-only`** — fix only real bugs (see `bugs.md`); batch-suppress the rest with a TODO marker. Zero type churn, high suppression count.
+
+If the user asks for a deeper explanation of any option, quote the matching bullet from Phase 3 § "Apply the chosen intent" — that is the authoritative definition. Do **not** paraphrase from this prompt.
 
 Record the chosen intent for use in Phase 3 and Phase 5.
 
@@ -143,6 +145,8 @@ Briefly describe the planned strategy (inline vs. parallel dispatch) so the user
 ## Phase 3 — Fix
 
 ### Apply the chosen intent
+
+**This section is the authoritative source for intent behavior.** Phase 1's `--intent` flag blurb and Phase 2's interactive prompt are summaries only; if any of them drifts from this section, this section wins. When editing an intent's behavior, update *here first* and reconcile the summaries after.
 
 The intent from Phase 2 (or `--intent`) shapes how Phase 3 fixes are written. This is the primary lean; the per-rule recipes in `rules.md` / `libraries.md` still apply within that lean.
 
@@ -164,7 +168,7 @@ The intent from Phase 2 (or `--intent`) shapes how Phase 3 fixes are written. Th
 - Each agent prompt includes:
   - Its file list. **Hard rule: the agent MUST NOT touch any file outside this list.**
   - Path to its pre-split error file (`/tmp/pyright_group_<N>.txt`).
-  - **The fix intent** selected in Phase 2 (`silence` / `improve` / `bugs-only`) and a brief description of the lean it implies (quote or paraphrase the matching bullet from "Apply the chosen intent" above). Agents operating under different intents produce very different diffs — this is not optional.
+  - **The fix intent** selected in Phase 2 (`silence` / `improve` / `bugs-only`) and the lean it implies. **Copy the matching bullet verbatim from "Apply the chosen intent" above — do not paraphrase.** The dispatched agent only sees the prompt you give it; a paraphrase that drops a constraint (e.g., omitting "still flag `bugs.md`-class items" from `silence`) will lean the whole partition wrong. Agents operating under different intents produce very different diffs — this is not optional.
   - Pointers to `${CLAUDE_PLUGIN_ROOT}/rules.md` and `${CLAUDE_PLUGIN_ROOT}/libraries.md` for recipes. The agent should read only the files its errors require — an agent fixing rule-keyed errors can skip `libraries.md` and vice versa. `${CLAUDE_PLUGIN_ROOT}/reference.md` for suppression policy and assert-vs-raise if suppression comes up.
   - Project conventions: read `CLAUDE.md`, `AGENTS.md`, or the project's contributor guide and summarize line length, naming, formatting.
   - Validation: run `pyright <files>` before finishing; re-run if errors remain.
@@ -299,6 +303,12 @@ Unless `--no-suggestions` was given, produce a list of structural improvements t
 **Signals to combine (no artificial cap — include every item they surface):**
 
 1. **Phase 3.5 repetition counts re-applied to the full touched set.** Every suppression rule with ≥ 5 sites, and every `cast(T, ...)` target type with ≥ 3 sites, becomes a suggestion — even if it was under the Phase 3.5 "pause" threshold. This is where `silence` runs produce the longest list: items you chose to defer now surface as actionable.
+
+   **De-dup rule against Phase 3.5.** Phase 3.5 already raised items meeting its stricter thresholds (≥ 10 suppressions, ≥ 5 casts). For each of those:
+   - If the user **applied** the root-cause fix in Phase 3.5, the item is resolved — omit from Phase 5 entirely.
+   - If the user **deferred** the item ("accepted, will revisit at ratchet time"), include it here — Phase 5 is where deferrals surface as follow-up work.
+   Items below Phase 3.5's threshold but at or above Phase 5's lower threshold (≥ 5 / ≥ 3) only appear in Phase 5.
+
 2. **`Any` escapes in touched files:**
    ```bash
    files=$(git diff --name-only -- '*.py')
@@ -312,8 +322,14 @@ Unless `--no-suggestions` was given, produce a list of structural improvements t
    ```
    Public callables without return annotations are low-cost annotation wins — especially if a downstream caller had to `cast()` the result.
 4. **Intent-scoped additions:**
-   - Under `silence`: every site tagged with `# pyright: ignore[...]` in this run's diff appears as a "suggested future widening" entry, rule-grouped.
-   - Under `bugs-only`: every site tagged with `# TODO(types): revisit under --intent improve` appears as a suggestion, file-grouped.
+   - Under `silence`: every site tagged with `# pyright: ignore[...]` in this run's diff appears as a "suggested future widening" entry, rule-grouped. Grep:
+     ```bash
+     grep -rnE "# pyright: ignore\[[A-Za-z]+\]" $files
+     ```
+   - Under `bugs-only`: every site carrying the TODO marker from Phase 3 appears as a suggestion, file-grouped. Grep:
+     ```bash
+     grep -rnF "TODO(types): revisit under --intent improve" $files
+     ```
    - Under `improve`: the list is usually short — most suggestions were acted on inline.
 
 **Format each suggestion as:**
@@ -325,7 +341,13 @@ N. <file>:<line>  —  <one-line what>
            "unlocks standard mode on workers/ package", "single source of truth for FastAPI app cast">
 ```
 
-Sort by impact: suppressions-removed first, then `Any` escapes, then missing annotations. No cap on length — the list is for reading, not for acting on in one session.
+**Sort order (deterministic — same run should produce the same ordering):**
+
+1. Group A — repetition-driven (signal #1 and the `silence`/`bugs-only` intent-scoped items from signal #4): sort by (a) suppressions/sites removed, desc; (b) total site count, desc; (c) file path, asc.
+2. Group B — `Any` escapes (signal #2): sort by file path, asc; then line number, asc.
+3. Group C — missing annotations (signal #3): sort by file path, asc; then line number, asc.
+
+Emit Group A, then Group B, then Group C. No cap on length — the list is for reading, not for acting on in one session.
 
 ### Offer to save the suggestions
 
