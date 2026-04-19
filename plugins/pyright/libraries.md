@@ -186,6 +186,43 @@ if e.has_error_label("TransientTransactionError"):
 
 Variant of the "prefer documented API" pattern in `reference.md` § "Prefer a documented API over 'works at runtime' tricks", with a concrete pymongo recipe.
 
+## Pydantic BaseModel fields with TypedDict types enforce at runtime
+
+A `BaseModel` field annotated with a TypedDict is not a pure type-checker annotation. Pydantic reads the TypedDict's schema and validates every key at runtime:
+
+```python
+from typing import TypedDict
+from pydantic import BaseModel
+
+class ImageRecord(TypedDict):
+    id: str
+    user_id: str
+    path: Optional[str]
+    # ... 25 more required keys
+
+class ProcessingResult(BaseModel):
+    image_record: ImageRecord   # pydantic validates ALL 27 keys at construction
+```
+
+**Breakage pattern.** Tests passing partial dicts to `ProcessingResult(image_record={"id": "x", "user_id": "y"})` will suddenly fail with pydantic validation errors (`image_record.path: Field required [type=missing]`) once the field is tightened from `dict` to a TypedDict. The mental model "TypedDict annotations are metadata, dicts are dicts at runtime" is wrong inside pydantic.
+
+**Diagnostic.** If tightening `field: dict` to `field: SomeTypedDict` in a `BaseModel` is followed by test failures with `type=missing` validation errors on partial-dict fixtures, this is the cause — not your test changes.
+
+**Fix.** Union with `Dict[str, Any]` to keep static tightness without runtime enforcement:
+
+```python
+class ProcessingResult(BaseModel):
+    image_record: ImageRecord | Dict[str, Any]
+```
+
+**Why the union works at runtime.** Pydantic tries union branches in declared order and accepts the first that validates. `Dict[str, Any]` accepts any dict, so partial-dict fixtures pass validation against that branch without invoking the TypedDict's per-key checks. Production code matching `ImageRecord` validates against the stricter branch first and retains full schema enforcement.
+
+**Static-typing side.** Pyright narrows to `ImageRecord` at call sites where the value matches it, and to `Dict[str, Any]` otherwise — so the union doesn't lose static precision for well-formed callers.
+
+**Not applicable to.** Function parameters, function return types, *vanilla* `@dataclasses.dataclass` fields, and raw module-level annotations — the runtime enforcement only happens through pydantic's model-construction pathway. Note: `@pydantic.dataclasses.dataclass` *does* enforce at runtime, so the same union workaround applies there. Tightening `def foo(x: dict)` to `def foo(x: SomeTypedDict)` is a pure type-checker change with no runtime effect.
+
+**Operational guidance.** If you're annotating a `BaseModel` field with a TypedDict for the first time in the codebase, run the test suite immediately after — not just pyright. The failures are runtime-only and won't appear in the type-checker's report.
+
 ## Optional-runtime dependencies: inline import + suppress
 
 Modules that are *intentionally* optional at runtime (the app should still load if the package isn't installed) must be imported inside a `try/except ImportError` — which means inline in a function, not at module level. The suppression here is correct and different from the `sys.path`-manipulation case:

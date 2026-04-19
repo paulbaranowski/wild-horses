@@ -208,6 +208,57 @@ Field(..., pattern=r"^\d+$")
 
 Easy to fix in bulk once you spot the pattern. Useful signal: if pyright flags several `Field(...)` calls at once after a pydantic upgrade, check the changelog rather than fixing them individually.
 
+## Pydantic `Field()` positional defaults
+
+`Field(None, description="...")` — pydantic's legacy positional-default form — is not recognized by pyright as providing a default. Every construction of the owning model triggers `reportCallIssue`: "Arguments missing for parameters X, Y, Z". Migrate to keyword form:
+
+```python
+# Wrong — pyright sees no default, flags every constructor call
+class Settings(BaseModel):
+    default_calendar: Optional[str] = Field(None, description="...")
+
+# Right — pyright recognizes the default
+class Settings(BaseModel):
+    default_calendar: Optional[str] = Field(default=None, description="...")
+```
+
+**The pattern generalizes beyond `None`.** Every literal positional default has the same issue: `Field(True, ...)`, `Field(False, ...)`, `Field(0, ...)`, `Field("UTC", ...)`, `Field(SomeEnum.MEMBER, ...)`. A migration that only catches `None` will leave the rest flagged.
+
+**Multi-line form evades single-line regex.** Field definitions that span lines — common for long descriptions — look like:
+
+```python
+scans_limit_monthly: Optional[int] = Field(
+    None,
+    description="Monthly scan limit (null = no limit)",
+)
+```
+
+A `sed 's/Field(None, /Field(default=None, /g'` catches only the single-line form. Use `perl -0777 -i -pe` with a pattern covering both shapes — but **dry-run first** on a small subset. The regex has tail cases (nested parens in defaults, string literals containing `,`, unusual whitespace) that will occasionally match incorrectly; a blind repo-wide run is a recipe for a bad merge.
+
+```bash
+# 1. Dry-run: list files that contain at least one match, so you can diff a handful first.
+find . -name "*.py" -exec perl -0777 -ne '
+  print "$ARGV\n" if /Field\(\s*\n?\s*(None|True|False|-?\d+(?:\.\d+)?|"[^"]*"|'"'"'[^'"'"']*'"'"'),/;
+' {} + | sort -u
+
+# 2. Apply on a 5–10 file subset, review with `git diff`, then expand scope.
+# 3. Repo-wide pass (only after the subset diff looks right):
+find . -name "*.py" -exec perl -0777 -i -pe '
+  # Multi-line: Field(\n    LITERAL,
+  s/Field\(\s*\n(\s+)(None|True|False|-?\d+(?:\.\d+)?|"[^"]*"|'"'"'[^'"'"']*'"'"'),/Field(\n${1}default=$2,/g;
+  # Single-line: Field(LITERAL,
+  s/Field\((None|True|False|-?\d+(?:\.\d+)?|"[^"]*"|'"'"'[^'"'"']*'"'"'),\s/Field(default=$1, /g;
+' {} +
+```
+
+Enum members (`Field(UserTier.FREE, ...)`) and other identifier-valued defaults won't match a literal-only regex — expect a small manual tail after the bulk pass.
+
+### Diagnostic: "Arguments missing for parameters X, Y, Z" on a pydantic/Beanie constructor
+
+When pyright reports `Arguments missing for parameters "default_calendar", "sort_by", "sort_order"` on a `SomeModel(...)` call *and* those fields are declared `Optional[T] = Field(<something>, ...)` in the schema, the schema is the bug — not the caller. The error message reads as "you forgot to pass these" but the root cause is positional-default form pyright can't see. Grep the schema for `Field(<positional>,` — almost always a hit.
+
+This matters because the fix is upstream: one `Field(None, ...)` → `Field(default=None, ...)` in the schema deletes the error at every caller. Point-fixing each caller with `# pyright: ignore[reportCallIssue]` spreads the workaround instead. See `reference.md` § "Repetition as a signal" for the broader pattern.
+
 ## `cast(Model, payload)` at pydantic list boundaries
 
 When passing `list[dict]` where `list[SomeModel]` is required, pydantic coerces at runtime via `model_validate`, but pyright needs the hint:
@@ -218,6 +269,46 @@ self.events_result = EventsResult(events=cast(List[ProcessedEvent], [saved_event
 ```
 
 Cleaner than building the model eagerly just to satisfy pyright — the runtime validation is the same either way.
+
+### The hidden-missing-field trap
+
+**`cast(T, dict_literal)` is a code smell, not a solution.** The cast silences pyright but also hides missing *required* fields in `T`. The worst-case shape is `cast(List[Order], [{}])` — type-checks cleanly, structurally invalid at runtime, zero compile-time help. Prefer the real constructor:
+
+```python
+# Wrong — pyright happy, runtime will explode if required fields missing
+orders = cast(List[Order], [{"id": "ord-1"}])
+
+# Right — pyright validates the shape against Order's field set
+orders = [Order(id="ord-1", customer="alice", total=Decimal("12.50"))]
+```
+
+`cast(T, x)` is appropriate only when `x`'s *runtime* value genuinely matches `T` but pyright can't see it — e.g. crossing a `model_dump()` → re-cast-back boundary, or a dict from an API client you control and have reason to trust. `cast(T, {literal})` is almost never that case; the literal is *your* construction, and a real constructor call would let pyright check it.
+
+### When to extract a test factory
+
+If the same `cast(T, {...})` or TypedDict-literal pattern repeats 5+ times across tests, extract a factory:
+
+```python
+# tests/factories.py
+def make_user_profile(**overrides) -> UserProfile:
+    base: UserProfile = {
+        "id": "test-user",
+        "email": "test@example.com",
+        "tier": "free",
+        # ... all required fields, realistic defaults
+    }
+    return {**base, **overrides}
+
+def make_order(**overrides) -> Order:
+    return Order(id="ord-1", customer="alice", total=Decimal("12.50"))
+    # Note: real constructor, not cast. Missing required fields fail fast.
+```
+
+Replace scattered casts with factory calls. Two benefits that the cast version doesn't give you:
+1. **Shape validation surfaces once, in the factory.** A future schema change flags one site, not twenty.
+2. **Test intent reads better.** `make_user_profile(tier="premium")` tells the reader "I care about tier here, everything else is a default." `cast(UserProfile, {"tier": "premium"})` hides that intent behind a type assertion — and also hides whether the other required fields are set.
+
+Count before deciding: 1-2 sites, inline `cast` is fine. 5+, factory. See `reference.md` § "Repetition as a signal" for the broader pattern.
 
 ## `reportGeneralTypeIssues` / `"None" is not iterable`
 

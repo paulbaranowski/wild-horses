@@ -21,6 +21,7 @@ This file is the entry point: it holds the index, the setup/triage process, poli
 - `Protocol` methods missing `self`
 - `asyncio.gather(..., return_exceptions=True)` returns `BaseException | T`
 - Pydantic v1 → v2 field-argument renames
+- Pydantic `Field()` positional defaults (including the "Arguments missing" diagnostic)
 - `cast(Model, payload)` at pydantic list boundaries
 - `reportGeneralTypeIssues` / `"None" is not iterable` (also see libraries.md for bitstring, PIL, tornado variants)
 - `reportOptionalOperand`
@@ -43,6 +44,7 @@ This file is the entry point: it holds the index, the setup/triage process, poli
 - PIL (`ImageCms.profileToProfile` Optional)
 - Tenacity (`retry_state.outcome` Optional)
 - `pymongo` (`has_error_label` over private attr)
+- Pydantic BaseModel fields with TypedDict types enforce at runtime
 - Optional-runtime dependencies (inline import + suppress)
 
 ### Bug classes pyright uncovers → `bugs.md`
@@ -131,6 +133,32 @@ When suppressing, add a one-line comment explaining WHY if the reason isn't obvi
 for bit in bits:  # pyright: ignore[reportGeneralTypeIssues]
 ```
 
+## Repetition as a signal: root-cause vs point-fix
+
+**If you're about to add the same suppression or the same cast for the third time, stop.** Repetition of a fix is a signal that the leverage is upstream — at the source of the type, not the call site. One root-cause edit can delete dozens of point fixes; continuing to suppress just spreads them.
+
+Worked example. Pydantic's positional-None form `Field(None, description="...")` triggers `reportCallIssue` at every construction of the owning model. In a 50-construction codebase, point-fixing adds 50 permanent suppressions; the root-cause edit adds zero. See `rules.md` § "Pydantic `Field()` positional defaults" for the concrete recipe.
+
+Rules of thumb:
+
+1. **Count before suppressing.** If you're inside a partition and already at 3+ identical suppressions, search the whole codebase: `grep -rn "# pyright: ignore\[<rule>\]" .`. For thresholds that trigger an orchestrator-level consolidation pass, see the command's Phase 3.5.
+2. **Cast repetition is the same signal.** `cast(T, {...})` appearing across many call sites almost always means `T` should have a factory (`def make_T(**overrides) -> T`) or a proper constructor call. See `rules.md` § "When to extract a test factory" for the factory pattern and `rules.md` § "The hidden-missing-field trap" for why `cast(T, {literal})` is a code smell.
+3. **Cross-partition cooperation beats strict signature-freeze.** Parallel dispatch uses signature-freeze to prevent agents conflicting, not to forbid upstream fixes. If a partition hits a high-repetition pattern, its report should flag "root-cause fix belongs in `<production-file>`" rather than silently suppressing through. The orchestrator can then dispatch a targeted follow-up or consolidate before committing.
+4. **Production edits can be staged before the test run.** For known high-repetition patterns (pydantic `Field(None, ...)`, ad-hoc TypedDict construction, missing shared factories), fix them in a pre-pass commit *before* dispatching the parallel fix work. Saves the entire cycle of "suppress → notice → undo suppressions → root-cause → re-verify."
+
+### Removing suppressions is a bug-finding operation
+
+A non-trivial fraction of any accumulated `# pyright: ignore[<rule>]` suppression pattern turns out to be hiding real bugs, not just stub noise. Observed range: 5–10% across a single-rule bulk migration. Example shapes:
+
+- String literals passed where enums were declared (`tier="paid"` where `UserTier.PAID` was needed).
+- Wrong numeric types (`"12.34"` where `Decimal` was declared).
+- Intentional-bad-input tests where pydantic's runtime coercion was silently saving the test from exercising what it intended to exercise.
+- Function calls missing parameters that the suppression had been silencing for so long nobody remembered why.
+
+**Plan for the surface.** After a root-cause migration that deletes a suppression pattern, re-run pyright expecting *new* errors, not a stable zero. Those errors are the bug-finding payoff of the migration — treat them as findings to fix, not "my change broke something." Budget time for this pass when estimating the work; a migration that looks like "search-replace, run tests, done" will surprise you when the type-checker surfaces 5–10% more work behind where the suppressions were.
+
+**Also re-run tests, not just pyright.** Some of the surfaced bugs are runtime validation issues (e.g., pydantic TypedDict validation — see `libraries.md` § "Pydantic BaseModel fields with TypedDict types enforce at runtime") that the type-checker alone won't catch.
+
 ## Narrowing artifacts vs runtime checks
 
 Not every `isinstance(x, T)` or `if x is None: return` in a codebase is a runtime defense — some exist purely to narrow a type for pyright. The two look identical but have different implications for change and review.
@@ -216,6 +244,8 @@ For large bulk fixes, the reusable pattern:
 7. **Require each agent to return a "cascading changes" section.** Agents that change public signatures, widen return types, or modify shared Protocols inside their partition *will* affect files outside it — disjointness doesn't eliminate type cascades. Ask each agent to list, in its final report: "signature/schema changes worth noting because they may cascade to other groups." This gives the orchestrator a decision point *before* the full-project re-run rather than hunting down surprise errors afterward. Observed value: one refactor's agents independently flagged Protocol-method changes, `List→Sequence` widenings, and exception-constant call-site rewrites that would have otherwise surfaced as unexplained errors in the verification run.
 8. **Dispatch granularity: ~70–80 errors per agent × 4 agents is a good default for mid-sized projects.** Smaller groups (3 × ~100 errors) give less parallelism and each agent takes longer; larger (6 × ~50 errors) increases cross-partition conflict risk as agents make structurally similar schema changes independently (e.g., two agents both updating the same Protocol from different sides). 4 agents is also the sweet spot for monitoring — you can read each final report without losing track.
 9. **Split the error file with `grep -F` (fixed-string), not `-E`.** File paths contain `.` and `/` characters that pattern-grep interprets as regex. `grep -F "/${file}:" /tmp/pyright_full.txt` pins the filename literally and avoids silent under-matches that produce empty per-group files. Also guard against blank/comment lines in the file list: `case "$f" in ""|"#"*) continue;; esac`.
+10. **Orchestrator owns cross-partition quality; agents own in-partition correctness.** An agent whose partition reaches zero errors has done its job — but reaching zero doesn't make the aggregate good. Only the orchestrator sees all partition reports together, and only the orchestrator can notice that multiple agents added many identical suppressions (one root cause, many duplicate point-fixes) or that two agents picked different solutions for the same underlying problem. Agents that try to do orchestrator work — e.g., editing outside their partition to achieve a root-cause fix — break the dispatch contract and produce merge conflicts. Orchestrators that don't reconcile — trusting N independent zero-error reports as a zero-error whole — produce technically-green runs whose aggregate quality is poor: duplicate suppressions scattered across files, inconsistent fixes for the same upstream issue, repeated casts that should be factories. The green count hides the debt. Concretely: between Phase 3 (agent work) and Phase 4 (full-project verification), run the suppression/cast counts described in the command file's Phase 3.5 and decide whether to consolidate before committing.
+11. **Reconciliation signals come from the agent reports themselves.** Before touching any grep, scan the cascading-changes sections (§7) across agents. Two agents independently flagging the same library workaround, the same TypedDict construction issue, or the same widening opportunity is the strongest possible signal that a cross-cutting fix is warranted. The agents' own reports often surface consolidation candidates more cheaply than a grep pass — the grep is the fallback for patterns agents didn't notice were shared.
 
 ## Verifying external type findings before acting
 
