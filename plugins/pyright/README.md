@@ -4,7 +4,7 @@ Run pyright on a Python codebase and fix what it finds, using a documented playb
 
 Install:
 
-```
+```text
 /plugin install pyright@wild-horses
 ```
 
@@ -14,7 +14,7 @@ Install:
 
 One command drives the whole flow: detect config, run pyright, triage errors, fix them using rule-specific recipes, verify, and summarize.
 
-```
+```text
 /pyright:run-and-fix [basic|standard|strict] [--persist] [--ratchet]
                      [--scope <path>] [--intent silence|improve|bugs-only]
                      [--no-suggestions]

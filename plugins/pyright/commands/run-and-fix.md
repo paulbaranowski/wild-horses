@@ -380,7 +380,7 @@ If the user declines, do not persist anything. The suggestions are already in th
 
 After the summary (and suggestions, if any), **always** print a single-line handoff pointer, regardless of intent, whether zero was reached, or whether `--no-suggestions` was set:
 
-```
+```text
 Next: for control-flow and documentation gaps beyond types (implicit flow, missing docstrings, structural complexity), run /harness:reasoning-gaps. Pyright covers the typing axis; reasoning-gaps covers the two axes pyright cannot see.
 ```
 
