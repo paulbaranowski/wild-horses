@@ -55,10 +55,12 @@ General typing patterns, keyed on the rule name pyright prints:
 - **Narrowing across nested scopes** — walrus for single-expression narrowing; pre-bind to a fresh local before comprehensions / closures. Unifies several rule names (`reportOperatorIssue`, `reportOptionalOperand`, `reportArgumentType`) under one fix shape.
 - **Stub-runtime type disagreement** — when stubs declare `T1` but the runtime may produce `T1 | T2 | ...`, widen once to `Any` on a named local and let `isinstance` ladders narrow. Distinct from trust-boundary `cast()`.
 - **Undeclared keys on TypedDict** — decide between widening the TypedDict or switching to a regular dict at the boundary.
+- **Discriminated unions with `Literal` + `TypedDict`** — model each variant as its own TypedDict and use a `Literal` field to let pyright narrow the whole shape from one check.
 - **`reportAttributeAccessIssue` on class-level fields** — annotate the class attribute; don't rely on `__init__` assignment to infer it.
 - **`def f(x: str = None)` antipattern** — fix to `x: str | None = None`.
 - **Dataclass mutable defaults** — `field(default_factory=list)` over `= []`.
 - **`Protocol` methods missing `self`** — add it; pyright will stop complaining and the Protocol will actually be callable.
+- **`Protocol` vs `ABC` vs plain duck typing** — when to reach for each; Protocol is usually the right default for pluggable interface contracts.
 - **`asyncio.gather(..., return_exceptions=True)`** — split the return into `BaseException | T` branches instead of casting.
 - **Pydantic v1 → v2 field renames** (`min_items` → `min_length`, `regex` → `pattern`, …).
 - **Pydantic `Field()` positional defaults** — "Arguments missing for parameters X, Y, Z" on pydantic/Beanie constructors.
@@ -66,6 +68,8 @@ General typing patterns, keyed on the rule name pyright prints:
 - **Schema projection via `model_validate`, not `cast`** — `cast(B, a.model_dump(include=...))` type-checks but returns a dict at runtime; `B.model_validate(...)` builds a real instance. Decision rule by target type (TypedDict / BaseModel / vanilla dataclass).
 - **`@staticmethod` over module-level free functions for class-adjacent helpers** — paired with the `cast(Required, None)` refactor signal (reference.md); test-patch-target durability is the tiebreaker.
 - **`reportGeneralTypeIssues` / "None is not iterable"**, **`reportOptionalOperand`**, **`reportMissingImports`**.
+- **Third-party library intake flow** — ordered fallbacks when a new library pyright can't type: typeshed stubs → `useLibraryCodeForTypes` → `pyright --createstub` → scoped `allowedUntypedLibraries`.
+- **`TYPE_CHECKING` for type-only imports** — guarded imports for circular references and heavy type-only dependencies; pair with `from __future__ import annotations` to avoid runtime `NameError`.
 - **`bool | None` → `bool` coercion** — when it's safe, and when coercing destroys the "unknown" vs "false" distinction.
 - **Stale `@overload` stacks** — prune overloads that no longer match the implementation.
 - **Opaque `dict[str, Any]` with repeated key reads** — `--intent improve` only. Scans touched files for `dict[str, Any]` values read through 3+ distinct literal keys and proposes extracting a TypedDict or Pydantic model. Pyright doesn't flag these (they're type-clean) but they block data-flow tracing; extraction gives the contract a name. Asks for approval before writing — the decision tree pauses on name, location, optional-key shape, and migration radius.
