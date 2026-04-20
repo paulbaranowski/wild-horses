@@ -330,6 +330,66 @@ Replace scattered casts with factory calls. Two benefits that the cast version d
 
 Count before deciding: 1-2 sites, inline `cast` is fine. 5+, factory. See `reference.md` § "Repetition as a signal" for the broader pattern.
 
+## Opaque `dict[str, Any]` with repeated key reads
+
+**`--intent improve` only.** Pyright does not emit an error here — the code is fully type-clean — so this recipe is triggered by file scan, not by a rule name.
+
+A `dict[str, Any]`-typed value (parameter, local, return, or attribute) read through **3+ distinct literal keys** inside one function body or file is a signal that an un-named data contract is being smuggled through a generic container. Extraction gives the contract a name pyright and future readers (human or agent) can trace.
+
+### Decision tree
+
+1. **Is the dict mutated at many sites?** (`d["k"] = ...`, `.pop()`, `.update()`, `del d["k"]`.) If yes, **keep `dict[str, Any]`.** TypedDicts don't cleanly support arbitrary-key mutation at the type level — the same caveat flagged in the `Mapping[str, Any]` section above. Do not extract.
+2. **Is the source a stable server/data contract?** (JSON payload from a documented endpoint, message-broker event, config file schema.) Extract a **`TypedDict`**. Keys that may be absent become `NotRequired`.
+3. **Is pydantic already imported in the file, and would validation/defaults/coercion help?** Extract a **`BaseModel` subclass** and replace `d["k"]` reads with attribute access after `Model.model_validate(d)` at the boundary.
+4. **Otherwise** (mixed-shape dict, keys determined at runtime, or the dict flows through too many generic helpers to re-plumb) — keep `dict[str, Any]` and move on.
+
+### Pause and ask before writing
+
+This is semantically loaded in the same class as `bool | None → bool` — the extraction surfaces four user-visible decisions the recipe cannot make alone:
+
+1. **Name** of the new type (`UserProfile` vs. `UserRecord` vs. `UserDict`).
+2. **Location** (`models.py`, a new `schemas/` module, colocated with the caller).
+3. **Optional keys**: `NotRequired[T]` vs. `T | None` — they are not equivalent. `NotRequired` means "may be absent"; `T | None` means "present, but may be null."
+4. **Migration radius**: does this extraction force call-site updates elsewhere, and is that in scope for this run?
+
+Present these to the user as a short proposal and wait for approval. If approval isn't forthcoming, do nothing — the code was already type-clean, leaving it alone is a valid outcome.
+
+### Before / after
+
+```python
+# Before — three reads, shape implicit
+def summarize(payload: dict[str, Any]) -> str:
+    user = payload["user_id"]
+    tier = payload.get("tier", "free")
+    active = payload["is_active"]
+    return f"{user} ({tier}, {'on' if active else 'off'})"
+```
+
+```python
+# After — TypedDict makes the shape part of the function's signature
+class SummaryPayload(TypedDict):
+    user_id: str
+    is_active: bool
+    tier: NotRequired[str]
+
+def summarize(payload: SummaryPayload) -> str:
+    user = payload["user_id"]
+    tier = payload.get("tier", "free")
+    active = payload["is_active"]
+    return f"{user} ({tier}, {'on' if active else 'off'})"
+```
+
+Now a caller passing a dict missing `user_id` fails at the call site, not inside `summarize`. The key reads don't change — only the contract got a name.
+
+### Why this isn't "test factories, part 2"
+
+The test-factory recipe above and this one share the "N-repetition triggers extraction" shape, but the trigger condition is different:
+
+- **Test factory**: repeated `cast(T, {...})` or TypedDict-literal *construction* (already pyright-errored or suppressed).
+- **Opaque dict**: repeated *reads* off a generically-typed source (pyright-clean, no error).
+
+Don't merge them — their decision trees and targets differ.
+
 ## `reportGeneralTypeIssues` / `"None" is not iterable`
 
 `for x in maybe_none:` when `maybe_none: list[...] | None`. Add `assert maybe_none is not None` before the loop, or use `for x in maybe_none or []:` if empty-iteration is the desired fallback.
