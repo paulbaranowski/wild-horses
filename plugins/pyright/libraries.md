@@ -20,6 +20,7 @@ Alternative: `for i in range(len(ba)): bit = ba[i]` or `iter(ba)`.
 Functions like `ks_2samp`, `ttest_ind` return an under-annotated `_` placeholder instead of the real `KstestResult` / `TtestResult`. Accessing `.statistic` / `.pvalue` trips pyright even though they exist at runtime (namedtuple fields).
 
 Options (preferred first):
+
 1. Cast to `Any` then access: `res = cast(Any, ks_2samp(...))`.
 2. Cast to the specific result class if you can import it: `cast(scipy.stats._stats_py.TtestResult, res)`.
 3. `# pyright: ignore[reportAttributeAccessIssue]` if both feel worse than just suppressing.
@@ -96,6 +97,18 @@ async def get_by_user(cls, user_id: str) -> Sequence[Self]:
     return await cls.find(cls.user_id == user_id).to_list()
 ```
 
+**`Document.id` is `PydanticObjectId`, not `str`.** Beanie's auto-generated `_id` field is typed as `PydanticObjectId` (a `bson.ObjectId` subclass). Passing `doc.id` directly where a `str` parameter is declared is a pyright error — and silently a runtime issue too, since string-keyed lookups (`some_dict.get(doc.id)`, URL formatters, cache keys) will receive an `ObjectId` where a `str` was expected. Wrap at the boundary:
+
+```python
+# Wrong — pyright flags, and the str-keyed consumer sees ObjectId at runtime
+await ImageDocument.get_by_id(sample_image.id)
+
+# Right — explicit conversion at the call site
+await ImageDocument.get_by_id(str(sample_image.id))
+```
+
+**Signal for an inconsistent codebase sweep.** When `str(doc.id)` appears at 8+ call sites in a file but one site passes `doc.id` bare, that one is almost always the bug — not an intentional deviation. A whole-file pyright pass will flag the asymmetry; fix to match the majority. This is the most common shape of Beanie pyright errors in consumer code — more than the `Indexed()` or `deleted_count` gotchas above.
+
 ## Supabase (auth + query client)
 
 **Auth responses: narrow `response.user` and `response.session` before use.** Both are `Optional` after `sign_in_with_password` / `sign_up`, contrary to what calling code tends to assume:
@@ -115,6 +128,8 @@ rows = cast(list[dict[str, Any]], response.data)
 ```
 
 **`SignInWithIdTokenCredentials` TypedDict boundary.** Building the credentials dict and passing it to `sign_in_with_id_token` requires a cast because the parameter is a TypedDict, not `dict[str, Any]`. See `rules.md` § "TypedDict ↔ `dict[str, Any]` asymmetry".
+
+**`User.created_at` (and similar timestamp fields) are typed `datetime` but may arrive as ISO strings.** The stub promises `datetime`; the SDK's JSON conversion may hand back a string. This is a concrete instance of the general stub-runtime disagreement pattern — see `rules.md` § "Stub-runtime type disagreement: widen to `Any`, don't cast" for the decision rule and code template. For Supabase specifically, `User.created_at` and other auth-user timestamp fields are the ones most likely to show this shape.
 
 ## `litellm.completion()` returns `ModelResponse | CustomStreamWrapper`
 
@@ -249,15 +264,15 @@ class ProcessingResult(BaseModel):
 
 **Static-typing side.** Pyright narrows to `ImageRecord` at call sites where the value matches it, and to `Dict[str, Any]` otherwise — so the union doesn't lose static precision for well-formed callers.
 
-**Why it's a stopgap.** The `Dict[str, Any]` branch accepts *any* dict, including structurally invalid shapes the factory would have rejected. And it tends to require narrowing casts (`cast(ImageRecord, x)`) at production call sites that pass the union back into functions expecting the TypedDict — which is exactly the "repetition as a signal" pattern (`reference.md`) in another form. Revisit when ratcheting to `standard`/`strict` or when adding enough factory callers that migrating the fixtures is cheap.
+**Why it's a stopgap.** The `Dict[str, Any]` branch accepts _any_ dict, including structurally invalid shapes the factory would have rejected. And it tends to require narrowing casts (`cast(ImageRecord, x)`) at production call sites that pass the union back into functions expecting the TypedDict — which is exactly the "repetition as a signal" pattern (`reference.md`) in another form. Revisit when ratcheting to `standard`/`strict` or when adding enough factory callers that migrating the fixtures is cheap.
 
-**Not applicable to.** Function parameters, function return types, *vanilla* `@dataclasses.dataclass` fields, and raw module-level annotations — the runtime enforcement only happens through pydantic's model-construction pathway. Note: `@pydantic.dataclasses.dataclass` *does* enforce at runtime, so the same union workaround applies there. Tightening `def foo(x: dict)` to `def foo(x: SomeTypedDict)` is a pure type-checker change with no runtime effect.
+**Not applicable to.** Function parameters, function return types, _vanilla_ `@dataclasses.dataclass` fields, and raw module-level annotations — the runtime enforcement only happens through pydantic's model-construction pathway. Note: `@pydantic.dataclasses.dataclass` _does_ enforce at runtime, so the same union workaround applies there. Tightening `def foo(x: dict)` to `def foo(x: SomeTypedDict)` is a pure type-checker change with no runtime effect.
 
 **Operational guidance.** If you're annotating a `BaseModel` field with a TypedDict for the first time in the codebase, run the test suite immediately after — not just pyright. The failures are runtime-only and won't appear in the type-checker's report.
 
 ## Optional-runtime dependencies: inline import + suppress
 
-Modules that are *intentionally* optional at runtime (the app should still load if the package isn't installed) must be imported inside a `try/except ImportError` — which means inline in a function, not at module level. The suppression here is correct and different from the `sys.path`-manipulation case:
+Modules that are _intentionally_ optional at runtime (the app should still load if the package isn't installed) must be imported inside a `try/except ImportError` — which means inline in a function, not at module level. The suppression here is correct and different from the `sys.path`-manipulation case:
 
 ```python
 def read_qr(img: Image.Image) -> Optional[str]:

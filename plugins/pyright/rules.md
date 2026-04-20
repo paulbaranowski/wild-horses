@@ -8,11 +8,14 @@ Access on a value that might be `None`.
 
 - **In tests:** `assert x is not None` before the use. Pyright narrows through a bare `assert`; unittest's `self.assertIsNotNone(x)` does NOT narrow, it just fails the test at runtime. Different tools. Use both if you want the nice test failure message AND the narrowing, but the bare assert is what gives pyright what it needs.
 - **In production:** prefer an explicit guard that raises a descriptive error, not an `assert`. Example:
+
   ```python
   if self._delegate is None:
       raise RuntimeError("delegate not set before replay")
   ```
+
   Reason: `python -O` strips asserts. Asserts are for invariants pyright needs to see; raises are for genuine runtime safety. See `reference.md` § "Assert vs raise for type narrowing".
+
 - **If the declared type is wrong:** fix the declaration (e.g. field was `Foo | None` but is always set in `__init__` so should be `Foo`).
 
 ## `reportArgumentType`
@@ -33,13 +36,13 @@ Neither direction is assignable without a cast. That's the surprise — intuitio
 Practical fixes:
 
 - **`TypedDict → dict[str, Any]`** (passing a typed response to a generic sink like a formatter, JSON encoder, or a helper that takes `dict[str, Any]`): `cast(dict[str, Any], td)` at the call site, or `dict(td)` if a runtime copy is acceptable. Widening the callee's signature is also an option if you own it — see below.
-- **`dict[str, Any] → TypedDict`** (e.g. casting `response.json()` to the declared response schema): `cast(SomeTypedDict, raw)`. Expected direction, but note the cast is *unchecked* — downstream `td.get("key")` will succeed statically and fail at runtime if the server doesn't actually send `key`.
+- **`dict[str, Any] → TypedDict`** (e.g. casting `response.json()` to the declared response schema): `cast(SomeTypedDict, raw)`. Expected direction, but note the cast is _unchecked_ — downstream `td.get("key")` will succeed statically and fail at runtime if the server doesn't actually send `key`.
 
-The asymmetry means a `reportArgumentType` at a `dict[str, Any]`-typed sink has the *same fix shape* as one at a `TypedDict`-typed sink: a `cast`. Without this in mind, you'll spend time looking for a structural-subtype path that doesn't exist.
+The asymmetry means a `reportArgumentType` at a `dict[str, Any]`-typed sink has the _same fix shape_ as one at a `TypedDict`-typed sink: a `cast`. Without this in mind, you'll spend time looking for a structural-subtype path that doesn't exist.
 
 ### If you own the consumer, widen to `Mapping[str, Any]`, not `Dict[str, Any]`
 
-The natural instinct when a function keeps collecting casts at its callers is "widen the parameter." The trap: widening `Dict[str, Any]` → `Dict[str, Any]` changes nothing because the original asymmetry is about `Dict`. **`Mapping[str, Any]` is different** — every TypedDict *is* assignable to it, because `Mapping` is the read-only protocol every dict (including TypedDicts) satisfies.
+The natural instinct when a function keeps collecting casts at its callers is "widen the parameter." The trap: widening `Dict[str, Any]` → `Dict[str, Any]` changes nothing because the original asymmetry is about `Dict`. **`Mapping[str, Any]` is different** — every TypedDict _is_ assignable to it, because `Mapping` is the read-only protocol every dict (including TypedDicts) satisfies.
 
 ```python
 # Before — callers need cast(Dict[str, Any], ...) every time
@@ -53,7 +56,7 @@ def generate_url(self, image: Mapping[str, Any], path_key: str) -> Optional[str]
         ...
 ```
 
-Works when the function only *reads* the dict (`.get()`, `[]`, iteration, `in`). If the function mutates the dict (`image["new_key"] = ...`, `.pop()`, `.update()`), you need `Dict[str, Any]` or a specific TypedDict instead — TypedDicts don't cleanly support arbitrary-key mutation at the type level.
+Works when the function only _reads_ the dict (`.get()`, `[]`, iteration, `in`). If the function mutates the dict (`image["new_key"] = ...`, `.pop()`, `.update()`), you need `Dict[str, Any]` or a specific TypedDict instead — TypedDicts don't cleanly support arbitrary-key mutation at the type level.
 
 This is the consumer-side analog of "fix the producer's return type" — and it's often the better leverage when you own the consumer but not the producers. One signature change deletes N casts at callers. See `reference.md` § "Repetition as a signal" — when multiple call sites cast the same value through to the same function, widening the function's parameter to `Mapping[str, Any]` is usually the right move.
 
@@ -77,9 +80,71 @@ If a whole block reads the same `result`, one `assert result is not None` at the
 
 What doesn't work: a truthy `if td.get("key"):` followed by a `td["key"]` subscript. Pyright does **not** propagate the truthiness check from the `.get()` call to a re-subscript of the same key, so the second access still triggers `reportTypedDictNotRequiredAccess`. Either use the `in`-based form, or keep the `.get()` form but bind it to a local and never re-subscript.
 
-## Reading *undeclared* keys on a TypedDict
+## Narrowing across nested scopes — walrus and rebind
 
-Different bug from `reportTypedDictNotRequiredAccess`. That rule is about a *declared-but-NotRequired* key — fix by narrowing with `if "key" in td` or binding `.get()` to a local. This case is different: the key isn't declared on the TypedDict at all.
+Pyright's narrowing (`isinstance`, `is None`, truthy check) is anchored to a **name** in a **lexical scope**. Two patterns break that: repeating the expression (each call is a fresh un-narrowed value) and capturing a narrowed name inside a comprehension / lambda / nested `def` (narrowing may not carry across the closure boundary). Both have the same fix: bind once, use the local.
+
+### Walrus for single-expression narrowing
+
+Same `.get()` or attribute access needs to be checked-then-used inline:
+
+```python
+# Wrong — two independent .get() calls; second is still Optional[V]
+[n for n in items if n.get("created_at") and n.get("created_at") > cutoff]
+
+# Right — one binding; pyright narrows `created` to non-None after the truthy check
+[n for n in items if (created := n.get("created_at")) and created > cutoff]
+```
+
+The perf win (one lookup, not two) is a bonus. The primary reason is that `created` is a single name with a single narrowed type; `n.get("created_at")` called twice is two independent un-narrowed values.
+
+### Rebind to a local before a nested scope
+
+Outer `if x:` narrows `x` in that scope, but the narrowing may not carry into a nested comprehension / lambda / `def` — especially across closure boundaries. Pre-binding a fresh local guarantees the inner scope sees the narrowed type:
+
+```python
+# Risky — narrowing of params.since may not follow into the comprehension
+if params.since:
+    filtered = [x for x in rows if x.created > params.since]
+
+# Right — fresh local's inferred type is T (not Optional[T]); follows into inner scope
+if params.since:
+    since_value = params.since
+    filtered = [x for x in rows if x.created > since_value]
+```
+
+### Diagnostic
+
+Error wording varies with the blocked operation (`reportOperatorIssue`, `reportOptionalOperand`, `reportArgumentType`). Signal that you're in _this_ pattern rather than a missing guard: the outer `if x:` guard is already there, but the error fires inside a nested scope or on a re-access of the same `.get()` / attribute expression.
+
+The `reportTypedDictNotRequiredAccess` recipe above is one instance of this rule — "bind `.get()` to a local, don't re-subscript" is the walrus/rebind idea in TypedDict flavor.
+
+## Stub-runtime type disagreement: widen to `Any`, don't cast
+
+When a library's stubs declare `T1` but the SDK may hand back `T1 | T2 | ...` at runtime, the instinct is to `cast` to whichever type you think came back. Don't — the cast is an unchecked lie in one direction and misses the other. Widen once to `Any` on a named local and let an `isinstance` ladder do the narrowing:
+
+```python
+# Stub says response.user.created_at is datetime; SDK sometimes returns an ISO string.
+raw_created_at: Any = response.user.created_at
+if isinstance(raw_created_at, str):
+    created_at = datetime.fromisoformat(raw_created_at.replace("Z", "+00:00"))
+elif isinstance(raw_created_at, datetime):
+    created_at = raw_created_at
+else:
+    created_at = None
+```
+
+Without the `Any` widening, pyright rejects the `str` branch as `reportUnnecessaryIsinstance` (on a declared-`datetime` value, `isinstance(x, str)` is "provably false" to pyright — even when it isn't at runtime).
+
+**Distinct from the trust-boundary `cast()` pattern** (see `reportArgumentType` above): with a trust-boundary cast you know _which_ type the runtime produces and commit to it. Here you don't — the whole point is that runtime may produce either — so you widen and branch.
+
+**General rule:** when stubs declare `T1` but the runtime may produce `T1 | T2 | ...`, widen to `Any` on a named local. Don't cast to one side.
+
+Concrete examples live in `libraries.md` (e.g. Supabase `User.created_at`). This pattern generalizes to any library whose JSON-conversion layer undercuts the declared stub type.
+
+## Reading _undeclared_ keys on a TypedDict
+
+Different bug from `reportTypedDictNotRequiredAccess`. That rule is about a _declared-but-NotRequired_ key — fix by narrowing with `if "key" in td` or binding `.get()` to a local. This case is different: the key isn't declared on the TypedDict at all.
 
 ```python
 class UserResponse(TypedDict, total=False):
@@ -93,16 +158,18 @@ u.get("email_confirmed_at")   # server sends this, TypedDict doesn't declare it
 Narrowing won't help — you can't narrow into a key the type doesn't know about. Three options:
 
 1. **Cast to `dict[str, Any]` at the read site** (pragmatic escape hatch):
+
    ```python
    extra = cast(dict[str, Any], u).get("email_confirmed_at")
    ```
+
    Honest: it acknowledges the type system doesn't know about this field. Better than `# pyright: ignore` because a reader can see exactly what was widened and why.
 
 2. **Add the key to the TypedDict.** Correct if the server contract actually includes it — but beware of padding TypedDicts with fields you're not sure belong to the real schema.
 
 3. **Suppress with `# pyright: ignore[...]`.** Worst of the three; the cast is cleaner and self-documenting.
 
-Signal that you're in *this* case, not the NotRequired case: pyright's complaint mentions "unknown member" / "no member" / `reportGeneralTypeIssues`-style wording rather than `reportTypedDictNotRequiredAccess`, and `if "key" in td:` doesn't narrow the access.
+Signal that you're in _this_ case, not the NotRequired case: pyright's complaint mentions "unknown member" / "no member" / `reportGeneralTypeIssues`-style wording rather than `reportTypedDictNotRequiredAccess`, and `if "key" in td:` doesn't narrow the access.
 
 ## `reportAttributeAccessIssue` on class-level fields
 
@@ -126,7 +193,7 @@ self.error_message: Optional[str] = None
 
 The annotation lives inside `__init__` on the assignment line; no separate class-body declaration is required.
 
-**Conditional init with different subtypes per branch.** When both branches of an `if/else` assign `self.x` with different types, pyright infers the *union* of the two branch types, not the type you intended. Example: one branch sets `self.client_id = config.google_client_id` (typed `str`), the other sets `self.client_id = os.getenv("HERDS_GOOGLE_CLIENT_ID")` (typed `Optional[str]`). Downstream code that expects a consistent `Optional[str]` sees a messy union. Fix by forward-declaring the attribute's type before the `if/else`:
+**Conditional init with different subtypes per branch.** When both branches of an `if/else` assign `self.x` with different types, pyright infers the _union_ of the two branch types, not the type you intended. Example: one branch sets `self.client_id = config.google_client_id` (typed `str`), the other sets `self.client_id = os.getenv("HERDS_GOOGLE_CLIENT_ID")` (typed `Optional[str]`). Downstream code that expects a consistent `Optional[str]` sees a messy union. Fix by forward-declaring the attribute's type before the `if/else`:
 
 ```python
 self.client_id: Optional[str]
@@ -275,7 +342,7 @@ Enum members (`Field(UserTier.FREE, ...)`) and other identifier-valued defaults 
 
 ### Diagnostic: "Arguments missing for parameters X, Y, Z" on a pydantic/Beanie constructor
 
-When pyright reports `Arguments missing for parameters "default_calendar", "sort_by", "sort_order"` on a `SomeModel(...)` call *and* those fields are declared `Optional[T] = Field(<something>, ...)` in the schema, the schema is the bug — not the caller. The error message reads as "you forgot to pass these" but the root cause is positional-default form pyright can't see. Grep the schema for `Field(<positional>,` — almost always a hit.
+When pyright reports `Arguments missing for parameters "default_calendar", "sort_by", "sort_order"` on a `SomeModel(...)` call _and_ those fields are declared `Optional[T] = Field(<something>, ...)` in the schema, the schema is the bug — not the caller. The error message reads as "you forgot to pass these" but the root cause is positional-default form pyright can't see. Grep the schema for `Field(<positional>,` — almost always a hit.
 
 This matters because the fix is upstream: one `Field(None, ...)` → `Field(default=None, ...)` in the schema deletes the error at every caller. Point-fixing each caller with `# pyright: ignore[reportCallIssue]` spreads the workaround instead. See `reference.md` § "Repetition as a signal" for the broader pattern.
 
@@ -292,7 +359,7 @@ Cleaner than building the model eagerly just to satisfy pyright — the runtime 
 
 ### The hidden-missing-field trap
 
-**`cast(T, dict_literal)` is a code smell, not a solution.** The cast silences pyright but also hides missing *required* fields in `T`. The worst-case shape is `cast(List[Order], [{}])` — type-checks cleanly, structurally invalid at runtime, zero compile-time help. Prefer the real constructor:
+**`cast(T, dict_literal)` is a code smell, not a solution.** The cast silences pyright but also hides missing _required_ fields in `T`. The worst-case shape is `cast(List[Order], [{}])` — type-checks cleanly, structurally invalid at runtime, zero compile-time help. Prefer the real constructor:
 
 ```python
 # Wrong — pyright happy, runtime will explode if required fields missing
@@ -302,7 +369,7 @@ orders = cast(List[Order], [{"id": "ord-1"}])
 orders = [Order(id="ord-1", customer="alice", total=Decimal("12.50"))]
 ```
 
-`cast(T, x)` is appropriate only when `x`'s *runtime* value genuinely matches `T` but pyright can't see it — e.g. crossing a `model_dump()` → re-cast-back boundary, or a dict from an API client you control and have reason to trust. `cast(T, {literal})` is almost never that case; the literal is *your* construction, and a real constructor call would let pyright check it.
+`cast(T, x)` is appropriate only when `x`'s _runtime_ value genuinely matches `T` but pyright can't see it — e.g. crossing a `model_dump()` → re-cast-back boundary, or a dict from an API client you control and have reason to trust. `cast(T, {literal})` is almost never that case; the literal is _your_ construction, and a real constructor call would let pyright check it.
 
 ### When to extract a test factory
 
@@ -325,10 +392,47 @@ def make_order(**overrides) -> Order:
 ```
 
 Replace scattered casts with factory calls. Two benefits that the cast version doesn't give you:
+
 1. **Shape validation surfaces once, in the factory.** A future schema change flags one site, not twenty.
 2. **Test intent reads better.** `make_user_profile(tier="premium")` tells the reader "I care about tier here, everything else is a default." `cast(UserProfile, {"tier": "premium"})` hides that intent behind a type assertion — and also hides whether the other required fields are set.
 
 Count before deciding: 1-2 sites, inline `cast` is fine. 5+, factory. See `reference.md` § "Repetition as a signal" for the broader pattern.
+
+## Schema projection via `model_validate`, not `cast`
+
+When projecting from a wider pydantic model `A` to a narrower model `B` where B's fields are a subset of A's, the natural first attempt casts the dumped dict to `B`:
+
+```python
+# Wrong — cast says "this is B" but runtime is a dict
+user_settings = cast(UserSettings, settings.model_dump(
+    include=set(UserSettings.model_fields.keys())
+))
+```
+
+Pyright is happy, but every downstream consumer that expects B's attribute access / methods / `isinstance` check gets a dict at runtime. `user_settings.notifications_enabled` raises `AttributeError`. This is the same class of shape lie as `cast(List[Order], [{}])` in "The hidden-missing-field trap" above — pyright-clean, runtime-broken.
+
+**Fix: round-trip through `B.model_validate()`.** The canonical pydantic-v2 idiom for dict-to-model conversion:
+
+```python
+# Right — constructs a real B instance, runs B's validators
+user_settings = UserSettings.model_validate(settings.model_dump(
+    include=set(UserSettings.model_fields.keys())
+))
+```
+
+Now `user_settings` is genuinely a `UserSettings` — attribute access, `isinstance` checks, and B's validators all work. `include=` projects A → dict-of-B's-keys; `model_validate` then builds the dict into an actual B instance.
+
+### Decision rule by target type
+
+- **Target is a `TypedDict`** → `cast(T, dict)` is acceptable. TypedDicts _are_ dicts at runtime; there's no behavior to wrap.
+- **Target is a `BaseModel` or `@pydantic.dataclasses.dataclass`** → always `Model.model_validate(...)`. The target has methods, validators, and serialization behavior that a plain dict doesn't provide.
+- **Target is a vanilla `@dataclasses.dataclass`** → use the real constructor (`Model(**dict_value)`); dataclass has no `model_validate`.
+
+The principle: **casts lie about shape; `model_validate` builds the real thing.** The runtime cost of one constructor call is negligible next to the debugging cost of "why is `.field` raising `AttributeError` when pyright says it's a `Model`?"
+
+### Where projection shows up
+
+Most commonly at API boundaries: an internal model gets projected onto a public response schema. The `include=` set names the intersection; `model_validate` re-runs the public schema's validators on the projected dict. That second validation is often _desirable_ — public-facing fields may have stricter validators than the internal superset (email format, length limits, enum membership) that the internal model doesn't enforce.
 
 ## Opaque `dict[str, Any]` with repeated key reads
 
@@ -385,10 +489,66 @@ Now a caller passing a dict missing `user_id` fails at the call site, not inside
 
 The test-factory recipe above and this one share the "N-repetition triggers extraction" shape, but the trigger condition is different:
 
-- **Test factory**: repeated `cast(T, {...})` or TypedDict-literal *construction* (already pyright-errored or suppressed).
-- **Opaque dict**: repeated *reads* off a generically-typed source (pyright-clean, no error).
+- **Test factory**: repeated `cast(T, {...})` or TypedDict-literal _construction_ (already pyright-errored or suppressed).
+- **Opaque dict**: repeated _reads_ off a generically-typed source (pyright-clean, no error).
 
 Don't merge them — their decision trees and targets differ.
+
+## Prefer `@staticmethod` over module-level free functions for class-adjacent helpers
+
+Triggered when you extract a pure method from an instance method — typically to eliminate a `cast(Required, None)` construction smell (see `reference.md` § "`cast(Required, None)` at construction is a refactor signal"). You now have a pure function that uses none of `self`'s state; where should it live?
+
+```python
+# Original
+class S3Storage:
+    def __init__(self, supabase: Client, bucket_name: str):
+        self.supabase = supabase
+        self.bucket_name = bucket_name
+
+    def generate_authenticated_image_url(self, image, path_key) -> Optional[str]:
+        # Reads only self.bucket_name, not self.supabase
+        ...
+```
+
+Extract options:
+
+```python
+# Option A: @staticmethod on the class (preferred for class-adjacent helpers)
+class S3Storage:
+    def generate_authenticated_image_url(self, image, path_key) -> Optional[str]:
+        return S3Storage.build_authenticated_image_url(image, path_key, self.bucket_name)
+
+    @staticmethod
+    def build_authenticated_image_url(image, path_key, bucket_name) -> Optional[str]:
+        ...
+
+# Option B: module-level free function next to the class
+def build_authenticated_image_url(image, path_key, bucket_name) -> Optional[str]: ...
+
+class S3Storage:
+    def generate_authenticated_image_url(self, image, path_key):
+        return build_authenticated_image_url(image, path_key, self.bucket_name)
+```
+
+**Prefer Option A when** the helper is class-adjacent — operates on the class's domain, would naturally be looked for on the class, or is a pure variant of an existing instance method. The `@staticmethod` form keeps the conceptual grouping visible at the call site (`S3Storage.build_authenticated_image_url(...)`) and avoids polluting the module namespace.
+
+**Prefer Option B when** the helper is genuinely class-independent — e.g. a pure parsing function (`parse_month_day(date_str)`) that existed before the class and would exist without it.
+
+### Test-patch-target durability as the tiebreaker
+
+When it's a judgment call, the test-mock implication is the deciding factor:
+
+- `@patch("app.services.s3_storage.S3Storage.build_authenticated_image_url")` — stable across module reorganization. The helper can move between files without breaking the patch target; only a _rename_ does.
+- `@patch("app.routes.image_endpoints.build_authenticated_image_url")` — the helper was imported into that module's namespace. If the helper is later moved to a different file, every test patching it through this module breaks, even though nothing about the helper itself changed.
+- `@patch("app.services.s3_storage.build_authenticated_image_url")` — middle ground. Stable against consumer refactors but not against helper-file moves.
+
+Class-attachment gives the patch target a stable fully-qualified name (`module.ClassName.helper`) that tracks the class, not the filesystem. For helpers you expect to be widely mocked in tests, this alone can justify Option A over B.
+
+### Codify the preference
+
+If this matches your team's style, add it to the project's contributor guide / `CLAUDE.md` / equivalent. The fork is invisible in pyright output — type-clean either way — so without a codified preference, different agents/contributors will pick different shapes on the same codebase. Example codification:
+
+> **Static helpers live on their class, not as module-level functions.** When a helper is class-adjacent (operates on the same domain, or is a pure variant of an instance method), put it on the class as a `@staticmethod`. Callers reach it via `ClassName.helper(...)`. Reserve module-level functions for genuinely class-independent helpers.
 
 ## `reportGeneralTypeIssues` / `"None" is not iterable`
 
@@ -420,7 +580,7 @@ class Record:
 
 Applies to any `Optional[T]` → `T` assignment where the `None` case carries meaning (not just "absent"). Before coercing, ask: does `None` mean something different from the falsy value of `T`? If yes, widen.
 
-## When `Optional[T] → T` coercion *is* fine
+## When `Optional[T] → T` coercion _is_ fine
 
 The inverse case of the `bool | None` warning: when `None` genuinely means "unset, use sensible default," a simple `x or default` at the assignment site is clean and preserves information. Example: a `Config.timezone: Optional[str]` flowing into a TypedDict field `timezone: str`.
 
@@ -431,7 +591,7 @@ ctx: HerdsContext = {
 }
 ```
 
-This is safe because the fallback (`"UTC"`) is semantically meaningful — it's the intended default when the user hasn't configured a timezone — not a coerced placeholder that destroys a meaningful `None`. Same question as the `bool | None` section, different answer: *does `None` carry different meaning than the falsy value?* Here, no — "unset" and "UTC" are the intended same-state. Coerce.
+This is safe because the fallback (`"UTC"`) is semantically meaningful — it's the intended default when the user hasn't configured a timezone — not a coerced placeholder that destroys a meaningful `None`. Same question as the `bool | None` section, different answer: _does `None` carry different meaning than the falsy value?_ Here, no — "unset" and "UTC" are the intended same-state. Coerce.
 
 The distinction between the two sections collapses into one rule: coerce `Optional[T] → T` when the default is the intended treatment of `None`; widen the destination to `Optional[T]` when `None` carries a distinct meaning that downstream consumers rely on.
 
@@ -453,7 +613,7 @@ def sanitize(data: Any) -> Any:
 
 Under strict, every caller passing an `Any`-typed value (e.g. from `response.json()` or another untyped source) gets `reportCallIssue` / "no overload matches" because `Any` doesn't match any single overload cleanly. The overloads promise specificity the body doesn't actually deliver.
 
-Fix: delete the overload stack and keep `def sanitize(data: Any) -> Any`. The overloads were load-bearing only when callers passed a *statically-typed* `Dict`, `List`, or `None` — which is rarer than it looks once you audit the call sites.
+Fix: delete the overload stack and keep `def sanitize(data: Any) -> Any`. The overloads were load-bearing only when callers passed a _statically-typed_ `Dict`, `List`, or `None` — which is rarer than it looks once you audit the call sites.
 
 Signals the overload stack is stale:
 
