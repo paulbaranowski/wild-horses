@@ -13,7 +13,9 @@ This file is the entry point: it holds the index, the setup/triage process, poli
 - TypedDict ↔ `dict[str, Any]` asymmetry
 - `reportCallIssue` / no overloads match
 - `reportTypedDictNotRequiredAccess`
-- Reading *undeclared* keys on a TypedDict
+- Narrowing across nested scopes — walrus and rebind
+- Stub-runtime type disagreement: widen to `Any`, don't cast
+- Reading _undeclared_ keys on a TypedDict
 - `reportAttributeAccessIssue` on class-level fields
 - Attribute typing in `__init__` (starts-None, conditional-init)
 - The `def f(x: str = None)` antipattern
@@ -23,12 +25,14 @@ This file is the entry point: it holds the index, the setup/triage process, poli
 - Pydantic v1 → v2 field-argument renames
 - Pydantic `Field()` positional defaults (including the "Arguments missing" diagnostic)
 - `cast(Model, payload)` at pydantic list boundaries
+- Schema projection via `model_validate`, not `cast`
 - `reportGeneralTypeIssues` / `"None" is not iterable` (also see libraries.md for bitstring, PIL, tornado variants)
 - `reportOptionalOperand`
 - `reportMissingImports` (also see libraries.md § "Optional-runtime dependencies")
 - Assigning `bool | None` to a `bool` field
-- When `Optional[T] → T` coercion *is* fine
+- When `Optional[T] → T` coercion _is_ fine
 - Stale `@overload` stacks become noise under strict
+- Prefer `@staticmethod` over module-level free functions for class-adjacent helpers
 
 ### By library / package → `libraries.md`
 
@@ -36,8 +40,8 @@ This file is the entry point: it holds the index, the setup/triage process, poli
 - `scipy.stats` (result types are `_`)
 - `tornado` (missing `connection.stream`, `RequestHandler` mixin attributes)
 - `matplotlib` (`plt.hist(bins=...)` rejects `np.ndarray`)
-- Beanie (MongoDB ODM) — `Indexed`, sort syntax, delete results, Document construction, `.collection`, `List[Self]`
-- Supabase — auth narrowing, `.data` cast, `SignInWithIdTokenCredentials`
+- Beanie (MongoDB ODM) — `Indexed`, sort syntax, delete results, Document construction, `.collection`, `List[Self]`, `Document.id` is `PydanticObjectId`
+- Supabase — auth narrowing, `.data` cast, `SignInWithIdTokenCredentials`, `created_at` stub/runtime disagreement
 - `litellm` (`completion()` union return)
 - `pic_prompt` (return-type lies)
 - Dynaconf (`Validator(messages={...})`)
@@ -64,6 +68,7 @@ Real bugs pyright surfaces (not recipes — flag these for user review, don't si
 - [Setup](#setup)
 - [Triage process for a large error count](#triage-process-for-a-large-error-count)
 - [Prefer a documented API over "works at runtime" tricks](#prefer-a-documented-api-over-works-at-runtime-tricks)
+- [`cast(Required, None)` at construction is a refactor signal, not a suppression](#castrequired-none-at-construction-is-a-refactor-signal-not-a-suppression)
 - [Suppression policy](#suppression-policy)
 - [Narrowing artifacts vs runtime checks](#narrowing-artifacts-vs-runtime-checks)
 - [Harness / CI integration](#harness--ci-integration) (includes Assert vs raise)
@@ -99,7 +104,7 @@ When facing hundreds of errors, don't dive in. Bucket first.
 5. **Fix production code first, then tests.** Two reasons:
    - **Cascade savings (project-shape-dependent).** When a function's return type becomes precise, tests destructuring that return often start type-checking without further changes. Strong cascades appear in projects with fixture-heavy tests built from prod types; weak or zero cascades in projects where tests hand-build dicts/mocks inline. Don't size Phase B on the cascade assumption — measure the residual after Phase A. One observed adoption moved 290 prod errors → 0 with zero change to the 536 test errors.
    - **Ordering a moving target.** Even when cascades are small, prod-first prevents test agents from encoding whatever prod types exist at their dispatch time — which would then change under them. Test fixes should land against final prod signatures, not in-flight ones.
-6. **Parallelize across contributors or agents.** The critical constraint is *disjointness*: two workers editing the same file will conflict. One file per worker is the simplest partition; for big files, one rule per worker on that file also works.
+6. **Parallelize across contributors or agents.** The critical constraint is _disjointness_: two workers editing the same file will conflict. One file per worker is the simplest partition; for big files, one rule per worker on that file also works.
 
 ## Prefer a documented API over "works at runtime" tricks
 
@@ -115,19 +120,54 @@ The first path is almost always there. Signals that you're using a "happens to w
 
 This pattern bleeds over into "bugs pyright uncovers": sometimes the reason the existing call works is purely accidental (e.g., a future library version may tighten the runtime behavior), and moving to the documented API hardens against that too.
 
+## `cast(Required, None)` at construction is a refactor signal, not a suppression
+
+Related to "prefer a documented API" but distinct in shape: when you see a module-level or class-level instance constructed with a cast on a required dependency, the cast is hiding a design smell, not a stub gap.
+
+```python
+# Smell: the class requires a Supabase client, but this caller only uses
+# the one method that doesn't touch it.
+_url_storage = S3Storage(cast(Client, None), settings.BUCKET_NAME)
+
+# Used only for:
+image_path = _url_storage.generate_authenticated_image_url(img, "path")
+```
+
+The `cast` silences pyright but lies at runtime — `self.supabase = None` works only because the called method reads `self.bucket_name`, not `self.supabase`. It's load-bearing on a coincidence, not a contract.
+
+**Signals this is the pattern:**
+
+1. A constructor's required typed parameter receives `cast(T, None)` (or `cast(T, <sentinel>)`).
+2. The resulting instance is used for a proper subset of the class's methods — specifically the methods that don't touch the faked-None attribute.
+3. The construction sits at module scope or class scope (a process-long singleton), not inside the function that uses it.
+4. A comment explains why the fake value is "safe" — i.e. the class's API is broader than this caller needs.
+
+**Fix: extract the pure method, don't suppress.** Options, roughly in order of preference:
+
+1. **Static method on the same class.** `@staticmethod` that takes what it needs as params (`bucket_name`, etc.) and has the instance method delegate to it. Keeps the conceptual grouping; callers reach it via `ClassName.method(...)` with no instance. See `rules.md` § "Prefer `@staticmethod` over module-level free functions for class-adjacent helpers".
+2. **Module-level free function** in the same file as the class, if the helper is genuinely class-independent.
+3. **Split the class** into `S3Storage` (needs client) + `S3UrlBuilder` (doesn't). Biggest change; warranted only if the "pure" method set is large.
+
+The `cast(Client, None)` + comment pattern is the smell; the refactor removes both the cast AND the comment in one edit, while letting pyright verify the new constraint structurally. A `# pyright: ignore` would preserve the smell and add a second lie on top.
+
+**Why this belongs in reference.md, not rules.md.** It's not a recipe for a pyright rule — the existing code is type-clean (the cast makes it so). The signal is the _shape_ of the cast + the narrowing-by-subset use pattern. Triggered by reading, not by a rule firing.
+
 ## Suppression policy
 
 A `# pyright: ignore[...]` is acceptable when:
+
 - The issue is in a third-party library's type stubs, not your code.
 - The runtime behavior is verified (tests pass) and the type checker is the one that's wrong.
 - The alternative (restructuring just to satisfy the type checker) would make the code worse.
 
 Not acceptable:
+
 - Bare `# pyright: ignore` with no rule name. Always specify: `# pyright: ignore[reportOptionalMemberAccess]`.
 - `# type: ignore` with or without brackets. That's mypy syntax. Pyright uses `# pyright: ignore[...]`.
 - Suppressing a rule to avoid fixing a real bug. If pyright flags a `None` access, either narrow or fix the declared type. Don't paper over it.
 
 When suppressing, add a one-line comment explaining WHY if the reason isn't obvious from the rule name:
+
 ```python
 # bitstring's stubs declare __iter__ wrong; iteration works at runtime
 for bit in bits:  # pyright: ignore[reportGeneralTypeIssues]
@@ -144,7 +184,7 @@ Rules of thumb:
 1. **Count before suppressing.** If you're inside a partition and already at 3+ identical suppressions, search the whole codebase: `grep -rn "# pyright: ignore\[<rule>\]" .`. For thresholds that trigger an orchestrator-level consolidation pass, see the command's Phase 3.5.
 2. **Cast repetition is the same signal.** `cast(T, {...})` appearing across many call sites almost always means `T` should have a factory (`def make_T(**overrides) -> T`) or a proper constructor call. See `rules.md` § "When to extract a test factory" for the factory pattern and `rules.md` § "The hidden-missing-field trap" for why `cast(T, {literal})` is a code smell.
 3. **Cross-partition cooperation beats strict signature-freeze.** Parallel dispatch uses signature-freeze to prevent agents conflicting, not to forbid upstream fixes. If a partition hits a high-repetition pattern, its report should flag "root-cause fix belongs in `<production-file>`" rather than silently suppressing through. The orchestrator can then dispatch a targeted follow-up or consolidate before committing.
-4. **Production edits can be staged before the test run.** For known high-repetition patterns (pydantic `Field(None, ...)`, ad-hoc TypedDict construction, missing shared factories), fix them in a pre-pass commit *before* dispatching the parallel fix work. Saves the entire cycle of "suppress → notice → undo suppressions → root-cause → re-verify."
+4. **Production edits can be staged before the test run.** For known high-repetition patterns (pydantic `Field(None, ...)`, ad-hoc TypedDict construction, missing shared factories), fix them in a pre-pass commit _before_ dispatching the parallel fix work. Saves the entire cycle of "suppress → notice → undo suppressions → root-cause → re-verify."
 
 ### Removing suppressions is a bug-finding operation
 
@@ -155,7 +195,7 @@ A non-trivial fraction of any accumulated `# pyright: ignore[<rule>]` suppressio
 - Intentional-bad-input tests where pydantic's runtime coercion was silently saving the test from exercising what it intended to exercise.
 - Function calls missing parameters that the suppression had been silencing for so long nobody remembered why.
 
-**Plan for the surface.** After a root-cause migration that deletes a suppression pattern, re-run pyright expecting *new* errors, not a stable zero. Those errors are the bug-finding payoff of the migration — treat them as findings to fix, not "my change broke something." Budget time for this pass when estimating the work; a migration that looks like "search-replace, run tests, done" will surprise you when the type-checker surfaces 5–10% more work behind where the suppressions were.
+**Plan for the surface.** After a root-cause migration that deletes a suppression pattern, re-run pyright expecting _new_ errors, not a stable zero. Those errors are the bug-finding payoff of the migration — treat them as findings to fix, not "my change broke something." Budget time for this pass when estimating the work; a migration that looks like "search-replace, run tests, done" will surprise you when the type-checker surfaces 5–10% more work behind where the suppressions were.
 
 **Also re-run tests, not just pyright.** Some of the surfaced bugs are runtime validation issues (e.g., pydantic TypedDict validation — see `libraries.md` § "Pydantic BaseModel fields with TypedDict types enforce at runtime") that the type-checker alone won't catch.
 
@@ -175,7 +215,28 @@ These comments were true when written and become actively misleading once the de
 grep -rn "returns Dict\|returns dict\|typed as .* at call sites\|shape matches" <changed-dirs>
 ```
 
-Delete or update each match. Also worth a look: removed `cast(T, x)` calls sometimes left a comment upstream explaining *why* the cast was needed. If the cast is gone, the comment often should be too.
+Delete or update each match. Also worth a look: removed `cast(T, x)` calls sometimes left a comment upstream explaining _why_ the cast was needed. If the cast is gone, the comment often should be too.
+
+**Docstrings are a separate sweep.** The comment-drift pattern above covers narrative `#`-style comments. Docstrings are their own class of staleness because `Args:` / `Returns:` blocks describe parameters by _type name_ and don't auto-update when the signature tightens. Typical rot:
+
+```python
+# Signature after tightening
+def process_raw_event(raw_event: RawScrapedEvent, input_dir: Path) -> EventData:
+    """Process a raw event dictionary into structured EventData.
+
+    Args:
+        raw_event: Raw event data (dict) from HTML parser
+        ...
+    """
+```
+
+The parameter became a dataclass (or pydantic model, or TypedDict) but the prose still says "dict" / "dictionary" / "raw dict from X". Pyright can't flag this — docstrings are plain text. Worth a post-tightening pass:
+
+```bash
+grep -rn 'dict\|tuple\|Dict\[\|Tuple\[' <changed-files>   # review Args: blocks and one-liners
+```
+
+The false-positive rate is high (legitimate uses of those words), but each match is cheap to eyeball. Focus on files that changed in the type-tightening PR — drift is strongly correlated with signatures that moved in the same diff.
 
 ## Narrowing artifacts vs runtime checks
 
@@ -194,7 +255,7 @@ The `isinstance(data, dict)` on the first line looks defensive against a non-dic
 - `data` is typed as a `TypedDict` with known keys.
 - `"error"` is not a declared key, so `data.get("error")` triggers `reportUnknownMemberType`.
 - `isinstance(data, dict)` narrows to plain `dict` where `.get(<arbitrary-key>)` is typed `Any | None` — silences the warning.
-- `"known_field"` *is* a declared key, so `data.get("known_field", 0)` type-checks without narrowing.
+- `"known_field"` _is_ a declared key, so `data.get("known_field", 0)` type-checks without narrowing.
 
 **Signals that an isinstance/None check is a pyright artifact rather than runtime defense:**
 
@@ -218,7 +279,7 @@ Pyright exits non-zero on any error; no extra flag needed.
 
 ### If using an LLM coding harness (Claude Code, Cursor, etc.)
 
-A naive setup runs pyright as a *pre-edit* or *per-edit* hook that blocks on errors. That's the wrong level for multi-file refactors: intermediate states are broken by construction (remove a symbol's definition, then remove its usages) and the hook refuses to let work progress.
+A naive setup runs pyright as a _pre-edit_ or _per-edit_ hook that blocks on errors. That's the wrong level for multi-file refactors: intermediate states are broken by construction (remove a symbol's definition, then remove its usages) and the hook refuses to let work progress.
 
 Better design:
 
@@ -258,8 +319,8 @@ For large bulk fixes, the reusable pattern:
 3. Give each agent: (a) the specific file list, (b) a pointer to pre-split per-file error lists on disk, (c) the fix-pattern recipes (`rules.md`, `libraries.md`), (d) project conventions (line length, naming, formatting), (e) validation steps (`pyright <files>`, the project's linter, the test runner).
 4. Dispatch agents in parallel rather than sequentially so they start together.
 5. Wait for all to complete before the next phase. Check overall pyright count in between phases, not just trust the reports.
-6. **Foundational files need a stability constraint, not just disjointness.** When one agent owns `api.py`, `core/base.py`, or an exception module that the other agents' files import, disjointness alone isn't enough — a "local" signature widening ripples into the other partitions. Add to the foundational-file agent's prompt: *prefer adding types over changing them; do not widen or narrow public signatures*. Otherwise a change like `def f(x: str) -> T` → `def f(x: str | None) -> T` looks safe locally but requires every caller in the other partitions to be updated, and those files are off-limits. The contract: partition owns the right to *edit*, but public signatures are frozen for the duration of the dispatch. This matters most under strict mode, where the dominant "Unknown" rule family fires at definition sites and tempts signature-widening fixes.
-7. **Require each agent to return a "cascading changes" section.** Agents that change public signatures, widen return types, or modify shared Protocols inside their partition *will* affect files outside it — disjointness doesn't eliminate type cascades. Ask each agent to list, in its final report: "signature/schema changes worth noting because they may cascade to other groups." This gives the orchestrator a decision point *before* the full-project re-run rather than hunting down surprise errors afterward. Observed value: one refactor's agents independently flagged Protocol-method changes, `List→Sequence` widenings, and exception-constant call-site rewrites that would have otherwise surfaced as unexplained errors in the verification run.
+6. **Foundational files need a stability constraint, not just disjointness.** When one agent owns `api.py`, `core/base.py`, or an exception module that the other agents' files import, disjointness alone isn't enough — a "local" signature widening ripples into the other partitions. Add to the foundational-file agent's prompt: _prefer adding types over changing them; do not widen or narrow public signatures_. Otherwise a change like `def f(x: str) -> T` → `def f(x: str | None) -> T` looks safe locally but requires every caller in the other partitions to be updated, and those files are off-limits. The contract: partition owns the right to _edit_, but public signatures are frozen for the duration of the dispatch. This matters most under strict mode, where the dominant "Unknown" rule family fires at definition sites and tempts signature-widening fixes.
+7. **Require each agent to return a "cascading changes" section.** Agents that change public signatures, widen return types, or modify shared Protocols inside their partition _will_ affect files outside it — disjointness doesn't eliminate type cascades. Ask each agent to list, in its final report: "signature/schema changes worth noting because they may cascade to other groups." This gives the orchestrator a decision point _before_ the full-project re-run rather than hunting down surprise errors afterward. Observed value: one refactor's agents independently flagged Protocol-method changes, `List→Sequence` widenings, and exception-constant call-site rewrites that would have otherwise surfaced as unexplained errors in the verification run.
 8. **Dispatch granularity: ~70–80 errors per agent × 4 agents is a good default for mid-sized projects.** Smaller groups (3 × ~100 errors) give less parallelism and each agent takes longer; larger (6 × ~50 errors) increases cross-partition conflict risk as agents make structurally similar schema changes independently (e.g., two agents both updating the same Protocol from different sides). 4 agents is also the sweet spot for monitoring — you can read each final report without losing track.
 9. **Split the error file with `grep -F` (fixed-string), not `-E`.** File paths contain `.` and `/` characters that pattern-grep interprets as regex. `grep -F "/${file}:" /tmp/pyright_full.txt` pins the filename literally and avoids silent under-matches that produce empty per-group files. Also guard against blank/comment lines in the file list: `case "$f" in ""|"#"*) continue;; esac`.
 10. **Orchestrator owns cross-partition quality; agents own in-partition correctness.** An agent whose partition reaches zero errors has done its job — but reaching zero doesn't make the aggregate good. Only the orchestrator sees all partition reports together, and only the orchestrator can notice that multiple agents added many identical suppressions (one root cause, many duplicate point-fixes) or that two agents picked different solutions for the same underlying problem. Agents that try to do orchestrator work — e.g., editing outside their partition to achieve a root-cause fix — break the dispatch contract and produce merge conflicts. Orchestrators that don't reconcile — trusting N independent zero-error reports as a zero-error whole — produce technically-green runs whose aggregate quality is poor: duplicate suppressions scattered across files, inconsistent fixes for the same upstream issue, repeated casts that should be factories. The green count hides the debt. Concretely: between Phase 3 (agent work) and Phase 4 (full-project verification), run the suppression/cast counts described in the command file's Phase 3.5 and decide whether to consolidate before committing.
@@ -286,7 +347,7 @@ Tools that run autofixers on every edit (ruff with `--fix`, isort, IDE format-on
 1. You remove a symbol (e.g. a `cast(Any, ...)` wrapper) to test whether it was load-bearing.
 2. The autofixer detects the now-unused import and strips it.
 3. Your change turns out to be wrong. You revert the edit.
-4. The revert restores the symbol use but not the import the autofixer removed. The type checker now reports a *different* error (`reportUndefinedVariable`) that looks unrelated to the original finding.
+4. The revert restores the symbol use but not the import the autofixer removed. The type checker now reports a _different_ error (`reportUndefinedVariable`) that looks unrelated to the original finding.
 
 This applies beyond imports — any autofix that cleans up "unused" artifacts (variables, parameters, `# noqa` lines whose flagged rule no longer triggers) can leave a reverted file in a broken state the autofix-free version would have preserved. Two mitigations:
 

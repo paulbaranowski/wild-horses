@@ -33,11 +33,11 @@ Key flags:
 
 The same error gets fixed three different ways depending on intent:
 
-| Intent       | Lean                                                                                                                     | Output shape                                        |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- |
-| `silence`    | Rule-specific suppressions (`# pyright: ignore[rule]`) + `cast()` at boundaries. Still flags real bugs.                  | Fastest to zero; small diff; many suppressions.     |
-| `improve`    | Widen over coerce, annotate over cast, extract a factory over repeated `cast(T, …)`. Pauses on semantically loaded calls. | Slower, larger diff, durable.                       |
-| `bugs-only`  | Fixes only `bugs.md`-class items; everything else gets a suppression + `# TODO(types): revisit under --intent improve`.  | Zero type churn; grep-able follow-up list.          |
+| Intent      | Lean                                                                                                                      | Output shape                                    |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `silence`   | Rule-specific suppressions (`# pyright: ignore[rule]`) + `cast()` at boundaries. Still flags real bugs.                   | Fastest to zero; small diff; many suppressions. |
+| `improve`   | Widen over coerce, annotate over cast, extract a factory over repeated `cast(T, …)`. Pauses on semantically loaded calls. | Slower, larger diff, durable.                   |
+| `bugs-only` | Fixes only `bugs.md`-class items; everything else gets a suppression + `# TODO(types): revisit under --intent improve`.   | Zero type churn; grep-able follow-up list.      |
 
 ## Types of fixes it makes
 
@@ -52,6 +52,8 @@ General typing patterns, keyed on the rule name pyright prints:
 - **TypedDict ↔ `dict[str, Any]` asymmetry** — widening direction that works with pyright's variance rules.
 - **`reportCallIssue` / no overloads match** — reorder / re-shape args; sometimes a stale `@overload` stack is the culprit.
 - **`reportTypedDictNotRequiredAccess`** — `.get(key)` with an explicit default, or narrow via membership check.
+- **Narrowing across nested scopes** — walrus for single-expression narrowing; pre-bind to a fresh local before comprehensions / closures. Unifies several rule names (`reportOperatorIssue`, `reportOptionalOperand`, `reportArgumentType`) under one fix shape.
+- **Stub-runtime type disagreement** — when stubs declare `T1` but the runtime may produce `T1 | T2 | ...`, widen once to `Any` on a named local and let `isinstance` ladders narrow. Distinct from trust-boundary `cast()`.
 - **Undeclared keys on TypedDict** — decide between widening the TypedDict or switching to a regular dict at the boundary.
 - **`reportAttributeAccessIssue` on class-level fields** — annotate the class attribute; don't rely on `__init__` assignment to infer it.
 - **`def f(x: str = None)` antipattern** — fix to `x: str | None = None`.
@@ -61,6 +63,8 @@ General typing patterns, keyed on the rule name pyright prints:
 - **Pydantic v1 → v2 field renames** (`min_items` → `min_length`, `regex` → `pattern`, …).
 - **Pydantic `Field()` positional defaults** — "Arguments missing for parameters X, Y, Z" on pydantic/Beanie constructors.
 - **`cast(Model, payload)` at pydantic list boundaries** — and the hidden-missing-field trap; when to extract a test factory instead.
+- **Schema projection via `model_validate`, not `cast`** — `cast(B, a.model_dump(include=...))` type-checks but returns a dict at runtime; `B.model_validate(...)` builds a real instance. Decision rule by target type (TypedDict / BaseModel / vanilla dataclass).
+- **`@staticmethod` over module-level free functions for class-adjacent helpers** — paired with the `cast(Required, None)` refactor signal (reference.md); test-patch-target durability is the tiebreaker.
 - **`reportGeneralTypeIssues` / "None is not iterable"**, **`reportOptionalOperand`**, **`reportMissingImports`**.
 - **`bool | None` → `bool` coercion** — when it's safe, and when coercing destroys the "unknown" vs "false" distinction.
 - **Stale `@overload` stacks** — prune overloads that no longer match the implementation.
