@@ -1,7 +1,7 @@
 {
   "name": "pyright",
-  "description": "Run pyright on a Python codebase and fix the errors it finds. Supports optional strictness override (basic/standard/strict), persisting the level to config, and progressive ratcheting from basic to strict.",
-  "version": "1.0.0",
+  "description": "Run pyright on a Python codebase and fix the errors it finds. Supports optional strictness override (basic/standard/strict), persisting the level to config, progressive ratcheting, fix-intent selection (silence/improve/bugs-only), an end-of-run list of suggested type improvements, active TypedDict/Pydantic extraction from opaque dict[str, Any] under --intent improve, and a handoff pointer to /harness:reasoning-gaps.",
+  "version": "1.2.0",
   "author": {
     "name": "Paul Baranowski"
   }

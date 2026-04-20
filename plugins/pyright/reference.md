@@ -133,7 +133,7 @@ When suppressing, add a one-line comment explaining WHY if the reason isn't obvi
 for bit in bits:  # pyright: ignore[reportGeneralTypeIssues]
 ```
 
-## Repetition as a signal: root-cause vs point-fix
+## Repetition as a signal
 
 **If you're about to add the same suppression or the same cast for the third time, stop.** Repetition of a fix is a signal that the leverage is upstream — at the source of the type, not the call site. One root-cause edit can delete dozens of point fixes; continuing to suppress just spreads them.
 
@@ -158,6 +158,24 @@ A non-trivial fraction of any accumulated `# pyright: ignore[<rule>]` suppressio
 **Plan for the surface.** After a root-cause migration that deletes a suppression pattern, re-run pyright expecting *new* errors, not a stable zero. Those errors are the bug-finding payoff of the migration — treat them as findings to fix, not "my change broke something." Budget time for this pass when estimating the work; a migration that looks like "search-replace, run tests, done" will surprise you when the type-checker surfaces 5–10% more work behind where the suppressions were.
 
 **Also re-run tests, not just pyright.** Some of the surfaced bugs are runtime validation issues (e.g., pydantic TypedDict validation — see `libraries.md` § "Pydantic BaseModel fields with TypedDict types enforce at runtime") that the type-checker alone won't catch.
+
+### Grep for stale comments after type tightening
+
+When you change a function's return type or a field's annotation from a loose type (`dict`, `Dict[str, Any]`) to a specific one (`ImageRecord`, `UserProfile`), nearby comments that narrate the old type become lies. Typical phrasings to sweep:
+
+```
+# function X returns Dict[str, Any]; the actual shape matches ImageRecord
+# typed as ImageRecord at call sites
+# shape matches the ImageRecord TypedDict at runtime
+```
+
+These comments were true when written and become actively misleading once the declaration tightens — exactly where future readers look for context. Practical grep:
+
+```bash
+grep -rn "returns Dict\|returns dict\|typed as .* at call sites\|shape matches" <changed-dirs>
+```
+
+Delete or update each match. Also worth a look: removed `cast(T, x)` calls sometimes left a comment upstream explaining *why* the cast was needed. If the cast is gone, the comment often should be too.
 
 ## Narrowing artifacts vs runtime checks
 
