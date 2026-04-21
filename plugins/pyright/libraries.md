@@ -120,12 +120,40 @@ if response.session is None or response.user is None:
 # both narrow from here
 ```
 
-**Query `.data` is loose `Any`.** Cast at the boundary rather than operating on `Any`:
+**Query `.data` is loose `Any` — prefer a Pydantic `BaseModel` for row shapes, not `cast`.** The Python client types `.data` as a loose JSON union. This is a concrete instance of the generic producer-boundary pattern in `rules.md` § "Opaque `dict[str, Any]`" step 0 — the template there shows the producer-agnostic shape; below is the Supabase-specific form with a manager class. The right fix depends on whether a data-access class exists (or should):
+
+_Preferred — production paths with a manager/repository for the table:_
+
+```python
+from pydantic import BaseModel
+
+class UserConfig(BaseModel):
+    user_id: str
+    timezone: str
+    # ... DB-managed columns as Optional
+
+class UserConfigManager:
+    def read(self, user_id: str) -> Optional[UserConfig]:
+        response = self.supabase.table("user_configs").select("*").eq(
+            "user_id", user_id
+        ).execute()
+        if response.data:
+            return UserConfig.model_validate(response.data[0])
+        return None
+```
+
+`model_validate` catches Supabase schema drift, RLS surprises, and wire-format regressions at the boundary with a clear `ValidationError`. Consumers get attribute access (`config.timezone`) instead of dict subscript (`config["timezone"]`), which matches the ergonomics you already have on any Beanie/SQLAlchemy-managed tables in the same codebase — closing an otherwise-invisible architectural asymmetry between DB layers.
+
+_Fallback — one-off scripts, debug code, or exploratory queries:_
 
 ```python
 response = client.table("users").select("*").execute()
 rows = cast(list[dict[str, Any]], response.data)
 ```
+
+Acceptable when the ceremony of a model class isn't warranted (ad-hoc queries, schema discovery, throwaway probes). **Not appropriate for production data paths** — a cast is an unchecked claim that silently admits malformed rows; `model_validate` is a verified guarantee. Three or more `cast(list[dict[str, Any]], response.data)` in production code is a strong signal to lift to the BaseModel pattern above.
+
+See `rules.md` § "Opaque dict[str, Any]" → step 0 for the boundary-case decision rule, and `reference.md` § "Before dict-shape extraction: check for a data-access class" for the architectural framing.
 
 **`SignInWithIdTokenCredentials` TypedDict boundary.** Building the credentials dict and passing it to `sign_in_with_id_token` requires a cast because the parameter is a TypedDict, not `dict[str, Any]`. See `rules.md` § "TypedDict ↔ `dict[str, Any]` asymmetry".
 

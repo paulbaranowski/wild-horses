@@ -502,10 +502,20 @@ A `dict[str, Any]`-typed value (parameter, local, return, or attribute) read thr
 
 ### Decision tree
 
+0. **Does this dict come directly from an external producer?** (DB client response like Supabase/PostgREST `.data`, `httpx`/`requests` `.json()`, subprocess `stdout`, file-parse output, cross-service RPC response, Postgres `fetchall()` rows.) If yes, extract a **Pydantic `BaseModel`** and call `Model.model_validate(...)` at the boundary. **Skip the rest of the tree** — boundary validation is the goal, and TypedDict's unchecked-claim semantics are the wrong tool for data crossing a trust boundary. A producer regression (schema drift, server-side bug, wire-format change) that `TypedDict` would silently admit becomes a clear `ValidationError` at the boundary with `BaseModel`. Steps 1–4 apply only to **internal** dicts — values your own code constructs or static configs.
+
 1. **Is the dict mutated at many sites?** (`d["k"] = ...`, `.pop()`, `.update()`, `del d["k"]`.) If yes, **keep `dict[str, Any]`.** TypedDicts don't cleanly support arbitrary-key mutation at the type level — the same caveat flagged in the `Mapping[str, Any]` section above. Do not extract.
-2. **Is the source a stable server/data contract?** (JSON payload from a documented endpoint, message-broker event, config file schema.) Extract a **`TypedDict`**. Keys that may be absent become `NotRequired`.
-3. **Is pydantic already imported in the file, and would validation/defaults/coercion help?** Extract a **`BaseModel` subclass** and replace `d["k"]` reads with attribute access after `Model.model_validate(d)` at the boundary.
+2. **Is the source a stable internal contract?** (A dict your own code constructs from a known schema — e.g., a config-loader result, a state-machine payload.) Extract a **`TypedDict`**. Keys that may be absent become `NotRequired`.
+3. **Is pydantic already imported in the file, and would validation/defaults/coercion help** even for an internal value? Extract a **`BaseModel` subclass** and replace `d["k"]` reads with attribute access after `Model.model_validate(d)` at the construction site.
 4. **Otherwise** (mixed-shape dict, keys determined at runtime, or the dict flows through too many generic helpers to re-plumb) — keep `dict[str, Any]` and move on.
+
+**Signal patterns that land in step 0.** Any of these in the source near the repeated reads is strong evidence of a boundary case:
+
+- `cast(list[dict[str, Any]], response.data)` — Supabase / PostgREST client
+- `cast(SomeShape, response.json())` — `httpx` / `requests` / similar
+- `cast(Dict[str, Any], json.loads(process.stdout))` — subprocess output
+- `cast(Dict[str, Any], cursor.fetchone())` — DB-API raw access
+- The dict is returned from a class method named `read()`, `get()`, `find()`, `list()`, `upsert()`, `insert()`, `query()`, or similar data-access shape — the "document class"-equivalent pattern belongs at _that_ class, not at the consumer. See `reference.md` § "Before dict-shape extraction: check for a data-access class".
 
 ### Pause and ask before writing
 
@@ -518,7 +528,48 @@ This is semantically loaded in the same class as `bool | None → bool` — the 
 
 Present these to the user as a short proposal and wait for approval. If approval isn't forthcoming, do nothing — the code was already type-clean, leaving it alone is a valid outcome.
 
-### Before / after
+### Before / after — producer boundary (step 0)
+
+The canonical shape for a dict coming off an external producer. Producer-agnostic — the same pattern applies to DB clients, HTTP clients, subprocess JSON, file parses, RPC responses. For a concrete Supabase instance see `libraries.md` § "Supabase" (query `.data`).
+
+```python
+# Before — opaque dict from an external producer, reads scattered across consumers
+def load_user(user_id: str) -> dict[str, Any]:
+    response = external_client.fetch(user_id)          # returns loose JSON
+    return cast(dict[str, Any], response.body)
+
+user = load_user("u1")
+email = user["email"]
+tier = user.get("tier", "free")
+created = user["created_at"]
+```
+
+```python
+# After — BaseModel validated at the boundary; consumers get attribute access
+from pydantic import BaseModel
+
+class UserRecord(BaseModel):
+    email: str
+    created_at: datetime
+    tier: Optional[str] = None          # DB-managed / absent in some rows
+
+def load_user(user_id: str) -> Optional[UserRecord]:
+    response = external_client.fetch(user_id)
+    if response.body is None:
+        return None
+    return UserRecord.model_validate(response.body)    # boundary check
+
+user = load_user("u1")
+email = user.email
+tier = user.tier or "free"
+created = user.created_at
+```
+
+Schema drift at the producer now surfaces as a named `ValidationError` at the `model_validate` call, not as a silent `KeyError` deep in a consumer. The `cast` is gone: it was an unchecked claim, replaced by a verified one. Before running this against real rows, see `reference.md` § "Verify boundary models against the real producer".
+
+### Before / after — internal contract (step 2)
+
+For a dict your own code constructs (not an external producer), a `TypedDict` is usually enough — no runtime validation, just a shape pyright enforces at the call site.
 
 ```python
 # Before — three reads, shape implicit
