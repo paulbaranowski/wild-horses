@@ -16,11 +16,13 @@ This file is the entry point: it holds the index, the setup/triage process, poli
 - Narrowing across nested scopes — walrus and rebind
 - Stub-runtime type disagreement: widen to `Any`, don't cast
 - Reading _undeclared_ keys on a TypedDict
+- Discriminated unions with `Literal` + `TypedDict`
 - `reportAttributeAccessIssue` on class-level fields
 - Attribute typing in `__init__` (starts-None, conditional-init)
 - The `def f(x: str = None)` antipattern
 - Dataclass mutable defaults
 - `Protocol` methods missing `self`
+- When to reach for `Protocol` vs `ABC` vs plain duck typing
 - `asyncio.gather(..., return_exceptions=True)` returns `BaseException | T`
 - Pydantic v1 → v2 field-argument renames
 - Pydantic `Field()` positional defaults (including the "Arguments missing" diagnostic)
@@ -29,6 +31,8 @@ This file is the entry point: it holds the index, the setup/triage process, poli
 - `reportGeneralTypeIssues` / `"None" is not iterable` (also see libraries.md for bitstring, PIL, tornado variants)
 - `reportOptionalOperand`
 - `reportMissingImports` (also see libraries.md § "Optional-runtime dependencies")
+- Third-party library intake flow (typeshed → useLibraryCodeForTypes → --createstub → scoped suppression)
+- `TYPE_CHECKING` for type-only imports
 - Assigning `bool | None` to a `bool` field
 - When `Optional[T] → T` coercion _is_ fine
 - Stale `@overload` stacks become noise under strict
@@ -66,6 +70,8 @@ Real bugs pyright surfaces (not recipes — flag these for user review, don't si
 ### By topic → this file
 
 - [Setup](#setup)
+- [Gradual adoption via narrow `include`](#gradual-adoption-via-narrow-include)
+- [File-level overrides](#file-level-overrides)
 - [Triage process for a large error count](#triage-process-for-a-large-error-count)
 - [Prefer a documented API over "works at runtime" tricks](#prefer-a-documented-api-over-works-at-runtime-tricks)
 - [`cast(Required, None)` at construction is a refactor signal, not a suppression](#castrequired-none-at-construction-is-a-refactor-signal-not-a-suppression)
@@ -92,6 +98,59 @@ pythonVersion = "3.13"        # match your runtime
 `basic` mode catches real bugs (undefined attributes, wrong argument counts, Optional misuse) without the noise of `strict` mode's "everything must be explicitly typed" enforcement. Right starting point for retrofitting types onto an existing codebase; consider `standard` or `strict` as a future tightening.
 
 Install pyright as a dev dependency with whatever package manager the project uses (`uv`, `poetry`, `pip`, etc.).
+
+## Gradual adoption via narrow `include`
+
+Turning pyright on project-wide from day one produces a PR too big to review meaningfully — hundreds of errors across dozens of files, each with its own judgment call. The fix is to narrow `include` to one module, land that, and expand the list in follow-up PRs:
+
+```toml
+[tool.pyright]
+include = ["src/module_a"]     # first module under pyright
+typeCheckingMode = "basic"
+pythonVersion = "3.13"
+```
+
+Each subsequent PR appends a directory to `include` and fixes its errors. Reviewers see one config-line change plus one module's worth of type fixes — not a thousand-file diff.
+
+**Why `include` beats file-level comments for adoption.** `# pyright: strict` / `# pyright: basic` at file tops also works, but it scatters adoption state across N files instead of gathering it in one config block. A reviewer asking "what's currently under pyright?" has to grep for the comments; with `include`, they read one list. File-level comments are the right tool for _mode_ differences within an already-adopted codebase (see § File-level overrides below) — not for drawing the adoption boundary.
+
+**Why not `typeCheckingMode = "off"` + per-file opt-in.** "Off" is the weakest preset, not a full bypass — it still emits syntax-level diagnostics and some basics. Opting files in with `# pyright: strict` over an "off" baseline works mechanically but inverts the normal default-then-override mental model and makes it harder to reason about what's actually checked. `include` keeps the defaults normal.
+
+### Expansion order
+
+When you can, expand by **dependency depth**: start with leaf modules (few internal imports), then the modules that import them, then entry points. This lets each PR stabilize a module's public signatures before the next PR's callers need them. Alternative heuristics (largest-first, by bug frequency, by test coverage) all work, but dependency-depth order minimizes the "signature I just fixed now cascades into the next PR" churn that turns a clean migration into re-litigation.
+
+**Expect a rework pass at the boundary.** When a module enters `include` for the first time, it suddenly sees the tightened types from modules already inside — and those callers may have been silently relying on the old looser signatures. Budget a small pass for this on each expansion PR; don't plan the PR as "just the new module."
+
+### `executionEnvironments` for mixed-strictness inside `include`
+
+If you want different strictness _within_ the adopted set — e.g., `src/` strict, `tests/` basic — use `executionEnvironments` rather than piling per-file comments:
+
+```toml
+[tool.pyright]
+include = ["src", "tests"]
+typeCheckingMode = "basic"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests"
+reportUnknownMemberType = "none"
+reportMissingTypeStubs = "none"
+```
+
+Use this for durable policy decisions (the production-vs-tests split is the canonical case), not as a workaround for a single file that isn't clean yet — for the one-file-temporary case, see § File-level overrides.
+
+## File-level overrides
+
+`# pyright: strict`, `# pyright: basic`, and per-rule `# pyright: reportX=none` comments at the top of a file override the project config for that file. Two legitimate uses:
+
+1. **One file should be stricter (or looser) than the project default** — e.g., a security-critical new module under `strict` in an otherwise-`basic` project. The strictness difference is a durable policy decision about this specific file.
+2. **Temporarily downgrade a single file** that isn't clean yet but is blocking a different fix. Scoped to the one file, documented at the top, easy to remove later.
+
+**Signals the file-level comment is being misused:**
+
+- Used to exclude a file from pyright entirely — use `exclude` in the config for that. File-level comments adjust _mode_, they don't skip the file.
+- Scattered across many files to work around the same cross-cutting pattern — the pattern's fix is upstream (see `rules.md` § "Repetition as a signal" and the intake-flow recipe).
+- Used instead of narrowing `include` during adoption — `include` is cleaner for adoption boundaries (see § Gradual adoption above); file-level comments are for mode differences inside the adopted set.
 
 ## Triage process for a large error count
 

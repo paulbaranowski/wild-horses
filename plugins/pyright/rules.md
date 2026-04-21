@@ -171,6 +171,45 @@ Narrowing won't help — you can't narrow into a key the type doesn't know about
 
 Signal that you're in _this_ case, not the NotRequired case: pyright's complaint mentions "unknown member" / "no member" / `reportGeneralTypeIssues`-style wording rather than `reportTypedDictNotRequiredAccess`, and `if "key" in td:` doesn't narrow the access.
 
+## Discriminated unions with `Literal` + `TypedDict`
+
+When a dict's shape depends on the value of a single field (`status: "success"` → has `data`; `status: "error"` → has `error_code`), modeling each variant as its own `TypedDict` with a `Literal` discriminator lets pyright narrow the whole shape from one check:
+
+```python
+from typing import Any, Literal, TypedDict
+
+class SuccessResponse(TypedDict):
+    status: Literal["success"]
+    data: dict[str, Any]
+
+class ErrorResponse(TypedDict):
+    status: Literal["error"]
+    error_code: int
+
+Response = SuccessResponse | ErrorResponse
+
+def handle(r: Response) -> None:
+    if r["status"] == "success":
+        process(r["data"])           # narrowed to SuccessResponse
+    else:
+        log_error(r["error_code"])   # narrowed to ErrorResponse
+```
+
+Without the `Literal`, pyright can't distinguish the variants; every branch needs `if "data" in r:` / `if "error_code" in r:` guards _and_ still fails `reportTypedDictNotRequiredAccess` if the fields are modeled as `NotRequired`. With the discriminator, one field check narrows the entire shape.
+
+**What discriminates:**
+
+- Literal strings (most common).
+- Literal ints (`version: Literal[1] | Literal[2]`) and literal bools.
+- `str`-backed enum members (`status: Literal[Status.SUCCESS]`).
+
+**What _doesn't_ discriminate:**
+
+- Plain `str` (pyright can't match specific values at the type level).
+- `None` vs. present — use `NotRequired[T]` for "maybe absent" rather than `T | None` in a union, and see § "`reportTypedDictNotRequiredAccess`".
+
+**When the ceremony pays off.** 2+ call sites consume the response and need the distinction; the shape comes from an external producer (so you can't collapse to a class hierarchy); readers benefit from the variants being named. For a 1-site consumer reading 2-3 keys once, an inline conditional is simpler and should stay — don't introduce two TypedDicts for a pattern that touches one function.
+
 ## `reportAttributeAccessIssue` on class-level fields
 
 When a subclass or related object reads `Cls.some_field` and pyright says "unknown attribute": declare the field as a `ClassVar` in the base class so pyright can see it.
@@ -260,6 +299,27 @@ class CalendarProvider(Protocol):
 ```
 
 Runtime duck-typing from module-level functions (`google_provider.add_event(calendar_id, event)`) still satisfies the Protocol because Python doesn't check `self`; the Protocol's only consumer is pyright. Add `self` and the call sites type-check.
+
+## When to reach for `Protocol` vs `ABC` vs plain duck typing
+
+The recipe above covers the missing-`self` trap once you've chosen Protocol. The upstream question — _should_ this be a Protocol? — comes up during adoption when you're deciding how to type a pluggable surface (providers, storage backends, notifiers).
+
+**Use `Protocol` when:**
+
+- Multiple unrelated classes or modules satisfy the same shape and you don't control all of them. Structural match means nothing has to inherit; anything that duck-types fits, including module-level functions and third-party classes you can't modify.
+- You want existing objects recognized _without_ wrapping or adapter layers.
+
+**Use `ABC` (abstract base class) when:**
+
+- You own all the implementations and want them forced to inherit — ABC runs the check at instantiation, Protocol does not.
+- You need shared concrete implementation alongside the abstract interface. ABC can mix `@abstractmethod` declarations with concrete helper methods that subclasses inherit; Protocol cannot provide inheritable behavior.
+- The type is public API and you want callers to explicitly opt in via inheritance (declaration visible in the MRO).
+
+**Use plain duck typing (no formal type) when:**
+
+- The shape is used in one place, by one caller, and lifting it into a Protocol adds more ceremony than insight.
+
+**Common mistake: defaulting to ABC.** Teams coming from Java / C# reach for ABC because "interfaces should be declared somewhere." In Python, Protocol is usually the better default for interface-like contracts — it costs nothing to add, existing code fits without changes, and `@runtime_checkable` can be added if `isinstance` support matters. Reserve ABC for when the _forcing_ matters (you want to block subclasses that don't implement required methods) or when you genuinely need shared concrete methods.
 
 ## `asyncio.gather(..., return_exceptions=True)` returns `BaseException | T`
 
@@ -561,6 +621,57 @@ If this matches your team's style, add it to the project's contributor guide / `
 ## `reportMissingImports`
 
 Real issue. Usually `sys.path`-manipulated imports, or genuinely-missing modules. If the `sys.path` manipulation is intentional, `# pyright: ignore[reportMissingImports]` is acceptable.
+
+## Third-party library intake flow
+
+When a new library arrives and pyright complains about missing types (`reportMissingTypeStubs`, `reportUnknownMemberType` on its symbols, or cascading `Unknown` into call chains), four fixes exist. Try them in this order — each step down is a step toward "the type checker can't help me here":
+
+1. **Install typeshed stubs: `pip install types-<library>`.** Real type information, zero config change. Common names: `types-requests`, `types-PyYAML`, `types-cachetools`, `types-python-dateutil`. Search PyPI for `types-<name>` before assuming stubs don't exist.
+
+2. **Enable `useLibraryCodeForTypes`.** Pyright infers types from the library's source when stubs are absent. Works well for libraries with thorough inline annotations; degrades to partial types (leaking `Unknown`) for libraries that annotate inconsistently.
+
+   ```toml
+   [tool.pyright]
+   useLibraryCodeForTypes = true
+   ```
+
+   Fine under `basic` mode; under `strict`, the partial-types leak becomes visible and you'll likely want to pair it with `allowedUntypedLibraries` for the worst offenders.
+
+3. **Generate stubs with `pyright --createstub <module>`.** Writes skeleton `.pyi` files to a local `typings/` directory, which you commit and maintain. Treat the generated stub as a starting point — fill in real types for the functions you actually call; the `Unknown` placeholders are useless until you do. Worth it for a library that's deeply depended on and whose inferred types are inadequate.
+
+4. **Scoped suppression.** Last resort. Prefer `allowedUntypedLibraries` (per-library) over `reportMissingTypeStubs = "none"` (project-wide): the scoped form names which library lacks types, so a future maintainer can revisit.
+
+   ```toml
+   [tool.pyright]
+   allowedUntypedLibraries = ["some_lib", "some_lib.submodule"]
+   ```
+
+**Why the order.** Stubs give real types; `useLibraryCodeForTypes` gives inferred (often partial) types; generated stubs give a skeleton you own; suppression gives nothing. Stop at the first step that solves the problem; don't jump to suppression because it's fastest — that silences the error but also silences the type checker for everything that library touches downstream. See the related `libraries.md` recipes for library-specific stub fixes; this flow is the "what do I try _first_" layer before any of those.
+
+**When to contribute stubs upstream.** If you're maintaining `.pyi` files for a library you've patched or extended, contributing those stubs upstream (to typeshed or the library itself) is almost always better than keeping them in your `typings/` forever — one commit, every consumer benefits.
+
+## `TYPE_CHECKING` for type-only imports
+
+Pyright sees imports inside `if TYPE_CHECKING:` blocks when type-checking but skips them at runtime. Two places this matters:
+
+1. **Circular imports where each side only needs the other for annotations.** Module A imports B for a parameter type; B imports A for the same reason. Runtime breaks with `ImportError`. Fix: put one side's import under `TYPE_CHECKING` and quote the annotation (or use `from __future__ import annotations` to make every annotation a string automatically).
+
+   ```python
+   from __future__ import annotations
+   from typing import TYPE_CHECKING
+
+   if TYPE_CHECKING:
+       from app.services.billing import BillingClient
+
+   def process(client: BillingClient) -> None:
+       ...
+   ```
+
+2. **Heavy imports whose only runtime cost is annotations.** Big modules (`pandas`, `torch`) imported only for type names. Same pattern — guard the import, quote or `__future__`-annotate.
+
+**The gotcha.** Without `from __future__ import annotations` (PEP 563), bare annotations still evaluate at runtime — `BillingClient` would raise `NameError` because the import didn't happen. Two fixes: quote the annotation (`def process(client: "BillingClient") -> None:`), or add the future import at the top of the file. The future import is usually cleaner — it makes _all_ annotations strings, not just the guarded one.
+
+**Don't overuse.** `TYPE_CHECKING` hides imports from readers who grep for dependencies. Use it for the two cases above, not as a generic "this import is only for annotations" cleanup. One-off type-only imports in an otherwise normal module don't need the machinery — normal imports are fine.
 
 ## Assigning `bool | None` to a `bool` field
 
