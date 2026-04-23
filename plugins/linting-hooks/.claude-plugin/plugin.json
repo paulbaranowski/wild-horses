@@ -1,0 +1,8 @@
+{
+  "name": "linting-hooks",
+  "description": "PostToolUse hooks that run Prettier + markdownlint on .md edits and pyright on .py edits. Hooks are registered automatically; /linting-hooks:install detects and installs the required software per machine.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Paul Baranowski"
+  }
+}

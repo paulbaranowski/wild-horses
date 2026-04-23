@@ -1,7 +1,7 @@
 {
   "name": "harness",
-  "description": "feedback-blockers, reasoning-gaps, setup, and hooks commands for harness engineering. Analyze code for feedback-loop blockers and AI reasoning gaps, set up the harness directory structure, and install PostToolUse hooks that run Prettier/markdownlint on .md edits and pyright on .py edits.",
-  "version": "2.9.0",
+  "description": "feedback-blockers, reasoning-gaps, and setup commands for harness engineering. Analyze code for feedback-loop blockers and AI reasoning gaps, and set up the harness directory structure. (PostToolUse linting hooks moved to the separate linting-hooks plugin.)",
+  "version": "3.0.0",
   "author": {
     "name": "Paul Baranowski"
   }
