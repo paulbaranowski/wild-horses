@@ -560,6 +560,8 @@ def load_user(user_id: str) -> Optional[UserRecord]:
     return UserRecord.model_validate(response.body)    # boundary check
 
 user = load_user("u1")
+if user is None:
+    raise LookupError("user u1 not found")
 email = user.email
 tier = user.tier or "free"
 created = user.created_at
