@@ -1,10 +1,10 @@
 ---
-description: Configure the harness PostToolUse hooks (markdown-combo-fix, pyright-post-edit). Asks which hooks you want, detects missing tools, and installs them with your consent. Hook registration is handled automatically by the plugin; this command only manages the software each hook depends on.
+description: Install the software the linting-hooks plugin's PostToolUse hooks depend on (prettier, markdownlint-cli2, pyright, jq). Hooks are registered automatically on plugin enable; this command only manages the per-machine software each hook needs to actually do work.
 ---
 
-# Harness Hooks Setup
+# Linting Hooks — Install
 
-Configure the **PostToolUse hooks** bundled with this plugin. Hook registration is automatic (via `hooks/hooks.json` merged on plugin enable). Scripts silently no-op until their dependencies are installed — so a hook is inert on a fresh install and becomes active once the right software is on `PATH`.
+Set up the **PostToolUse hooks** bundled with this plugin. Hook registration is automatic (via `hooks/hooks.json` merged on plugin enable). Scripts silently no-op until their dependencies are installed — so a hook is inert on a fresh install and becomes active once the right software is on `PATH`.
 
 This command is the opt-in surface for **which hooks the user wants functional** and **what software to install** to make that so.
 
@@ -25,7 +25,7 @@ Each script self-guards: if required tools are missing, it exits 0 without outpu
 
 Show the table above to the user. Then use `AskUserQuestion` with `multiSelect: true`:
 
-- **Question:** "Which harness hooks should be functional on this machine? (Hooks are already registered; this picks which ones get their software installed.)"
+- **Question:** "Which linting hooks should be functional on this machine? (Hooks are already registered; this picks which ones get their software installed.)"
 - **Header:** "Hooks"
 - **Options** (one per bundled hook above) — label is the hook name, description summarises its behavior + deps.
 
@@ -85,7 +85,7 @@ Then remind the user:
 
 - "Hooks are registered automatically — no edits to `settings.json` are needed."
 - "To disable a hook without uninstalling its deps, edit `hooks/hooks.json` in the plugin or disable the plugin via `/plugin`."
-- "If you want the hooks functional on another machine, run `/harness:hooks` again there."
+- "If you want the hooks functional on another machine, run `/linting-hooks:install` again there."
 
 Stop. Do not run any hooks directly to "test" them — the user will see them fire on their next edit.
 
@@ -97,4 +97,4 @@ Stop. Do not run any hooks directly to "test" them — the user will see them fi
 2. **Never edit the user's `settings.json`.** Registration is the plugin system's job.
 3. **Never touch the hook scripts themselves** from this command. If a hook needs a behavior change, edit its script file directly (and bump the plugin version).
 4. **Platform fallback:** on non-macOS systems, print manual install lines instead of running them.
-5. **Idempotent:** running `/harness:hooks` a second time should do nothing when everything is already installed — report all-green and exit.
+5. **Idempotent:** running `/linting-hooks:install` a second time should do nothing when everything is already installed — report all-green and exit.

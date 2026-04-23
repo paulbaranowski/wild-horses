@@ -1,7 +1,7 @@
 #!/bin/bash
 # PostToolUse hook: run Prettier + markdownlint-cli2 on any .md file edited by
 # Claude. Silently no-op when deps are missing so the hook is harmless until
-# /harness:hooks installs them.
+# /linting-hooks:install installs them.
 
 command -v jq >/dev/null 2>&1 && command -v prettier >/dev/null 2>&1 && command -v markdownlint-cli2 >/dev/null 2>&1 || exit 0
 
