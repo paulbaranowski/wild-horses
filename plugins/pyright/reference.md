@@ -80,6 +80,7 @@ Real bugs pyright surfaces (not recipes — flag these for user review, don't si
 - [Harness / CI integration](#harness--ci-integration) (includes Assert vs raise)
 - [Parallel agent dispatch pattern](#parallel-agent-dispatch-pattern)
 - [Verifying external type findings before acting](#verifying-external-type-findings-before-acting)
+- [Verify boundary models against the real producer](#verify-boundary-models-against-the-real-producer)
 - [If your editor / hook auto-fixes on save](#if-your-editor--hook-auto-fixes-on-save)
 - [Serialization backward compat when removing fields](#serialization-backward-compat-when-removing-fields)
 - [Configuration intent as source of truth](#configuration-intent-as-source-of-truth)
@@ -245,6 +246,25 @@ Rules of thumb:
 3. **Cross-partition cooperation beats strict signature-freeze.** Parallel dispatch uses signature-freeze to prevent agents conflicting, not to forbid upstream fixes. If a partition hits a high-repetition pattern, its report should flag "root-cause fix belongs in `<production-file>`" rather than silently suppressing through. The orchestrator can then dispatch a targeted follow-up or consolidate before committing.
 4. **Production edits can be staged before the test run.** For known high-repetition patterns (pydantic `Field(None, ...)`, ad-hoc TypedDict construction, missing shared factories), fix them in a pre-pass commit _before_ dispatching the parallel fix work. Saves the entire cycle of "suppress → notice → undo suppressions → root-cause → re-verify."
 
+### Before dict-shape extraction: check for a data-access class
+
+When the opaque dict comes from — or is returned by — a class method shaped like data access, that class is where the model belongs, not the consumer that reads the dict. Ask this **before** walking the `rules.md` § "Opaque dict[str, Any]" decision tree: **"Is there already a manager / repository / DAO / CRUD class returning raw dicts for this data?"**
+
+**Signal patterns:**
+
+- `class FooManager: def read(...) -> Optional[dict[str, Any]]: ...`
+- `class FooRepository: def find_by(...) -> list[dict[str, Any]]: ...`
+- A CRUD-shaped class (`upsert`, `insert`, `delete`, `query`) returning raw dicts
+- Callers writing `result["field"]` on the return value of such a method
+
+**Fix:** define a Pydantic `BaseModel` for the row shape; change the method's return type; call `Model.model_validate(...)` inside the method. Consumers switch from `result["field"]` to `result.field`.
+
+The model + manager pair forms a "document class"-equivalent — the analog to Beanie's `Document` or SQLAlchemy's declarative classes for data stores that don't have a first-party ODM. **Codebases that have this pattern on one data store and raw dict-shuffling on another are showing a structural asymmetry the extraction closes.** Cross-DB inconsistency is diagnostic: the weaker layer is almost always the one that needs the upgrade.
+
+**Why this is the first question, not a later one.** The `rules.md` decision tree asks about mutation, schema stability, and pydantic availability — all useful, but all answered at the _call site_. When the real fix is at the manager, walking the tree misroutes the work: an agent ends up optimizing the local cast, adding a TypedDict, or building a helper, when one architectural edit at the manager would have deleted every downstream cast. Checking for the manager first collapses N local fixes into 1.
+
+**When the answer is "no":** there's no existing manager/repository class, and the dict flows ad-hoc through a function. Fall through to the `rules.md` decision tree — the boundary-vs-internal split in step 0 still applies, but the fix lives at the function, not at a missing class. (If the data crosses a service boundary and is ad-hoc, consider whether _introducing_ a manager is in scope for the run — usually out of scope for an `--improve` pass, but worth flagging in the end-of-run report.)
+
 ### Removing suppressions is a bug-finding operation
 
 A non-trivial fraction of any accumulated `# pyright: ignore[<rule>]` suppression pattern turns out to be hiding real bugs, not just stub noise. Observed range: 5–10% across a single-rule bulk migration. Example shapes:
@@ -257,6 +277,18 @@ A non-trivial fraction of any accumulated `# pyright: ignore[<rule>]` suppressio
 **Plan for the surface.** After a root-cause migration that deletes a suppression pattern, re-run pyright expecting _new_ errors, not a stable zero. Those errors are the bug-finding payoff of the migration — treat them as findings to fix, not "my change broke something." Budget time for this pass when estimating the work; a migration that looks like "search-replace, run tests, done" will surprise you when the type-checker surfaces 5–10% more work behind where the suppressions were.
 
 **Also re-run tests, not just pyright.** Some of the surfaced bugs are runtime validation issues (e.g., pydantic TypedDict validation — see `libraries.md` § "Pydantic BaseModel fields with TypedDict types enforce at runtime") that the type-checker alone won't catch.
+
+### Defensive tests often become redundant after boundary-model extraction
+
+When a test suite has multiple tests checking "what if the input dict is missing a field," "what if a field is `None`," "what if the dict is empty," those are usually a signal that the input should be a validated model — the tests describe scenarios the type system can't rule out, so they're scaffolding around a missing schema.
+
+After extracting a Pydantic model at the **producing** layer (`model_validate` inside a manager's `read()` / `query()` / etc.), those scenarios become structurally impossible at the consumer — the manager either returns a valid model or `None`, never a malformed dict. The defensive tests can usually be deleted.
+
+**Check before deleting:** is the test verifying the _manager's_ behavior (malformed row → `None` or logged `ValidationError`) or the _consumer's_ behavior (malformed dict → safe fallback)? The former stays (and may be worth adding if it doesn't already exist). The latter was scaffolding around an absent schema that now exists.
+
+**Practical consequence:** type-tightening PRs that add a boundary model often **shrink** the test count while improving safety. Don't treat the negative delta as a red flag — it's the right-sizing of a suite that was compensating for a missing schema. Report it in the end-of-run summary as part of the architectural win, not buried as a side effect.
+
+This is the same shape as "Removing suppressions is a bug-finding operation" above, one abstraction layer up: both describe work the root-cause fix deletes, not work it creates. The suppressions were hiding bugs; the defensive tests were hiding the architectural gap.
 
 ### Grep for stale comments after type tightening
 
@@ -398,6 +430,38 @@ General verification sequence:
 5. **Weigh findings against project conventions.** Suggestions to add defensive `or []` / explicit `if x is None: raise` / preemptive `isinstance` often conflict with a "don't defend against impossible states" stance. Re-check the project's contributor guide before scattering guards.
 
 Findings framed as prescriptive fixes ("replace X with Y") tempt direct implementation. Reframe them as claims: "the fix's author believes X is wrong. What's the evidence?" Most fail the evidence test.
+
+## Verify boundary models against the real producer
+
+After extracting a Pydantic `BaseModel` for data from an external producer (DB client, HTTP response, subprocess, file parse), the model reflects **inferred** shape — what you could read from existing consumer code. The producer's actual shape may differ:
+
+- **Extra columns / fields** the code never read (benign — Pydantic drops them by default, but could flag columns you'd want to expose)
+- **Type coercions at the client layer** — e.g., Supabase's Python client may hand back `datetime` as ISO-8601 string (not `datetime` object), `uuid` as `str` (not `UUID`), `numeric` as `Decimal` (not `float`). Each becomes a `ValidationError` unless the model accepts the shape the client actually produces
+- **Edge-case nulls** — a column declared `NOT NULL` in the DB might still arrive as `None` in specific cases (aggregations, left joins, RLS-filtered reads that coalesce)
+
+### Standard recipe
+
+Before committing a boundary-model refactor, run a one-off verification script that:
+
+1. Reads one live row from the producer
+2. Prints the symmetric diff of keys (producer vs. model)
+3. Prints each value's runtime Python type
+4. Calls `Model.model_validate(row)` and reports success or the full `ValidationError`
+5. Exits non-zero if validation fails (so it can be reused as a manual CI smoke-check if the producer is reachable)
+
+Keep the script in-tree as `verify_<model>_schema.py` (or similar) — it's a manual-sanity tool, not a test fixture. Don't run it in CI unless the producer is reachable from CI; do run it locally after any boundary-model change or whenever the producer's schema drifts.
+
+### Why `model_validate`'s result is the real pass/fail
+
+The key-set diff is a **diagnostic** — it tells you where the model and producer disagree on which fields exist. But "a key is missing from the producer" isn't necessarily a bug: Pydantic-optional fields with defaults handle that case. The binding question is **"does the real row pass the declared validators?"** If yes, the model is structurally safe even when columns don't match exactly; if no, Pydantic's error message names the specific bad field — a diagnostic gift a `cast`-based approach doesn't provide.
+
+### Empty-producer trap
+
+The script prints "(no rows found)" when the test user / account has no data in the table. Easy to misread as "all good" — it isn't. Either seed a row first (many codebases already have `__main__` blocks or fixture scripts that do this) or have the script **error out loudly** when it finds zero rows. Silent-pass on empty producers is a real footgun; the whole point of this step is to hit the producer.
+
+### When to run
+
+Boundary-model verification is model-generation-complete, not pyright-complete — pyright can't see whether a Pydantic model matches a runtime producer, because the producer isn't in scope for static analysis. This step belongs to the `--improve` flow, not the basic/standard/strict error-fix flow. Specifically: after the model is written and before the refactor is considered done. An agent completing an opaque-dict → BaseModel extraction at a producer boundary (`rules.md` § "Opaque dict" step 0) should surface this step in the end-of-run report even if the verification requires human execution (e.g., the producer isn't reachable from the agent's environment).
 
 ## If your editor / hook auto-fixes on save
 

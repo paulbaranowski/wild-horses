@@ -72,7 +72,7 @@ General typing patterns, keyed on the rule name pyright prints:
 - **`TYPE_CHECKING` for type-only imports** — guarded imports for circular references and heavy type-only dependencies; pair with `from __future__ import annotations` to avoid runtime `NameError`.
 - **`bool | None` → `bool` coercion** — when it's safe, and when coercing destroys the "unknown" vs "false" distinction.
 - **Stale `@overload` stacks** — prune overloads that no longer match the implementation.
-- **Opaque `dict[str, Any]` with repeated key reads** — `--intent improve` only. Scans touched files for `dict[str, Any]` values read through 3+ distinct literal keys and proposes extracting a TypedDict or Pydantic model. Pyright doesn't flag these (they're type-clean) but they block data-flow tracing; extraction gives the contract a name. Asks for approval before writing — the decision tree pauses on name, location, optional-key shape, and migration radius.
+- **Opaque `dict[str, Any]` with repeated key reads** — `--intent improve` only. Scans touched files for `dict[str, Any]` values read through 3+ distinct literal keys and proposes extraction. Prefers **Pydantic `BaseModel`** (with `model_validate` at the boundary) for dicts coming off an **external producer** (DB client, HTTP response, subprocess, file parse); **TypedDict** for internal contracts your own code constructs. Also checks whether a data-access class (manager/repository) is the right place for the model. Pyright doesn't flag any of this (code is type-clean) but the shapes block data-flow tracing; extraction gives the contract a name. Asks for approval before writing — the decision tree pauses on name, location, optional-key shape, and migration radius.
 
 ### Library-stub workarounds (`libraries.md`)
 
