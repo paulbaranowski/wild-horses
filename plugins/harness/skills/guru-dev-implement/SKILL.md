@@ -150,7 +150,7 @@ Do not bundle. The bootstrap is reusable across future Option E rewrites; the fe
 
 On the old branch (the `else` arm or the function being shadowed), apply:
 
-```
+```text
 DEPRECATED <YYYY-MM-DD>: replaced by `<new_function_or_path>`.
 Force OLD via <one-line: how to force OLD locally — e.g. "set FLAG_X=0",
 "Toggle.with_old(Feature.X)", "Flipper.disable(:flag_x) in console">.

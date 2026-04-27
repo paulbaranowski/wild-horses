@@ -69,7 +69,7 @@ If the audit turns up _nothing_ overlapping on any axis, that's a real signal �
 
 ## Phase 4: Make the Decision
 
-Pick exactly **one** of the four options and state it. The decision must be specific enough that someone reading it knows what file(s) to open first.
+Pick exactly **one** of the five options and state it. The decision must be specific enough that someone reading it knows what file(s) to open first.
 
 ### Option A — Extend
 
@@ -142,7 +142,7 @@ Present the recommendation in this exact shape so it can be pasted into `/guru-d
 **Natural home:** `path/to/module.py` (or class `Foo` within it)
 [one-sentence justification — why this home over the other candidates]
 
-**Decision:** Extend / Adapt / Refactor first / Add new / Parallel-new-with-Toggle
+**Decision:** extend / adapt / refactor-first / add-new / parallel-new-with-toggle
 
 **What this means concretely:**
 
