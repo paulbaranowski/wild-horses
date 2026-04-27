@@ -6,13 +6,17 @@ A [Claude Code](https://claude.ai/code) plugin marketplace for making code AI-re
 
 ### harness
 
-Harness engineering tools — find AI reasoning gaps, audit code for feedback-loop blockers, and set up the harness directory structure.
+Five harness-engineering tools. Two analyze existing code — `/harness:reasoning-gaps` for AI-comprehension gaps, `/harness:feedback-blockers` for verification gaps. Two shape new code — `/guru-dev-review (harness)` decides where the change belongs, `/guru-dev-implement (harness)` writes it with the same rule-sets applied as TDD discipline. Plus `/harness:setup` to scaffold the docs directory.
 
 ```text
 /plugin install harness@wild-horses
 ```
 
-#### Typical workflow
+#### Typical workflows
+
+Two flows — audit existing code, or implement new code. Both pull from the same rule-sets.
+
+##### Audit existing code
 
 Set up the documentation structure so agents can orient themselves:
 
@@ -35,6 +39,24 @@ Then fix the feedback loops — testability, opaque errors, tight coupling. This
 ```
 
 Both analysis commands accept file paths, directory paths, or free-form descriptions of what to analyze. They default to files changed on the current branch when run without arguments. Each produces a remediation plan with ranked interventions that can be implemented automatically — you review the plan, choose "implement all," and the agent loop works through each task, running tests after every change.
+
+##### Implement new code
+
+Decide where the change belongs and what shape it should take. The senior-dev "evolve, don't append" survey decides among extend / adapt / refactor-first / add-new / parallel-new-with-toggle:
+
+```text
+/guru-dev-review the new payment retry logic
+/guru-dev-review docs/exec-plans/active/payment-retry.md
+```
+
+Then implement with TDD discipline and the same rule-sets the analyzers use, applied at write-time instead of post-hoc:
+
+```text
+/guru-dev-implement the new payment retry logic
+/guru-dev-implement docs/exec-plans/active/payment-retry.md
+```
+
+Both are skills, so they appear in the slash menu as `/guru-dev-review (harness)` and `/guru-dev-implement (harness)` — Claude Code skills don't carry the `/harness:` plugin-namespace prefix that commands do. The implement skill consumes the review's structured output directly, so the two flow into each other.
 
 ---
 
@@ -102,6 +124,76 @@ Analyzes existing files, proposes moves and generations, executes after approval
 ```text
 /harness:setup
 /harness:setup /path/to/project
+```
+
+#### /guru-dev-review
+
+**Skill, not command.** Shows as `/guru-dev-review (harness)` in the slash menu — Claude Code skills don't carry the `/harness:` plugin-namespace prefix that commands do.
+
+**Why this matters for AI development:** When an AI agent is asked to add a feature, the easy default is to add new files alongside existing ones. That works locally and silently fragments the codebase — every "add new" that should have been "extend" or "adapt" leaves behind two structures that do almost the same thing, and every future change has to re-decide between them. This skill enforces a senior-dev "evolve, don't append" discipline before any code is written: it surveys the codebase for the natural home of the change, audits overlapping structures, names anti-patterns to reject, and outputs a structured recommendation that can be pasted directly into `/guru-dev-implement`.
+
+Decides among five options:
+
+| Option                       | Use when                                                                                                                                          |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Extend**                   | The new behavior is a natural variant of existing behavior — same shape, slightly different parameters or one new caller.                         |
+| **Adapt**                    | The existing structure is _almost_ right but hardcodes something the new case needs to vary; widen a type, parameterize a constant.               |
+| **Refactor first**           | The existing code blocks a clean addition; do a small no-behavior-change refactor as a separate first commit, then add on top.                    |
+| **Add new**                  | No existing structure fits without distortion AND options A–C have been considered and rejected with concrete reasons.                            |
+| **Parallel-new-with-Toggle** | The change alters the observable behavior of existing functionality and you want a local A/B verification path before committing to the new path. |
+
+The toggle path supports the project's existing flag system if one exists (Flipper, LaunchDarkly, Unleash, Flagsmith, Statsig, …), or OpenFeature with its in-memory provider as the vendor-neutral default, or a minimal in-codebase `Toggle` value-object pattern (~30 lines) when frozen-snapshot threading semantics are explicitly wanted.
+
+Output is a structured recommendation: the natural home (file path + one-sentence justification), the decision and what it means concretely, existing structures to plug into (cited at `file:line`), the toggle mechanism (if applicable), anti-patterns considered and avoided, and any open questions for the user.
+
+```text
+/guru-dev-review the new payment retry logic
+/guru-dev-review docs/exec-plans/active/payment-retry.md
+/guru-dev-review
+```
+
+#### /guru-dev-implement
+
+**Skill, not command.** Shows as `/guru-dev-implement (harness)` in the slash menu.
+
+**Why this matters for AI development:** The two analyzer commands above are review-time audits — they surface problems in code that already exists. This skill is their **write-time mirror**: same rule-sets, applied as a generation discipline rather than a post-hoc cleanup. It prevents the gaps from being written in the first place, so future agents can understand the code and verify their edits.
+
+Three non-negotiables:
+
+1. **Decide the shape before writing.** Either run `/guru-dev-review` first or make the call inline. Don't start writing before naming whether you're doing extend / adapt / refactor-first / add-new / parallel-new-with-toggle.
+2. **Tests before code.** Write failing tests first. Watch them fail for the _right reason_ (`AssertionError` / `ImportError` / `AttributeError` pointing at the not-yet-existing code, not a typo or missing fixture). Then write the smallest code that makes them pass.
+3. **Apply the rules at write-time.** Walk a condensed checklist drawn from `reasoning-gaps` (typed signatures, no dict-based contracts, no hidden flow, module/class docstrings, "why" comments) and `feedback-blockers` (dependencies injected, no untestable side effects, no non-determinism without a seam, errors loud and located, encapsulation honored, single responsibility) before declaring done.
+
+For behavior changes via parallel-new-with-toggle, the skill scans for an existing flag system first, then falls back to OpenFeature or the minimal in-codebase pattern, applies the deprecation comment template to the old branch (with the replacement path, how to force OLD locally, and the removal trigger), and records the removal commit as a follow-up.
+
+Reports back with: what was built, the senior-dev decision and why, the toggle details (if applicable), test count and status, rule-checklist results, files touched grouped by created vs modified, and suggested follow-ups not in scope for the current change.
+
+```text
+/guru-dev-implement the new payment retry logic
+/guru-dev-implement docs/exec-plans/active/payment-retry.md
+```
+
+### linting-hooks
+
+Auto-format and type-check files as Claude edits them. PostToolUse hooks fire after every `.md` and `.py` edit; scripts self-guard so they no-op silently when the underlying tools aren't installed.
+
+```text
+/plugin install linting-hooks@wild-horses
+```
+
+| Hook                 | When it fires                                            | What it does                                                                               | Dependencies                          |
+| -------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------- |
+| `markdown-combo-fix` | PostToolUse on `Edit`, `Write`, or `MultiEdit` for `.md` | Runs `prettier --write` then `markdownlint-cli2 --fix` on the edited file. Non-blocking.   | `jq`, `prettier`, `markdownlint-cli2` |
+| `pyright-post-edit`  | PostToolUse on `Edit`, `Write`, or `MultiEdit` for `.py` | Runs `pyright <file>` and prints findings to stderr. Non-blocking — never blocks the edit. | `jq`, `pyright`                       |
+
+#### /linting-hooks:install
+
+**Why this matters for AI development:** Linting and type-checking are the cheapest agent feedback signal you can buy. Running them as a hook (not a separate step the agent has to remember) means every `.md` and `.py` edit gets immediately formatted or type-checked, with results streamed back to the agent as part of the tool result. Mistakes are caught at the edit site, not three steps later when the agent finally remembers to run a checker.
+
+Detects which dependencies are missing on the current machine and walks you through installing them. Hooks are registered automatically when the plugin enables; this command only manages the underlying software (`prettier`, `markdownlint-cli2`, `pyright`, `jq`) — picking it interactively per hook so you can opt out of either.
+
+```text
+/linting-hooks:install
 ```
 
 ### pyright

@@ -10,7 +10,7 @@
     {
       "name": "harness",
       "source": "./plugins/harness",
-      "description": "feedback-blockers, reasoning-gaps, and setup commands for harness engineering. Analyze code for feedback-loop blockers, AI reasoning gaps, and set up the harness directory structure.",
+      "description": "Five harness-engineering tools, each answering one question — about whether AI can understand code (reasoning-gaps), verify edits (feedback-blockers), find a home for new code (guru-dev-review), or write code that stays comprehensible (guru-dev-implement). Plus /harness:setup for the directory layout.",
       "author": {
         "name": "Paul Baranowski"
       },
