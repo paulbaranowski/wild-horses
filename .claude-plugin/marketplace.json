@@ -10,7 +10,7 @@
     {
       "name": "harness",
       "source": "./plugins/harness",
-      "description": "Five harness-engineering tools, each answering one question — about whether AI can understand code (reasoning-gaps), verify edits (feedback-blockers), find a home for new code (guru-dev-review), or write code that stays comprehensible (guru-dev-implement). Plus /harness:setup for the directory layout.",
+      "description": "Four harness-engineering tools, each answering one question — about whether AI can understand code (reasoning-gaps), verify edits (feedback-blockers), and find a home for new code (guru-dev-review, which includes Option E flag-tier decisions for behavior changes). Plus /harness:setup for directory scaffolding and two reference docs (option-e-mechanics, rule-checklist) consulted by executors. Designed to compose with superpowers:writing-plans + superpowers:executing-plans for the implementation phase.",
       "author": {
         "name": "Paul Baranowski"
       },

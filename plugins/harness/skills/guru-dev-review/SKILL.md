@@ -1,6 +1,6 @@
 ---
 name: guru-dev-review
-description: Review a proposed change against the existing codebase before implementation to decide among extend, adapt, refactor-first, add-new, or parallel-new-with-toggle (for behavior changes to existing code). Applies a senior-dev "evolve, don't append" discipline — looks for the natural home of the change, audits overlapping structures, names anti-patterns to reject, and outputs a structured recommendation that can be handed to `/guru-dev-implement (harness)`. Use before writing any non-trivial new code, especially when the change might fit inside or alongside something that already exists, or when it changes the behavior of an existing feature. Auto-invokes on phrases like "should I add", "where should this go", "is there already a", "refactor", "change the behavior of", or "before I implement".
+description: Pre-implementation senior-dev review — decides where a change belongs in the codebase (extend / adapt / refactor-first / add-new / parallel-new-with-toggle) and captures the planning details an executor needs (acceptance criteria, natural home, overlapping structures, anti-patterns rejected, and — for parallel-new-with-toggle — the flag-system tier + removal trigger). Outputs a structured recommendation designed to be handed to `superpowers:writing-plans` for task decomposition, then to `superpowers:executing-plans` or `superpowers:subagent-driven-development` for execution. Use before writing any non-trivial new code. Auto-invokes on phrases like "should I add", "where should this go", "is there already a", "refactor", "change the behavior of", or "before I implement".
 user-invocable: true
 disable-model-invocation: false
 argument-hint: "[change description or path to plan file]"
@@ -27,12 +27,17 @@ This is **not** "find a util to call." It is asking whether the new requirement 
    - If it's a free-form description, restate it back to the user in one sentence and confirm.
    - If empty, ask the user what change they want surveyed.
 
-2. Identify three things explicitly:
+2. Identify three things explicitly — these are the angles you'll search the codebase for overlap on. A change is rarely brand new on all three axes; usually at least one already has a home.
    - **The data shape** the change introduces or moves around (inputs, outputs, persisted records).
    - **The behavior** it produces (the verb — what does it _do_?).
    - **The trigger / entry point** (a CLI command? an HTTP route? a callback? a scheduled job?).
 
-These three angles are how you'll search the codebase for overlap. A change is rarely brand new on all three axes — usually at least one already has a home.
+3. Capture **acceptance criteria** explicitly:
+   - What inputs does the new code accept?
+   - What observable behavior or output does it produce?
+   - What is _out of scope_? (This is the executor's guardrail against gold-plating.)
+
+If acceptance criteria are vague, ask **one** clarifying question before proceeding to Phase 2. Don't ask three at once and don't proceed on assumption — vague criteria propagate into a vague plan and an over-scoped implementation.
 
 ---
 
@@ -110,11 +115,37 @@ Build the new behavior alongside the old, gated by a flag, with a removal trigge
   3. **Local-verification path** that doesn't require touching production config (an AI or dev can force OLD with a parameter, env var, or in-memory provider).
   4. **Deprecation comment on the old branch** naming the replacement, how to force OLD, and the removal trigger.
   5. **Removal as a separate follow-up commit** — delete the registry entry and the old branch together once validated.
-- **Pick the lightest implementation that fits:**
-  - **Project already has a flag system** (Flipper, LaunchDarkly, Unleash, Flagsmith, Statsig, etc.) — use it. Add a flags-registry module for type-safe references and integrate at the boundary.
-  - **No flag system, want cloud-capable later** — use **OpenFeature** with the in-memory provider for dev/test (Python: `openfeature-sdk` on PyPI; Ruby: `openfeature-sdk` on rubygems). Provider swap is the cloud upgrade path; user code doesn't change.
-  - **No flag system, no plans for cloud or vendor neutrality** — a minimal in-codebase value-object (`Toggle` + `Feature` enum, ~30 lines). Only choose this if you specifically need frozen-snapshot threading semantics; otherwise OpenFeature is lighter overall.
 - **Don't use when:** purely additive new feature (no existing behavior changes — go to A or D); pure refactor with verified no-behavior-change (green existing tests are the verification); trivial single-call-site change where inspection is enough.
+
+#### Option E sub-decisions you must make at review time
+
+If you've chosen Option E, work through these three sub-decisions in order and capture the answers in the Phase 6 output. Implementation patterns for each are in `plugins/harness/option-e-mechanics.md` — but the _decisions_ are planning, and they belong here.
+
+##### E.1 — Scan for an existing flag system in the project
+
+Before introducing any toggle infrastructure, scan the project. If a flag system already exists, the executor must integrate at its boundary instead of adding a parallel one. Look for:
+
+- Imports / usage of: `flipper`, `Flipper.enabled?`, `launchdarkly`, `ldclient`, `unleash`, `flagsmith`, `statsig`, `openfeature`, `posthog`
+- Env-var-driven flags: `os.getenv("FEATURE_X")`, `ENV["FEATURE_X"]`
+- Custom flag modules: `flags.py`, `lib/flags.rb`, `app/feature_flags.rb`, similar
+
+Record what you found (or "none found").
+
+##### E.2 — Pick the implementation tier
+
+The tiers, lightest first:
+
+- **Tier 0: Existing project flag system** (the result of E.1). Always preferred when one exists. The `Toggle` design is just "named, type-safe, default-NEW reference to a flag the existing system evaluates."
+- **Tier 1: OpenFeature** — recommended default when no flag system exists. Vendor-neutral, in-memory provider for dev/test, swap providers for cloud later.
+  - Python: `pip install openfeature-sdk`. Use `InMemoryProvider` for dev/test.
+  - Ruby: `gem install openfeature-sdk`. Use the in-memory provider.
+- **Tier 2: Minimal in-codebase pattern** (`Toggle` value object + `Feature` enum) — only if you specifically want frozen-snapshot threading semantics (decisions made at boundary, immutable thereafter) AND you don't anticipate cloud-capable rollouts. ~30 lines per language.
+
+Tier 1 is the strong default when no existing system was found. Tier 2 should be defended in writing.
+
+##### E.3 — Define the removal trigger
+
+The deprecation comment on the old branch will reference this trigger verbatim. It must be **concrete**, not "eventually" or "when ready". Vague triggers rot. Examples that pass: "after local A/B verification confirms parity", "after 2 weeks default-NEW in production with no rollback signal", "after PR #123 ships". Examples that fail: "soon", "when stable", "later".
 
 ---
 
@@ -132,12 +163,18 @@ Before you finalize, scan the proposed plan for these failure modes. If you spot
 
 ## Phase 6: Output the Review Result
 
-Present the recommendation in this exact shape so it can be pasted into `/guru-dev-implement (harness)` or shared with a colleague:
+Present the recommendation in this exact shape so it can be pasted into `superpowers:writing-plans` or shared with a colleague:
 
 ```markdown
 ## Guru-Dev Review Result
 
 **Change:** [one sentence — the new behavior in plain language]
+
+**Acceptance criteria:**
+
+- **Inputs:** [what the new code accepts]
+- **Observable output / behavior:** [what an outside caller sees]
+- **Out of scope:** [explicit guardrails against gold-plating]
 
 **Natural home:** `path/to/module.py` (or class `Foo` within it)
 [one-sentence justification — why this home over the other candidates]
@@ -156,16 +193,20 @@ Present the recommendation in this exact shape so it can be pasted into `/guru-d
 - `file.py:line` — [type/function/pattern and how the new code uses it]
 - ...
 
-**Toggle mechanism (only if Decision is Parallel-new-with-Toggle):**
+**Toggle mechanism (only if Decision is parallel-new-with-toggle):**
 
-- **Implementation tier:** [project's existing flag system | OpenFeature with in-memory provider | minimal in-codebase Toggle pattern] — and why
+- **Existing flag system in project:** [name + entry point, or "none found"] (from sub-decision E.1)
+- **Implementation tier:** [Tier 0: existing | Tier 1: OpenFeature | Tier 2: minimal in-codebase] — and one-sentence why (from sub-decision E.2)
 - **Flag/feature key:** `<flag-name-here>`
 - **How to force OLD locally:** [one-line — e.g. "set env var FLAG_X=0", "Toggle.with_old(Feature.X)", "Flipper.disable(:flag_x)"]
-- **Removal trigger:** [concrete condition — e.g. "after local A/B verification confirms parity", "after 2 weeks default-NEW in production with no rollback signal", "after PR #123 ships"]
+- **Removal trigger:** [concrete condition — see sub-decision E.3 examples]
+- **Mechanics reference:** the executor should follow `plugins/harness/option-e-mechanics.md` for bootstrap commit pattern, deprecation comment template, A/B verification test, and removal commit checklist.
 
 **Anti-patterns considered and avoided:**
 
 - [name the anti-pattern and the alternative chosen]
+
+**Rule-checklist reference:** the executor should walk `plugins/harness/rule-checklist.md` (reasoning-gaps + feedback-blockers self-check) at the end of each implementation task.
 
 **Open questions for the user (if any):**
 
@@ -173,6 +214,8 @@ Present the recommendation in this exact shape so it can be pasted into `/guru-d
 ```
 
 If there are no open questions, omit that section. If the survey concluded "Add new" with no overlap found, say so plainly — short answers are fine when they're correct.
+
+**Next step — handoff to writing-plans:** paste the result above into `superpowers:writing-plans` (or save it to a spec file under `docs/superpowers/specs/` or your project's equivalent). The plan-writer turns the decision + acceptance criteria + structures-to-plug-into into bite-sized TDD tasks. Then run `superpowers:executing-plans` (or `superpowers:subagent-driven-development`) to execute.
 
 ---
 

@@ -1,7 +1,7 @@
 {
   "name": "harness",
-  "description": "Five independent harness-engineering tools, each answering one question. /harness:reasoning-gaps — Can an AI understand this code well enough to change it correctly? (Audits for untyped signatures, implicit control flow, hidden state, structural complexity.) /harness:feedback-blockers — Can an AI edit this code and know if it got it right? (Audits for verification and observability gaps.) /harness:setup — Where does harness-engineering material live in this repo? (Scaffolds the harness directory; proposes moves for existing files.) /guru-dev-review — Does this change belong inside something that already exists, or do I need new structure? /guru-dev-implement — How do I write this without creating reasoning-gaps or feedback-blockers in the first place? (Reuses the analyzer rule-sets as write-time TDD discipline.)",
-  "version": "3.2.0",
+  "description": "Four independent harness-engineering tools, each answering one question. /harness:reasoning-gaps — Can an AI understand this code well enough to change it correctly? (Audits for untyped signatures, implicit control flow, hidden state, structural complexity.) /harness:feedback-blockers — Can an AI edit this code and know if it got it right? (Audits for verification and observability gaps.) /harness:setup — Where does harness-engineering material live in this repo? (Scaffolds the harness directory.) /guru-dev-review — Does this change belong inside something that already exists, or do I need new structure? (Senior-dev decision, including Option E flag-tier and removal-trigger choices for behavior changes; output handed to superpowers:writing-plans for task decomposition.) Plus reference docs option-e-mechanics.md and rule-checklist.md that executors consult during implementation.",
+  "version": "4.0.0",
   "author": {
     "name": "Paul Baranowski"
   }
