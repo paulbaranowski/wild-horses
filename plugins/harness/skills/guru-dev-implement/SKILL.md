@@ -10,11 +10,11 @@ argument-hint: "[task description or path to plan file]"
 
 This skill enforces a write-time discipline for implementing code. It is the **write-time mirror** of the `/harness:feedback-blockers` and `/harness:reasoning-gaps` review-time analyzers: same rule-set, applied as a generation discipline rather than a post-hoc audit.
 
-It pairs with **`/guru-dev-review (harness)`** — the companion skill that decides whether the change should extend, adapt, refactor-first, or add new structure. For non-trivial changes, run `guru-dev-review` first; this skill then consumes its recommendation.
+It pairs with **`/guru-dev-review (harness)`** — the companion skill that decides whether the change should extend, adapt, refactor-first, add-new, or parallel-new-with-toggle. For non-trivial changes, run `guru-dev-review` first; this skill then consumes its recommendation.
 
 Three non-negotiables:
 
-1. **Decide the shape before writing.** Either run `/guru-dev-review (harness)` first or make a brief decision yourself (Phase 2). Don't start writing before naming which of extend / adapt / refactor-first / add-new you're doing.
+1. **Decide the shape before writing.** Either run `/guru-dev-review (harness)` first or make a brief decision yourself (Phase 2). Don't start writing before naming which of extend / adapt / refactor-first / add-new / parallel-new-with-toggle you're doing.
 2. **Tests before code.** Write failing tests first. Watch them fail for the _right reason_. Then write the smallest code that makes them pass.
 3. **Apply the rules at write-time.** Walk a condensed checklist from `/harness:reasoning-gaps` (types, implicit flow, structure) and `/harness:feedback-blockers` (testability, encapsulation, observability) before declaring done.
 
