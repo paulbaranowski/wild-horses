@@ -241,10 +241,46 @@ Worked example. Pydantic's positional-None form `Field(None, description="...")`
 
 Rules of thumb:
 
-1. **Count before suppressing.** If you're inside a partition and already at 3+ identical suppressions, search the whole codebase: `grep -rn "# pyright: ignore\[<rule>\]" .`. For thresholds that trigger an orchestrator-level consolidation pass, see the command's Phase 3.5.
+1. **Count before suppressing.** If you're inside a partition and already at 3+ identical suppressions, search the whole codebase: `grep -rn "# pyright: ignore\[<rule>\]" .`. For thresholds that trigger an orchestrator-level consolidation pass, see § "Consolidation pass (orchestrator-level)" below.
 2. **Cast repetition is the same signal.** `cast(T, {...})` appearing across many call sites almost always means `T` should have a factory (`def make_T(**overrides) -> T`) or a proper constructor call. See `rules.md` § "When to extract a test factory" for the factory pattern and `rules.md` § "The hidden-missing-field trap" for why `cast(T, {literal})` is a code smell.
 3. **Cross-partition cooperation beats strict signature-freeze.** Parallel dispatch uses signature-freeze to prevent agents conflicting, not to forbid upstream fixes. If a partition hits a high-repetition pattern, its report should flag "root-cause fix belongs in `<production-file>`" rather than silently suppressing through. The orchestrator can then dispatch a targeted follow-up or consolidate before committing.
 4. **Production edits can be staged before the test run.** For known high-repetition patterns (pydantic `Field(None, ...)`, ad-hoc TypedDict construction, missing shared factories), fix them in a pre-pass commit _before_ dispatching the parallel fix work. Saves the entire cycle of "suppress → notice → undo suppressions → root-cause → re-verify."
+
+### Consolidation pass (orchestrator-level)
+
+After parallel dispatch completes, the orchestrator runs a consolidation pass before full verification. Individual partition agents cannot see cross-partition repetition; the orchestrator can. This is the procedure the command's Phase 3.5 follows.
+
+Scan the changed files (not the whole project — this is about _what the run produced_, not pre-existing suppressions):
+
+```bash
+# list Python files the run touched
+files=$(git diff --name-only -- '*.py')
+
+# count suppressions added, by rule
+grep -rhE "pyright: ignore\[[a-zA-Z]+\]" $files \
+  | grep -oE "pyright: ignore\[[a-zA-Z]+\]" \
+  | sort | uniq -c | sort -rn | head
+
+# count casts added, by target type
+grep -rhE "cast\([A-Z][A-Za-z_]+," $files \
+  | grep -oE "cast\([A-Z][A-Za-z_]+," \
+  | sort | uniq -c | sort -rn | head
+```
+
+**Thresholds (pause and investigate if any fire):**
+
+- **Same suppression rule ≥ 10 sites** → probable single upstream cause (pydantic/Beanie `Field(None, ...)`, a class missing a type annotation, a library-stub gap fixable with one root-cause edit). See § "Repetition as a signal" above.
+- **Same `cast(T, ...)` target type ≥ 5 sites** → probable missing factory. See `rules.md` § "When to extract a test factory."
+- **Inconsistency across partitions** — if two agents' reports describe the same problem with different fixes (e.g., one used `cast(FastAPI, self.client.app)`, another used `from app.main import app`), unify on one approach before committing. Diverging solutions to the same problem age badly.
+
+If a threshold fires:
+
+1. Present the counts to the user with `file:line` pointers to a representative sample.
+2. Propose the root-cause fix as a separate commit (often a 10-line production change that deletes dozens of downstream suppressions).
+3. Once the user decides, either apply the root-cause fix (and remove the now-dead suppressions) or mark explicitly as "accepted, will revisit at ratchet time."
+4. Re-run full verification after any consolidation.
+
+If no threshold fires, log "consolidation pass: clean" in the summary and proceed to verification.
 
 ### Before dict-shape extraction: check for a data-access class
 
