@@ -6,13 +6,17 @@ A [Claude Code](https://claude.ai/code) plugin marketplace for making code AI-re
 
 ### harness
 
-Harness engineering tools — find AI reasoning gaps, audit code for feedback-loop blockers, and set up the harness directory structure.
+Four harness-engineering tools plus two reference docs. The two analyzers — `/harness:reasoning-gaps` and `/harness:feedback-blockers` — audit existing code. `/belongs-here (harness)` is the senior-dev pre-implementation decision (where this change belongs, including flag-gated-rewrite tier choices for behavior changes). `/harness:setup` scaffolds the docs directory. The reference docs `flag-gated-rewrite.md` and `rule-checklist.md` are consumed by the executor during implementation. Designed to compose with `superpowers:writing-plans` + `superpowers:executing-plans` for task decomposition and execution.
 
 ```text
 /plugin install harness@wild-horses
 ```
 
-#### Typical workflow
+#### Typical workflows
+
+Two flows — audit existing code, or implement new code. Both pull from the same rule-sets.
+
+##### Audit existing code
 
 Set up the documentation structure so agents can orient themselves:
 
@@ -35,6 +39,29 @@ Then fix the feedback loops — testability, opaque errors, tight coupling. This
 ```
 
 Both analysis commands accept file paths, directory paths, or free-form descriptions of what to analyze. They default to files changed on the current branch when run without arguments. Each produces a remediation plan with ranked interventions that can be implemented automatically — you review the plan, choose "implement all," and the agent loop works through each task, running tests after every change.
+
+##### Implement new code
+
+Layered workflow, integrating with the `superpowers` plugin:
+
+1. **(Optional) Brainstorm intent.** For changes whose purpose / approach isn't already settled, run `superpowers:brainstorming` first. It writes a design spec under `docs/superpowers/specs/` (path configurable) and asks for your approval before continuing.
+2. **Senior-dev review (harness).** Decide _where_ the change belongs and _what shape_ it should take:
+
+   ```text
+   /belongs-here the new payment retry logic
+   /belongs-here docs/superpowers/specs/2026-04-27-payment-retry-design.md
+   ```
+
+   Outputs a structured recommendation: acceptance criteria, natural home, decision (extend / adapt / refactor-first / add-new / flag-gated-rewrite), existing structures to plug into, anti-patterns rejected, and — for flag-gated-rewrite — flag-system tier and removal trigger.
+
+3. **Plan task decomposition (superpowers).** Hand the review output to `superpowers:writing-plans`. It turns the decision + acceptance criteria into bite-sized TDD tasks with exact file paths, test code, and commit boundaries. Saves the plan as a markdown file (default `docs/superpowers/plans/`, configurable to `docs/exec-plans/active/` or wherever you keep plans).
+4. **Execute the plan.** Run `superpowers:executing-plans` (inline) or `superpowers:subagent-driven-development` (fresh subagent per task with checkpoints). The executor walks the plan task by task, applying TDD discipline and consulting two reference docs from this plugin:
+   - `plugins/harness/rule-checklist.md` — reasoning-gaps + feedback-blockers self-check at the end of each task.
+   - `plugins/harness/flag-gated-rewrite.md` — bootstrap commit pattern, deprecation comment template, A/B verification test, and removal commit checklist (only when the decision was flag-gated-rewrite).
+
+`/belongs-here` is a skill, so it appears in the slash menu as `/belongs-here (harness)` — Claude Code skills don't carry the `/harness:` plugin-namespace prefix that commands do.
+
+This plugin **no longer ships an implementation skill of its own** — `superpowers:writing-plans` + `superpowers:executing-plans` cover the TDD execution loop better than a custom skill could. Earlier versions of this plugin shipped `/guru-dev-implement (harness)`; that skill was removed in 4.0.0 (its planning content moved to `/belongs-here`, and its implementation patterns moved to the two reference docs).
 
 ---
 
@@ -102,6 +129,64 @@ Analyzes existing files, proposes moves and generations, executes after approval
 ```text
 /harness:setup
 /harness:setup /path/to/project
+```
+
+#### /belongs-here
+
+**Skill, not command.** Shows as `/belongs-here (harness)` in the slash menu — Claude Code skills don't carry the `/harness:` plugin-namespace prefix that commands do.
+
+**Why this matters for AI development:** When an AI agent is asked to add a feature, the easy default is to add new files alongside existing ones. That works locally and silently fragments the codebase — every "add new" that should have been "extend" or "adapt" leaves behind two structures that do almost the same thing, and every future change has to re-decide between them. This skill enforces a senior-dev "evolve, don't append" discipline before any code is written: it surveys the codebase for the natural home of the change, audits overlapping structures, names anti-patterns to reject, and outputs a structured recommendation that can be pasted directly into `superpowers:writing-plans` for task decomposition.
+
+Decides among five options:
+
+| Option                 | Use when                                                                                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Extend**             | The new behavior is a natural variant of existing behavior — same shape, slightly different parameters or one new caller.                         |
+| **Adapt**              | The existing structure is _almost_ right but hardcodes something the new case needs to vary; widen a type, parameterize a constant.               |
+| **Refactor first**     | The existing code blocks a clean addition; do a small no-behavior-change refactor as a separate first commit, then add on top.                    |
+| **Add new**            | No existing structure fits without distortion AND options A–C have been considered and rejected with concrete reasons.                            |
+| **Flag-Gated Rewrite** | The change alters the observable behavior of existing functionality and you want a local A/B verification path before committing to the new path. |
+
+The toggle path supports the project's existing flag system if one exists (Flipper, LaunchDarkly, Unleash, Flagsmith, Statsig, …), or OpenFeature with its in-memory provider as the vendor-neutral default, or a minimal in-codebase `Toggle` value-object pattern (~30 lines) when frozen-snapshot threading semantics are explicitly wanted.
+
+Output is a structured recommendation: the natural home (file path + one-sentence justification), the decision and what it means concretely, existing structures to plug into (cited at `file:line`), the toggle mechanism (if applicable), anti-patterns considered and avoided, and any open questions for the user.
+
+```text
+/belongs-here the new payment retry logic
+/belongs-here docs/exec-plans/active/payment-retry.md
+/belongs-here
+```
+
+#### Reference docs
+
+Two markdown files at the plugin root that the executor (`superpowers:executing-plans` / `superpowers:subagent-driven-development` / a human) consults during implementation. Not skills, not auto-invoked — just durable references.
+
+- **`plugins/harness/rule-checklist.md`** — write-time self-check. Eleven items split between the reasoning-gaps half (typed signatures, no dict-based contracts, no hidden flow, docstrings, "why" comments) and the feedback-blockers half (dependencies injected, no untestable side effects, no non-determinism without a seam, errors loud and located, encapsulation honored, single responsibility). Walked at the end of each task.
+- **`plugins/harness/flag-gated-rewrite.md`** — only relevant when the `/belongs-here` decision was flag-gated-rewrite. Contains the bootstrap commit pattern (separate the flag-system bootstrap from the feature commit), the deprecation comment template (with replacement path + force-OLD instruction + removal trigger), the A/B verification test pattern (the load-bearing test that makes the toggle useful), and the removal commit checklist for when the trigger fires.
+
+These docs replaced the pre-4.0.0 `/guru-dev-implement (harness)` skill. The skill's planning content moved into `/belongs-here`; the patterns above stayed at write-time and became reference documents instead of skill phases.
+
+### linting-hooks
+
+Auto-format and type-check files as Claude edits them. PostToolUse hooks fire after every `.md` and `.py` edit; scripts self-guard so they no-op silently when the underlying tools aren't installed.
+
+```text
+/plugin install linting-hooks@wild-horses
+```
+
+| Hook                 | When it fires                                            | What it does                                                                               | Dependencies                          |
+| -------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------- |
+| `markdown-combo-fix` | PostToolUse on `Edit`, `Write`, or `MultiEdit` for `.md` | Runs `prettier --write` then `markdownlint-cli2 --fix` on the edited file. Non-blocking.   | `jq`, `prettier`, `markdownlint-cli2` |
+| `pyright-post-edit`  | PostToolUse on `Edit`, `Write`, or `MultiEdit` for `.py` | Runs `pyright <file>` and prints findings to stderr. Non-blocking — never blocks the edit. | `jq`, `pyright`                       |
+
+#### /linting-hooks:install
+
+**Why this matters for AI development:** Linting and type-checking are the cheapest agent feedback signal you can buy. Running them as a hook (not a separate step the agent has to remember) means every `.md` and `.py` edit gets immediately formatted or type-checked, with results streamed back to the agent as part of the tool result. Mistakes are caught at the edit site, not three steps later when the agent finally remembers to run a checker.
+
+Detects which dependencies are missing on the current machine and walks you through installing them. Hooks are registered automatically when the plugin enables; this command only manages the underlying software (`prettier`, `markdownlint-cli2`, `pyright`, `jq`) — picking it interactively per hook so you can opt out of either.
+
+```text
+/linting-hooks:install
 ```
 
 ### pyright
