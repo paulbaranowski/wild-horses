@@ -6,7 +6,7 @@ A [Claude Code](https://claude.ai/code) plugin marketplace for making code AI-re
 
 ### harness
 
-Four harness-engineering tools plus two reference docs. The two analyzers — `/harness:reasoning-gaps` and `/harness:feedback-blockers` — audit existing code. `/guru-dev-review (harness)` is the senior-dev pre-implementation decision (where this change belongs, including flag-gated-rewrite tier choices for behavior changes). `/harness:setup` scaffolds the docs directory. The reference docs `flag-gated-rewrite.md` and `rule-checklist.md` are consumed by the executor during implementation. Designed to compose with `superpowers:writing-plans` + `superpowers:executing-plans` for task decomposition and execution.
+Four harness-engineering tools plus two reference docs. The two analyzers — `/harness:reasoning-gaps` and `/harness:feedback-blockers` — audit existing code. `/belongs-here (harness)` is the senior-dev pre-implementation decision (where this change belongs, including flag-gated-rewrite tier choices for behavior changes). `/harness:setup` scaffolds the docs directory. The reference docs `flag-gated-rewrite.md` and `rule-checklist.md` are consumed by the executor during implementation. Designed to compose with `superpowers:writing-plans` + `superpowers:executing-plans` for task decomposition and execution.
 
 ```text
 /plugin install harness@wild-horses
@@ -48,8 +48,8 @@ Layered workflow, integrating with the `superpowers` plugin:
 2. **Senior-dev review (harness).** Decide _where_ the change belongs and _what shape_ it should take:
 
    ```text
-   /guru-dev-review the new payment retry logic
-   /guru-dev-review docs/superpowers/specs/2026-04-27-payment-retry-design.md
+   /belongs-here the new payment retry logic
+   /belongs-here docs/superpowers/specs/2026-04-27-payment-retry-design.md
    ```
 
    Outputs a structured recommendation: acceptance criteria, natural home, decision (extend / adapt / refactor-first / add-new / flag-gated-rewrite), existing structures to plug into, anti-patterns rejected, and — for flag-gated-rewrite — flag-system tier and removal trigger.
@@ -59,9 +59,9 @@ Layered workflow, integrating with the `superpowers` plugin:
    - `plugins/harness/rule-checklist.md` — reasoning-gaps + feedback-blockers self-check at the end of each task.
    - `plugins/harness/flag-gated-rewrite.md` — bootstrap commit pattern, deprecation comment template, A/B verification test, and removal commit checklist (only when the decision was flag-gated-rewrite).
 
-`/guru-dev-review` is a skill, so it appears in the slash menu as `/guru-dev-review (harness)` — Claude Code skills don't carry the `/harness:` plugin-namespace prefix that commands do.
+`/belongs-here` is a skill, so it appears in the slash menu as `/belongs-here (harness)` — Claude Code skills don't carry the `/harness:` plugin-namespace prefix that commands do.
 
-This plugin **no longer ships an implementation skill of its own** — `superpowers:writing-plans` + `superpowers:executing-plans` cover the TDD execution loop better than a custom skill could. Earlier versions of this plugin shipped `/guru-dev-implement (harness)`; that skill was removed in 4.0.0 (its planning content moved to `/guru-dev-review`, and its implementation patterns moved to the two reference docs).
+This plugin **no longer ships an implementation skill of its own** — `superpowers:writing-plans` + `superpowers:executing-plans` cover the TDD execution loop better than a custom skill could. Earlier versions of this plugin shipped `/guru-dev-implement (harness)`; that skill was removed in 4.0.0 (its planning content moved to `/belongs-here`, and its implementation patterns moved to the two reference docs).
 
 ---
 
@@ -131,9 +131,9 @@ Analyzes existing files, proposes moves and generations, executes after approval
 /harness:setup /path/to/project
 ```
 
-#### /guru-dev-review
+#### /belongs-here
 
-**Skill, not command.** Shows as `/guru-dev-review (harness)` in the slash menu — Claude Code skills don't carry the `/harness:` plugin-namespace prefix that commands do.
+**Skill, not command.** Shows as `/belongs-here (harness)` in the slash menu — Claude Code skills don't carry the `/harness:` plugin-namespace prefix that commands do.
 
 **Why this matters for AI development:** When an AI agent is asked to add a feature, the easy default is to add new files alongside existing ones. That works locally and silently fragments the codebase — every "add new" that should have been "extend" or "adapt" leaves behind two structures that do almost the same thing, and every future change has to re-decide between them. This skill enforces a senior-dev "evolve, don't append" discipline before any code is written: it surveys the codebase for the natural home of the change, audits overlapping structures, names anti-patterns to reject, and outputs a structured recommendation that can be pasted directly into `superpowers:writing-plans` for task decomposition.
 
@@ -152,9 +152,9 @@ The toggle path supports the project's existing flag system if one exists (Flipp
 Output is a structured recommendation: the natural home (file path + one-sentence justification), the decision and what it means concretely, existing structures to plug into (cited at `file:line`), the toggle mechanism (if applicable), anti-patterns considered and avoided, and any open questions for the user.
 
 ```text
-/guru-dev-review the new payment retry logic
-/guru-dev-review docs/exec-plans/active/payment-retry.md
-/guru-dev-review
+/belongs-here the new payment retry logic
+/belongs-here docs/exec-plans/active/payment-retry.md
+/belongs-here
 ```
 
 #### Reference docs
@@ -162,9 +162,9 @@ Output is a structured recommendation: the natural home (file path + one-sentenc
 Two markdown files at the plugin root that the executor (`superpowers:executing-plans` / `superpowers:subagent-driven-development` / a human) consults during implementation. Not skills, not auto-invoked — just durable references.
 
 - **`plugins/harness/rule-checklist.md`** — write-time self-check. Eleven items split between the reasoning-gaps half (typed signatures, no dict-based contracts, no hidden flow, docstrings, "why" comments) and the feedback-blockers half (dependencies injected, no untestable side effects, no non-determinism without a seam, errors loud and located, encapsulation honored, single responsibility). Walked at the end of each task.
-- **`plugins/harness/flag-gated-rewrite.md`** — only relevant when the `/guru-dev-review` decision was flag-gated-rewrite. Contains the bootstrap commit pattern (separate the flag-system bootstrap from the feature commit), the deprecation comment template (with replacement path + force-OLD instruction + removal trigger), the A/B verification test pattern (the load-bearing test that makes the toggle useful), and the removal commit checklist for when the trigger fires.
+- **`plugins/harness/flag-gated-rewrite.md`** — only relevant when the `/belongs-here` decision was flag-gated-rewrite. Contains the bootstrap commit pattern (separate the flag-system bootstrap from the feature commit), the deprecation comment template (with replacement path + force-OLD instruction + removal trigger), the A/B verification test pattern (the load-bearing test that makes the toggle useful), and the removal commit checklist for when the trigger fires.
 
-These docs replaced the pre-4.0.0 `/guru-dev-implement (harness)` skill. The skill's planning content moved into `/guru-dev-review`; the patterns above stayed at write-time and became reference documents instead of skill phases.
+These docs replaced the pre-4.0.0 `/guru-dev-implement (harness)` skill. The skill's planning content moved into `/belongs-here`; the patterns above stayed at write-time and became reference documents instead of skill phases.
 
 ### linting-hooks
 
