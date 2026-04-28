@@ -10,7 +10,7 @@
     {
       "name": "harness",
       "source": "./plugins/harness",
-      "description": "Four harness-engineering tools, each answering one question — about whether AI can understand code (reasoning-gaps), verify edits (feedback-blockers), and find a home for new code (guru-dev-review, which includes Option E flag-tier decisions for behavior changes). Plus /harness:setup for directory scaffolding and two reference docs (option-e-mechanics, rule-checklist) consulted by executors. Designed to compose with superpowers:writing-plans + superpowers:executing-plans for the implementation phase.",
+      "description": "Four harness-engineering tools, each answering one question — about whether AI can understand code (reasoning-gaps), verify edits (feedback-blockers), and find a home for new code (guru-dev-review, which includes flag-gated-rewrite tier decisions for behavior changes). Plus /harness:setup for directory scaffolding and two reference docs (flag-gated-rewrite, rule-checklist) consulted by executors. Designed to compose with superpowers:writing-plans + superpowers:executing-plans for the implementation phase.",
       "author": {
         "name": "Paul Baranowski"
       },

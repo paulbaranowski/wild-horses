@@ -6,7 +6,7 @@ A [Claude Code](https://claude.ai/code) plugin marketplace for making code AI-re
 
 ### harness
 
-Four harness-engineering tools plus two reference docs. The two analyzers — `/harness:reasoning-gaps` and `/harness:feedback-blockers` — audit existing code. `/guru-dev-review (harness)` is the senior-dev pre-implementation decision (where this change belongs, including Option E flag-tier choices for behavior changes). `/harness:setup` scaffolds the docs directory. The reference docs `option-e-mechanics.md` and `rule-checklist.md` are consumed by the executor during implementation. Designed to compose with `superpowers:writing-plans` + `superpowers:executing-plans` for task decomposition and execution.
+Four harness-engineering tools plus two reference docs. The two analyzers — `/harness:reasoning-gaps` and `/harness:feedback-blockers` — audit existing code. `/guru-dev-review (harness)` is the senior-dev pre-implementation decision (where this change belongs, including flag-gated-rewrite tier choices for behavior changes). `/harness:setup` scaffolds the docs directory. The reference docs `flag-gated-rewrite.md` and `rule-checklist.md` are consumed by the executor during implementation. Designed to compose with `superpowers:writing-plans` + `superpowers:executing-plans` for task decomposition and execution.
 
 ```text
 /plugin install harness@wild-horses
@@ -57,7 +57,7 @@ Layered workflow, integrating with the `superpowers` plugin:
 3. **Plan task decomposition (superpowers).** Hand the review output to `superpowers:writing-plans`. It turns the decision + acceptance criteria into bite-sized TDD tasks with exact file paths, test code, and commit boundaries. Saves the plan as a markdown file (default `docs/superpowers/plans/`, configurable to `docs/exec-plans/active/` or wherever you keep plans).
 4. **Execute the plan.** Run `superpowers:executing-plans` (inline) or `superpowers:subagent-driven-development` (fresh subagent per task with checkpoints). The executor walks the plan task by task, applying TDD discipline and consulting two reference docs from this plugin:
    - `plugins/harness/rule-checklist.md` — reasoning-gaps + feedback-blockers self-check at the end of each task.
-   - `plugins/harness/option-e-mechanics.md` — bootstrap commit pattern, deprecation comment template, A/B verification test, and removal commit checklist (only when the decision was flag-gated-rewrite).
+   - `plugins/harness/flag-gated-rewrite.md` — bootstrap commit pattern, deprecation comment template, A/B verification test, and removal commit checklist (only when the decision was flag-gated-rewrite).
 
 `/guru-dev-review` is a skill, so it appears in the slash menu as `/guru-dev-review (harness)` — Claude Code skills don't carry the `/harness:` plugin-namespace prefix that commands do.
 
@@ -162,7 +162,7 @@ Output is a structured recommendation: the natural home (file path + one-sentenc
 Two markdown files at the plugin root that the executor (`superpowers:executing-plans` / `superpowers:subagent-driven-development` / a human) consults during implementation. Not skills, not auto-invoked — just durable references.
 
 - **`plugins/harness/rule-checklist.md`** — write-time self-check. Eleven items split between the reasoning-gaps half (typed signatures, no dict-based contracts, no hidden flow, docstrings, "why" comments) and the feedback-blockers half (dependencies injected, no untestable side effects, no non-determinism without a seam, errors loud and located, encapsulation honored, single responsibility). Walked at the end of each task.
-- **`plugins/harness/option-e-mechanics.md`** — only relevant when the `/guru-dev-review` decision was flag-gated-rewrite. Contains the bootstrap commit pattern (separate the flag-system bootstrap from the feature commit), the deprecation comment template (with replacement path + force-OLD instruction + removal trigger), the A/B verification test pattern (the load-bearing test that makes the toggle useful), and the removal commit checklist for when the trigger fires.
+- **`plugins/harness/flag-gated-rewrite.md`** — only relevant when the `/guru-dev-review` decision was flag-gated-rewrite. Contains the bootstrap commit pattern (separate the flag-system bootstrap from the feature commit), the deprecation comment template (with replacement path + force-OLD instruction + removal trigger), the A/B verification test pattern (the load-bearing test that makes the toggle useful), and the removal commit checklist for when the trigger fires.
 
 These docs replaced the pre-4.0.0 `/guru-dev-implement (harness)` skill. The skill's planning content moved into `/guru-dev-review`; the patterns above stayed at write-time and became reference documents instead of skill phases.
 

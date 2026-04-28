@@ -104,7 +104,7 @@ Create a new structure (file, class, function) alongside what exists.
 - **Use when:** no existing structure fits without distortion AND you've considered Options A–C and rejected each with a concrete reason.
 - **Defend it:** "Add new" is the choice that has to be _justified_. State why extension/adaptation/refactor would be worse here. If the only reason is "easier", you're choosing the wrong option.
 
-### Option E — Flag-Gated Rewrite
+### Flag-Gated Rewrite
 
 Build the new behavior alongside the old, gated by a flag, with a removal trigger. This is the right choice for **behavior changes to existing functionality** when you want a local A/B verification path before committing to the new path.
 
@@ -117,11 +117,11 @@ Build the new behavior alongside the old, gated by a flag, with a removal trigge
   5. **Removal as a separate follow-up commit** — delete the registry entry and the old branch together once validated.
 - **Don't use when:** purely additive new feature (no existing behavior changes — go to A or D); pure refactor with verified no-behavior-change (green existing tests are the verification); trivial single-call-site change where inspection is enough.
 
-#### Option E sub-decisions you must make at review time
+#### Flag-Gated Rewrite sub-decisions you must make at review time
 
-If you've chosen Option E, work through these three sub-decisions in order and capture the answers in the Phase 6 output. Implementation patterns for each are in `plugins/harness/option-e-mechanics.md` — but the _decisions_ are planning, and they belong here.
+If you've chosen flag-gated-rewrite, work through these three sub-decisions in order and capture the answers in the Phase 6 output. Implementation patterns for each are in `plugins/harness/flag-gated-rewrite.md` — but the _decisions_ are planning, and they belong here.
 
-##### E.1 — Scan for an existing flag system in the project
+##### 1. Scan for an existing flag system in the project
 
 Before introducing any toggle infrastructure, scan the project. If a flag system already exists, the executor must integrate at its boundary instead of adding a parallel one. Look for:
 
@@ -131,11 +131,11 @@ Before introducing any toggle infrastructure, scan the project. If a flag system
 
 Record what you found (or "none found").
 
-##### E.2 — Pick the implementation tier
+##### 2. Pick the implementation tier
 
 The tiers, lightest first:
 
-- **Tier 0: Existing project flag system** (the result of E.1). Always preferred when one exists. The `Toggle` design is just "named, type-safe, default-NEW reference to a flag the existing system evaluates."
+- **Tier 0: Existing project flag system** (the result of step 1). Always preferred when one exists. The `Toggle` design is just "named, type-safe, default-NEW reference to a flag the existing system evaluates."
 - **Tier 1: OpenFeature** — recommended default when no flag system exists. Vendor-neutral, in-memory provider for dev/test, swap providers for cloud later.
   - Python: `pip install openfeature-sdk`. Use `InMemoryProvider` for dev/test.
   - Ruby: `gem install openfeature-sdk`. Use the in-memory provider.
@@ -143,7 +143,7 @@ The tiers, lightest first:
 
 Tier 1 is the strong default when no existing system was found. Tier 2 should be defended in writing.
 
-##### E.3 — Define the removal trigger
+##### 3. Define the removal trigger
 
 The deprecation comment on the old branch will reference this trigger verbatim. It must be **concrete**, not "eventually" or "when ready". Vague triggers rot. Examples that pass: "after local A/B verification confirms parity", "after 2 weeks default-NEW in production with no rollback signal", "after PR #123 ships". Examples that fail: "soon", "when stable", "later".
 
@@ -195,12 +195,12 @@ Present the recommendation in this exact shape so it can be pasted into `superpo
 
 **Toggle mechanism (only if Decision is flag-gated-rewrite):**
 
-- **Existing flag system in project:** [name + entry point, or "none found"] (from sub-decision E.1)
-- **Implementation tier:** [Tier 0: existing | Tier 1: OpenFeature | Tier 2: minimal in-codebase] — and one-sentence why (from sub-decision E.2)
+- **Existing flag system in project:** [name + entry point, or "none found"] (from sub-decision 1)
+- **Implementation tier:** [Tier 0: existing | Tier 1: OpenFeature | Tier 2: minimal in-codebase] — and one-sentence why (from sub-decision 2)
 - **Flag/feature key:** `<flag-name-here>`
 - **How to force OLD locally:** [one-line — e.g. "set env var FLAG_X=0", "Toggle.with_old(Feature.X)", "Flipper.disable(:flag_x)"]
-- **Removal trigger:** [concrete condition — see sub-decision E.3 examples]
-- **Mechanics reference:** the executor should follow `plugins/harness/option-e-mechanics.md` for bootstrap commit pattern, deprecation comment template, A/B verification test, and removal commit checklist.
+- **Removal trigger:** [concrete condition — see sub-decision 3 examples]
+- **Mechanics reference:** the executor should follow `plugins/harness/flag-gated-rewrite.md` for bootstrap commit pattern, deprecation comment template, A/B verification test, and removal commit checklist.
 
 **Anti-patterns considered and avoided:**
 
