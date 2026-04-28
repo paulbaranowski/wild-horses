@@ -1,6 +1,6 @@
-# Option E — Parallel-new-with-Toggle: Mechanics Reference
+# Option E — Flag-Gated Rewrite: Mechanics Reference
 
-This document describes **how to apply** the parallel-new-with-toggle pattern when implementing a change whose `guru-dev-review` decision was **Option E**. The decisions themselves (whether to use Option E, which flag-system tier, what the removal trigger is) are made earlier — see `plugins/harness/skills/guru-dev-review/SKILL.md` Phase 4 / Option E.
+This document describes **how to apply** the flag-gated-rewrite pattern when implementing a change whose `guru-dev-review` decision was **Option E**. The decisions themselves (whether to use Option E, which flag-system tier, what the removal trigger is) are made earlier — see `plugins/harness/skills/guru-dev-review/SKILL.md` Phase 4 / Option E.
 
 This is a write-time pattern reference. Read it when you are about to implement an Option E change. The four sections below — bootstrap, deprecation comment, tests, removal — are applied in order.
 

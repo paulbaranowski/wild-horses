@@ -52,12 +52,12 @@ Layered workflow, integrating with the `superpowers` plugin:
    /guru-dev-review docs/superpowers/specs/2026-04-27-payment-retry-design.md
    ```
 
-   Outputs a structured recommendation: acceptance criteria, natural home, decision (extend / adapt / refactor-first / add-new / parallel-new-with-toggle), existing structures to plug into, anti-patterns rejected, and — for parallel-new-with-toggle — flag-system tier and removal trigger.
+   Outputs a structured recommendation: acceptance criteria, natural home, decision (extend / adapt / refactor-first / add-new / flag-gated-rewrite), existing structures to plug into, anti-patterns rejected, and — for flag-gated-rewrite — flag-system tier and removal trigger.
 
 3. **Plan task decomposition (superpowers).** Hand the review output to `superpowers:writing-plans`. It turns the decision + acceptance criteria into bite-sized TDD tasks with exact file paths, test code, and commit boundaries. Saves the plan as a markdown file (default `docs/superpowers/plans/`, configurable to `docs/exec-plans/active/` or wherever you keep plans).
 4. **Execute the plan.** Run `superpowers:executing-plans` (inline) or `superpowers:subagent-driven-development` (fresh subagent per task with checkpoints). The executor walks the plan task by task, applying TDD discipline and consulting two reference docs from this plugin:
    - `plugins/harness/rule-checklist.md` — reasoning-gaps + feedback-blockers self-check at the end of each task.
-   - `plugins/harness/option-e-mechanics.md` — bootstrap commit pattern, deprecation comment template, A/B verification test, and removal commit checklist (only when the decision was parallel-new-with-toggle).
+   - `plugins/harness/option-e-mechanics.md` — bootstrap commit pattern, deprecation comment template, A/B verification test, and removal commit checklist (only when the decision was flag-gated-rewrite).
 
 `/guru-dev-review` is a skill, so it appears in the slash menu as `/guru-dev-review (harness)` — Claude Code skills don't carry the `/harness:` plugin-namespace prefix that commands do.
 
@@ -139,13 +139,13 @@ Analyzes existing files, proposes moves and generations, executes after approval
 
 Decides among five options:
 
-| Option                       | Use when                                                                                                                                          |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Extend**                   | The new behavior is a natural variant of existing behavior — same shape, slightly different parameters or one new caller.                         |
-| **Adapt**                    | The existing structure is _almost_ right but hardcodes something the new case needs to vary; widen a type, parameterize a constant.               |
-| **Refactor first**           | The existing code blocks a clean addition; do a small no-behavior-change refactor as a separate first commit, then add on top.                    |
-| **Add new**                  | No existing structure fits without distortion AND options A–C have been considered and rejected with concrete reasons.                            |
-| **Parallel-new-with-Toggle** | The change alters the observable behavior of existing functionality and you want a local A/B verification path before committing to the new path. |
+| Option                 | Use when                                                                                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Extend**             | The new behavior is a natural variant of existing behavior — same shape, slightly different parameters or one new caller.                         |
+| **Adapt**              | The existing structure is _almost_ right but hardcodes something the new case needs to vary; widen a type, parameterize a constant.               |
+| **Refactor first**     | The existing code blocks a clean addition; do a small no-behavior-change refactor as a separate first commit, then add on top.                    |
+| **Add new**            | No existing structure fits without distortion AND options A–C have been considered and rejected with concrete reasons.                            |
+| **Flag-Gated Rewrite** | The change alters the observable behavior of existing functionality and you want a local A/B verification path before committing to the new path. |
 
 The toggle path supports the project's existing flag system if one exists (Flipper, LaunchDarkly, Unleash, Flagsmith, Statsig, …), or OpenFeature with its in-memory provider as the vendor-neutral default, or a minimal in-codebase `Toggle` value-object pattern (~30 lines) when frozen-snapshot threading semantics are explicitly wanted.
 
@@ -162,7 +162,7 @@ Output is a structured recommendation: the natural home (file path + one-sentenc
 Two markdown files at the plugin root that the executor (`superpowers:executing-plans` / `superpowers:subagent-driven-development` / a human) consults during implementation. Not skills, not auto-invoked — just durable references.
 
 - **`plugins/harness/rule-checklist.md`** — write-time self-check. Eleven items split between the reasoning-gaps half (typed signatures, no dict-based contracts, no hidden flow, docstrings, "why" comments) and the feedback-blockers half (dependencies injected, no untestable side effects, no non-determinism without a seam, errors loud and located, encapsulation honored, single responsibility). Walked at the end of each task.
-- **`plugins/harness/option-e-mechanics.md`** — only relevant when the `/guru-dev-review` decision was parallel-new-with-toggle. Contains the bootstrap commit pattern (separate the flag-system bootstrap from the feature commit), the deprecation comment template (with replacement path + force-OLD instruction + removal trigger), the A/B verification test pattern (the load-bearing test that makes the toggle useful), and the removal commit checklist for when the trigger fires.
+- **`plugins/harness/option-e-mechanics.md`** — only relevant when the `/guru-dev-review` decision was flag-gated-rewrite. Contains the bootstrap commit pattern (separate the flag-system bootstrap from the feature commit), the deprecation comment template (with replacement path + force-OLD instruction + removal trigger), the A/B verification test pattern (the load-bearing test that makes the toggle useful), and the removal commit checklist for when the trigger fires.
 
 These docs replaced the pre-4.0.0 `/guru-dev-implement (harness)` skill. The skill's planning content moved into `/guru-dev-review`; the patterns above stayed at write-time and became reference documents instead of skill phases.
 

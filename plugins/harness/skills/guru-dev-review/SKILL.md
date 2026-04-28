@@ -1,6 +1,6 @@
 ---
 name: guru-dev-review
-description: Pre-implementation senior-dev review — decides where a change belongs in the codebase (extend / adapt / refactor-first / add-new / parallel-new-with-toggle) and captures the planning details an executor needs (acceptance criteria, natural home, overlapping structures, anti-patterns rejected, and — for parallel-new-with-toggle — the flag-system tier + removal trigger). Outputs a structured recommendation designed to be handed to `superpowers:writing-plans` for task decomposition, then to `superpowers:executing-plans` or `superpowers:subagent-driven-development` for execution. Use before writing any non-trivial new code. Auto-invokes on phrases like "should I add", "where should this go", "is there already a", "refactor", "change the behavior of", or "before I implement".
+description: Pre-implementation senior-dev review — decides where a change belongs in the codebase (extend / adapt / refactor-first / add-new / flag-gated-rewrite) and captures the planning details an executor needs (acceptance criteria, natural home, overlapping structures, anti-patterns rejected, and — for flag-gated-rewrite — the flag-system tier + removal trigger). Outputs a structured recommendation designed to be handed to `superpowers:writing-plans` for task decomposition, then to `superpowers:executing-plans` or `superpowers:subagent-driven-development` for execution. Use before writing any non-trivial new code. Auto-invokes on phrases like "should I add", "where should this go", "is there already a", "refactor", "change the behavior of", or "before I implement".
 user-invocable: true
 disable-model-invocation: false
 argument-hint: "[change description or path to plan file]"
@@ -104,7 +104,7 @@ Create a new structure (file, class, function) alongside what exists.
 - **Use when:** no existing structure fits without distortion AND you've considered Options A–C and rejected each with a concrete reason.
 - **Defend it:** "Add new" is the choice that has to be _justified_. State why extension/adaptation/refactor would be worse here. If the only reason is "easier", you're choosing the wrong option.
 
-### Option E — Parallel-new-with-Toggle
+### Option E — Flag-Gated Rewrite
 
 Build the new behavior alongside the old, gated by a flag, with a removal trigger. This is the right choice for **behavior changes to existing functionality** when you want a local A/B verification path before committing to the new path.
 
@@ -179,21 +179,21 @@ Present the recommendation in this exact shape so it can be pasted into `superpo
 **Natural home:** `path/to/module.py` (or class `Foo` within it)
 [one-sentence justification — why this home over the other candidates]
 
-**Decision:** extend / adapt / refactor-first / add-new / parallel-new-with-toggle
+**Decision:** extend / adapt / refactor-first / add-new / flag-gated-rewrite
 
 **What this means concretely:**
 
 - [for Extend/Adapt: name the existing structure and the specific change to it]
 - [for Refactor first: name the refactor as step 1, then the addition as step 2]
 - [for Add new: name the new structure and where it lives, and why A/B/C were rejected]
-- [for Parallel-new-with-Toggle: name the new path, the old path, and the flag that selects between them]
+- [for Flag-Gated Rewrite: name the new path, the old path, and the flag that selects between them]
 
 **Existing structures to plug into:**
 
 - `file.py:line` — [type/function/pattern and how the new code uses it]
 - ...
 
-**Toggle mechanism (only if Decision is parallel-new-with-toggle):**
+**Toggle mechanism (only if Decision is flag-gated-rewrite):**
 
 - **Existing flag system in project:** [name + entry point, or "none found"] (from sub-decision E.1)
 - **Implementation tier:** [Tier 0: existing | Tier 1: OpenFeature | Tier 2: minimal in-codebase] — and one-sentence why (from sub-decision E.2)
