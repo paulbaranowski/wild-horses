@@ -36,6 +36,38 @@
         "Tests pass"
       ],
       "log": null
+    },
+    {
+      "id": 3,
+      "title": "Move 409 carve-out from global to per-endpoint flag",
+      "what": "src/services/api.ts:231 currently suppresses error popups for status 409 across every endpoint. Replace the global carve-out with a per-endpoint meta flag (suppressedStatusCodes: number[]) read by baseQueryWithReauth. Update postImage to declare suppressedStatusCodes: [409]; leave other endpoints empty so 409 from putEventEdit etc. surfaces an error popup.",
+      "resolves": ["src/services/api.ts:231"],
+      "effort": "medium",
+      "createsNewCode": false,
+      "status": "pending",
+      "acceptanceCriteria": [
+        "baseQueryWithReauth reads suppressedStatusCodes from the endpoint definition",
+        "postImage declares suppressedStatusCodes: [409]",
+        "No global status-code carve-out remains in the error-popup branch",
+        "Tests pass"
+      ],
+      "log": null
+    },
+    {
+      "id": 4,
+      "title": "Write tests for per-endpoint 409 suppression",
+      "what": "Add tests in __tests__/services/apiError.test.ts that mount the RTK Query store with two endpoints (postImage with suppressedStatusCodes: [409], putEventEdit with no suppression). Mock the fetch layer to return 409 for both. Assert the error-popup dispatch fires for putEventEdit and does NOT fire for postImage.",
+      "resolves": [],
+      "effort": "low",
+      "createsNewCode": false,
+      "status": "pending",
+      "acceptanceCriteria": [
+        "Test follows project test conventions",
+        "Asserts both branches: postImage 409 suppressed, putEventEdit 409 surfaces popup",
+        "Test fails if the implementation task is reverted (the global carve-out reintroduced)",
+        "Tests pass"
+      ],
+      "log": null
     }
   ]
 }

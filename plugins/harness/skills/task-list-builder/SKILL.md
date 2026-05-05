@@ -116,13 +116,16 @@ Use the schema in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md` (lines 81-119). Top-l
 **Hard rules** (enforce these — don't skip):
 
 1. **Sequential ids.** Tasks have `id: 1, 2, 3, ...` in order. No gaps, no reordering.
-2. **Paired test tasks.** For every task with `createsNewCode: true`, the next task in the array must be a test task: title starts with `"Write tests for "`, `createsNewCode: false`, `resolves: []`, `effort: "low"`, acceptance criteria like `"Test file follows project test conventions"` and `"Tests pass"` (rule from `loop-protocol.md:121`).
-3. **`createsNewCode` discipline.** `true` only when the task creates new callable code (functions, classes, methods, services, models, protocols). `false` for restructuring, annotations, documentation, config edits.
-4. **Defaults.** Every task starts with `status: "pending"` and `log: null`. Don't pre-fill these.
-5. **Non-empty acceptance criteria.** Every task has at least one concrete, verifiable criterion. Most tasks should include `"Tests pass"`. Avoid vague criteria like "looks good" or "code is clean".
-6. **Repo-relative paths.** All paths in `scope` and in `resolves` must be repo-relative. No local prefixes.
+2. **Paired test tasks — trigger on behavior modification, not on `createsNewCode`.** Pair a `"Write tests for "` task immediately after every task that modifies runtime behavior, regardless of `createsNewCode`. The test task: `createsNewCode: false`, `resolves: []`, `effort: "low"`, acceptance criteria including `"Test follows project test conventions"`, `"Test fails if the implementation task is reverted"`, `"Tests pass"`. **Read `${CLAUDE_PLUGIN_ROOT}/skills/task-list-builder/pairing-rules.md` before classifying** — it has the full inclusion/exclusion lists, rationalization table, and red flags. Skipping it leads to under-pairing on review-driven inputs.
+3. **Don't bury test work in acceptance criteria.** Lines like `"Test asserts X"`, `"New unit test verifies Y"`, `"Test fails if Z is reverted"` describe hidden engineering work. Extract each into the paired test task per rule 2. Implementation criteria describe the _implementation_ outcome; the paired test task carries the test work.
+4. **`createsNewCode` is a classifier, not the pairing trigger.** `true` only when the task creates new callable code (functions, classes, methods, services, models, protocols). `false` for restructuring, annotations, documentation, config edits. Still useful for "new symbol vs. modification of existing one"; no longer triggers paired tests.
+5. **Defaults.** Every task starts with `status: "pending"` and `log: null`. Don't pre-fill these.
+6. **Non-empty acceptance criteria.** Every task has at least one concrete, verifiable criterion. Most should include `"Tests pass"`. Avoid vague criteria like "looks good" or "code is clean".
+7. **Repo-relative paths.** All paths in `scope` and `resolves` must be repo-relative. No local prefixes.
 
-A reference example with one paired implementation+test pair lives at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-builder/example.json`.
+**In rewrite mode**, additionally apply rules 2 and 3 retroactively: extract buried test work into paired tasks, insert missing pairs for behavior-modifying tasks, renumber. See `pairing-rules.md` § "Rewrite mode — retroactively apply rules 2 and 3" for the algorithm.
+
+A reference example with two paired pairs (one `createsNewCode: true`, one `createsNewCode: false` behavior-modifying refactor) lives at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-builder/example.json`.
 
 ---
 
@@ -247,7 +250,9 @@ Do **not** stage or commit either file. Do not run `git add`.
 ## Failure modes — prevent these
 
 - **Schema drift.** If `loop-protocol.md` changes, the skill changes. Always re-read `loop-protocol.md` rather than relying on memory of past output.
-- **Unpaired test tasks.** Forgetting to insert a `"Write tests for …"` task after every `createsNewCode: true` task breaks the harness loop's expectations.
+- **Unpaired test tasks.** Behavior-modifying tasks without a `"Write tests for …"` immediately after. Trigger is wider than `createsNewCode: true` — see `pairing-rules.md`.
+- **Buried test work in acceptance criteria.** `"Test asserts X"` etc. inside an implementation task's criteria. Extract per rule 3.
+- **Skipping extraction in rewrite mode.** Failing to retroactively split tasks with buried test work — see `pairing-rules.md` § "Rewrite mode".
 - **Absolute paths in `scope` or `resolves`.** Leaks local machine structure if the file is shared.
 - **Pre-filled `status` or `log`.** The loop runner expects all tasks to start as `pending` with `log: null`. Anything else looks like a partially-completed run.
 - **Writing files without a preview.** Always show the preview in Phase 5; never silently overwrite.
