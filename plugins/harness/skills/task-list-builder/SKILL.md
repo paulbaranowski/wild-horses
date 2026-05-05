@@ -10,7 +10,7 @@ argument-hint: "[free-form description | path to .md report | path to .json task
 
 Build a paired `.json` + `.md` task list in the format the harness loop runner consumes.
 
-**The schema is defined in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md` (lines 81-130).** That file is the source of truth — do not duplicate the schema here, read it.
+**The schema is defined in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md`** (Phase 4 Option 1 → "Step 3 — Write the JSON task file"). That file is the source of truth — do not duplicate the schema here, read it.
 
 **Arguments:** `$ARGUMENTS`
 
@@ -61,7 +61,7 @@ Find the project's test command in this order; stop at the first one that yields
 3. `pyproject.toml` or `pytest.ini` — if present, the command is `uv run pytest` (or `pytest` if the project doesn't use `uv`).
 4. Fallback: ask the user what their test command is. Don't invent one.
 
-This matches the convention used by `/harness:reasoning-gaps` and `/harness:feedback-blockers` (see `loop-protocol.md` lines 125-126).
+This matches the convention used by `/harness:reasoning-gaps` and `/harness:feedback-blockers` (see the `testCommand` field definition in `loop-protocol.md`'s Step 3 schema).
 
 ---
 
@@ -106,7 +106,7 @@ Carry that yes/no into Phase 6.
 
 ## Phase 4 — Build the tasks
 
-Use the schema in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md` (lines 81-119). Top-level fields:
+Use the schema in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md` (Phase 4 Option 1 → Step 3). Top-level fields:
 
 - `plan` — absolute-from-repo path to the paired `.md` file (Phase 3).
 - `testCommand` — from Phase 2.
@@ -116,7 +116,7 @@ Use the schema in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md` (lines 81-119). Top-l
 **Hard rules** (enforce these — don't skip):
 
 1. **Sequential ids.** Tasks have `id: 1, 2, 3, ...` in order. No gaps, no reordering.
-2. **Paired test tasks.** For every task with `createsNewCode: true`, the next task in the array must be a test task: title starts with `"Write tests for "`, `createsNewCode: false`, `resolves: []`, `effort: "low"`, acceptance criteria like `"Test file follows project test conventions"` and `"Tests pass"` (rule from `loop-protocol.md:121`).
+2. **Paired test tasks.** For every task with `createsNewCode: true`, the next task in the array must be a test task: title starts with `"Write tests for "`, `createsNewCode: false`, `resolves: []`, `effort: "low"`, acceptance criteria like `"Test file follows project test conventions"` and `"Tests pass"` (rule documented in the schema note in `loop-protocol.md`).
 3. **`createsNewCode` discipline.** `true` only when the task creates new callable code (functions, classes, methods, services, models, protocols). `false` for restructuring, annotations, documentation, config edits.
 4. **Defaults.** Every task starts with `status: "pending"` and `log: null`. Don't pre-fill these.
 5. **Non-empty acceptance criteria.** Every task has at least one concrete, verifiable criterion. Most tasks should include `"Tests pass"`. Avoid vague criteria like "looks good" or "code is clean".
