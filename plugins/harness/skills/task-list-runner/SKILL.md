@@ -68,7 +68,7 @@ Then branch on the Phase 1 mode flag:
   > 3. **Give feedback** — Review or adjust the plan before continuing
   - **Option 1** → Phase 4 with mode = `all`.
   - **Option 2** → Phase 4 with mode = `next`.
-  - **Option 3** — Ask the user for their feedback (reorder tasks, skip a task, modify a task's `what` field, adjust scope). Apply the feedback by editing the JSON directly — these are structural edits (set `status` to `"skipped"`, revise `what`, reorder), not code changes. After saving, return to the start of Phase 3 (re-show summary, prompt again).
+  - **Option 3** — Ask the user for their feedback (reorder tasks, skip a task, modify a task's `what` field, adjust scope). Apply the feedback by editing the JSON directly — these are structural edits (revise `what`, reorder, or mark a task as skipped), not code changes. To skip a task, set its `status` to `"complete"` and put `"skipped: <reason>"` in its `log` field — the schema's status enum is `"pending" | "in-progress" | "complete" | "failed"` and does not include `"skipped"`. After saving, return to the start of Phase 3 (re-show summary, prompt again).
 
 ---
 
