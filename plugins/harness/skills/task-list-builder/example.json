@@ -3,7 +3,9 @@
   "testCommand": "uv run pytest",
   "scope": [
     "src/auth/middleware.py",
-    "tests/auth/test_middleware.py"
+    "tests/auth/test_middleware.py",
+    "src/services/api.ts",
+    "__tests__/services/apiError.test.ts"
   ],
   "tasks": [
     {
