@@ -108,7 +108,7 @@ Carry that yes/no into Phase 6.
 
 Use the schema in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md` (lines 81-119). Top-level fields:
 
-- `plan` — absolute-from-repo path to the paired `.md` file (Phase 3).
+- `plan` — repo-relative path to the paired `.md` file (Phase 3). Set to empty string `""` if Phase 4.5 determines no MD will be written.
 - `testCommand` — from Phase 2.
 - `scope` — repo-relative paths of files involved. Strip any local-machine prefix (`/Users/...`, `C:\...`) so the file is portable. Empty array is OK if the work doesn't touch specific files yet.
 - `tasks` — array of task objects, each matching the schema in `loop-protocol.md`.
@@ -126,11 +126,30 @@ A reference example with one paired implementation+test pair lives at `${CLAUDE_
 
 ---
 
+## Phase 4.5 — Ask whether to also write the paired markdown
+
+The JSON file is always written — it's the canonical artifact the harness loop consumes. The MD file is a human-readable mirror; some users want it, others don't.
+
+**Skip this question** when you are in rewrite mode AND an MD already exists at the existing JSON's `plan` path. In that case, Phase 6 preserves the existing MD as-is and the user's preference doesn't change behavior.
+
+**Otherwise**, ask the user a multi-choice question with exactly these two options:
+
+- `Yes, write the markdown file` — Phase 6 will write both JSON and MD.
+- `No, JSON only` — Phase 6 will write only the JSON. Set the JSON's `plan` field to an empty string `""` so downstream tooling can tell there is no paired MD.
+
+Use `AskUserQuestion` for this. Phrase the question as: _"Also write a paired markdown report alongside the JSON task list?"_ with a one-line description like _"The MD file mirrors the JSON in human-readable form. The harness loop runner only reads the JSON."_
+
+Carry the user's answer (`writeMd: true | false`) into Phase 5 and Phase 6.
+
+---
+
 ## Phase 5 — Preview to the user
 
 Before writing anything, show the user a compact preview. The "Files" section depends on the output target:
 
-**Fresh build:**
+List the MD line in the "Files" section only when `writeMd` from Phase 4.5 is `true` (or when, in rewrite mode, the MD already exists and is being preserved).
+
+**Fresh build, `writeMd: true`:**
 
 ```text
 Task list preview (<N> tasks):
@@ -150,6 +169,8 @@ scope: <N files>
 Proceed? (yes / edit / cancel)
 ```
 
+**Fresh build, `writeMd: false`:** identical, except the "Files to write (new)" section omits the MD line and shows only the JSON path.
+
 **Rewrite:**
 
 ```text
@@ -160,7 +181,8 @@ Task list preview (<N> tasks) — REWRITE of existing file:
 Files:
   - <existing .json path>     (will be OVERWRITTEN)
   - <existing .md path>       (PRESERVED — will not be modified)
-    OR  <existing .md path>   (will be created — no MD exists yet)
+    OR  <existing .md path>   (will be created — no MD exists yet, writeMd: true)
+    OR  (no MD line)          (writeMd: false — JSON only)
 
 testCommand: <from existing JSON; preserved unless changed>
 scope: <N files>
@@ -178,11 +200,13 @@ Proceed? (yes / edit / cancel)
 
 **Always write the JSON file** (it is the canonical artifact the loop reads). In rewrite mode this overwrites the existing JSON; in fresh-build mode it creates a new file.
 
-The MD file is conditional:
+The MD file is conditional on the answer from Phase 4.5 and on rewrite-mode state:
 
-- **Fresh-build mode** → write the MD.
-- **Rewrite mode, MD already exists** → do NOT write the MD. Do NOT modify it. Leave it exactly as-is.
-- **Rewrite mode, MD missing** → write the MD (using the path from the existing JSON's `plan` field).
+- **Fresh-build mode, `writeMd: true`** → write the MD.
+- **Fresh-build mode, `writeMd: false`** → do NOT write the MD. The JSON's `plan` field must be `""`.
+- **Rewrite mode, MD already exists** → do NOT write the MD. Do NOT modify it. Leave it exactly as-is. (Phase 4.5 was skipped in this case.)
+- **Rewrite mode, MD missing, `writeMd: true`** → write the MD (using the path from the existing JSON's `plan` field).
+- **Rewrite mode, MD missing, `writeMd: false`** → do NOT write the MD. Set the JSON's `plan` field to `""` in the rewritten JSON.
 
 When you do write the MD, use this YAML frontmatter at the top:
 
@@ -208,12 +232,20 @@ The markdown is for humans to read — the loop runner does not modify it.
 
 Pick the message that matches the output target:
 
-**Fresh build:**
+**Fresh build, MD written:**
 
 ```text
 Wrote task list:
   JSON: <path>.task-list-builder.json   (<N> tasks)
   MD:   <path>.task-list-builder.md
+```
+
+**Fresh build, JSON only:**
+
+```text
+Wrote task list:
+  JSON: <path>.task-list-builder.json   (<N> tasks)
+  MD:   (skipped — user opted out)
 ```
 
 **Rewrite, MD preserved:**
@@ -230,6 +262,14 @@ Rewrote task list:
 Rewrote task list:
   JSON: <path>.task-list-builder.json   (<N> tasks, OVERWRITTEN)
   MD:   <path>.task-list-builder.md     (created — none existed)
+```
+
+**Rewrite, JSON only (user opted out, MD missing):**
+
+```text
+Rewrote task list:
+  JSON: <path>.task-list-builder.json   (<N> tasks, OVERWRITTEN)
+  MD:   (skipped — user opted out, none existed)
 ```
 
 In all cases, append:
