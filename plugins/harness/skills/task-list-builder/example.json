@@ -1,0 +1,41 @@
+{
+  "plan": "docs/exec-plans/active/2026-05-05-a3f2-extract-session-validator.task-list-builder.md",
+  "testCommand": "uv run pytest",
+  "scope": [
+    "src/auth/middleware.py",
+    "tests/auth/test_middleware.py"
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Extract session-validation helper from auth middleware",
+      "what": "Pull the session-token verification logic out of AuthMiddleware.__call__ into a new module-level function validate_session(token: str) -> Session. Update AuthMiddleware to call the helper.",
+      "resolves": ["src/auth/middleware.py:42", "src/auth/middleware.py:57"],
+      "effort": "medium",
+      "createsNewCode": true,
+      "status": "pending",
+      "acceptanceCriteria": [
+        "validate_session is defined at module scope in src/auth/middleware.py",
+        "AuthMiddleware.__call__ delegates token validation to validate_session",
+        "No behavior change for existing callers",
+        "Tests pass"
+      ],
+      "log": null
+    },
+    {
+      "id": 2,
+      "title": "Write tests for validate_session helper",
+      "what": "Add unit tests in tests/auth/test_middleware.py covering: valid token, expired token, malformed token, missing token. Mock the session store boundary.",
+      "resolves": [],
+      "effort": "low",
+      "createsNewCode": false,
+      "status": "pending",
+      "acceptanceCriteria": [
+        "Test file follows project test conventions",
+        "At least 4 test cases covering happy path, expired, malformed, and missing token",
+        "Tests pass"
+      ],
+      "log": null
+    }
+  ]
+}

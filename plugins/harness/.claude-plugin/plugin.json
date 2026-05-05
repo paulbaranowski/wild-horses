@@ -1,7 +1,7 @@
 {
   "name": "harness",
   "description": "feedback-blockers, reasoning-gaps, and setup commands for harness engineering. Analyze code for feedback-loop blockers and AI reasoning gaps, and set up the harness directory structure. (PostToolUse linting hooks moved to the separate linting-hooks plugin.)",
-  "version": "3.1.0",
+  "version": "3.3.0",
   "author": {
     "name": "Paul Baranowski"
   }
