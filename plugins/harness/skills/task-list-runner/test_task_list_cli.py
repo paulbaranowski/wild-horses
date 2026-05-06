@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+"""Smoke tests for task_list_cli.py.
+
+Stdlib-only — no pytest needed. Run from anywhere:
+
+    python3 plugins/harness/skills/task-list-runner/test_task_list_cli.py
+
+Or via unittest discovery:
+
+    python3 -m unittest plugins.harness.skills.task-list-runner.test_task_list_cli
+
+Tests invoke the CLI as a subprocess so exit codes, argparse behaviour,
+and stdout/stderr separation are exercised exactly as a dispatched
+agent would see them.
+"""
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+CLI = Path(__file__).parent / "task_list_cli.py"
+
+
+def fixture_data() -> dict:
+    return {
+        "plan": "docs/exec-plans/active/test.md",
+        "testCommand": "echo test",
+        "scope": ["src/foo.py"],
+        "tasks": [
+            {
+                "id": 1,
+                "title": "First task",
+                "what": "Do thing one",
+                "resolves": ["src/foo.py:10"],
+                "effort": "low",
+                "createsNewCode": True,
+                "status": "pending",
+                "acceptanceCriteria": ["it works"],
+                "log": None,
+            },
+            {
+                "id": 2,
+                "title": 'Task with "quotes" and unicode 日本語',
+                "what": "tricky\nfield",
+                "resolves": [],
+                "effort": "medium",
+                "createsNewCode": False,
+                "status": "in-progress",
+                "acceptanceCriteria": [],
+                "log": None,
+            },
+            {
+                "id": 3,
+                "title": "Already done",
+                "what": "x",
+                "resolves": [],
+                "effort": "low",
+                "createsNewCode": False,
+                "status": "complete",
+                "acceptanceCriteria": [],
+                "log": "all good",
+            },
+        ],
+    }
+
+
+class CliTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp_dir = Path(self._tmp.name)
+        self.task_path = self.tmp_dir / "tasks.json"
+        self.task_path.write_text(json.dumps(fixture_data(), indent=2), encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def run_cli(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(CLI), "--file", str(self.task_path), *args],
+            capture_output=True,
+            text=True,
+        )
+
+    def read_task_file(self) -> dict:
+        return json.loads(self.task_path.read_text(encoding="utf-8"))
+
+    # ---- validate ------------------------------------------------------
+
+    def test_validate_good_file_exits_zero(self):
+        result = self.run_cli("validate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
+    def test_validate_missing_file_exits_one(self):
+        result = subprocess.run(
+            [sys.executable, str(CLI), "--file", str(self.tmp_dir / "nope.json"), "validate"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no such file", result.stderr)
+
+    def test_validate_malformed_json_exits_thirteen(self):
+        self.task_path.write_text('{"tasks": [},', encoding="utf-8")
+        result = self.run_cli("validate")
+        self.assertEqual(result.returncode, 13, result.stderr)
+        self.assertIn("not valid JSON", result.stderr)
+
+    def test_validate_missing_test_command_exits_twelve(self):
+        data = fixture_data()
+        del data["testCommand"]
+        self.task_path.write_text(json.dumps(data), encoding="utf-8")
+        result = self.run_cli("validate")
+        self.assertEqual(result.returncode, 12)
+        self.assertIn("testCommand", result.stderr)
+
+    def test_validate_duplicate_task_ids_exits_twelve(self):
+        data = fixture_data()
+        data["tasks"][1]["id"] = 1
+        self.task_path.write_text(json.dumps(data), encoding="utf-8")
+        result = self.run_cli("validate")
+        self.assertEqual(result.returncode, 12)
+        self.assertIn("duplicate", result.stderr)
+
+    def test_validate_invalid_status_exits_twelve(self):
+        data = fixture_data()
+        data["tasks"][0]["status"] = "skipped"
+        self.task_path.write_text(json.dumps(data), encoding="utf-8")
+        result = self.run_cli("validate")
+        self.assertEqual(result.returncode, 12)
+        self.assertIn("status", result.stderr)
+
+    # ---- list ----------------------------------------------------------
+
+    def test_list_no_filter_returns_all(self):
+        result = self.run_cli("list")
+        self.assertEqual(result.returncode, 0)
+        tasks = json.loads(result.stdout)
+        self.assertEqual([t["id"] for t in tasks], [1, 2, 3])
+
+    def test_list_remaining_returns_pending_and_in_progress(self):
+        result = self.run_cli("list", "--remaining")
+        self.assertEqual(result.returncode, 0)
+        tasks = json.loads(result.stdout)
+        self.assertEqual({t["id"] for t in tasks}, {1, 2})
+
+    def test_list_status_filters_exactly(self):
+        result = self.run_cli("list", "--status", "complete")
+        self.assertEqual(result.returncode, 0)
+        tasks = json.loads(result.stdout)
+        self.assertEqual([t["id"] for t in tasks], [3])
+
+    def test_list_status_and_remaining_are_mutually_exclusive(self):
+        result = self.run_cli("list", "--remaining", "--status", "pending")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not allowed with", result.stderr)
+
+    # ---- get -----------------------------------------------------------
+
+    def test_get_existing_id_prints_object(self):
+        result = self.run_cli("get", "--id", "2")
+        self.assertEqual(result.returncode, 0)
+        task = json.loads(result.stdout)
+        self.assertEqual(task["id"], 2)
+        self.assertIn("日本語", task["title"])
+
+    def test_get_missing_id_exits_ten_with_empty_stdout(self):
+        result = self.run_cli("get", "--id", "999")
+        self.assertEqual(result.returncode, 10)
+        self.assertEqual(result.stdout, "", "stdout must be empty so jq cannot silently succeed")
+        self.assertIn("not found", result.stderr)
+
+    # ---- start ---------------------------------------------------------
+
+    def test_start_pending_flips_to_in_progress(self):
+        result = self.run_cli("start", "--id", "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(self.read_task_file()["tasks"][0]["status"], "in-progress")
+
+    def test_start_already_in_progress_exits_eleven(self):
+        result = self.run_cli("start", "--id", "2")
+        self.assertEqual(result.returncode, 11)
+        self.assertIn('current status is "in-progress"', result.stderr)
+
+    def test_start_already_complete_exits_eleven(self):
+        result = self.run_cli("start", "--id", "3")
+        self.assertEqual(result.returncode, 11)
+        self.assertIn('current status is "complete"', result.stderr)
+
+    def test_start_missing_id_exits_ten(self):
+        result = self.run_cli("start", "--id", "999")
+        self.assertEqual(result.returncode, 10)
+
+    # ---- finish --------------------------------------------------------
+
+    def _write_log(self, content: str) -> Path:
+        log = self.tmp_dir / "log.txt"
+        log.write_text(content, encoding="utf-8")
+        return log
+
+    def test_finish_in_progress_to_complete(self):
+        log = self._write_log("done\nthings\n")
+        result = self.run_cli(
+            "finish", "--id", "2", "--status", "complete", "--log-file", str(log)
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task = self.read_task_file()["tasks"][1]
+        self.assertEqual(task["status"], "complete")
+        self.assertEqual(task["log"], "done\nthings")  # one trailing \n stripped
+
+    def test_finish_preserves_quotes_and_unicode(self):
+        payload = 'embedded "quotes", unicode 漢字, and {"json": "looking"}'
+        log = self._write_log(payload)
+        result = self.run_cli(
+            "finish", "--id", "2", "--status", "complete", "--log-file", str(log)
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(self.read_task_file()["tasks"][1]["log"], payload)
+
+    def test_finish_strips_only_one_trailing_newline(self):
+        log = self._write_log("line\n\n")
+        result = self.run_cli(
+            "finish", "--id", "2", "--status", "complete", "--log-file", str(log)
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(self.read_task_file()["tasks"][1]["log"], "line\n")
+
+    def test_finish_pending_task_exits_eleven(self):
+        log = self._write_log("x")
+        result = self.run_cli(
+            "finish", "--id", "1", "--status", "complete", "--log-file", str(log)
+        )
+        self.assertEqual(result.returncode, 11)
+        self.assertIn('current status is "pending"', result.stderr)
+
+    def test_finish_with_failed_status(self):
+        log = self._write_log("broke")
+        result = self.run_cli(
+            "finish", "--id", "2", "--status", "failed", "--log-file", str(log)
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(self.read_task_file()["tasks"][1]["status"], "failed")
+
+    def test_finish_rejects_non_terminal_status(self):
+        log = self._write_log("x")
+        result = self.run_cli(
+            "finish", "--id", "2", "--status", "in-progress", "--log-file", str(log)
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("invalid choice", result.stderr)
+
+    def test_finish_missing_log_file_exits_one(self):
+        result = self.run_cli(
+            "finish",
+            "--id",
+            "2",
+            "--status",
+            "complete",
+            "--log-file",
+            str(self.tmp_dir / "absent.txt"),
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no such file", result.stderr)
+
+    # ---- atomicity -----------------------------------------------------
+
+    def test_successful_write_leaves_no_tmp_file(self):
+        self.run_cli("start", "--id", "1")
+        self.assertFalse(
+            (self.task_path.with_name(self.task_path.name + ".tmp")).exists(),
+            ".tmp file must be cleaned up after successful os.replace",
+        )
+
+    def test_pretty_printed_indent_two(self):
+        self.run_cli("start", "--id", "1")
+        contents = self.task_path.read_text(encoding="utf-8")
+        # tasks array should be indented with 2 spaces
+        self.assertIn('\n  "tasks": [', contents)
+
+
+if __name__ == "__main__":
+    unittest.main()

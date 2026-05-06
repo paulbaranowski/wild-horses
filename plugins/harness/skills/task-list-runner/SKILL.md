@@ -87,8 +87,17 @@ Implement tasks via sequential foreground `Agent` tool calls. Each Agent runs _w
    3. If `MAX_ITER` is reached → `"Max iterations (MAX_ITER) reached"` and stop.
    4. Show progress header: `"Iteration X/MAX_ITER — N tasks remaining"`.
    5. **Issue a single foreground `Agent` tool call** with the **Task Implementation Prompt** below, substituting the task file path. Do NOT issue multiple `Agent` calls in parallel — tasks may depend on prior tasks' edits. Wait for it to return.
-   6. Re-read the JSON. If the task that was in-progress wasn't updated (status still `"in-progress"` with no `log` change), warn: `"Agent did not update task status on iteration X, continuing"` and proceed.
-   7. Repeat from step 1.
+   6. **Strict-parse the task file** by running:
+
+      ```bash
+      python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
+          --file TASK_FILE_PATH validate
+      ```
+
+      If exit code is non-zero, halt the loop with `"Task file corrupted on iteration X — see <path>"` and stop. Do NOT continue iterating on a malformed file.
+
+   7. Re-read the JSON. If the task that was in-progress wasn't updated (status still `"in-progress"` with no `log` change), warn: `"Agent did not update task status on iteration X, continuing"` and proceed.
+   8. Repeat from step 1.
 
 ### Mode = `next`
 
@@ -113,7 +122,43 @@ After the loop completes (all tasks done, max iterations reached, or `--next` fi
 
 Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with the absolute path to the JSON task file:
 
-> You are implementing one task from a structured task list. Read the task file at `TASK_FILE_PATH` (JSON). Find the first task with status `"in-progress"` or `"pending"`. Set its status to `"in-progress"` and write the file immediately. Read the `what`, `resolves`, and `acceptanceCriteria` fields. Implement the change. Verify all acceptance criteria are met. Run tests using the `testCommand` from the task file. If tests pass, set status to `"complete"` with a `log` summary and commit. If tests fail, fix forward or set status to `"failed"` with a `log` describing what went wrong. Commit. Implement exactly ONE task per iteration. IMPORTANT: when committing, stage only the source files you changed — do NOT stage the task file (`TASK_FILE_PATH`) or any `docs/exec-plans/` files. These are loop metadata, not deliverables.
+> You are implementing one task from a structured task list. **Use `task_list_cli.py` for ALL task-file mutations and reads.** Never use `Edit`, `Write`, or inline `python3 -c '...'` against the task file — they bypass atomicity and schema validation, and have caused silent JSON corruption in past runs.
+>
+> **Step 1 — Find your task and start it:**
+>
+> ```bash
+> python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
+>     --file TASK_FILE_PATH list --remaining
+> ```
+>
+> Pick the first element. Note its `id`. Then:
+>
+> ```bash
+> python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
+>     --file TASK_FILE_PATH start --id <id>
+> ```
+>
+> **Step 2 — Read implementation fields:**
+>
+> ```bash
+> python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
+>     --file TASK_FILE_PATH get --id <id>
+> ```
+>
+> Read `what`, `resolves`, and `acceptanceCriteria`. Implement the change. Verify all acceptance criteria are met. Run tests using the `testCommand` from the task file.
+>
+> **Step 3 — Finish:** Use the `Write` tool to dump your log to `/tmp/task-list-runner-<id>.txt`. Then:
+>
+> ```bash
+> python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
+>     --file TASK_FILE_PATH finish --id <id> --status complete --log-file /tmp/task-list-runner-<id>.txt
+> ```
+>
+> If tests failed and you cannot fix forward: same command with `--status failed`.
+>
+> **Step 4 — Commit.** Stage only the source files you changed. NEVER stage the task file (`TASK_FILE_PATH`) or any `docs/exec-plans/` files — these are loop metadata, not deliverables. Implement exactly ONE task per iteration.
+
+The CLI exits non-zero on any failure (task id not found → 10; invalid state transition → 11; schema/JSON errors → 12 / 13). If a step fails, read stderr, fix the cause, and retry. Do not work around it by hand-editing the task file.
 
 ---
 
@@ -125,3 +170,5 @@ Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with th
 - **Auto-locating multiple files silently.** If Phase 2 finds more than one validated match, _always_ ask the user. Don't pick by recency or alphabetical order.
 - **Trying to build a missing task list.** This skill consumes an existing JSON. If Phase 2 finds nothing, stop and tell the user — don't shell out to `task-list-builder` or fabricate tasks.
 - **Treating `--next` as a silent one-shot.** Even in `--next` mode, show the Phase 3 summary first so the user can see which task is about to run.
+- **Hand-editing the task file.** Do not use `Edit`, `Write`, or inline `python3 -c '...'` against the task JSON during the loop. All mutations go through `task_list_cli.py`. The one exception is structural revision in Phase 3 Option 3 (reorder, revise `what`, mark skipped) — and even then, re-run `task_list_cli.py validate` after saving.
+- **Skipping the strict-parse check.** Phase 4 step 6 (`validate`) is the canary that caught past silent-corruption bugs only after 19 iterations. Never skip it; never downgrade a non-zero exit to a warning.
