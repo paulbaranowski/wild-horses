@@ -1,41 +1,8 @@
 # Loop Protocol — shared by `/harness:feedback-blockers` and `/harness:reasoning-gaps`
 
-This file documents the post-analysis flow that both commands share: resuming an existing task file, the Phase 4 options menu, the JSON task schema, and the iterative Agent loop.
+This file documents the post-analysis flow both commands share: the Phase 4 options menu and the JSON task schema. **Execution** (resuming an existing task file, the iterative Agent loop, and the Task Implementation Prompt) lives in the `task-list-runner` skill at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/SKILL.md`.
 
-**Slug substitution.** The orchestrating command substitutes `<slug>` with its own slug — `feedback-blockers` or `reasoning-gaps` — wherever it appears below. The orchestrator also substitutes `<intervention-noun>` with `feedback-blocker` or `reasoning-gap` (singular) in the Task Implementation Prompt.
-
----
-
-## Resume Check (run before Phase 1)
-
-If `$ARGUMENTS` contains `--resume`, skip all analysis and restart the loop from an existing task file:
-
-1. **Locate the task file:**
-   - If a path follows `--resume` (e.g., `--resume docs/exec-plans/active/2026-04-14-a3f2-user-endpoints.<slug>.json`): read that file directly. If the path ends in `.<slug>.md`, read its YAML frontmatter `task_file` field, then validate the pointer: the path must exist, be readable, parse as valid JSON, and contain at least one task with `status` `"pending"` or `"in-progress"`. If any check fails, report a clear error (e.g., "task_file points to X which does not exist" or "JSON at X has no pending tasks") and stop. Otherwise, open the validated JSON file.
-   - If no path provided (just `--resume`): scan `docs/exec-plans/active/*.<slug>.json` for files with any task where `status` is `"pending"` or `"in-progress"`. If no JSON matches, fall back to scanning `docs/exec-plans/active/*.<slug>.md` — for each `.md` candidate, read its YAML frontmatter `task_file` field, then validate the pointer: the path must exist, be readable, parse as valid JSON, and contain at least one task with `status` `"pending"` or `"in-progress"`. Discard any candidate that fails any of these checks.
-     - If exactly one validated match (from either scan): use it.
-     - If multiple validated matches: list them with progress summaries (complete/pending/failed counts) and ask the user to pick one.
-     - If no validated matches: report "No in-progress <slug> task files found" and stop.
-
-2. **Validate the task file:** Confirm it has a `tasks` array and `testCommand` fields. If invalid, report the error and stop.
-
-3. **Show resume summary:**
-   - Task file path
-   - Total / complete / in-progress / pending / failed task counts
-   - List the remaining tasks (pending and in-progress) with their id, title, and effort
-
-4. **Ask the user what they'd like to do:**
-
-   > **How would you like to proceed?**
-   >
-   > 1. **Run all remaining** — Implement all pending/in-progress tasks via automated loop
-   > 2. **Run next task only** — Implement just the next pending/in-progress task, then stop
-   > 3. **Give feedback** — Review or adjust the plan before continuing
-   - **Option 1 (Run all remaining):** Jump directly to **Option 1's Step 4** in Phase 4 below — start the Agent loop with `MAX_ITER` = remaining tasks (pending + in-progress) × 1.5 (rounded up) + 1, using the existing task file path.
-   - **Option 2 (Run next task only):** Find the first task with status `"in-progress"` or `"pending"` in the task file. Use a single foreground **Agent tool** call with the **Task Implementation Prompt** below, substituting the task file path. After the Agent returns, re-read the JSON task file, show the updated task summary (complete/pending/failed counts) to the user, and return to step 4.
-   - **Option 3 (Give feedback):** Ask the user for their feedback (e.g., reorder tasks, skip a task, modify a task's approach, adjust scope). You (the agent) apply the feedback by directly editing the JSON task file — these are structural edits (reordering, setting status to `"skipped"`, revising a task's `what` field), not code implementation. After updating the file, return to step 4 — show the updated task list and ask again.
-
-5. **Skip Phases 1–4 entirely** — no analysis, no report generation, no options menu.
+**Slug substitution.** The orchestrating command substitutes `<slug>` with its own slug — `feedback-blockers` or `reasoning-gaps` — wherever it appears below.
 
 ---
 
@@ -129,42 +96,15 @@ Field definitions:
 - `status` — `"pending"` | `"in-progress"` | `"complete"` | `"failed"`
 - `log` — `null` when pending; a string describing what was done (or what went wrong) when in-progress/complete/failed
 
-**Step 4 — Implement tasks via Agent loop.**
+**Step 4 — Implement tasks via the `task-list-runner` skill.**
 
-Implement each task using sequential foreground Agent tool calls. Each iteration dispatches one task to an Agent that runs within this conversation, so the user sees every file read, edit, and test run in real time.
-
-Set `MAX_ITER` to the number of tasks multiplied by 1.5 (rounded up) plus 1. For example, 10 tasks → 16 max iterations.
-
-Execute the following loop. On each iteration:
-
-1. Read the JSON task file. Count tasks with status `"pending"` or `"in-progress"`.
-2. If none remain, the loop is done. Show final status:
-   - If any tasks have status `"failed"`: "Done with failures: X/Y complete, Z failed"
-   - Otherwise: "All Y tasks complete"
-3. If `MAX_ITER` is reached, show "Max iterations (MAX_ITER) reached" and stop.
-4. Show a progress header to the user: "Iteration X/MAX_ITER — N tasks remaining"
-5. Use the **Agent tool** (foreground, not background) with the **Task Implementation Prompt** below, substituting the actual task file path.
-6. After the Agent returns, re-read the JSON task file. If the task that was in-progress was not updated (status is still `"in-progress"` with no log change), log a warning: "Agent did not update task status on iteration X, continuing" and proceed.
-7. Repeat from step 1.
-
-**IMPORTANT:** Issue Agent tool calls **one at a time, sequentially**. Do NOT launch multiple Agent calls in parallel for task implementation — each task may depend on changes from the previous task. Wait for each Agent to complete before starting the next iteration.
-
-**Step 5 — Show final summary.**
-
-After the loop completes (all tasks done or max iterations reached), read the JSON task file and show the user:
-
-- A task status table: each task's id, title, and status
-- Plan location: `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.<slug>.md`
-- Task file location: `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.<slug>.json`
-- If any tasks failed or remain pending: suggest re-running with `--resume`
+Hand off execution to the `task-list-runner` skill, passing the absolute path to the JSON task file from Step 3 with the `--all` flag. The skill owns the Agent loop, `MAX_ITER` math, the Task Implementation Prompt, and the final summary — re-read its `SKILL.md` for the up-to-date procedure.
 
 ### Option 2: Save plan and fix top intervention
 
-- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.<slug>.md` including scope, all findings, all interventions with details
-- Implement intervention #1
-- Run existing tests (check CLAUDE.md for the test command, fallback to `uv run pytest` or `npm test`) to verify nothing breaks
-- If tests fail, fix forward or revert and explain what went wrong
-- Present a before/after summary showing the improvement
+- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.<slug>.md` including scope, all findings, all interventions with details.
+- Write the JSON task file (Step 3 above) so the runner has something to consume.
+- Hand off to the `task-list-runner` skill with the JSON path and the `--next` flag — it will run intervention #1 and stop.
 
 ### Option 3: Save full remediation plan
 
@@ -179,8 +119,6 @@ After the loop completes (all tasks done or max iterations reached), read the JS
 
 ---
 
-## Task Implementation Prompt
+## Resuming an existing task list
 
-Pass this prompt to each Agent tool call, replacing `TASK_FILE_PATH` with the actual path to the JSON task file from Step 3, and `<intervention-noun>` with `feedback-blocker` or `reasoning-gap`:
-
-> You are implementing <intervention-noun> interventions. Read the task file at TASK_FILE_PATH (JSON). Find the first task with status "in-progress" or "pending". Set it to "in-progress" and write the file immediately. Read the `what`, `resolves`, and `acceptanceCriteria` fields. Implement the change. Verify all acceptance criteria are met. Run tests using the `testCommand` from the task file. If tests pass, set status to "complete" with a log summary and commit. If tests fail, fix forward or set status to "failed" with a log. Commit. Implement exactly ONE task per iteration. IMPORTANT: When committing, stage only the source files you changed — do NOT stage the task file (TASK_FILE_PATH) or any docs/exec-plans/ files. These are metadata for loop tracking, not deliverables.
+To resume an in-progress task list (instead of running a fresh analysis), invoke the `task-list-runner` skill directly. It auto-locates an in-progress JSON in `docs/exec-plans/active/` when no path is given, and accepts `--all` or `--next` to skip the interactive menu. See `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/SKILL.md`.

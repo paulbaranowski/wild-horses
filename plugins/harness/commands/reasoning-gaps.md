@@ -11,7 +11,8 @@ This is NOT a code quality review. Code can be well-written and still be opaque 
 
 **Bundled assets at `${CLAUDE_PLUGIN_ROOT}`** (if the variable isn't substituted in this context, find the files with `Glob "**/harness/loop-protocol.md"` and read the siblings alongside it):
 
-- `loop-protocol.md` — Resume Check, Phase 4 options, JSON task schema, and the Agent loop. Shared with `/harness:feedback-blockers`.
+- `loop-protocol.md` — Phase 4 options menu and the JSON task schema. Shared with `/harness:feedback-blockers`.
+- `skills/task-list-runner/SKILL.md` — execution engine (resume, Agent loop, Task Implementation Prompt). Invoked from Phase 4 Options 1 and 2 and from `--resume`.
 - `agents/reasoning-gaps/types-and-data-contracts.md`
 - `agents/reasoning-gaps/implicit-flow-and-state.md`
 - `agents/reasoning-gaps/structure-and-documentation.md`
@@ -19,13 +20,12 @@ This is NOT a code quality review. Code can be well-written and still be opaque 
 **Target:** "$ARGUMENTS"
 
 **Slug:** `reasoning-gaps` (use this value wherever `loop-protocol.md` says `<slug>`).
-**Intervention noun:** `reasoning-gap` (use this wherever `loop-protocol.md` says `<intervention-noun>`).
 
 ---
 
 ## Resume Check (before Phase 1)
 
-If `$ARGUMENTS` contains `--resume`, follow the **Resume Check** procedure in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md`. After resuming, skip Phases 1–4 entirely.
+If `$ARGUMENTS` contains `--resume`, hand off to the `task-list-runner` skill (it will auto-locate the in-progress task file or accept a path that follows `--resume`). Skip Phases 1–4 entirely.
 
 ---
 
