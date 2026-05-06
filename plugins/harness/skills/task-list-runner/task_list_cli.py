@@ -188,7 +188,14 @@ def cmd_list(args: argparse.Namespace, data: dict, path: Path) -> None:
 
 
 def cmd_validate(args: argparse.Namespace, data: dict, path: Path) -> None:
-    del args, data, path  # load_and_validate already ran; reaching here means valid.
+    del args, path  # load_and_validate already ran; reaching here means valid.
+    tasks = data["tasks"]
+    counts = {status: 0 for status in ("pending", "in-progress", "complete", "failed")}
+    for task in tasks:
+        counts[task["status"]] += 1
+    parts = [f"{n} {status}" for status, n in counts.items() if n > 0]
+    suffix = f" ({', '.join(parts)})" if parts else ""
+    print(f"valid: {len(tasks)} tasks{suffix}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -242,7 +249,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="sugar for status in {pending, in-progress}",
     )
 
-    sub.add_parser("validate", help="strict-parse + minimal schema check; exit 0 if valid")
+    sub.add_parser(
+        "validate",
+        help="strict-parse + minimal schema check; on success prints 'valid: N tasks (...)' and exits 0",
+    )
 
     return parser
 

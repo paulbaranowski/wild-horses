@@ -91,7 +91,13 @@ class CliTestCase(unittest.TestCase):
     def test_validate_good_file_exits_zero(self):
         result = self.run_cli("validate")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "")
+        # fixture has 3 tasks: 1 pending, 1 in-progress, 1 complete; bucket
+        # order is fixed (pending, in-progress, complete, failed) and zero
+        # buckets are omitted.
+        self.assertEqual(
+            result.stdout,
+            "valid: 3 tasks (1 pending, 1 in-progress, 1 complete)\n",
+        )
         self.assertEqual(result.stderr, "")
 
     def test_validate_missing_file_exits_one(self):
@@ -132,6 +138,14 @@ class CliTestCase(unittest.TestCase):
         result = self.run_cli("validate")
         self.assertEqual(result.returncode, 12)
         self.assertIn("status", result.stderr)
+
+    def test_validate_zero_tasks_omits_parens(self):
+        data = fixture_data()
+        data["tasks"] = []
+        self.task_path.write_text(json.dumps(data), encoding="utf-8")
+        result = self.run_cli("validate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "valid: 0 tasks\n")
 
     # ---- list ----------------------------------------------------------
 
