@@ -16,6 +16,24 @@ The schema this skill consumes is defined in `${CLAUDE_PLUGIN_ROOT}/loop-protoco
 
 ---
 
+## CLI reference — `task_list_cli.py`
+
+The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py` is the canonical interface to the task file. Available subcommands (all take `--file <task-file-path>`):
+
+- **`next`** — atomically claim and print the next task. Resumes in-progress, else flips first pending → in-progress. Exits 14 if no tasks remain.
+- **`start --id <N>`** — flip task N from pending → in-progress.
+- **`finish --id <N> --status complete|failed --log-file <path>`** — flip in-progress task N to terminal status; log content is read from the file (file-only input avoids shell-arg quoting hazards).
+- **`get --id <N>`** — print one task as pretty JSON.
+- **`list [--status <s>|--remaining]`** — print all tasks (or filtered) as a JSON array. `--remaining` is sugar for `pending` + `in-progress`.
+- **`status`** — print task counts + `plan` path + `testCommand` as a JSON object. Use this for Phase 3 / Phase 5 summary displays.
+- **`validate`** — strict-parse + minimal schema check; exit 0 if valid.
+
+**Exit codes:** 0 success · 1 IO error · 2 argparse · 10 task id not found · 11 invalid state transition · 12 schema validation · 13 JSON parse · 14 no remaining tasks.
+
+Mutations from dispatched agents go ONLY through this CLI. The runner itself may also use `status`, `list`, and `validate` for its own bookkeeping displays — prefer those over re-reading and re-counting the JSON natively. Hand-edits to the JSON during the loop are forbidden (see Failure modes).
+
+---
+
 ## Phase 1 — Parse arguments
 
 From `$ARGUMENTS`, extract:

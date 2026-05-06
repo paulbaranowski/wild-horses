@@ -140,6 +140,23 @@ def cmd_get(args: argparse.Namespace, data: dict, path: Path) -> None:
     print(json.dumps(task, indent=2, ensure_ascii=False))
 
 
+def cmd_status(args: argparse.Namespace, data: dict, path: Path) -> None:
+    del args, path
+    counts = {status: 0 for status in VALID_STATUSES}
+    for task in data["tasks"]:
+        counts[task["status"]] += 1
+    summary = {
+        "total": len(data["tasks"]),
+        "pending": counts["pending"],
+        "in-progress": counts["in-progress"],
+        "complete": counts["complete"],
+        "failed": counts["failed"],
+        "plan": data.get("plan"),
+        "testCommand": data["testCommand"],
+    }
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+
+
 def cmd_next(args: argparse.Namespace, data: dict, path: Path) -> None:
     del args
     tasks = data["tasks"]
@@ -207,6 +224,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="atomically claim and print the next task (resume in-progress, else flip first pending → in-progress)",
     )
 
+    sub.add_parser(
+        "status",
+        help="print task counts + plan path + testCommand as JSON",
+    )
+
     p_list = sub.add_parser("list", help="print tasks as a pretty JSON array to stdout")
     list_filter = p_list.add_mutually_exclusive_group()
     list_filter.add_argument(
@@ -236,6 +258,7 @@ def main() -> int:
             "finish": cmd_finish,
             "get": cmd_get,
             "next": cmd_next,
+            "status": cmd_status,
             "list": cmd_list,
             "validate": cmd_validate,
         }

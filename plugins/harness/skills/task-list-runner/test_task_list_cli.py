@@ -173,6 +173,41 @@ class CliTestCase(unittest.TestCase):
         self.assertEqual(result.stdout, "", "stdout must be empty so jq cannot silently succeed")
         self.assertIn("not found", result.stderr)
 
+    # ---- status --------------------------------------------------------
+
+    def test_status_returns_counts_plan_and_test_command(self):
+        # Fixture: 1 pending, 1 in-progress, 1 complete, 0 failed → total 3
+        result = self.run_cli("status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["total"], 3)
+        self.assertEqual(summary["pending"], 1)
+        self.assertEqual(summary["in-progress"], 1)
+        self.assertEqual(summary["complete"], 1)
+        self.assertEqual(summary["failed"], 0)
+        self.assertEqual(summary["plan"], "docs/exec-plans/active/test.md")
+        self.assertEqual(summary["testCommand"], "echo test")
+
+    def test_status_with_no_tasks(self):
+        data = fixture_data()
+        data["tasks"] = []
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        result = self.run_cli("status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["total"], 0)
+        self.assertEqual(summary["pending"], 0)
+        self.assertEqual(summary["complete"], 0)
+
+    def test_status_with_missing_plan_field_returns_null(self):
+        data = fixture_data()
+        del data["plan"]
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        result = self.run_cli("status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertIsNone(summary["plan"])
+
     # ---- next ----------------------------------------------------------
 
     def test_next_returns_in_progress_unchanged_when_present(self):
