@@ -384,6 +384,23 @@ class CliTestCase(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("invalid choice", result.stderr)
 
+    def test_finish_non_utf8_log_file_exits_thirteen(self):
+        # Non-UTF-8 bytes (e.g. latin-1 0xff) must map to a controlled
+        # CLI error, not a Python UnicodeDecodeError traceback.
+        log = self.tmp_dir / "log.bin"
+        log.write_bytes(b"\xff\xfe\xfd not utf-8 here")
+        result = self.run_cli(
+            "finish", "--id", "2", "--status", "complete", "--log-file", str(log)
+        )
+        self.assertEqual(result.returncode, 13)
+        self.assertIn("not valid UTF-8", result.stderr)
+
+    def test_validate_non_utf8_file_exits_thirteen(self):
+        self.task_path.write_bytes(b"\xff\xfe\xfd not utf-8 here")
+        result = self.run_cli("validate")
+        self.assertEqual(result.returncode, 13)
+        self.assertIn("not valid UTF-8", result.stderr)
+
     def test_finish_missing_log_file_exits_one(self):
         result = self.run_cli(
             "finish",
@@ -401,9 +418,11 @@ class CliTestCase(unittest.TestCase):
 
     def test_successful_write_leaves_no_tmp_file(self):
         self.run_cli("start", "--id", "1")
-        self.assertFalse(
-            (self.task_path.with_name(self.task_path.name + ".tmp")).exists(),
-            ".tmp file must be cleaned up after successful os.replace",
+        leftovers = list(self.tmp_dir.glob("*.tmp"))
+        self.assertEqual(
+            leftovers,
+            [],
+            f".tmp file(s) must be cleaned up after successful os.replace; found {leftovers}",
         )
 
     def test_pretty_printed_indent_two(self):

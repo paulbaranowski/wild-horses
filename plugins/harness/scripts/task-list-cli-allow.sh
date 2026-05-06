@@ -15,13 +15,17 @@ command -v jq >/dev/null 2>&1 || exit 0
 cmd=$(jq -r '.tool_input.command // empty')
 
 # Match: command starts with `python3 ` (with whitespace), AND contains
-# `/task_list_cli.py` as a literal substring. The leading slash prevents
-# accidental matches against a stray `task_list_cli.py` in CWD; the
-# `python3 ` prefix prevents matches against e.g. `cat task_list_cli.py`.
-# Two-clause check (instead of a single regex with end-anchor) handles
-# quoted paths — Claude Code defensively quotes script paths, so the
-# real command is `python3 "/path/task_list_cli.py" --file ...` and a
-# regex requiring whitespace right after `.py` would miss it.
-if [[ "$cmd" =~ ^python3[[:space:]] ]] && [[ "$cmd" == *"/task_list_cli.py"* ]]; then
+# `/skills/task-list-runner/task_list_cli.py` as a literal substring.
+# That suffix is tighter than just `/task_list_cli.py` (a stray script
+# elsewhere on the filesystem won't match) and is the common substring
+# between both layouts:
+#   - dev:       /...checkout.../plugins/harness/skills/task-list-runner/task_list_cli.py
+#   - installed: /...cache/wild-horses/harness/<version>/skills/task-list-runner/task_list_cli.py
+# (The `harness` segment is NOT adjacent to `skills` in the installed
+# path — a version directory sits between them — so we anchor on the
+# `skills/task-list-runner/` prefix instead.) Two-clause check (instead
+# of one regex with end-anchor) handles Claude Code's defensive
+# path-quoting.
+if [[ "$cmd" =~ ^python3[[:space:]] ]] && [[ "$cmd" == *"/skills/task-list-runner/task_list_cli.py"* ]]; then
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"task-list-runner CLI is plugin-approved"}}'
 fi

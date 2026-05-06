@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -32,16 +33,22 @@ def load_and_validate(path: Path) -> dict:
     per-task id/title/status/log, unique ids). Other fields pass through
     so this script doesn't need to be co-updated when the schema grows.
     """
-    if not path.is_file():
-        raise TaskCliError(f"file {path}: no such file or not readable", code=1)
     try:
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
+    except FileNotFoundError:
+        raise TaskCliError(f"file {path}: no such file or not readable", code=1) from None
+    except IsADirectoryError:
+        raise TaskCliError(f"file {path}: is a directory, not a file", code=1) from None
+    except OSError as e:
+        raise TaskCliError(f"file {path}: {e}", code=1) from e
+    except UnicodeDecodeError as e:
+        raise TaskCliError(f"file {path} is not valid UTF-8: {e}", code=13) from e
     except json.JSONDecodeError as e:
         raise TaskCliError(
             f"file is not valid JSON at line {e.lineno} column {e.colno}: {e.msg}",
             code=13,
-        )
+        ) from e
 
     if not isinstance(data, dict):
         raise TaskCliError("top-level value must be a JSON object", code=12)
@@ -78,9 +85,18 @@ def write_atomic(path: Path, data: dict) -> None:
     """Write JSON to a sibling tmp file, fsync, then os.replace.
 
     POSIX-atomic. The original file is untouched until the rename, so
-    no half-written intermediate state is observable.
+    no half-written intermediate state is observable. The tmp file gets
+    a unique mkstemp-generated name so two concurrent writers can't
+    clobber each other (the spec says runner is single-writer by
+    design, but defending against accidental violations is cheap).
     """
-    tmp = path.with_name(path.name + ".tmp")
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    os.close(fd)
+    tmp = Path(tmp_name)
     try:
         with tmp.open("w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
@@ -127,7 +143,9 @@ def cmd_finish(args: argparse.Namespace, data: dict, path: Path) -> None:
     try:
         log_content = log_path.read_text(encoding="utf-8")
     except OSError as e:
-        raise TaskCliError(f"log file {log_path}: {e}", code=1)
+        raise TaskCliError(f"log file {log_path}: {e}", code=1) from e
+    except UnicodeDecodeError as e:
+        raise TaskCliError(f"log file {log_path} is not valid UTF-8: {e}", code=13) from e
     if log_content.endswith("\n"):
         log_content = log_content[:-1]
     task["status"] = args.status
