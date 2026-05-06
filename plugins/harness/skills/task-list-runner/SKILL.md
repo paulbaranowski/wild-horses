@@ -87,8 +87,9 @@ Implement tasks via sequential foreground `Agent` tool calls. Each Agent runs _w
    3. If `MAX_ITER` is reached → `"Max iterations (MAX_ITER) reached"` and stop.
    4. Show progress header: `"Iteration X/MAX_ITER — N tasks remaining"`.
    5. **Issue a single foreground `Agent` tool call** with the **Task Implementation Prompt** below, substituting the task file path. Do NOT issue multiple `Agent` calls in parallel — tasks may depend on prior tasks' edits. Wait for it to return.
-   6. Re-read the JSON. If the task that was in-progress wasn't updated (status still `"in-progress"` with no `log` change), warn: `"Agent did not update task status on iteration X, continuing"` and proceed.
-   7. Repeat from step 1.
+   6. **Strict-parse the task file** with `python3 -c "import json; json.load(open('TASK_FILE_PATH'))"` (or `jq . TASK_FILE_PATH > /dev/null`). If parsing fails, **halt the loop** and report: `"Task file became invalid JSON during iteration X — stopping before further writes compound the corruption. Inspect the file and fix syntax, then resume."` Do NOT proceed to step 7 with a malformed file — subsequent agents will keep writing to it.
+   7. Re-read the JSON. If the task that was in-progress wasn't updated (status still `"in-progress"` with no `log` change), warn: `"Agent did not update task status on iteration X, continuing"` and proceed.
+   8. Repeat from step 1.
 
 ### Mode = `next`
 
@@ -113,13 +114,33 @@ After the loop completes (all tasks done, max iterations reached, or `--next` fi
 
 Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with the absolute path to the JSON task file:
 
-> You are implementing one task from a structured task list. Read the task file at `TASK_FILE_PATH` (JSON). Find the first task with status `"in-progress"` or `"pending"`. Set its status to `"in-progress"` and write the file immediately. Read the `what`, `resolves`, and `acceptanceCriteria` fields. Implement the change. Verify all acceptance criteria are met. Run tests using the `testCommand` from the task file. If tests pass, set status to `"complete"` with a `log` summary and commit. If tests fail, fix forward or set status to `"failed"` with a `log` describing what went wrong. Commit. Implement exactly ONE task per iteration. IMPORTANT: when committing, stage only the source files you changed — do NOT stage the task file (`TASK_FILE_PATH`) or any `docs/exec-plans/` files. These are loop metadata, not deliverables.
+> You are implementing one task from a structured task list. Read the task file at `TASK_FILE_PATH` (JSON). Find the first task with status `"in-progress"` or `"pending"`. Set its status to `"in-progress"` and write the file immediately. Read the `what`, `resolves`, and `acceptanceCriteria` fields. Implement the change. Verify all acceptance criteria are met. Run tests using the `testCommand` from the task file. If tests pass, set status to `"complete"` with a `log` summary and commit. If tests fail, fix forward or set status to `"failed"` with a `log` describing what went wrong. Commit. Implement exactly ONE task per iteration.
+>
+> **JSON update discipline (mandatory).** Never use `Edit` or `Write` to modify the task file directly — hand-edited JSON loses structural punctuation (missing `},` between tasks, unescaped quotes inside long `log` strings, etc.) and the corruption survives silently across many iterations. For every task-file mutation, go through a strict parser:
+>
+> ```bash
+> python3 -c '
+> import json, sys
+> p = "TASK_FILE_PATH"
+> d = json.load(open(p))
+> # locate the task by id and mutate fields in-place, e.g.:
+> # next(t for t in d["tasks"] if t["id"] == 17)["status"] = "complete"
+> # next(t for t in d["tasks"] if t["id"] == 17)["log"] = "..."
+> json.dump(d, open(p, "w"), indent=2)
+> '
+> ```
+>
+> Equivalent `jq` is fine. After every write, verify the file still parses by running `python3 -c "import json; json.load(open('TASK_FILE_PATH'))"` (exit code 0). If parsing fails, stop — do not attempt further writes. The runner will halt the loop on the next iteration's strict-parse check, which is the intended behavior.
+>
+> IMPORTANT: when committing, stage only the source files you changed — do NOT stage the task file (`TASK_FILE_PATH`) or any `docs/exec-plans/` files. These are loop metadata, not deliverables.
 
 ---
 
 ## Failure modes — prevent these
 
 - **Parallel `Agent` calls.** Never issue multiple `Agent` tool calls in the same response during the loop. Tasks may depend on prior tasks' edits. Always sequential, always foreground.
+- **Skipping the strict-parse check.** Phase 4 step 6 must use a JSON parser, not text inspection. A prior incident: an agent's `Edit` to a long `log` string dropped the `},` between two adjacent task objects; 19 subsequent iterations ran on the corrupted file because the loop only checked status text, not JSON validity. Halt loudly the moment a parse fails — do not let agents pile more writes onto a malformed file.
+- **Hand-editing the task JSON.** Agents must use `python3 -c 'json.load → mutate → json.dump'` (or `jq`) for every task-file write, per the Task Implementation Prompt. Long multi-paragraph `log` strings with embedded escapes are the highest-risk shape for `Edit`/`Write` corruption.
 - **Skipping the re-read.** After every `Agent` returns, re-read the JSON. Don't trust in-memory state — the Agent has been writing to the file and the in-memory copy is stale.
 - **Committing the task file.** The Task Implementation Prompt forbids staging `docs/exec-plans/` files. If an Agent does it anyway, that's a bug — flag it to the user and don't propagate.
 - **Auto-locating multiple files silently.** If Phase 2 finds more than one validated match, _always_ ask the user. Don't pick by recency or alphabetical order.
