@@ -124,30 +124,18 @@ Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with th
 
 > You are implementing one task from a structured task list. **Use `task_list_cli.py` for ALL task-file mutations and reads.** Never use `Edit`, `Write`, or inline `python3 -c '...'` against the task file — they bypass atomicity and schema validation, and have caused silent JSON corruption in past runs.
 >
-> **Step 1 — Find your task and start it:**
+> **Step 1 — Claim and read your task:**
 >
 > ```bash
 > python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
->     --file TASK_FILE_PATH list --remaining
+>     --file TASK_FILE_PATH next
 > ```
 >
-> Pick the first element. Note its `id`. Then:
+> The output is the full task object — note the `id` and read `what`, `resolves`, and `acceptanceCriteria`. (`next` atomically claims the first pending task and flips it to `in-progress`, or returns an already-in-progress task unchanged if a previous iteration crashed mid-task.) If the command exits with code 14, no work remains — exit cleanly.
 >
-> ```bash
-> python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
->     --file TASK_FILE_PATH start --id <id>
-> ```
+> Implement the change. Verify all acceptance criteria are met. Run tests using the `testCommand` from the task file.
 >
-> **Step 2 — Read implementation fields:**
->
-> ```bash
-> python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
->     --file TASK_FILE_PATH get --id <id>
-> ```
->
-> Read `what`, `resolves`, and `acceptanceCriteria`. Implement the change. Verify all acceptance criteria are met. Run tests using the `testCommand` from the task file.
->
-> **Step 3 — Finish:** Use the `Write` tool to dump your log to `/tmp/task-list-runner-<id>.txt`. Then:
+> **Step 2 — Finish:** Use the `Write` tool to dump your log to `/tmp/task-list-runner-<id>.txt`. Then:
 >
 > ```bash
 > python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
@@ -156,9 +144,9 @@ Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with th
 >
 > If tests failed and you cannot fix forward: same command with `--status failed`.
 >
-> **Step 4 — Commit.** Stage only the source files you changed. NEVER stage the task file (`TASK_FILE_PATH`) or any `docs/exec-plans/` files — these are loop metadata, not deliverables. Implement exactly ONE task per iteration.
+> **Step 3 — Commit.** Stage only the source files you changed. NEVER stage the task file (`TASK_FILE_PATH`) or any `docs/exec-plans/` files — these are loop metadata, not deliverables. Implement exactly ONE task per iteration.
 
-The CLI exits non-zero on any failure (task id not found → 10; invalid state transition → 11; schema/JSON errors → 12 / 13). If a step fails, read stderr, fix the cause, and retry. Do not work around it by hand-editing the task file.
+The CLI exits non-zero on any failure (task id not found → 10; invalid state transition → 11; schema/JSON errors → 12 / 13; no remaining tasks → 14). If a step fails, read stderr, fix the cause, and retry. Do not work around it by hand-editing the task file.
 
 ---
 

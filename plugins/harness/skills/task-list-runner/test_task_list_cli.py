@@ -173,6 +173,88 @@ class CliTestCase(unittest.TestCase):
         self.assertEqual(result.stdout, "", "stdout must be empty so jq cannot silently succeed")
         self.assertIn("not found", result.stderr)
 
+    # ---- next ----------------------------------------------------------
+
+    def test_next_returns_in_progress_unchanged_when_present(self):
+        # Fixture has task 2 already in-progress — resume preference must
+        # return it as-is, NOT flip task 1 (which is pending and earlier).
+        result = self.run_cli("next")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task = json.loads(result.stdout)
+        self.assertEqual(task["id"], 2)
+        self.assertEqual(task["status"], "in-progress")
+        # Task 1 must still be pending — no claim happened
+        self.assertEqual(self.read_task_file()["tasks"][0]["status"], "pending")
+
+    def test_next_claims_pending_when_no_in_progress(self):
+        # Mutate fixture: drop task 2 to pending so only pending tasks remain
+        data = fixture_data()
+        data["tasks"][1]["status"] = "pending"
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        result = self.run_cli("next")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task = json.loads(result.stdout)
+        self.assertEqual(task["id"], 1)
+        self.assertEqual(task["status"], "in-progress")
+        # Persisted to disk
+        self.assertEqual(self.read_task_file()["tasks"][0]["status"], "in-progress")
+        # Task 2 untouched
+        self.assertEqual(self.read_task_file()["tasks"][1]["status"], "pending")
+
+    def test_next_no_remaining_tasks_exits_fourteen(self):
+        # Mark all tasks complete
+        data = fixture_data()
+        for t in data["tasks"]:
+            t["status"] = "complete"
+            t["log"] = "done"
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        result = self.run_cli("next")
+        self.assertEqual(result.returncode, 14)
+        self.assertEqual(result.stdout, "", "stdout must be empty so jq cannot silently succeed")
+        self.assertIn("no remaining tasks", result.stderr)
+
+    def test_next_skips_failed_tasks(self):
+        data = fixture_data()
+        data["tasks"][0]["status"] = "failed"
+        data["tasks"][0]["log"] = "broke"
+        data["tasks"][1]["status"] = "complete"
+        data["tasks"][1]["log"] = "done"
+        # Add a fresh pending task at id 4
+        data["tasks"].append(
+            {
+                "id": 4,
+                "title": "fresh",
+                "what": "x",
+                "resolves": [],
+                "effort": "low",
+                "createsNewCode": False,
+                "status": "pending",
+                "acceptanceCriteria": [],
+                "log": None,
+            }
+        )
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        result = self.run_cli("next")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task = json.loads(result.stdout)
+        self.assertEqual(task["id"], 4)
+        self.assertEqual(task["status"], "in-progress")
+
+    def test_next_finish_round_trip(self):
+        # Resume task 2 via next, finish it, next picks up task 1
+        log = self._write_log("done")
+        first = self.run_cli("next")
+        self.assertEqual(json.loads(first.stdout)["id"], 2)
+        finish = self.run_cli(
+            "finish", "--id", "2", "--status", "complete", "--log-file", str(log)
+        )
+        self.assertEqual(finish.returncode, 0, finish.stderr)
+        second = self.run_cli("next")
+        self.assertEqual(second.returncode, 0)
+        second_task = json.loads(second.stdout)
+        self.assertEqual(second_task["id"], 1)
+        self.assertEqual(second_task["status"], "in-progress")
+
     # ---- start ---------------------------------------------------------
 
     def test_start_pending_flips_to_in_progress(self):

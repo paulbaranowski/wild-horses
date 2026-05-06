@@ -140,6 +140,26 @@ def cmd_get(args: argparse.Namespace, data: dict, path: Path) -> None:
     print(json.dumps(task, indent=2, ensure_ascii=False))
 
 
+def cmd_next(args: argparse.Namespace, data: dict, path: Path) -> None:
+    del args
+    tasks = data["tasks"]
+    # Resume preference: an already-in-progress task means a previous iteration
+    # crashed mid-task. Return it without changing status so the agent can
+    # finish what it started.
+    for task in tasks:
+        if task["status"] == "in-progress":
+            print(json.dumps(task, indent=2, ensure_ascii=False))
+            return
+    # No in-progress: claim the first pending task and flip it.
+    for task in tasks:
+        if task["status"] == "pending":
+            task["status"] = "in-progress"
+            write_atomic(path, data)
+            print(json.dumps(task, indent=2, ensure_ascii=False))
+            return
+    raise TaskCliError("no remaining tasks", code=14)
+
+
 def cmd_list(args: argparse.Namespace, data: dict, path: Path) -> None:
     del path
     tasks: list[Any] = data["tasks"]
@@ -182,6 +202,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_get = sub.add_parser("get", help="print one task as pretty JSON to stdout")
     p_get.add_argument("--id", type=int, required=True, help="task id")
 
+    sub.add_parser(
+        "next",
+        help="atomically claim and print the next task (resume in-progress, else flip first pending → in-progress)",
+    )
+
     p_list = sub.add_parser("list", help="print tasks as a pretty JSON array to stdout")
     list_filter = p_list.add_mutually_exclusive_group()
     list_filter.add_argument(
@@ -210,6 +235,7 @@ def main() -> int:
             "start": cmd_start,
             "finish": cmd_finish,
             "get": cmd_get,
+            "next": cmd_next,
             "list": cmd_list,
             "validate": cmd_validate,
         }
