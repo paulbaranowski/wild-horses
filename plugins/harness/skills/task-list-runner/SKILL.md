@@ -127,7 +127,7 @@ After the loop completes (all tasks done, max iterations reached, or `--next` fi
 
 Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with the absolute path to the JSON task file:
 
-> You are implementing one task from a structured task list. **Use `task_list_cli.py` for ALL task-file access — mutations AND read-only inspections of single fields.** Never use `Edit`, `Write`, `cat`, `jq`, or inline `python3 -c '...'` against the task file. The CLI's read verbs split by _what_ you're reading: `get --id <N>` and `next` return per-task objects; `list` returns the full task array; `status` returns file-level metadata (counts, the precomputed `remaining` integer, `plan`); `remaining` returns the compact pending+in-progress display array; `verify --id <N>` _executes_ the task's verifications (it doesn't print `verifySteps` for inspection — it runs them, naming each step in the `verify[i/n] <slug> ...` lines). There is no "get any field by name" verb, and `verifySteps` specifically has no read verb — read it by watching `verify`'s output, not by trying to fetch the array. Bypassing the CLI skips atomicity and schema validation, and has caused silent JSON corruption in past runs.
+> You are implementing one task from a structured task list. **Use `task_list_cli.py` for ALL task-file access — mutations AND read-only inspections of single fields.** Never use `Edit`, `Write`, `cat`, `jq`, or inline `python3 -c '...'` against the task file. The CLI's read verbs split by _what_ you're reading: `get --id <N>` and `next` return per-task objects; `list` returns the full task array; `status` returns file-level metadata (counts, the precomputed `remaining` integer, `plan`); `remaining` returns the compact pending+in-progress display array; `verify --id <N>` _executes_ the task's verifications, naming each running step in the `verify[i/n] <slug> ...` lines on stdout. There is no "get any field by name" verb. Bypassing the CLI skips atomicity and schema validation, and has caused silent JSON corruption in past runs.
 >
 > **Step 1 — Claim and read your task:**
 >
@@ -147,15 +147,13 @@ Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with th
 >     --file TASK_FILE_PATH verify --id <id>
 > ```
 >
-> The CLI runs each `verifySteps` command in order, capturing stdout+stderr to a per-step log file (`/tmp/verify-<id>-step<N>-<slug>.log`), and stops on the first failing step. If the command exits non-zero, that exit code is the failing step's exit code; the last `verify[i/n]` line in stdout names the failing step's log path. `Read` that file, fix the underlying cause in your code, then re-run the same `verify --id <id>` invocation. When the command exits zero, all steps passed and the task is verified.
->
-> You do **not** need to inspect `verifySteps` before calling `verify`. The CLI runs the array; each step's `name` shows up in the `verify[i/n] <slug> ...` line on stdout, so the running output tells you exactly which step is executing and which (if any) failed (with the path to that step's log). The `verifySteps` array has no read verb — `get verifySteps` is not real (`get` is `get --id <N>`); `status` does not include the array (it returns counts + plan, no schema body); peeking at the JSON via `cat`/`jq`/`Read` is forbidden. Run `verify` and read its output.
+> The CLI runs each verification step in order, capturing stdout+stderr to a per-step log file (`/tmp/verify-<id>-step<N>-<slug>.log`), and stops on the first failing step. If the command exits non-zero, that exit code is the failing step's exit code; the last `verify[i/n]` line in stdout names the failing step's log path. `Read` that file, fix the underlying cause in your code, then re-run the same `verify --id <id>` invocation. When the command exits zero, all steps passed and the task is verified.
 >
 > Strictly forbidden during verification:
 >
-> - Re-invoking individual `verifySteps` commands directly (e.g. running `npx tsc --noEmit` yourself). The CLI is the contract; running steps by hand splits your verification rhythm and burns budget.
+> - Re-invoking individual verification steps directly (e.g. running `npx tsc --noEmit` yourself after seeing it run). The CLI is the contract; running steps by hand splits your verification rhythm and burns budget.
 > - Permuting redirection flags on the same command hoping for clearer output (`| head -50` → `2>&1` → drop `2>&1` → repeat). The CLI's redirection is canonical; the answer is in the log file. If the log is unclear, `Read` more of it — don't re-run.
-> - Inventing additional verification commands not in `verifySteps`. If a step you need is missing, that's a bug in the task file, not something to paper over with shell improvisation.
+> - Inventing additional verification commands beyond what `verify` runs. If a step you need is missing, that's a bug in the task file, not something to paper over with shell improvisation.
 >
 > **Step 2 — Finish:** Pipe your log into `finish` via a quoted heredoc. The `--log-file -` token tells the CLI to read from stdin; the quoted `<<'EOF'` makes the shell pass the body verbatim (no `$VAR` expansion, no quote-mangling), so embedded `"`, `$`, and newlines are safe.
 >
