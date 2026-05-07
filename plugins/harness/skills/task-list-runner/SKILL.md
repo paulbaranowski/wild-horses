@@ -1,6 +1,6 @@
 ---
 name: task-list-runner
-description: Run a structured task list (JSON file in the harness loop-protocol schema) by dispatching each task to a foreground Agent in sequence. Auto-locates an in-progress task file in docs/exec-plans/active/ when no path is given. Use when the user says "run the plan", "resume the plan", "execute the tasks", "run task-list-runner", or otherwise asks to drive an existing harness task list to completion. Pairs with task-list-builder, which produces the JSON.
+description: Run a structured task list (JSON file in the harness task-list schema) by dispatching each task to a foreground Agent in sequence. Auto-locates an in-progress task file in docs/exec-plans/active/ when no path is given. Use when the user says "run the plan", "resume the plan", "execute the tasks", "run task-list-runner", or otherwise asks to drive an existing harness task list to completion. Pairs with task-list-builder, which produces the JSON.
 user-invocable: true
 disable-model-invocation: false
 argument-hint: "[path to .json or .md task file] [--all | --next]"
@@ -8,9 +8,9 @@ argument-hint: "[path to .json or .md task file] [--all | --next]"
 
 # task-list-runner
 
-Drive a harness task list (JSON file matching the `loop-protocol.md` schema) to completion by dispatching each task to a foreground `Agent` tool call, one at a time. Pairs with `task-list-builder`, which produces the JSON.
+Drive a harness task list (JSON file matching the `task-list-schema.md` schema) to completion by dispatching each task to a foreground `Agent` tool call, one at a time. Pairs with `task-list-builder`, which produces the JSON.
 
-The schema this skill consumes is defined in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md` (see "JSON task schema"). Re-read that file rather than relying on memory.
+The schema this skill consumes is defined in `${CLAUDE_PLUGIN_ROOT}/task-list-schema.md`. Re-read that file rather than relying on memory.
 
 **Arguments:** `$ARGUMENTS`
 
@@ -149,11 +149,11 @@ Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with th
 >
 > The CLI runs each verification step in order, capturing stdout+stderr to a per-step log file (`/tmp/verify-<id>-step<N>-<slug>.log`), and stops on the first failing step. If the command exits non-zero, that exit code is the failing step's exit code; the last `verify[i/n]` line in stdout names the failing step's log path. `Read` that file, fix the underlying cause in your code, then re-run the same `verify --id <id>` invocation. When the command exits zero, all steps passed and the task is verified.
 >
-> Strictly forbidden during verification:
+> Never do these during verification:
 >
-> - Re-invoking individual verification steps directly (e.g. running `npx tsc --noEmit` yourself after seeing it run). The CLI is the contract; running steps by hand splits your verification rhythm and burns budget.
-> - Permuting redirection flags on the same command hoping for clearer output (`| head -50` → `2>&1` → drop `2>&1` → repeat). The CLI's redirection is canonical; the answer is in the log file. If the log is unclear, `Read` more of it — don't re-run.
-> - Inventing additional verification commands beyond what `verify` runs. If a step you need is missing, that's a bug in the task file, not something to paper over with shell improvisation.
+> - **Don't re-invoke individual verification steps directly** (e.g. running `npx tsc --noEmit` yourself after seeing it run). The CLI is the contract; running steps by hand splits your verification rhythm and burns budget.
+> - **Don't permute redirection flags** on the same command hoping for clearer output (`| head -50` → `2>&1` → drop `2>&1` → repeat). The CLI's redirection is canonical; the answer is in the log file. If the log is unclear, `Read` more of it — don't re-run.
+> - **Don't invent additional verification commands** beyond what `verify` runs. If a step you need is missing, that's a bug in the task file, not something to paper over with shell improvisation.
 >
 > **Step 2 — Finish:** Pipe your log into `finish` via a quoted heredoc. The `--log-file -` token tells the CLI to read from stdin; the quoted `<<'EOF'` makes the shell pass the body verbatim (no `$VAR` expansion, no quote-mangling), so embedded `"`, `$`, and newlines are safe.
 >

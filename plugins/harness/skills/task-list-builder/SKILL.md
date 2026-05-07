@@ -1,6 +1,6 @@
 ---
 name: task-list-builder
-description: Build or rewrite a structured task list (JSON + paired markdown report) matching the harness loop-protocol schema. Accepts free-form text, an existing reasoning-gaps/feedback-blockers report, an existing JSON task file (in-place rewrite), or recent conversation context. Use when the user says "build the task list using task-list-builder", "rewrite the plan file using task-list-builder", or otherwise asks to convert or update a chunk of work into the harness task-list format.
+description: Build or rewrite a structured task list (JSON + paired markdown report) matching the harness task-list schema. Accepts free-form text, an existing reasoning-gaps/feedback-blockers report, an existing JSON task file (in-place rewrite), or recent conversation context. Use when the user says "build the task list using task-list-builder", "rewrite the plan file using task-list-builder", or otherwise asks to convert or update a chunk of work into the harness task-list format.
 user-invocable: true
 disable-model-invocation: false
 argument-hint: "[free-form description | path to .md report | path to .json task file (rewrite) | empty for conversation context]"
@@ -10,7 +10,7 @@ argument-hint: "[free-form description | path to .md report | path to .json task
 
 Build a paired `.json` + `.md` task list in the format the harness loop runner consumes.
 
-**The schema is defined in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md`** (Phase 4 Option 1 → "Step 3 — Write the JSON task file"). That file is the source of truth — do not duplicate the schema here, read it.
+**The schema is defined in `${CLAUDE_PLUGIN_ROOT}/task-list-schema.md`.** That file is the source of truth — do not duplicate the schema here, read it.
 
 **Arguments:** `$ARGUMENTS`
 
@@ -73,7 +73,7 @@ Order matters: put the **fastest** step first (typecheck is usually faster than 
 
 **Do not** add `lint` steps automatically — lint is rarely an acceptance criterion for a refactor, and adding it noisily slows every iteration. The user can ask for it during the Phase 5 preview if they want.
 
-This matches the convention used by `/harness:reasoning-gaps` and `/harness:feedback-blockers` (see the `verifySteps` field definition in `loop-protocol.md`'s Step 3 schema).
+This matches the convention used by `/harness:reasoning-gaps` and `/harness:feedback-blockers` (see the `verifySteps` field definition in `task-list-schema.md`).
 
 ---
 
@@ -118,17 +118,17 @@ Carry that yes/no into Phase 6.
 
 ## Phase 4 — Build the tasks
 
-Use the schema in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md` (Phase 4 Option 1 → Step 3). Top-level fields:
+Use the schema in `${CLAUDE_PLUGIN_ROOT}/task-list-schema.md`. Top-level fields:
 
 - `plan` — absolute-from-repo path to the paired `.md` file (Phase 3).
 - `verifySteps` — from Phase 2.
 - `scope` — repo-relative paths of files involved. Strip any local-machine prefix (`/Users/...`, `C:\...`) so the file is portable. Empty array is OK if the work doesn't touch specific files yet.
-- `tasks` — array of task objects, each matching the schema in `loop-protocol.md`.
+- `tasks` — array of task objects, each matching the schema in `task-list-schema.md`.
 
 **Hard rules** (enforce these — don't skip):
 
 1. **Sequential ids.** Tasks have `id: 1, 2, 3, ...` in order. No gaps, no reordering.
-2. **Paired test tasks.** For every task with `createsNewCode: true`, the next task in the array must be a test task: title starts with `"Write tests for "`, `createsNewCode: false`, `resolves: []`, `effort: "low"`, acceptance criteria like `"Test file follows project test conventions"` and `"Tests pass"` (rule documented in the schema note in `loop-protocol.md`).
+2. **Paired test tasks.** For every task with `createsNewCode: true`, the next task in the array must be a test task: title starts with `"Write tests for "`, `createsNewCode: false`, `resolves: []`, `effort: "low"`, acceptance criteria like `"Test file follows project test conventions"` and `"Tests pass"` (rule documented in `task-list-schema.md`).
 3. **`createsNewCode` discipline.** `true` only when the task creates new callable code (functions, classes, methods, services, models, protocols). `false` for restructuring, annotations, documentation, config edits.
 4. **Defaults.** Every task starts with `status: "pending"` and `log: null`. Don't pre-fill these.
 5. **Non-empty acceptance criteria.** Every task has at least one concrete, verifiable criterion. Most tasks should include `"Tests pass"`. Avoid vague criteria like "looks good" or "code is clean".
@@ -262,7 +262,7 @@ Do **not** stage or commit either file. Do not run `git add`.
 
 ## Failure modes — prevent these
 
-- **Schema drift.** If `loop-protocol.md` changes, the skill changes. Always re-read `loop-protocol.md` rather than relying on memory of past output.
+- **Schema drift.** If `task-list-schema.md` changes, the skill changes. Always re-read `task-list-schema.md` rather than relying on memory of past output.
 - **Unpaired test tasks.** Forgetting to insert a `"Write tests for …"` task after every `createsNewCode: true` task breaks the harness loop's expectations.
 - **Absolute paths in `scope` or `resolves`.** Leaks local machine structure if the file is shared.
 - **Pre-filled `status` or `log`.** The loop runner expects all tasks to start as `pending` with `log: null`. Anything else looks like a partially-completed run.
