@@ -196,6 +196,11 @@ def cmd_status(args: argparse.Namespace, data: dict, path: Path) -> None:
     counts = {status: 0 for status in VALID_STATUSES}
     for task in data["tasks"]:
         counts[task["status"]] += 1
+    remaining = [
+        {"id": t["id"], "title": t["title"], "effort": t.get("effort"), "status": t["status"]}
+        for t in data["tasks"]
+        if t["status"] in {"pending", "in-progress"}
+    ]
     summary = {
         "total": len(data["tasks"]),
         "pending": counts["pending"],
@@ -204,6 +209,7 @@ def cmd_status(args: argparse.Namespace, data: dict, path: Path) -> None:
         "failed": counts["failed"],
         "plan": data.get("plan"),
         "verifySteps": data["verifySteps"],
+        "remaining": remaining,
     }
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 

@@ -25,7 +25,7 @@ The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.
 - **`finish --id <N> --status complete|failed --log-file <path>`** — flip in-progress task N to terminal status; log content is read from the file (file-only input avoids shell-arg quoting hazards).
 - **`get --id <N>`** — print one task as pretty JSON.
 - **`list [--status <s>]`** — print all tasks (or filtered) as a JSON array.
-- **`status`** — print task counts + `plan` path + the full `verifySteps` array as a JSON object. Use this for Phase 3 / Phase 5 summary displays AND as the between-iteration halt-gate (it runs `load_and_validate` like every other command, so a non-zero exit means the file is corrupt).
+- **`status`** — print task counts + `plan` path + the full `verifySteps` array + a compact `remaining` array (each entry has just `id`, `title`, `effort`, `status` — enough for Phase 3's user-facing summary, no need to also call `list`). Use this for Phase 3 / Phase 5 summary displays AND as the between-iteration halt-gate (it runs `load_and_validate` like every other command, so a non-zero exit means the file is corrupt).
 
 **Exit codes:** 0 success · 1 IO error · 2 argparse · 10 task id not found · 11 invalid state transition · 12 schema validation · 13 JSON parse · 14 no remaining tasks.
 
@@ -68,7 +68,7 @@ Show the user:
 
 - Task file path
 - Total / complete / in-progress / pending / failed counts
-- The remaining tasks (pending + in-progress) with their `id`, `title`, and `effort`. Source these via two filtered `list` calls — `list --status pending` and `list --status in-progress` — and concatenate.
+- The remaining tasks (pending + in-progress) with their `id`, `title`, and `effort`. Source these from `status.remaining` — already in the `status` payload from the counts call. Do NOT make additional `list` calls or pipe `list` through inline `python3 -c '...'` to filter; the data you need is already in hand.
 
 Then branch on the Phase 1 mode flag:
 

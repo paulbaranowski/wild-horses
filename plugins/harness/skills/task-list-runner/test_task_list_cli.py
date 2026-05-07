@@ -223,6 +223,45 @@ class CliTestCase(unittest.TestCase):
             summary["verifySteps"],
             [{"name": "tests", "command": "echo test"}],
         )
+        # `remaining` must include only pending + in-progress (task 3 is complete),
+        # in source order, with the four display fields.
+        self.assertEqual(
+            summary["remaining"],
+            [
+                {"id": 1, "title": "First task", "effort": "low", "status": "pending"},
+                {
+                    "id": 2,
+                    "title": 'Task with "quotes" and unicode 日本語',
+                    "effort": "medium",
+                    "status": "in-progress",
+                },
+            ],
+        )
+
+    def test_status_remaining_field_is_compact_only(self):
+        # Each entry must expose ONLY the four display fields — no full-task
+        # leakage (no `what`, `resolves`, `acceptanceCriteria`, `log`, etc.).
+        result = self.run_cli("status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertGreater(len(summary["remaining"]), 0, "fixture has remaining tasks")
+        for entry in summary["remaining"]:
+            self.assertEqual(
+                set(entry.keys()),
+                {"id", "title", "effort", "status"},
+                f"remaining entry must be compact; got keys {sorted(entry.keys())}",
+            )
+
+    def test_status_remaining_empty_when_all_complete(self):
+        data = fixture_data()
+        for t in data["tasks"]:
+            t["status"] = "complete"
+            t["log"] = "done"
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        result = self.run_cli("status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["remaining"], [])
 
     def test_status_emits_full_verify_steps_array(self):
         # Multi-step plan: status output must show every step verbatim, not
