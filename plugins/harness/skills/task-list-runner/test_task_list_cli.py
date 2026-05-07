@@ -223,10 +223,38 @@ class CliTestCase(unittest.TestCase):
             summary["verifySteps"],
             [{"name": "tests", "command": "echo test"}],
         )
-        # `remaining` must include only pending + in-progress (task 3 is complete),
-        # in source order, with the four display fields.
+
+    def test_status_remaining_is_precomputed_integer(self):
+        # `status.remaining` is the halt-gate's one number — pending +
+        # in_progress, computed by the CLI so the agent reads it without
+        # any addition. The full task array lives behind the `remaining`
+        # subcommand so a 30–50-task file doesn't pay an O(N) payload on
+        # every loop iteration.
+        result = self.run_cli("status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["remaining"], 2)
+        self.assertEqual(summary["remaining"], summary["pending"] + summary["in_progress"])
+
+    def test_status_no_remaining_array_field_leaks_through(self):
+        # Guard against accidental reintroduction of the heavy array
+        # under the `remaining` key (or a renamed variant). `remaining`
+        # must be the integer; the array shape only appears under the
+        # separate `remaining` subcommand.
+        result = self.run_cli("status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertIsInstance(summary["remaining"], int)
+
+    def test_remaining_returns_pending_and_in_progress_in_source_order(self):
+        # The new subcommand replaces what `status.remaining` used to
+        # carry. Same compact projection (id/title/effort/status), same
+        # filter (pending + in-progress), same source order.
+        result = self.run_cli("remaining")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        entries = json.loads(result.stdout)
         self.assertEqual(
-            summary["remaining"],
+            entries,
             [
                 {"id": 1, "title": "First task", "effort": "low", "status": "pending"},
                 {
@@ -238,30 +266,42 @@ class CliTestCase(unittest.TestCase):
             ],
         )
 
-    def test_status_remaining_field_is_compact_only(self):
+    def test_remaining_entries_are_compact_only(self):
         # Each entry must expose ONLY the four display fields — no full-task
         # leakage (no `what`, `resolves`, `acceptanceCriteria`, `log`, etc.).
-        result = self.run_cli("status")
+        result = self.run_cli("remaining")
         self.assertEqual(result.returncode, 0, result.stderr)
-        summary = json.loads(result.stdout)
-        self.assertGreater(len(summary["remaining"]), 0, "fixture has remaining tasks")
-        for entry in summary["remaining"]:
+        entries = json.loads(result.stdout)
+        self.assertGreater(len(entries), 0, "fixture has remaining tasks")
+        for entry in entries:
             self.assertEqual(
                 set(entry.keys()),
                 {"id", "title", "effort", "status"},
                 f"remaining entry must be compact; got keys {sorted(entry.keys())}",
             )
 
-    def test_status_remaining_empty_when_all_complete(self):
+    def test_remaining_empty_when_all_complete(self):
         data = fixture_data()
         for t in data["tasks"]:
             t["status"] = "complete"
             t["log"] = "done"
         self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        result = self.run_cli("status")
+        result = self.run_cli("remaining")
         self.assertEqual(result.returncode, 0, result.stderr)
-        summary = json.loads(result.stdout)
-        self.assertEqual(summary["remaining"], [])
+        self.assertEqual(json.loads(result.stdout), [])
+
+    def test_status_remaining_count_matches_remaining_command_length(self):
+        # The count and the list are derived from the same constant
+        # (NON_TERMINAL_STATUSES) — this test pins them together so a
+        # future change to one definition can't silently make them
+        # disagree.
+        status_result = self.run_cli("status")
+        remaining_result = self.run_cli("remaining")
+        self.assertEqual(status_result.returncode, 0, status_result.stderr)
+        self.assertEqual(remaining_result.returncode, 0, remaining_result.stderr)
+        summary = json.loads(status_result.stdout)
+        entries = json.loads(remaining_result.stdout)
+        self.assertEqual(summary["remaining"], len(entries))
 
     def test_status_emits_full_verify_steps_array(self):
         # Multi-step plan: status output must show every step verbatim, not
@@ -515,7 +555,7 @@ class CliTestCase(unittest.TestCase):
     # humans and dispatched agents discover the available verbs when
     # they mistype.
 
-    SUBCOMMAND_NAMES = ("start", "finish", "get", "next", "status", "list")
+    SUBCOMMAND_NAMES = ("start", "finish", "get", "next", "status", "remaining", "list")
 
     def test_no_args_at_all_prints_full_help_to_stderr(self):
         result = subprocess.run(

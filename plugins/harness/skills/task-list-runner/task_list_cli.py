@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 VALID_STATUSES = {"pending", "in-progress", "complete", "failed"}
+NON_TERMINAL_STATUSES = {"pending", "in-progress"}
 
 
 class HelpfulArgumentParser(argparse.ArgumentParser):
@@ -191,31 +192,52 @@ def cmd_get(args: argparse.Namespace, data: dict, path: Path) -> None:
     print(json.dumps(task, indent=2, ensure_ascii=False))
 
 
+def _remaining_entries(data: dict) -> list[dict]:
+    """Compact projection of non-terminal tasks — used by `remaining`.
+
+    `status` exposes only the count derived from this list; the array
+    itself is materialised on demand by the `remaining` subcommand. Both
+    sites filter through `NON_TERMINAL_STATUSES` so the count and the
+    list cannot disagree about what "remaining" means.
+    """
+    return [
+        {"id": t["id"], "title": t["title"], "effort": t.get("effort"), "status": t["status"]}
+        for t in data["tasks"]
+        if t["status"] in NON_TERMINAL_STATUSES
+    ]
+
+
 def cmd_status(args: argparse.Namespace, data: dict, path: Path) -> None:
     del args, path
     counts = {status: 0 for status in VALID_STATUSES}
     for task in data["tasks"]:
         counts[task["status"]] += 1
-    remaining = [
-        {"id": t["id"], "title": t["title"], "effort": t.get("effort"), "status": t["status"]}
-        for t in data["tasks"]
-        if t["status"] in {"pending", "in-progress"}
-    ]
     # Count keys use snake_case so prose can use dot-access uniformly
     # (status.in_progress vs the awkward status["in-progress"]). The
-    # schema enum value in tasks[].status and remaining[].status is
-    # still "in-progress" — only the summary count key is renamed.
+    # schema enum value in tasks[].status is still "in-progress" — only
+    # the summary count key is renamed.
+    #
+    # `remaining` here is a precomputed integer (pending + in_progress)
+    # so the halt-gate can read one number without agent-side math. The
+    # full task array lives behind the separate `remaining` subcommand —
+    # Phase 3 calls it once for the user-facing summary; the loop's hot
+    # path never pays for that payload.
     summary = {
         "total": len(data["tasks"]),
         "pending": counts["pending"],
         "in_progress": counts["in-progress"],
         "complete": counts["complete"],
         "failed": counts["failed"],
+        "remaining": counts["pending"] + counts["in-progress"],
         "plan": data.get("plan"),
         "verifySteps": data["verifySteps"],
-        "remaining": remaining,
     }
     print(json.dumps(summary, indent=2, ensure_ascii=False))
+
+
+def cmd_remaining(args: argparse.Namespace, data: dict, path: Path) -> None:
+    del args, path
+    print(json.dumps(_remaining_entries(data), indent=2, ensure_ascii=False))
 
 
 def cmd_next(args: argparse.Namespace, data: dict, path: Path) -> None:
@@ -286,7 +308,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser(
         "status",
-        help="print task counts + plan path + verifySteps as JSON",
+        help="print task counts + remaining count + plan path + verifySteps as JSON",
+    )
+
+    sub.add_parser(
+        "remaining",
+        help="print non-terminal tasks (pending + in-progress) as a compact JSON array (id, title, effort, status)",
     )
 
     p_list = sub.add_parser("list", help="print tasks as a pretty JSON array to stdout")
@@ -311,6 +338,7 @@ def main() -> int:
             "get": cmd_get,
             "next": cmd_next,
             "status": cmd_status,
+            "remaining": cmd_remaining,
             "list": cmd_list,
         }
         dispatch[args.cmd](args, data, path)

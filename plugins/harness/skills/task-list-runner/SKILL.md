@@ -25,7 +25,8 @@ The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.
 - **`finish --id <N> --status complete|failed --log-file <path>`** — flip in-progress task N to terminal status; log content is read from the file (file-only input avoids shell-arg quoting hazards).
 - **`get --id <N>`** — print one task as pretty JSON.
 - **`list [--status <s>]`** — print all tasks (or filtered) as a JSON array.
-- **`status`** — print task counts + `plan` path + the full `verifySteps` array + a compact `remaining` array (each entry has just `id`, `title`, `effort`, `status` — enough for Phase 3's user-facing summary, no need to also call `list`). Use this for Phase 3 / Phase 5 summary displays AND as the between-iteration halt-gate (it runs `load_and_validate` like every other command, so a non-zero exit means the file is corrupt).
+- **`status`** — print task counts + a precomputed `remaining` integer (`pending + in_progress`, the halt-gate's one number) + `plan` path + the full `verifySteps` array. Use this for Phase 5 summary displays AND as the between-iteration halt-gate (it runs `load_and_validate` like every other command, so a non-zero exit means the file is corrupt).
+- **`remaining`** — print non-terminal tasks (pending + in-progress) as a compact JSON array — each entry has just `id`, `title`, `effort`, `status`. Use for Phase 3's user-facing summary table. The hot-path halt-gate uses `status.remaining` (the integer) instead so a 30–50-task file doesn't pay an O(N) array on every iteration.
 
 **Exit codes:** 0 success · 1 IO error · 2 argparse · 10 task id not found · 11 invalid state transition · 12 schema validation · 13 JSON parse · 14 no remaining tasks.
 
@@ -48,7 +49,7 @@ If the path is a `.md` file, validate the pointer: the JSON it points to must ex
 
 If Phase 1 yielded no path, auto-locate by content (not filename):
 
-1. Glob `docs/exec-plans/active/*.json`. For each candidate, run `task_list_cli.py --file <path> status`. Treat as valid if exit is 0 (file parses + schema is well-formed) and `status.remaining` is non-empty. Cache the per-candidate `status` payload — counts and `plan` are what you'd display in step 3 anyway.
+1. Glob `docs/exec-plans/active/*.json`. For each candidate, run `task_list_cli.py --file <path> status`. Treat as valid if exit is 0 (file parses + schema is well-formed) and `status.remaining > 0`. Cache the per-candidate `status` payload — counts and `plan` are what you'd display in step 3 anyway.
 2. If no JSON candidates match, repeat the scan against `docs/exec-plans/active/*.md`. For each, read its YAML frontmatter `task_file` field and run `status` against the JSON it points to (same accept criterion).
 3. Resolve:
    - **Exactly one match** (from either scan): use it.
@@ -65,7 +66,7 @@ Show the user:
 
 - Task file path
 - Total / complete / in-progress / pending / failed counts
-- The remaining tasks (pending + in-progress) with their `id`, `title`, and `effort`. Source these from `status.remaining` — already in the `status` payload from the counts call. Do NOT make additional `list` calls or pipe `list` through inline `python3 -c '...'` to filter; the data you need is already in hand.
+- The remaining tasks (pending + in-progress) with their `id`, `title`, and `effort`. Source these by running `task_list_cli.py --file <path> remaining` (a compact array, just the four display fields). Do NOT call `list` and pipe it through inline `python3 -c '...'` to filter — the `remaining` subcommand exists for exactly this display.
 
 Then branch on the Phase 1 mode flag:
 
@@ -92,15 +93,15 @@ Implement tasks via sequential foreground `Agent` tool calls. Each Agent runs _w
 
 1. Compute `MAX_ITER` = (number of tasks with status `"pending"` or `"in-progress"`) × 1.5, rounded up, plus 1. Example: 10 remaining → `MAX_ITER = 16`.
 2. Run the loop. On each iteration:
-   1. Run `task_list_cli.py status` to get current counts and confirm the file is still well-formed (any non-zero exit = corruption — halt the loop). Note `prev_remaining = len(status.remaining)`; you'll compare it after the agent runs.
-   2. If `status.remaining` is empty, the loop is done. Show final status:
+   1. Run `task_list_cli.py status` to get current counts and confirm the file is still well-formed (any non-zero exit = corruption — halt the loop). Note `prev_remaining = status.remaining` (the integer); you'll compare it after the agent runs.
+   2. If `status.remaining == 0`, the loop is done. Show final status:
       - Any `"failed"` tasks (`status.failed > 0`) → `"Done with failures: X/Y complete, Z failed"`.
       - Otherwise → `"All Y tasks complete"`.
    3. If `MAX_ITER` is reached → `"Max iterations (MAX_ITER) reached"` and stop.
    4. Show progress header: `"Iteration X/MAX_ITER — N tasks remaining"`.
    5. **Issue a single foreground `Agent` tool call** with the **Task Implementation Prompt** below, substituting the task file path. Do NOT issue multiple `Agent` calls in parallel — tasks may depend on prior tasks' edits. Wait for it to return.
    6. **Re-run `task_list_cli.py status`** as the post-iteration corruption gate. `status` runs `load_and_validate` like every other subcommand, so any structural corruption surfaces as a non-zero exit — halt the loop with `"Task file corrupted on iteration X — see <path>"` and stop. Do NOT continue iterating on a malformed file.
-   7. If `len(status.remaining) == prev_remaining`, the agent didn't move any task to a terminal state — warn `"Agent did not finish a task on iteration X, continuing"` and proceed. (Next iteration's `next` will resume any in-progress task.)
+   7. If `status.remaining == prev_remaining`, the agent didn't move any task to a terminal state — warn `"Agent did not finish a task on iteration X, continuing"` and proceed. (Next iteration's `next` will resume any in-progress task.)
    8. Repeat from step 1.
 
 ### Mode = `next`
@@ -158,7 +159,7 @@ The CLI exits non-zero on any failure (task id not found → 10; invalid state t
 ## Failure modes — prevent these
 
 - **Parallel `Agent` calls.** Never issue multiple `Agent` tool calls in the same response during the loop. Tasks may depend on prior tasks' edits. Always sequential, always foreground.
-- **Skipping the re-read.** After every `Agent` returns, re-run `status` — both to corruption-check and to compare `len(status.remaining)` against the pre-iteration count for the no-progress warn. Don't trust in-memory state — the Agent has been writing to the file and the in-memory copy is stale.
+- **Skipping the re-read.** After every `Agent` returns, re-run `status` — both to corruption-check and to compare `status.remaining` (integer) against `prev_remaining` for the no-progress warn. Don't trust in-memory state — the Agent has been writing to the file and the in-memory copy is stale.
 - **Committing the task file.** The Task Implementation Prompt forbids staging `docs/exec-plans/` files. If an Agent does it anyway, that's a bug — flag it to the user and don't propagate.
 - **Auto-locating multiple files silently.** If Phase 2 finds more than one validated match, _always_ ask the user. Don't pick by recency or alphabetical order.
 - **Trying to build a missing task list.** This skill consumes an existing JSON. If Phase 2 finds nothing, stop and tell the user — don't shell out to `task-list-builder` or fabricate tasks.
