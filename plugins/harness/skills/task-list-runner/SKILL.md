@@ -18,7 +18,7 @@ The schema this skill consumes is defined in `${CLAUDE_PLUGIN_ROOT}/task-list-sc
 
 ## CLI reference — `task_list_cli.py`
 
-The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py` is the canonical interface to the task file. **Subcommands:** `next`, `start`, `finish`, `get`, `list`, `status`, `remaining`, `verify` — these are the only valid verbs (argparse rejects others — don't invent names like `show` or `inspect`). All take `--file <task-file-path>`.
+The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py` is the canonical interface to the task file. **Subcommands:** `next`, `start`, `finish`, `get`, `list`, `status`, `remaining`, `verify`. All take `--file <task-file-path>`. **Don't invent verbs** like `show`, `inspect`, `info`, or `view` — argparse rejects anything outside the list above and prints the full subcommand help on rejection, so a wrong guess costs one wasted call but the right verb is always one of the eight names just enumerated.
 
 - **`next`** — atomically claim and print the next task. Resumes in-progress, else flips first pending → in-progress. Exits 14 if no tasks remain.
 - **`start --id <N>`** — flip task N from pending → in-progress.
