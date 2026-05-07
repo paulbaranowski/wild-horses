@@ -18,7 +18,7 @@ The schema this skill consumes is defined in `${CLAUDE_PLUGIN_ROOT}/loop-protoco
 
 ## CLI reference — `task_list_cli.py`
 
-The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py` is the canonical interface to the task file. Available subcommands (all take `--file <task-file-path>`):
+The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py` is the canonical interface to the task file. **Subcommands:** `next`, `start`, `finish`, `get`, `list`, `status`, `remaining`, `verify` — these are the only valid verbs (argparse rejects others — don't invent names like `show` or `inspect`). All take `--file <task-file-path>`.
 
 - **`next`** — atomically claim and print the next task. Resumes in-progress, else flips first pending → in-progress. Exits 14 if no tasks remain.
 - **`start --id <N>`** — flip task N from pending → in-progress.
@@ -27,7 +27,7 @@ The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.
 - **`list [--status <s>]`** — print all tasks (or filtered) as a JSON array.
 - **`status`** — print task counts + a precomputed `remaining` integer (`pending + in_progress`, the halt-gate's one number) + `plan` path. Use this for Phase 5 summary displays AND as the between-iteration halt-gate (it runs `load_and_validate` like every other command, so a non-zero exit means the file is corrupt).
 - **`remaining`** — print non-terminal tasks (pending + in-progress) as a compact JSON array — each entry has just `id`, `title`, `effort`, `status`. Use for Phase 3's user-facing summary table. The hot-path halt-gate uses `status.remaining` (the integer) instead so a 30–50-task file doesn't pay an O(N) array on every iteration.
-- **`verify --id <N>`** — execute `verifySteps` in order, capturing each step's stdout+stderr to `/tmp/verify-<id>-step<i>-<slug>.log`, stopping on the first failure with that step's exit code, and printing one `verify[i/n] <slug> exit=<EX> log=<path>` line per executed step. Auto-approved through the harness PreToolUse hook, so per-task verification runs without per-call prompts; trust for verifySteps content is upstream (task-list-builder).
+- **`verify --id <N>`** — execute `verifySteps` in order, capturing each step's stdout+stderr to `/tmp/verify-<id>-step<i>-<slug>.log`, stopping on the first failure with that step's exit code, and printing one `verify[i/n] <slug> exit=<EX> log=<path>` line per executed step. `verifySteps` is a single top-level array applied uniformly to every task; `--id` only keeps log filenames distinct, not because each task has its own steps. Auto-approved through the harness PreToolUse hook, so per-task verification runs without per-call prompts; trust for verifySteps content is upstream (task-list-builder).
 
 **Exit codes:** 0 success · 1 IO error · 2 argparse · 10 task id not found · 11 invalid state transition · 12 schema validation · 13 JSON parse · 14 no remaining tasks.
 
@@ -127,7 +127,7 @@ After the loop completes (all tasks done, max iterations reached, or `--next` fi
 
 Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with the absolute path to the JSON task file:
 
-> You are implementing one task from a structured task list. **Use `task_list_cli.py` for ALL task-file mutations and reads.** Never use `Edit`, `Write`, or inline `python3 -c '...'` against the task file — they bypass atomicity and schema validation, and have caused silent JSON corruption in past runs.
+> You are implementing one task from a structured task list. **Use `task_list_cli.py` for ALL task-file access — mutations AND read-only inspections of single fields.** Never use `Edit`, `Write`, `cat`, `jq`, or inline `python3 -c '...'` against the task file. The CLI's `get` / `list` / `status` / `remaining` subcommands cover the read surface; if you can't find a field through them, it likely doesn't exist in the schema (e.g. `verifySteps` is a single top-level array shared by every task — there is no per-task verifySteps to look up). Bypassing the CLI skips atomicity and schema validation, and has caused silent JSON corruption in past runs.
 >
 > **Step 1 — Claim and read your task:**
 >
