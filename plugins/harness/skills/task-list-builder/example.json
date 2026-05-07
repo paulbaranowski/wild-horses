@@ -1,6 +1,9 @@
 {
   "plan": "docs/exec-plans/active/2026-05-05-a3f2-extract-session-validator.task-list-builder.md",
-  "testCommand": "uv run pytest",
+  "verifySteps": [
+    { "name": "typecheck", "command": "uv run pyright" },
+    { "name": "tests", "command": "uv run pytest" }
+  ],
   "scope": [
     "src/auth/middleware.py",
     "tests/auth/test_middleware.py"
