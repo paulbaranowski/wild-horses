@@ -29,7 +29,7 @@ The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.
 
 **Exit codes:** 0 success · 1 IO error · 2 argparse · 10 task id not found · 11 invalid state transition · 12 schema validation · 13 JSON parse · 14 no remaining tasks.
 
-Every subcommand calls `load_and_validate` as a precondition before doing its work — there is no separate `validate` verb because there's no need for one. Mutations from dispatched agents go ONLY through this CLI. The runner itself may also use `status` and `list` for its own bookkeeping displays — prefer those over re-reading the JSON natively. Hand-edits to the JSON during the loop are forbidden (see Failure modes).
+Every subcommand calls `load_and_validate` as a precondition before doing its work — there is no separate `validate` verb because there's no need for one. **Every mutation goes through this CLI** — no exceptions. Dispatched agents never use `Edit`/`Write`/inline `python3 -c '...'` against the task JSON; the runner itself never hand-edits during the loop. For its own bookkeeping displays, the runner uses `status` and `list`, never re-reads the JSON natively. If the plan needs structural revision, run `/harness:task-list-builder` in rewrite mode — this skill consumes plans; it doesn't edit them.
 
 ---
 
@@ -77,10 +77,10 @@ Then branch on the Phase 1 mode flag:
   >
   > 1. **Run all remaining** — Implement every pending/in-progress task via automated loop
   > 2. **Run next task only** — Implement just the next pending/in-progress task, then stop
-  > 3. **Give feedback** — Review or adjust the plan before continuing
   - **Option 1** → Phase 4 with mode = `all`.
   - **Option 2** → Phase 4 with mode = `next`.
-  - **Option 3** — Ask the user for their feedback (reorder tasks, skip a task, modify a task's `what` field, adjust scope). Apply the feedback by editing the JSON directly — these are structural edits (revise `what`, reorder, or mark a task as skipped), not code changes. To skip a task, set its `status` to `"complete"` and put `"skipped: <reason>"` in its `log` field — the schema's status enum is `"pending" | "in-progress" | "complete" | "failed"` and does not include `"skipped"`. After saving, return to the start of Phase 3 (re-show summary, prompt again).
+
+If the user wants to revise the plan instead of running it (reorder, edit a task's `what`, drop a task), point them at `/harness:task-list-builder` in rewrite mode — that's the canonical revision tool. This skill consumes plans; it does not edit them.
 
 ---
 
@@ -92,23 +92,15 @@ Implement tasks via sequential foreground `Agent` tool calls. Each Agent runs _w
 
 1. Compute `MAX_ITER` = (number of tasks with status `"pending"` or `"in-progress"`) × 1.5, rounded up, plus 1. Example: 10 remaining → `MAX_ITER = 16`.
 2. Run the loop. On each iteration:
-   1. Run `task_list_cli.py status` to get current counts and confirm the file is still well-formed (any non-zero exit = corruption — halt the loop).
+   1. Run `task_list_cli.py status` to get current counts and confirm the file is still well-formed (any non-zero exit = corruption — halt the loop). Note `prev_remaining = len(status.remaining)`; you'll compare it after the agent runs.
    2. If `status.remaining` is empty, the loop is done. Show final status:
       - Any `"failed"` tasks (`status.failed > 0`) → `"Done with failures: X/Y complete, Z failed"`.
       - Otherwise → `"All Y tasks complete"`.
    3. If `MAX_ITER` is reached → `"Max iterations (MAX_ITER) reached"` and stop.
    4. Show progress header: `"Iteration X/MAX_ITER — N tasks remaining"`.
    5. **Issue a single foreground `Agent` tool call** with the **Task Implementation Prompt** below, substituting the task file path. Do NOT issue multiple `Agent` calls in parallel — tasks may depend on prior tasks' edits. Wait for it to return.
-   6. **Re-validate the task file** by running:
-
-      ```bash
-      python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
-          --file TASK_FILE_PATH status
-      ```
-
-      `status` runs `load_and_validate` as a precondition (like every other subcommand), so any structural corruption surfaces as a non-zero exit. If exit code is non-zero, halt the loop with `"Task file corrupted on iteration X — see <path>"` and stop. Do NOT continue iterating on a malformed file. The `status` payload itself can be discarded — it's the exit code that matters here.
-
-   7. Run `task_list_cli.py list --status in-progress`. If any returned task has `log: null`, the agent didn't even start updating its task — warn `"Agent did not update task status on iteration X, continuing"` and proceed. (A non-null `log` on an in-progress task means the agent crashed mid-task; the next iteration's `next` will resume it.)
+   6. **Re-run `task_list_cli.py status`** as the post-iteration corruption gate. `status` runs `load_and_validate` like every other subcommand, so any structural corruption surfaces as a non-zero exit — halt the loop with `"Task file corrupted on iteration X — see <path>"` and stop. Do NOT continue iterating on a malformed file.
+   7. If `len(status.remaining) == prev_remaining`, the agent didn't move any task to a terminal state — warn `"Agent did not finish a task on iteration X, continuing"` and proceed. (Next iteration's `next` will resume any in-progress task.)
    8. Repeat from step 1.
 
 ### Mode = `next`
@@ -166,10 +158,9 @@ The CLI exits non-zero on any failure (task id not found → 10; invalid state t
 ## Failure modes — prevent these
 
 - **Parallel `Agent` calls.** Never issue multiple `Agent` tool calls in the same response during the loop. Tasks may depend on prior tasks' edits. Always sequential, always foreground.
-- **Skipping the re-read.** After every `Agent` returns, re-read the file via the CLI (`status` for counts + corruption check, `list --status in-progress` for the agent-didn't-update detector). Don't trust in-memory state — the Agent has been writing to the file and the in-memory copy is stale.
+- **Skipping the re-read.** After every `Agent` returns, re-run `status` — both to corruption-check and to compare `len(status.remaining)` against the pre-iteration count for the no-progress warn. Don't trust in-memory state — the Agent has been writing to the file and the in-memory copy is stale.
 - **Committing the task file.** The Task Implementation Prompt forbids staging `docs/exec-plans/` files. If an Agent does it anyway, that's a bug — flag it to the user and don't propagate.
 - **Auto-locating multiple files silently.** If Phase 2 finds more than one validated match, _always_ ask the user. Don't pick by recency or alphabetical order.
 - **Trying to build a missing task list.** This skill consumes an existing JSON. If Phase 2 finds nothing, stop and tell the user — don't shell out to `task-list-builder` or fabricate tasks.
 - **Treating `--next` as a silent one-shot.** Even in `--next` mode, show the Phase 3 summary first so the user can see which task is about to run.
-- **Hand-editing the task file.** Do not use `Edit`, `Write`, or inline `python3 -c '...'` against the task JSON during the loop. All mutations go through `task_list_cli.py`. The one exception is structural revision in Phase 3 Option 3 (reorder, revise `what`, mark skipped) — and even then, re-run `task_list_cli.py status` after saving so its `load_and_validate` step can confirm the edit didn't break the schema.
 - **Skipping the between-iteration check.** Phase 4 step 6 (`status` as halt-gate) is the canary that caught past silent-corruption bugs only after 19 iterations. Never skip it; never downgrade a non-zero exit to a warning.
