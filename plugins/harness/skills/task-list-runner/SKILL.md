@@ -95,9 +95,9 @@ Implement tasks via sequential foreground `Agent` tool calls. Each Agent runs _w
 
 1. Compute `MAX_ITER` = (number of tasks with status `"pending"` or `"in-progress"`) × 1.5, rounded up, plus 1. Example: 10 remaining → `MAX_ITER = 16`.
 2. Run the loop. On each iteration:
-   1. Read the JSON. Count tasks with status `"pending"` or `"in-progress"`.
-   2. If none remain, the loop is done. Show final status:
-      - Any `"failed"` tasks → `"Done with failures: X/Y complete, Z failed"`.
+   1. Run `task_list_cli.py status` to get current counts and confirm the file is still well-formed (any non-zero exit = corruption — halt the loop).
+   2. If `status.pending + status["in-progress"] == 0`, the loop is done. Show final status:
+      - Any `"failed"` tasks (`status.failed > 0`) → `"Done with failures: X/Y complete, Z failed"`.
       - Otherwise → `"All Y tasks complete"`.
    3. If `MAX_ITER` is reached → `"Max iterations (MAX_ITER) reached"` and stop.
    4. Show progress header: `"Iteration X/MAX_ITER — N tasks remaining"`.
@@ -111,25 +111,24 @@ Implement tasks via sequential foreground `Agent` tool calls. Each Agent runs _w
 
       `status` runs `load_and_validate` as a precondition (like every other subcommand), so any structural corruption surfaces as a non-zero exit. If exit code is non-zero, halt the loop with `"Task file corrupted on iteration X — see <path>"` and stop. Do NOT continue iterating on a malformed file. The `status` payload itself can be discarded — it's the exit code that matters here.
 
-   7. Re-read the JSON. If the task that was in-progress wasn't updated (status still `"in-progress"` with no `log` change), warn: `"Agent did not update task status on iteration X, continuing"` and proceed.
+   7. Run `task_list_cli.py list --status in-progress`. If any returned task has `log: null`, the agent didn't even start updating its task — warn `"Agent did not update task status on iteration X, continuing"` and proceed. (A non-null `log` on an in-progress task means the agent crashed mid-task; the next iteration's `next` will resume it.)
    8. Repeat from step 1.
 
 ### Mode = `next`
 
-1. Find the first task with status `"in-progress"` or `"pending"` in the JSON.
-2. Issue a single foreground `Agent` tool call with the Task Implementation Prompt, substituting the task file path.
-3. After the Agent returns, re-read the JSON, show the updated counts (complete/pending/failed), and stop.
+1. Issue a single foreground `Agent` tool call with the Task Implementation Prompt, substituting the task file path. (Phase 3's `status` already confirmed work remains; the dispatched agent's `next` call will claim and run it. If `next` exits 14, the agent will report no work — propagate that to the user.)
+2. After the Agent returns, run `task_list_cli.py status` to show the updated counts (complete/pending/failed), and stop.
 
 ---
 
 ## Phase 5 — Final summary
 
-After the loop completes (all tasks done, max iterations reached, or `--next` finished), read the JSON one more time and show:
+After the loop completes (all tasks done, max iterations reached, or `--next` finished), source data via `task_list_cli.py status` (for the `plan` path + per-status counts) and `task_list_cli.py list` (for the full task table) and show:
 
 - A task status table: each task's `id`, `title`, and `status`.
-- Plan markdown path (from the JSON's `plan` field, if present).
+- Plan markdown path (from `status.plan`, if present).
 - Task file path.
-- If any tasks failed or remain pending: suggest re-running the skill (with `--all` to continue, or with no flag to revise first).
+- If `status.failed > 0` or any tasks remain pending/in-progress: suggest re-running the skill (with `--all` to continue, or with no flag to revise first).
 
 ---
 
@@ -170,7 +169,7 @@ The CLI exits non-zero on any failure (task id not found → 10; invalid state t
 ## Failure modes — prevent these
 
 - **Parallel `Agent` calls.** Never issue multiple `Agent` tool calls in the same response during the loop. Tasks may depend on prior tasks' edits. Always sequential, always foreground.
-- **Skipping the re-read.** After every `Agent` returns, re-read the JSON. Don't trust in-memory state — the Agent has been writing to the file and the in-memory copy is stale.
+- **Skipping the re-read.** After every `Agent` returns, re-read the file via the CLI (`status` for counts + corruption check, `list --status in-progress` for the agent-didn't-update detector). Don't trust in-memory state — the Agent has been writing to the file and the in-memory copy is stale.
 - **Committing the task file.** The Task Implementation Prompt forbids staging `docs/exec-plans/` files. If an Agent does it anyway, that's a bug — flag it to the user and don't propagate.
 - **Auto-locating multiple files silently.** If Phase 2 finds more than one validated match, _always_ ask the user. Don't pick by recency or alphabetical order.
 - **Trying to build a missing task list.** This skill consumes an existing JSON. If Phase 2 finds nothing, stop and tell the user — don't shell out to `task-list-builder` or fabricate tasks.
