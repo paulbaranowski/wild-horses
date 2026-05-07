@@ -127,7 +127,7 @@ After the loop completes (all tasks done, max iterations reached, or `--next` fi
 
 Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with the absolute path to the JSON task file:
 
-> You are implementing one task from a structured task list. **Use `task_list_cli.py` for ALL task-file access — mutations AND read-only inspections of single fields.** Never use `Edit`, `Write`, `cat`, `jq`, or inline `python3 -c '...'` against the task file. The CLI's `get` / `list` / `status` / `remaining` subcommands cover the read surface; if you can't find a field through them, it likely doesn't exist in the schema (e.g. `verifySteps` is a single top-level array shared by every task — there is no per-task verifySteps to look up). Bypassing the CLI skips atomicity and schema validation, and has caused silent JSON corruption in past runs.
+> You are implementing one task from a structured task list. **Use `task_list_cli.py` for ALL task-file access — mutations AND read-only inspections of single fields.** Never use `Edit`, `Write`, `cat`, `jq`, or inline `python3 -c '...'` against the task file. The CLI's read verbs split by _what_ you're reading: `get --id <N>` and `next` return per-task objects; `list` returns the full task array; `status` returns the file-level metadata (counts, `plan`, **`verifySteps`**, `remaining` integer); `remaining` returns the compact pending+in-progress display array. There is no "get any field by name" verb — top-level fields like `verifySteps` live in `status`'s output, not `get`'s. Bypassing the CLI skips atomicity and schema validation, and has caused silent JSON corruption in past runs.
 >
 > **Step 1 — Claim and read your task:**
 >
@@ -148,6 +148,8 @@ Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with th
 > ```
 >
 > The CLI runs each `verifySteps` command in order, capturing stdout+stderr to a per-step log file (`/tmp/verify-<id>-step<N>-<slug>.log`), and stops on the first failing step. If the command exits non-zero, that exit code is the failing step's exit code; the last `verify[i/n]` line in stdout names the failing step's log path. `Read` that file, fix the underlying cause in your code, then re-run the same `verify --id <id>` invocation. When the command exits zero, all steps passed and the task is verified.
+>
+> You do **not** need to inspect `verifySteps` before calling `verify`. The CLI runs the array; the per-step `name` shows up in the `verify[i/n] <slug> ...` line so you'll see exactly which step ran. If you really want to see the array first (rare, e.g. for the finish-log summary), run `status` — its output includes the full `verifySteps` array verbatim. Don't reach for `get verifySteps` (that's not a real verb — `get` is `get --id <N>`).
 >
 > Strictly forbidden during verification:
 >
