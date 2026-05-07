@@ -7,7 +7,7 @@ Stdlib-only — no pytest needed. Run from anywhere:
 
 Or via unittest discovery:
 
-    python3 -m unittest plugins.harness.skills.task-list-runner.test_task_list_cli
+    python3 -m unittest discover -s plugins/harness/skills/task-list-runner -p 'test_task_list_cli.py'
 
 Tests invoke the CLI as a subprocess so exit codes, argparse behaviour,
 and stdout/stderr separation are exercised exactly as a dispatched
