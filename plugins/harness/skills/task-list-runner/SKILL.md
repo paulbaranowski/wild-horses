@@ -22,7 +22,7 @@ The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.
 
 - **`next`** — atomically claim and print the next task. Resumes in-progress, else flips first pending → in-progress. Exits 14 if no tasks remain.
 - **`start --id <N>`** — flip task N from pending → in-progress.
-- **`finish --id <N> --status complete|failed --log-file <path>`** — flip in-progress task N to terminal status; log content is read from the file (file-only input avoids shell-arg quoting hazards).
+- **`finish --id <N> --status complete|failed --log-file <path>`** — flip in-progress task N to terminal status; log content is read from the file (file-only input avoids shell-arg quoting hazards). Pass `--log-file -` to read the log from stdin instead — pair with a quoted heredoc (`<<'EOF' ... EOF`) so the shell passes the body byte-verbatim, no `$VAR` expansion or quote-mangling. The stdin path is preferred in the dispatched-agent flow because it's one Bash call (auto-approved by the harness hook) instead of `Write` + Bash (two tool calls, each gated separately by the auto-mode classifier).
 - **`get --id <N>`** — print one task as pretty JSON.
 - **`list [--status <s>]`** — print all tasks (or filtered) as a JSON array.
 - **`status`** — print task counts + a precomputed `remaining` integer (`pending + in_progress`, the halt-gate's one number) + `plan` path. Use this for Phase 5 summary displays AND as the between-iteration halt-gate (it runs `load_and_validate` like every other command, so a non-zero exit means the file is corrupt).
