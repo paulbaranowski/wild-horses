@@ -155,14 +155,19 @@ Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with th
 > - Permuting redirection flags on the same command hoping for clearer output (`| head -50` → `2>&1` → drop `2>&1` → repeat). The CLI's redirection is canonical; the answer is in the log file. If the log is unclear, `Read` more of it — don't re-run.
 > - Inventing additional verification commands not in `verifySteps`. If a step you need is missing, that's a bug in the task file, not something to paper over with shell improvisation.
 >
-> **Step 2 — Finish:** Use the `Write` tool to dump your log to `/tmp/task-list-runner-<id>.txt`. Then:
+> **Step 2 — Finish:** Pipe your log into `finish` via a quoted heredoc. The `--log-file -` token tells the CLI to read from stdin; the quoted `<<'EOF'` makes the shell pass the body verbatim (no `$VAR` expansion, no quote-mangling), so embedded `"`, `$`, and newlines are safe.
 >
 > ```bash
 > python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
->     --file TASK_FILE_PATH finish --id <id> --status complete --log-file /tmp/task-list-runner-<id>.txt
+>     --file TASK_FILE_PATH finish --id <id> --status complete --log-file - <<'EOF'
+> Task <id>: <one-line summary of what changed>
+>
+> Acceptance criteria: <which were verified>
+> Verification: <which steps ran, all passed>
+> EOF
 > ```
 >
-> If tests failed and you cannot fix forward: same command with `--status failed`.
+> If tests failed and you cannot fix forward: same command with `--status failed`. Do NOT use the `Write` tool to stage a `/tmp/` log file — the heredoc path is one Bash call (auto-approved by the harness hook); the Write path is two tool calls each gated separately by the auto-mode classifier.
 >
 > **Step 3 — Commit.** Stage only the source files you changed. NEVER stage the task file (`TASK_FILE_PATH`) or any `docs/exec-plans/` files — these are loop metadata, not deliverables. Implement exactly ONE task per iteration.
 

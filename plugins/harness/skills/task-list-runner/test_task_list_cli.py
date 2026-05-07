@@ -85,6 +85,14 @@ class CliTestCase(unittest.TestCase):
             text=True,
         )
 
+    def run_cli_stdin(self, stdin: str, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(CLI), "--file", str(self.task_path), *args],
+            input=stdin,
+            capture_output=True,
+            text=True,
+        )
+
     def read_task_file(self) -> dict:
         return json.loads(self.task_path.read_text(encoding="utf-8"))
 
@@ -526,6 +534,42 @@ class CliTestCase(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
         self.assertEqual(self.read_task_file()["tasks"][1]["log"], "line\n")
+
+    def test_finish_log_file_dash_reads_stdin(self):
+        # `--log-file -` is the Unix convention for stdin. Lets the dispatched
+        # agent pipe a heredoc directly without an intermediate /tmp file
+        # (and the Write-tool classifier gating that comes with one).
+        result = self.run_cli_stdin(
+            "log content from stdin\nmultiple lines\n",
+            "finish", "--id", "2", "--status", "complete", "--log-file", "-",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task = self.read_task_file()["tasks"][1]
+        self.assertEqual(task["status"], "complete")
+        self.assertEqual(task["log"], "log content from stdin\nmultiple lines")
+
+    def test_finish_log_file_dash_preserves_quotes_and_unicode(self):
+        # Same safety property as --log-file <path>: stdin bytes are verbatim,
+        # no shell-arg quoting hazard. The agent's heredoc payload arrives
+        # untransformed.
+        payload = 'embedded "quotes", unicode 漢字, and {"json": "looking"}'
+        result = self.run_cli_stdin(
+            payload,
+            "finish", "--id", "2", "--status", "complete", "--log-file", "-",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.read_task_file()["tasks"][1]["log"], payload)
+
+    def test_finish_log_file_dash_with_empty_stdin(self):
+        # An empty heredoc yields an empty log — accepted (the "did the agent
+        # actually do anything" check belongs to the runner's iteration count
+        # delta, not the CLI's input validation).
+        result = self.run_cli_stdin(
+            "",
+            "finish", "--id", "2", "--status", "complete", "--log-file", "-",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.read_task_file()["tasks"][1]["log"], "")
 
     def test_finish_pending_task_exits_eleven(self):
         log = self._write_log("x")

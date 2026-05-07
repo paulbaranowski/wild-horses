@@ -172,15 +172,25 @@ def cmd_finish(args: argparse.Namespace, data: dict, path: Path) -> None:
             f'cannot finish task {args.id}: current status is "{task["status"]}", expected "in-progress"',
             code=11,
         )
-    log_path = Path(args.log_file)
-    if not log_path.is_file():
-        raise TaskCliError(f"log file {log_path}: no such file or not readable", code=1)
-    try:
-        log_content = log_path.read_text(encoding="utf-8")
-    except OSError as e:
-        raise TaskCliError(f"log file {log_path}: {e}", code=1) from e
-    except UnicodeDecodeError as e:
-        raise TaskCliError(f"log file {log_path} is not valid UTF-8: {e}", code=13) from e
+    if args.log_file == "-":
+        # Unix convention: `-` means read from stdin. Lets the agent pipe a
+        # heredoc directly without an intermediate /tmp file (and the Write-
+        # tool classifier gating that comes with one). Heredoc content is
+        # verbatim bytes from the shell — no shell-arg quoting hazard.
+        try:
+            log_content = sys.stdin.read()
+        except UnicodeDecodeError as e:
+            raise TaskCliError(f"stdin is not valid UTF-8: {e}", code=13) from e
+    else:
+        log_path = Path(args.log_file)
+        if not log_path.is_file():
+            raise TaskCliError(f"log file {log_path}: no such file or not readable", code=1)
+        try:
+            log_content = log_path.read_text(encoding="utf-8")
+        except OSError as e:
+            raise TaskCliError(f"log file {log_path}: {e}", code=1) from e
+        except UnicodeDecodeError as e:
+            raise TaskCliError(f"log file {log_path} is not valid UTF-8: {e}", code=13) from e
     if log_content.endswith("\n"):
         log_content = log_content[:-1]
     task["status"] = args.status
@@ -363,7 +373,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_finish.add_argument(
         "--log-file",
         required=True,
-        help="path to a file whose contents become the task's log field",
+        help="path to a file whose contents become the task's log field, "
+        "or `-` to read from stdin (use a quoted heredoc to avoid shell quoting)",
     )
 
     p_get = sub.add_parser("get", help="print one task as pretty JSON to stdout")
