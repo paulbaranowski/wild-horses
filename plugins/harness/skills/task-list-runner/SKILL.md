@@ -48,15 +48,12 @@ If the path is a `.md` file, validate the pointer: the JSON it points to must ex
 
 If Phase 1 yielded no path, auto-locate by content (not filename):
 
-1. Scan `docs/exec-plans/active/*.json`. For each file, validate that it:
-   - parses as valid JSON,
-   - has a `tasks` array and a `verifySteps` array, and
-   - contains at least one task with `status` of `"pending"` or `"in-progress"`.
-2. If no JSON matches, fall back to scanning `docs/exec-plans/active/*.md` — for each candidate, read its YAML frontmatter `task_file` field and validate the JSON it points to using the same checks.
+1. Glob `docs/exec-plans/active/*.json`. For each candidate, run `task_list_cli.py --file <path> status`. Treat as valid if exit is 0 (file parses + schema is well-formed) and `status.pending + status["in-progress"] > 0`. Cache the per-candidate `status` payload — counts and `plan` are what you'd display in step 3 anyway.
+2. If no JSON candidates match, repeat the scan against `docs/exec-plans/active/*.md`. For each, read its YAML frontmatter `task_file` field and run `status` against the JSON it points to (same accept criterion).
 3. Resolve:
-   - **Exactly one validated match** (from either scan): use it.
-   - **Multiple validated matches:** list them with progress summaries (complete/pending/failed counts) and ask the user to pick one. Do NOT pick by recency or alphabetical order.
-   - **No validated matches:** report `"No in-progress task files found in docs/exec-plans/active/"` and stop. Do NOT try to build a new task list — that is `task-list-builder`'s job.
+   - **Exactly one match** (from either scan): use it.
+   - **Multiple matches:** list them with their cached `status` summaries (counts + `plan` path) and ask the user to pick. Do NOT pick by recency or alphabetical order.
+   - **No matches:** report `"No in-progress task files found in docs/exec-plans/active/"` and stop. Do NOT try to build a new task list — that is `task-list-builder`'s job.
 
 From here on, "the task file" means the chosen JSON.
 
