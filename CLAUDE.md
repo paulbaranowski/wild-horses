@@ -61,6 +61,23 @@ plugins/marketplace/               -- plugin root (skills-based)
 ### Authoring agent-facing prompts (skills, commands, sub-prompts)
 
 - **Negative instructions: lead every bullet with `Don't` / `Never`, not just the section header.** Bullets that read as gerunds ("Re-invoking…") or bare imperatives parse as descriptions of techniques whenever a model only attends to one bullet at a time (partial recall, paraphrase, inner-monologue quoting). The header's polarity lives one structural level up and may not be co-attended. Repo convention — set in `plugins/harness/skills/task-list-runner/SKILL.md` — is a bolded `**Don't <verb-phrase>**` lead-in on each bullet, e.g. `**Don't re-invoke individual verification steps directly** (...)`.
+- **Sub-prompts inside SKILL.md count as agent-facing prompts.** Blockquoted (`>`) text inside a SKILL.md is shipped verbatim to a dispatched `Agent` — apply the same prompt-engineering rules (per-bullet negation, bolded lead-ins, no critical info one structural level up from where the model attends) to those lines as to the SKILL.md body itself. Canonical example: the Task Implementation Prompt at `plugins/harness/skills/task-list-runner/SKILL.md` lines 128–172.
+
+### Schema source-of-truth
+
+- **When multiple skills consume a structured format, define the schema in one doc and have skills link to it — never re-state it.** Example: `plugins/harness/task-list-schema.md` defines the runner's task JSON schema; both `task-list-builder` and `task-list-runner` link to it from their `SKILL.md` (line 13 of each) instead of duplicating field definitions. Schema drift between paired skills is a real cost — a definition that exists in two places will eventually diverge.
+
+### CLI design for agent loops
+
+Conventions for Python CLIs (like `plugins/harness/skills/task-list-runner/task_list_cli.py`) that get auto-approved by a harness PreToolUse hook and called by dispatched agents.
+
+- **Mutate via stdin (`--flag -`) where possible, not via `Write` + Bash.** Every mutation should fit in one Bash call. The pattern `cli mutate --log-file - <<'EOF' ... EOF` ships the body in a single auto-approved Bash invocation; `Write` to `/tmp/x` followed by `cli mutate --log-file /tmp/x` is two tool calls, each gated separately by the auto-mode classifier. Use a _quoted_ heredoc (`<<'EOF'`) so the shell passes the body byte-verbatim — no `$VAR` expansion or quote-mangling.
+- **Mutations write atomically: tmp file + `fsync` + `os.replace` against the original.** Improvised in-place edits silently corrupted a 37-task session in the prior iteration of this work; the corruption (a missing structural comma) went undetected for 19 subsequent iterations. The agent-loop context makes this _more_ important than for a normal CLI: agents will keep iterating against a broken state file rather than halting, so corruption that a human would notice immediately can survive 19 turns of work. See `write_atomic` in `task_list_cli.py`.
+- **Split read-only subcommands by _what_ is returned, not by the operation.** `task_list_cli.py` has `next` / `get` (per-task object), `list` (full array), `status` (file-level metadata), `remaining` (compact display array). Avoid generic "get any field by name" verbs — agents will invent queries like `get verifySteps` if the surface invites it.
+
+### Hook design
+
+- **PreToolUse hook allow-list matches must anchor on plugin-specific path structure, not bare script name.** `plugins/harness/scripts/task-list-cli-allow.sh` matches `python3 .../skills/task-list-runner/task_list_cli.py` rather than the filename alone, so a stray `task_list_cli.py` elsewhere in the workspace doesn't get auto-approved. Both the dev-checkout path (`plugins/harness/...`) and the installed plugin-cache path (with version directory) need to match.
 
 ## Reference Marketplaces
 
