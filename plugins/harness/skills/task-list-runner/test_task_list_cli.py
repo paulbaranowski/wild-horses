@@ -88,111 +88,94 @@ class CliTestCase(unittest.TestCase):
     def read_task_file(self) -> dict:
         return json.loads(self.task_path.read_text(encoding="utf-8"))
 
-    # ---- validate ------------------------------------------------------
+    # ---- load_and_validate (exercised via `status`) -------------------
+    # `validate` was removed in v5.0.0; `load_and_validate` runs as a
+    # precondition for every subcommand, so we route these through
+    # `status` (cheapest read) to confirm the schema-check contract.
 
-    def test_validate_good_file_exits_zero(self):
-        result = self.run_cli("validate")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        # fixture has 3 tasks: 1 pending, 1 in-progress, 1 complete; bucket
-        # order is fixed (pending, in-progress, complete, failed) and zero
-        # buckets are omitted.
-        self.assertEqual(
-            result.stdout,
-            "valid: 3 tasks (1 pending, 1 in-progress, 1 complete)\n",
-        )
-        self.assertEqual(result.stderr, "")
-
-    def test_validate_missing_file_exits_one(self):
+    def test_status_missing_file_exits_one(self):
         result = subprocess.run(
-            [sys.executable, str(CLI), "--file", str(self.tmp_dir / "nope.json"), "validate"],
+            [sys.executable, str(CLI), "--file", str(self.tmp_dir / "nope.json"), "status"],
             capture_output=True,
             text=True,
         )
         self.assertEqual(result.returncode, 1)
         self.assertIn("no such file", result.stderr)
 
-    def test_validate_malformed_json_exits_thirteen(self):
+    def test_status_malformed_json_exits_thirteen(self):
         self.task_path.write_text('{"tasks": [},', encoding="utf-8")
-        result = self.run_cli("validate")
+        result = self.run_cli("status")
         self.assertEqual(result.returncode, 13, result.stderr)
         self.assertIn("not valid JSON", result.stderr)
 
-    def test_validate_missing_verify_steps_exits_twelve(self):
+    def test_status_missing_verify_steps_exits_twelve(self):
         data = fixture_data()
         del data["verifySteps"]
         self.task_path.write_text(json.dumps(data), encoding="utf-8")
-        result = self.run_cli("validate")
+        result = self.run_cli("status")
         self.assertEqual(result.returncode, 12)
         self.assertIn("verifySteps", result.stderr)
 
-    def test_validate_empty_verify_steps_exits_twelve(self):
+    def test_status_empty_verify_steps_exits_twelve(self):
         data = fixture_data()
         data["verifySteps"] = []
         self.task_path.write_text(json.dumps(data), encoding="utf-8")
-        result = self.run_cli("validate")
+        result = self.run_cli("status")
         self.assertEqual(result.returncode, 12)
         self.assertIn("at least one step", result.stderr)
 
-    def test_validate_old_test_command_field_rejected_with_migration_hint(self):
+    def test_status_old_test_command_field_rejected_with_migration_hint(self):
         # Old (pre-v4) shape: a single testCommand string. Validator must reject
         # it AND tell the user how to migrate, not just say "verifySteps missing".
         data = fixture_data()
         del data["verifySteps"]
         data["testCommand"] = "echo test"
         self.task_path.write_text(json.dumps(data), encoding="utf-8")
-        result = self.run_cli("validate")
+        result = self.run_cli("status")
         self.assertEqual(result.returncode, 12)
         self.assertIn("testCommand", result.stderr)
         self.assertIn("verifySteps", result.stderr)
         self.assertIn("migrate", result.stderr)
 
-    def test_validate_step_missing_name_exits_twelve(self):
+    def test_status_step_missing_name_exits_twelve(self):
         data = fixture_data()
         data["verifySteps"] = [{"command": "echo hi"}]
         self.task_path.write_text(json.dumps(data), encoding="utf-8")
-        result = self.run_cli("validate")
+        result = self.run_cli("status")
         self.assertEqual(result.returncode, 12)
         self.assertIn("name", result.stderr)
 
-    def test_validate_step_missing_command_exits_twelve(self):
+    def test_status_step_missing_command_exits_twelve(self):
         data = fixture_data()
         data["verifySteps"] = [{"name": "tests"}]
         self.task_path.write_text(json.dumps(data), encoding="utf-8")
-        result = self.run_cli("validate")
+        result = self.run_cli("status")
         self.assertEqual(result.returncode, 12)
         self.assertIn("command", result.stderr)
 
-    def test_validate_step_empty_name_exits_twelve(self):
+    def test_status_step_empty_name_exits_twelve(self):
         data = fixture_data()
         data["verifySteps"] = [{"name": "", "command": "echo hi"}]
         self.task_path.write_text(json.dumps(data), encoding="utf-8")
-        result = self.run_cli("validate")
+        result = self.run_cli("status")
         self.assertEqual(result.returncode, 12)
         self.assertIn("non-empty", result.stderr)
 
-    def test_validate_duplicate_task_ids_exits_twelve(self):
+    def test_status_duplicate_task_ids_exits_twelve(self):
         data = fixture_data()
         data["tasks"][1]["id"] = 1
         self.task_path.write_text(json.dumps(data), encoding="utf-8")
-        result = self.run_cli("validate")
+        result = self.run_cli("status")
         self.assertEqual(result.returncode, 12)
         self.assertIn("duplicate", result.stderr)
 
-    def test_validate_invalid_status_exits_twelve(self):
+    def test_status_invalid_status_exits_twelve(self):
         data = fixture_data()
         data["tasks"][0]["status"] = "skipped"
         self.task_path.write_text(json.dumps(data), encoding="utf-8")
-        result = self.run_cli("validate")
+        result = self.run_cli("status")
         self.assertEqual(result.returncode, 12)
         self.assertIn("status", result.stderr)
-
-    def test_validate_zero_tasks_omits_parens(self):
-        data = fixture_data()
-        data["tasks"] = []
-        self.task_path.write_text(json.dumps(data), encoding="utf-8")
-        result = self.run_cli("validate")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "valid: 0 tasks\n")
 
     # ---- list ----------------------------------------------------------
 
@@ -202,22 +185,11 @@ class CliTestCase(unittest.TestCase):
         tasks = json.loads(result.stdout)
         self.assertEqual([t["id"] for t in tasks], [1, 2, 3])
 
-    def test_list_remaining_returns_pending_and_in_progress(self):
-        result = self.run_cli("list", "--remaining")
-        self.assertEqual(result.returncode, 0)
-        tasks = json.loads(result.stdout)
-        self.assertEqual({t["id"] for t in tasks}, {1, 2})
-
     def test_list_status_filters_exactly(self):
         result = self.run_cli("list", "--status", "complete")
         self.assertEqual(result.returncode, 0)
         tasks = json.loads(result.stdout)
         self.assertEqual([t["id"] for t in tasks], [3])
-
-    def test_list_status_and_remaining_are_mutually_exclusive(self):
-        result = self.run_cli("list", "--remaining", "--status", "pending")
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("not allowed with", result.stderr)
 
     # ---- get -----------------------------------------------------------
 
@@ -462,9 +434,9 @@ class CliTestCase(unittest.TestCase):
         self.assertEqual(result.returncode, 13)
         self.assertIn("not valid UTF-8", result.stderr)
 
-    def test_validate_non_utf8_file_exits_thirteen(self):
+    def test_status_non_utf8_file_exits_thirteen(self):
         self.task_path.write_bytes(b"\xff\xfe\xfd not utf-8 here")
-        result = self.run_cli("validate")
+        result = self.run_cli("status")
         self.assertEqual(result.returncode, 13)
         self.assertIn("not valid UTF-8", result.stderr)
 
@@ -497,6 +469,37 @@ class CliTestCase(unittest.TestCase):
         contents = self.task_path.read_text(encoding="utf-8")
         # tasks array should be indented with 2 spaces
         self.assertIn('\n  "tasks": [', contents)
+
+    # ---- help-on-error -------------------------------------------------
+    # Bad/missing args should print the full help (including subcommand
+    # names) to stderr, not just `usage:` + a one-line error. Helps both
+    # humans and dispatched agents discover the available verbs when
+    # they mistype.
+
+    SUBCOMMAND_NAMES = ("start", "finish", "get", "next", "status", "list")
+
+    def test_no_args_at_all_prints_full_help_to_stderr(self):
+        result = subprocess.run(
+            [sys.executable, str(CLI)],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        for verb in self.SUBCOMMAND_NAMES:
+            self.assertIn(verb, result.stderr, f"help output should mention `{verb}`")
+
+    def test_no_subcommand_prints_full_help_to_stderr(self):
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 2)
+        for verb in self.SUBCOMMAND_NAMES:
+            self.assertIn(verb, result.stderr, f"help output should mention `{verb}`")
+
+    def test_unknown_subcommand_prints_full_help_to_stderr(self):
+        result = self.run_cli("bogus")
+        self.assertEqual(result.returncode, 2)
+        for verb in self.SUBCOMMAND_NAMES:
+            self.assertIn(verb, result.stderr, f"help output should mention `{verb}`")
+        self.assertIn("invalid choice", result.stderr)
 
 
 if __name__ == "__main__":

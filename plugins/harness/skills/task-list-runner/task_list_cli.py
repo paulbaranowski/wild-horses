@@ -18,6 +18,20 @@ from typing import Any
 VALID_STATUSES = {"pending", "in-progress", "complete", "failed"}
 
 
+class HelpfulArgumentParser(argparse.ArgumentParser):
+    """Print full help (not just usage) before erroring on bad/missing args.
+
+    The default argparse error path prints `usage: ...` + a one-line error
+    and exits — without the subcommand list. That's enough for someone
+    who already knows the surface, but agents and humans alike benefit
+    from seeing the available subcommand names when they mistype one.
+    """
+
+    def error(self, message: str):
+        self.print_help(sys.stderr)
+        self.exit(2, f"\n{self.prog}: error: {message}\n")
+
+
 class TaskCliError(Exception):
     """Expected, user-facing errors. Carries an exit code."""
 
@@ -217,31 +231,23 @@ def cmd_next(args: argparse.Namespace, data: dict, path: Path) -> None:
 def cmd_list(args: argparse.Namespace, data: dict, path: Path) -> None:
     del path
     tasks: list[Any] = data["tasks"]
-    if args.remaining:
-        tasks = [t for t in tasks if t["status"] in {"pending", "in-progress"}]
-    elif args.status:
+    if args.status:
         tasks = [t for t in tasks if t["status"] == args.status]
     print(json.dumps(tasks, indent=2, ensure_ascii=False))
 
 
-def cmd_validate(args: argparse.Namespace, data: dict, path: Path) -> None:
-    del args, path  # load_and_validate already ran; reaching here means valid.
-    tasks = data["tasks"]
-    counts = {status: 0 for status in ("pending", "in-progress", "complete", "failed")}
-    for task in tasks:
-        counts[task["status"]] += 1
-    parts = [f"{n} {status}" for status, n in counts.items() if n > 0]
-    suffix = f" ({', '.join(parts)})" if parts else ""
-    print(f"valid: {len(tasks)} tasks{suffix}")
-
-
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = HelpfulArgumentParser(
         prog="task_list_cli",
         description="Mutator + reader for harness task-list JSON files.",
     )
     parser.add_argument("--file", required=True, help="path to the task-list JSON file")
-    sub = parser.add_subparsers(dest="cmd", required=True, metavar="<subcommand>")
+    sub = parser.add_subparsers(
+        dest="cmd",
+        required=True,
+        metavar="<subcommand>",
+        parser_class=HelpfulArgumentParser,
+    )
 
     p_start = sub.add_parser("start", help="flip task <id> from pending → in-progress")
     p_start.add_argument("--id", type=int, required=True, help="task id")
@@ -274,21 +280,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p_list = sub.add_parser("list", help="print tasks as a pretty JSON array to stdout")
-    list_filter = p_list.add_mutually_exclusive_group()
-    list_filter.add_argument(
+    p_list.add_argument(
         "--status",
         choices=sorted(VALID_STATUSES),
         help="filter by exact status",
-    )
-    list_filter.add_argument(
-        "--remaining",
-        action="store_true",
-        help="sugar for status in {pending, in-progress}",
-    )
-
-    sub.add_parser(
-        "validate",
-        help="strict-parse + minimal schema check; on success prints 'valid: N tasks (...)' and exits 0",
     )
 
     return parser
@@ -307,7 +302,6 @@ def main() -> int:
             "next": cmd_next,
             "status": cmd_status,
             "list": cmd_list,
-            "validate": cmd_validate,
         }
         dispatch[args.cmd](args, data, path)
         return 0

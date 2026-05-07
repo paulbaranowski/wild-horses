@@ -24,13 +24,12 @@ The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.
 - **`start --id <N>`** — flip task N from pending → in-progress.
 - **`finish --id <N> --status complete|failed --log-file <path>`** — flip in-progress task N to terminal status; log content is read from the file (file-only input avoids shell-arg quoting hazards).
 - **`get --id <N>`** — print one task as pretty JSON.
-- **`list [--status <s>|--remaining]`** — print all tasks (or filtered) as a JSON array. `--remaining` is sugar for `pending` + `in-progress`.
-- **`status`** — print task counts + `plan` path + the full `verifySteps` array as a JSON object. Use this for Phase 3 / Phase 5 summary displays.
-- **`validate`** — strict-parse + minimal schema check; exit 0 if valid.
+- **`list [--status <s>]`** — print all tasks (or filtered) as a JSON array.
+- **`status`** — print task counts + `plan` path + the full `verifySteps` array as a JSON object. Use this for Phase 3 / Phase 5 summary displays AND as the between-iteration halt-gate (it runs `load_and_validate` like every other command, so a non-zero exit means the file is corrupt).
 
 **Exit codes:** 0 success · 1 IO error · 2 argparse · 10 task id not found · 11 invalid state transition · 12 schema validation · 13 JSON parse · 14 no remaining tasks.
 
-Mutations from dispatched agents go ONLY through this CLI. The runner itself may also use `status`, `list`, and `validate` for its own bookkeeping displays — prefer those over re-reading and re-counting the JSON natively. Hand-edits to the JSON during the loop are forbidden (see Failure modes).
+Every subcommand calls `load_and_validate` as a precondition before doing its work — there is no separate `validate` verb because there's no need for one. Mutations from dispatched agents go ONLY through this CLI. The runner itself may also use `status` and `list` for its own bookkeeping displays — prefer those over re-reading the JSON natively. Hand-edits to the JSON during the loop are forbidden (see Failure modes).
 
 ---
 
@@ -71,7 +70,7 @@ Show the user:
 
 - Task file path
 - Total / complete / in-progress / pending / failed counts
-- The remaining tasks (pending + in-progress) with their `id`, `title`, and `effort`
+- The remaining tasks (pending + in-progress) with their `id`, `title`, and `effort`. Source these via two filtered `list` calls — `list --status pending` and `list --status in-progress` — and concatenate.
 
 Then branch on the Phase 1 mode flag:
 
@@ -105,14 +104,14 @@ Implement tasks via sequential foreground `Agent` tool calls. Each Agent runs _w
    3. If `MAX_ITER` is reached → `"Max iterations (MAX_ITER) reached"` and stop.
    4. Show progress header: `"Iteration X/MAX_ITER — N tasks remaining"`.
    5. **Issue a single foreground `Agent` tool call** with the **Task Implementation Prompt** below, substituting the task file path. Do NOT issue multiple `Agent` calls in parallel — tasks may depend on prior tasks' edits. Wait for it to return.
-   6. **Strict-parse the task file** by running:
+   6. **Re-validate the task file** by running:
 
       ```bash
       python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
-          --file TASK_FILE_PATH validate
+          --file TASK_FILE_PATH status
       ```
 
-      If exit code is non-zero, halt the loop with `"Task file corrupted on iteration X — see <path>"` and stop. Do NOT continue iterating on a malformed file.
+      `status` runs `load_and_validate` as a precondition (like every other subcommand), so any structural corruption surfaces as a non-zero exit. If exit code is non-zero, halt the loop with `"Task file corrupted on iteration X — see <path>"` and stop. Do NOT continue iterating on a malformed file. The `status` payload itself can be discarded — it's the exit code that matters here.
 
    7. Re-read the JSON. If the task that was in-progress wasn't updated (status still `"in-progress"` with no `log` change), warn: `"Agent did not update task status on iteration X, continuing"` and proceed.
    8. Repeat from step 1.
@@ -178,5 +177,5 @@ The CLI exits non-zero on any failure (task id not found → 10; invalid state t
 - **Auto-locating multiple files silently.** If Phase 2 finds more than one validated match, _always_ ask the user. Don't pick by recency or alphabetical order.
 - **Trying to build a missing task list.** This skill consumes an existing JSON. If Phase 2 finds nothing, stop and tell the user — don't shell out to `task-list-builder` or fabricate tasks.
 - **Treating `--next` as a silent one-shot.** Even in `--next` mode, show the Phase 3 summary first so the user can see which task is about to run.
-- **Hand-editing the task file.** Do not use `Edit`, `Write`, or inline `python3 -c '...'` against the task JSON during the loop. All mutations go through `task_list_cli.py`. The one exception is structural revision in Phase 3 Option 3 (reorder, revise `what`, mark skipped) — and even then, re-run `task_list_cli.py validate` after saving.
-- **Skipping the strict-parse check.** Phase 4 step 6 (`validate`) is the canary that caught past silent-corruption bugs only after 19 iterations. Never skip it; never downgrade a non-zero exit to a warning.
+- **Hand-editing the task file.** Do not use `Edit`, `Write`, or inline `python3 -c '...'` against the task JSON during the loop. All mutations go through `task_list_cli.py`. The one exception is structural revision in Phase 3 Option 3 (reorder, revise `what`, mark skipped) — and even then, re-run `task_list_cli.py status` after saving so its `load_and_validate` step can confirm the edit didn't break the schema.
+- **Skipping the between-iteration check.** Phase 4 step 6 (`status` as halt-gate) is the canary that caught past silent-corruption bugs only after 19 iterations. Never skip it; never downgrade a non-zero exit to a warning.
