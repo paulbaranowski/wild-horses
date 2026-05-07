@@ -64,8 +64,6 @@ From here on, "the task file" means the chosen JSON.
 
 ## Phase 3 — Show summary and choose mode
 
-Re-validate the task file: it must have a `tasks` array and a `verifySteps` array. If invalid, report and stop.
-
 Show the user:
 
 - Task file path
