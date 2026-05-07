@@ -25,7 +25,7 @@ The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.
 - **`finish --id <N> --status complete|failed --log-file <path>`** — flip in-progress task N to terminal status; log content is read from the file (file-only input avoids shell-arg quoting hazards).
 - **`get --id <N>`** — print one task as pretty JSON.
 - **`list [--status <s>|--remaining]`** — print all tasks (or filtered) as a JSON array. `--remaining` is sugar for `pending` + `in-progress`.
-- **`status`** — print task counts + `plan` path + `testCommand` as a JSON object. Use this for Phase 3 / Phase 5 summary displays.
+- **`status`** — print task counts + `plan` path + the full `verifySteps` array as a JSON object. Use this for Phase 3 / Phase 5 summary displays.
 - **`validate`** — strict-parse + minimal schema check; exit 0 if valid.
 
 **Exit codes:** 0 success · 1 IO error · 2 argparse · 10 task id not found · 11 invalid state transition · 12 schema validation · 13 JSON parse · 14 no remaining tasks.
@@ -51,7 +51,7 @@ If Phase 1 yielded no path, auto-locate by content (not filename):
 
 1. Scan `docs/exec-plans/active/*.json`. For each file, validate that it:
    - parses as valid JSON,
-   - has a `tasks` array and a `testCommand` field, and
+   - has a `tasks` array and a `verifySteps` array, and
    - contains at least one task with `status` of `"pending"` or `"in-progress"`.
 2. If no JSON matches, fall back to scanning `docs/exec-plans/active/*.md` — for each candidate, read its YAML frontmatter `task_file` field and validate the JSON it points to using the same checks.
 3. Resolve:
@@ -65,7 +65,7 @@ From here on, "the task file" means the chosen JSON.
 
 ## Phase 3 — Show summary and choose mode
 
-Re-validate the task file: it must have a `tasks` array and a `testCommand` field. If invalid, report and stop.
+Re-validate the task file: it must have a `tasks` array and a `verifySteps` array. If invalid, report and stop.
 
 Show the user:
 
@@ -151,7 +151,9 @@ Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with th
 >
 > The output is the full task object — note the `id` and read `what`, `resolves`, and `acceptanceCriteria`. (`next` atomically claims the first pending task and flips it to `in-progress`, or returns an already-in-progress task unchanged if a previous iteration crashed mid-task.) If the command exits with code 14, no work remains — exit cleanly.
 >
-> Implement the change. Verify all acceptance criteria are met. Run tests using the `testCommand` from the task file.
+> Implement the change. Verify all acceptance criteria are met.
+>
+> **Run verification.** Read the `verifySteps` array from the task file (or run `task_list_cli.py status` to see it). Run each step's `command` in order via Bash. If any step exits non-zero, **stop, fix the cause, and re-run the full sequence from step 1** — do not skip ahead. Do not invent additional verification commands; if a step you need is missing from `verifySteps`, that's a bug in the task file, not something to paper over with shell improvisation. When all steps pass, the task is verified.
 >
 > **Step 2 — Finish:** Use the `Write` tool to dump your log to `/tmp/task-list-runner-<id>.txt`. Then:
 >

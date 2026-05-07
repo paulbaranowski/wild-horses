@@ -54,8 +54,27 @@ def load_and_validate(path: Path) -> dict:
         raise TaskCliError("top-level value must be a JSON object", code=12)
     if "tasks" not in data or not isinstance(data["tasks"], list):
         raise TaskCliError('top-level "tasks" must be an array', code=12)
-    if "testCommand" not in data or not isinstance(data["testCommand"], str):
-        raise TaskCliError('top-level "testCommand" must be a string', code=12)
+    if "testCommand" in data:
+        # Hard break: old single-string field was replaced by verifySteps in v4.
+        # Checked before the verifySteps shape check so users on the old schema
+        # get the actionable migration message, not a generic "missing field" error.
+        raise TaskCliError(
+            'field "testCommand" was replaced by "verifySteps" (an array of '
+            "{name, command} objects). To migrate, replace "
+            '`"testCommand": "X"` with `"verifySteps": [{"name": "tests", "command": "X"}]`.',
+            code=12,
+        )
+    if "verifySteps" not in data or not isinstance(data["verifySteps"], list):
+        raise TaskCliError('top-level "verifySteps" must be an array', code=12)
+    if len(data["verifySteps"]) == 0:
+        raise TaskCliError('"verifySteps" must contain at least one step', code=12)
+    for i, step in enumerate(data["verifySteps"]):
+        if not isinstance(step, dict):
+            raise TaskCliError(f"verifySteps[{i}] must be an object", code=12)
+        if not isinstance(step.get("name"), str) or not step["name"]:
+            raise TaskCliError(f"verifySteps[{i}].name must be a non-empty string", code=12)
+        if not isinstance(step.get("command"), str) or not step["command"]:
+            raise TaskCliError(f"verifySteps[{i}].command must be a non-empty string", code=12)
 
     seen_ids: set = set()
     for i, task in enumerate(data["tasks"]):
@@ -170,7 +189,7 @@ def cmd_status(args: argparse.Namespace, data: dict, path: Path) -> None:
         "complete": counts["complete"],
         "failed": counts["failed"],
         "plan": data.get("plan"),
-        "testCommand": data["testCommand"],
+        "verifySteps": data["verifySteps"],
     }
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
@@ -251,7 +270,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser(
         "status",
-        help="print task counts + plan path + testCommand as JSON",
+        help="print task counts + plan path + verifySteps as JSON",
     )
 
     p_list = sub.add_parser("list", help="print tasks as a pretty JSON array to stdout")

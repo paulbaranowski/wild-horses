@@ -26,7 +26,9 @@ CLI = Path(__file__).parent / "task_list_cli.py"
 def fixture_data() -> dict:
     return {
         "plan": "docs/exec-plans/active/test.md",
-        "testCommand": "echo test",
+        "verifySteps": [
+            {"name": "tests", "command": "echo test"},
+        ],
         "scope": ["src/foo.py"],
         "tasks": [
             {
@@ -115,13 +117,58 @@ class CliTestCase(unittest.TestCase):
         self.assertEqual(result.returncode, 13, result.stderr)
         self.assertIn("not valid JSON", result.stderr)
 
-    def test_validate_missing_test_command_exits_twelve(self):
+    def test_validate_missing_verify_steps_exits_twelve(self):
         data = fixture_data()
-        del data["testCommand"]
+        del data["verifySteps"]
+        self.task_path.write_text(json.dumps(data), encoding="utf-8")
+        result = self.run_cli("validate")
+        self.assertEqual(result.returncode, 12)
+        self.assertIn("verifySteps", result.stderr)
+
+    def test_validate_empty_verify_steps_exits_twelve(self):
+        data = fixture_data()
+        data["verifySteps"] = []
+        self.task_path.write_text(json.dumps(data), encoding="utf-8")
+        result = self.run_cli("validate")
+        self.assertEqual(result.returncode, 12)
+        self.assertIn("at least one step", result.stderr)
+
+    def test_validate_old_test_command_field_rejected_with_migration_hint(self):
+        # Old (pre-v4) shape: a single testCommand string. Validator must reject
+        # it AND tell the user how to migrate, not just say "verifySteps missing".
+        data = fixture_data()
+        del data["verifySteps"]
+        data["testCommand"] = "echo test"
         self.task_path.write_text(json.dumps(data), encoding="utf-8")
         result = self.run_cli("validate")
         self.assertEqual(result.returncode, 12)
         self.assertIn("testCommand", result.stderr)
+        self.assertIn("verifySteps", result.stderr)
+        self.assertIn("migrate", result.stderr)
+
+    def test_validate_step_missing_name_exits_twelve(self):
+        data = fixture_data()
+        data["verifySteps"] = [{"command": "echo hi"}]
+        self.task_path.write_text(json.dumps(data), encoding="utf-8")
+        result = self.run_cli("validate")
+        self.assertEqual(result.returncode, 12)
+        self.assertIn("name", result.stderr)
+
+    def test_validate_step_missing_command_exits_twelve(self):
+        data = fixture_data()
+        data["verifySteps"] = [{"name": "tests"}]
+        self.task_path.write_text(json.dumps(data), encoding="utf-8")
+        result = self.run_cli("validate")
+        self.assertEqual(result.returncode, 12)
+        self.assertIn("command", result.stderr)
+
+    def test_validate_step_empty_name_exits_twelve(self):
+        data = fixture_data()
+        data["verifySteps"] = [{"name": "", "command": "echo hi"}]
+        self.task_path.write_text(json.dumps(data), encoding="utf-8")
+        result = self.run_cli("validate")
+        self.assertEqual(result.returncode, 12)
+        self.assertIn("non-empty", result.stderr)
 
     def test_validate_duplicate_task_ids_exits_twelve(self):
         data = fixture_data()
@@ -189,7 +236,7 @@ class CliTestCase(unittest.TestCase):
 
     # ---- status --------------------------------------------------------
 
-    def test_status_returns_counts_plan_and_test_command(self):
+    def test_status_returns_counts_plan_and_verify_steps(self):
         # Fixture: 1 pending, 1 in-progress, 1 complete, 0 failed → total 3
         result = self.run_cli("status")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -200,7 +247,27 @@ class CliTestCase(unittest.TestCase):
         self.assertEqual(summary["complete"], 1)
         self.assertEqual(summary["failed"], 0)
         self.assertEqual(summary["plan"], "docs/exec-plans/active/test.md")
-        self.assertEqual(summary["testCommand"], "echo test")
+        self.assertEqual(
+            summary["verifySteps"],
+            [{"name": "tests", "command": "echo test"}],
+        )
+
+    def test_status_emits_full_verify_steps_array(self):
+        # Multi-step plan: status output must show every step verbatim, not
+        # collapse to "the first one" or "N steps". The agent reads this to
+        # know exactly which commands it will run.
+        data = fixture_data()
+        data["verifySteps"] = [
+            {"name": "typecheck", "command": "npx tsc --noEmit"},
+            {"name": "tests", "command": "npm test"},
+        ]
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        result = self.run_cli("status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(len(summary["verifySteps"]), 2)
+        self.assertEqual(summary["verifySteps"][0]["name"], "typecheck")
+        self.assertEqual(summary["verifySteps"][1]["command"], "npm test")
 
     def test_status_with_no_tasks(self):
         data = fixture_data()

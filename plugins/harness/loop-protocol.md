@@ -23,7 +23,7 @@ Before executing any option below, generate a **run ID** by running `openssl ran
 
 Save the analysis and implement all interventions iteratively. Each intervention is implemented by a foreground Agent tool call within this conversation — the user sees every file read, edit, and test run as it happens. The JSON task file tracks progress between iterations.
 
-**Step 1 — Discover the test command.** Check CLAUDE.md for the project's test command. Fall back to `uv run pytest` or `npm test`.
+**Step 1 — Discover the verify steps.** Build the `verifySteps` array (each entry is `{name, command}`). Always include a `tests` step (check CLAUDE.md, fall back to `uv run pytest` or `npm test`). Add a `typecheck` step if the project has a static type-checker configured (`tsconfig.json` → `npx tsc --noEmit`; `pyrightconfig.json` → `uv run pyright`; `mypy.ini` → `uv run mypy .`). Order steps fastest-first so cheap checks fail fast. See the `task-list-builder` skill's Phase 2 for the full discovery procedure.
 
 **Step 2 — Write the markdown report** to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.<slug>.md` (where YYYY-MM-DD is today's date and `<run-id>` is the 4-character hex run ID).
 
@@ -48,7 +48,10 @@ Schema (illustrative example — actual tasks come from Phase 3 interventions):
 ```json
 {
   "plan": "docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.<slug>.md",
-  "testCommand": "<discovered test command>",
+  "verifySteps": [
+    { "name": "typecheck", "command": "<typecheck command, if applicable>" },
+    { "name": "tests", "command": "<test command>" }
+  ],
   "scope": ["<repo-relative file paths from Phase 1>"],
   "tasks": [
     {
@@ -89,7 +92,7 @@ Note: tasks with `createsNewCode: true` get a paired test task immediately after
 
 Field definitions:
 
-- `testCommand` — project test command, discovered once and reused every iteration
+- `verifySteps` — array of `{name, command}` objects, each describing one verification step the per-task Agent runs after implementing a task. Steps run in order; on first failure the Agent stops and reports which step (`name`) failed. At least one step is required. Conventional names: `typecheck`, `tests`, `lint` — but any non-empty string is valid. Discovered once during plan creation and reused every iteration.
 - `scope` — repo-relative file paths from Phase 1, preserved for potential re-analysis. Use paths relative to the repository root to avoid leaking local machine structure if the file is committed
 - `createsNewCode` — `true` if the intervention creates new callable code (functions, classes, methods, services, models, protocols), `false` if it only restructures, annotates, or documents existing code. Determines whether a paired test task is generated
 - `acceptanceCriteria` — derived from the intervention's What and Resolves fields. Each criterion should be concrete and verifiable

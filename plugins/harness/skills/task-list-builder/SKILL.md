@@ -46,22 +46,34 @@ Independent of the output target, the new task content comes from one of:
 2. **Free-form** — `$ARGUMENTS` (after stripping any path arguments) is non-empty text. Treat it as a description of the work to break down.
 3. **Conversation-context** — no description in `$ARGUMENTS`. Use the recent conversation. If conversation context is too thin to extract concrete tasks, ask the user one clarifying question instead of guessing.
 
-In **rewrite mode**, the existing JSON is also a content source: preserve `testCommand`, `scope`, and any task-level fields the user did not ask to change. The rewrite _intent_ (what to change) comes from $ARGUMENTS or conversation. If the user only pointed at a file with no further instructions, ask what changes they want — don't rewrite blindly.
+In **rewrite mode**, the existing JSON is also a content source: preserve `verifySteps`, `scope`, and any task-level fields the user did not ask to change. The rewrite _intent_ (what to change) comes from $ARGUMENTS or conversation. If the user only pointed at a file with no further instructions, ask what changes they want — don't rewrite blindly.
 
 If the input is genuinely ambiguous (e.g., a single word that could be a path or a description), ask the user. Don't silently pick.
 
 ---
 
-## Phase 2 — Discover the test command
+## Phase 2 — Discover the verify steps
 
-Find the project's test command in this order; stop at the first one that yields a value:
+Build the `verifySteps` array — every step the per-task Agent must run to verify a task is complete. Each step is `{name, command}`. Steps run in order; first failure halts and the Agent reports which step (`name`) failed.
 
-1. `CLAUDE.md` — search for an explicit `testCommand`, "Tests", or "Run tests" section.
+**Always include a `tests` step.** Discover the test command in this order; stop at the first one that yields a value:
+
+1. `CLAUDE.md` — search for an explicit test command, "Tests", or "Run tests" section.
 2. `package.json` — read `scripts.test`. If present, the command is `npm test`.
 3. `pyproject.toml` or `pytest.ini` — if present, the command is `uv run pytest` (or `pytest` if the project doesn't use `uv`).
 4. Fallback: ask the user what their test command is. Don't invent one.
 
-This matches the convention used by `/harness:reasoning-gaps` and `/harness:feedback-blockers` (see the `testCommand` field definition in `loop-protocol.md`'s Step 3 schema).
+**Add a `typecheck` step when the project has a static type-checker configured.** This is what prevents the agent from improvising `tsc --noEmit | head -80` mid-loop:
+
+- `tsconfig.json` exists → `{ "name": "typecheck", "command": "npx tsc --noEmit" }`
+- `pyrightconfig.json` exists → `{ "name": "typecheck", "command": "uv run pyright" }` (or `pyright` if the project doesn't use `uv`)
+- `mypy.ini` or `[tool.mypy]` in `pyproject.toml` → `{ "name": "typecheck", "command": "uv run mypy ." }`
+
+Order matters: put the **fastest** step first (typecheck is usually faster than the test suite, so it goes ahead of `tests`). The agent can fail fast on the cheap check before paying for the expensive one.
+
+**Do not** add `lint` steps automatically — lint is rarely an acceptance criterion for a refactor, and adding it noisily slows every iteration. The user can ask for it during the Phase 5 preview if they want.
+
+This matches the convention used by `/harness:reasoning-gaps` and `/harness:feedback-blockers` (see the `verifySteps` field definition in `loop-protocol.md`'s Step 3 schema).
 
 ---
 
@@ -109,7 +121,7 @@ Carry that yes/no into Phase 6.
 Use the schema in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md` (Phase 4 Option 1 → Step 3). Top-level fields:
 
 - `plan` — absolute-from-repo path to the paired `.md` file (Phase 3).
-- `testCommand` — from Phase 2.
+- `verifySteps` — from Phase 2.
 - `scope` — repo-relative paths of files involved. Strip any local-machine prefix (`/Users/...`, `C:\...`) so the file is portable. Empty array is OK if the work doesn't touch specific files yet.
 - `tasks` — array of task objects, each matching the schema in `loop-protocol.md`.
 
@@ -144,7 +156,9 @@ Files to write (new):
   - docs/exec-plans/active/<…>.task-list-builder.json
   - docs/exec-plans/active/<…>.task-list-builder.md
 
-testCommand: <discovered command>
+verifySteps:
+  1. <name>: <command>
+  2. <name>: <command>
 scope: <N files>
 
 Proceed? (yes / edit / cancel)
@@ -162,7 +176,9 @@ Files:
   - <existing .md path>       (PRESERVED — will not be modified)
     OR  <existing .md path>   (will be created — no MD exists yet)
 
-testCommand: <from existing JSON; preserved unless changed>
+verifySteps: <from existing JSON; preserved unless changed>
+  1. <name>: <command>
+  2. <name>: <command>
 scope: <N files>
 
 Proceed? (yes / edit / cancel)
