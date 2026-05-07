@@ -48,7 +48,7 @@ If the path is a `.md` file, validate the pointer: the JSON it points to must ex
 
 If Phase 1 yielded no path, auto-locate by content (not filename):
 
-1. Glob `docs/exec-plans/active/*.json`. For each candidate, run `task_list_cli.py --file <path> status`. Treat as valid if exit is 0 (file parses + schema is well-formed) and `status.pending + status["in-progress"] > 0`. Cache the per-candidate `status` payload — counts and `plan` are what you'd display in step 3 anyway.
+1. Glob `docs/exec-plans/active/*.json`. For each candidate, run `task_list_cli.py --file <path> status`. Treat as valid if exit is 0 (file parses + schema is well-formed) and `status.remaining` is non-empty. Cache the per-candidate `status` payload — counts and `plan` are what you'd display in step 3 anyway.
 2. If no JSON candidates match, repeat the scan against `docs/exec-plans/active/*.md`. For each, read its YAML frontmatter `task_file` field and run `status` against the JSON it points to (same accept criterion).
 3. Resolve:
    - **Exactly one match** (from either scan): use it.
@@ -93,7 +93,7 @@ Implement tasks via sequential foreground `Agent` tool calls. Each Agent runs _w
 1. Compute `MAX_ITER` = (number of tasks with status `"pending"` or `"in-progress"`) × 1.5, rounded up, plus 1. Example: 10 remaining → `MAX_ITER = 16`.
 2. Run the loop. On each iteration:
    1. Run `task_list_cli.py status` to get current counts and confirm the file is still well-formed (any non-zero exit = corruption — halt the loop).
-   2. If `status.pending + status["in-progress"] == 0`, the loop is done. Show final status:
+   2. If `status.remaining` is empty, the loop is done. Show final status:
       - Any `"failed"` tasks (`status.failed > 0`) → `"Done with failures: X/Y complete, Z failed"`.
       - Otherwise → `"All Y tasks complete"`.
    3. If `MAX_ITER` is reached → `"Max iterations (MAX_ITER) reached"` and stop.

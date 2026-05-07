@@ -215,7 +215,7 @@ class CliTestCase(unittest.TestCase):
         summary = json.loads(result.stdout)
         self.assertEqual(summary["total"], 3)
         self.assertEqual(summary["pending"], 1)
-        self.assertEqual(summary["in-progress"], 1)
+        self.assertEqual(summary["in_progress"], 1)
         self.assertEqual(summary["complete"], 1)
         self.assertEqual(summary["failed"], 0)
         self.assertEqual(summary["plan"], "docs/exec-plans/active/test.md")

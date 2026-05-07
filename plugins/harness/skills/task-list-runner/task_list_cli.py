@@ -201,10 +201,14 @@ def cmd_status(args: argparse.Namespace, data: dict, path: Path) -> None:
         for t in data["tasks"]
         if t["status"] in {"pending", "in-progress"}
     ]
+    # Count keys use snake_case so prose can use dot-access uniformly
+    # (status.in_progress vs the awkward status["in-progress"]). The
+    # schema enum value in tasks[].status and remaining[].status is
+    # still "in-progress" — only the summary count key is renamed.
     summary = {
         "total": len(data["tasks"]),
         "pending": counts["pending"],
-        "in-progress": counts["in-progress"],
+        "in_progress": counts["in-progress"],
         "complete": counts["complete"],
         "failed": counts["failed"],
         "plan": data.get("plan"),
