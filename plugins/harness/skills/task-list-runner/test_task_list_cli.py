@@ -206,9 +206,75 @@ class CliTestCase(unittest.TestCase):
         self.assertEqual(result.stdout, "", "stdout must be empty so jq cannot silently succeed")
         self.assertIn("not found", result.stderr)
 
+    # ---- verify (executor) --------------------------------------------
+
+    def test_verify_runs_passing_steps_and_exits_zero(self):
+        data = fixture_data()
+        data["verifySteps"] = [
+            {"name": "first", "command": "echo first-out; echo first-err 1>&2; true"},
+            {"name": "second", "command": "true"},
+        ]
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        result = self.run_cli("verify", "--id", "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "verify[1/2] first exit=0 log=/tmp/verify-1-step1-first.log", result.stdout
+        )
+        self.assertIn(
+            "verify[2/2] second exit=0 log=/tmp/verify-1-step2-second.log", result.stdout
+        )
+        self.assertIn("verify: all 2 steps passed", result.stdout)
+        log1 = Path("/tmp/verify-1-step1-first.log").read_text(encoding="utf-8")
+        # Both stdout and stderr must land in the same log (stderr=STDOUT)
+        self.assertIn("first-out", log1)
+        self.assertIn("first-err", log1)
+
+    def test_verify_stops_on_first_failure_with_correct_exit_code(self):
+        data = fixture_data()
+        data["verifySteps"] = [
+            {"name": "ok", "command": "true"},
+            {"name": "boom", "command": "echo about-to-fail; exit 7"},
+            {"name": "skipped", "command": "echo SHOULD-NOT-RUN"},
+        ]
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        # Pre-clean any matching log files from previous test runs so the
+        # "step 3 never ran" assertion can't false-pass on a leftover.
+        for stale in Path("/tmp").glob("verify-1-step*.log"):
+            stale.unlink()
+        result = self.run_cli("verify", "--id", "1")
+        self.assertEqual(result.returncode, 7, "exit code must be the failing step's code")
+        self.assertIn(
+            "verify[2/3] boom exit=7 log=/tmp/verify-1-step2-boom.log", result.stdout
+        )
+        self.assertNotIn("all 3 steps passed", result.stdout)
+        log2 = Path("/tmp/verify-1-step2-boom.log").read_text(encoding="utf-8")
+        self.assertIn("about-to-fail", log2)
+        self.assertFalse(
+            Path("/tmp/verify-1-step3-skipped.log").exists(),
+            "step 3 must be skipped after step 2 fails",
+        )
+
+    def test_verify_missing_id_exits_ten(self):
+        result = self.run_cli("verify", "--id", "999")
+        self.assertEqual(result.returncode, 10)
+        self.assertEqual(result.stdout, "", "stdout must be empty so jq cannot silently succeed")
+        self.assertIn("not found", result.stderr)
+
+    def test_verify_slugifies_special_chars_in_step_name(self):
+        # Step names with spaces, slashes, unicode etc. get reduced to
+        # ASCII-alnum + hyphens for safe use in log paths. The agent's
+        # "the failing log is at /tmp/verify-<id>-stepN-<slug>.log"
+        # mental model relies on this being predictable.
+        data = fixture_data()
+        data["verifySteps"] = [{"name": "Tests / Type-check 日本語", "command": "true"}]
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        result = self.run_cli("verify", "--id", "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("log=/tmp/verify-1-step1-tests-type-check.log", result.stdout)
+
     # ---- status --------------------------------------------------------
 
-    def test_status_returns_counts_plan_and_verify_steps(self):
+    def test_status_returns_counts_and_plan(self):
         # Fixture: 1 pending, 1 in-progress, 1 complete, 0 failed → total 3
         result = self.run_cli("status")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -219,10 +285,10 @@ class CliTestCase(unittest.TestCase):
         self.assertEqual(summary["complete"], 1)
         self.assertEqual(summary["failed"], 0)
         self.assertEqual(summary["plan"], "docs/exec-plans/active/test.md")
-        self.assertEqual(
-            summary["verifySteps"],
-            [{"name": "tests", "command": "echo test"}],
-        )
+        # `verifySteps` is intentionally NOT in the status payload — agents
+        # use `verify` to access it, so embedding it in `status` would just
+        # tempt them to bypass that subcommand.
+        self.assertNotIn("verifySteps", summary)
 
     def test_status_remaining_is_precomputed_integer(self):
         # `status.remaining` is the halt-gate's one number — pending +
@@ -302,23 +368,6 @@ class CliTestCase(unittest.TestCase):
         summary = json.loads(status_result.stdout)
         entries = json.loads(remaining_result.stdout)
         self.assertEqual(summary["remaining"], len(entries))
-
-    def test_status_emits_full_verify_steps_array(self):
-        # Multi-step plan: status output must show every step verbatim, not
-        # collapse to "the first one" or "N steps". The agent reads this to
-        # know exactly which commands it will run.
-        data = fixture_data()
-        data["verifySteps"] = [
-            {"name": "typecheck", "command": "npx tsc --noEmit"},
-            {"name": "tests", "command": "npm test"},
-        ]
-        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        result = self.run_cli("status")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        summary = json.loads(result.stdout)
-        self.assertEqual(len(summary["verifySteps"]), 2)
-        self.assertEqual(summary["verifySteps"][0]["name"], "typecheck")
-        self.assertEqual(summary["verifySteps"][1]["command"], "npm test")
 
     def test_status_with_no_tasks(self):
         data = fixture_data()
@@ -555,7 +604,16 @@ class CliTestCase(unittest.TestCase):
     # humans and dispatched agents discover the available verbs when
     # they mistype.
 
-    SUBCOMMAND_NAMES = ("start", "finish", "get", "next", "status", "remaining", "list")
+    SUBCOMMAND_NAMES = (
+        "start",
+        "finish",
+        "get",
+        "next",
+        "status",
+        "remaining",
+        "verify",
+        "list",
+    )
 
     def test_no_args_at_all_prints_full_help_to_stderr(self):
         result = subprocess.run(

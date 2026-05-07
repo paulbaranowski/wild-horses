@@ -10,6 +10,7 @@ See SKILL.md in the same directory for invocation patterns.
 import argparse
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -230,7 +231,6 @@ def cmd_status(args: argparse.Namespace, data: dict, path: Path) -> None:
         "failed": counts["failed"],
         "remaining": counts["pending"] + counts["in-progress"],
         "plan": data.get("plan"),
-        "verifySteps": data["verifySteps"],
     }
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
@@ -238,6 +238,74 @@ def cmd_status(args: argparse.Namespace, data: dict, path: Path) -> None:
 def cmd_remaining(args: argparse.Namespace, data: dict, path: Path) -> None:
     del args, path
     print(json.dumps(_remaining_entries(data), indent=2, ensure_ascii=False))
+
+
+def _slug(name: str) -> str:
+    """Reduce an arbitrary step name to a safe path/identifier component.
+
+    Lowercase a–z / 0–9 only, hyphens collapse, no leading/trailing hyphens.
+    Used for log-file paths and shell-safe labels — the original name still
+    appears verbatim in the script's leading comment for readability.
+    """
+    out: list[str] = []
+    for ch in name.lower():
+        if ch.isalnum() and ch.isascii():
+            out.append(ch)
+        elif out and out[-1] != "-":
+            out.append("-")
+    return "".join(out).strip("-") or "step"
+
+
+def _verify_log_path(task_id: int, index: int, slug: str) -> Path:
+    """Single source of truth for the per-step log path.
+
+    Agents are told in SKILL.md that the failing step's log lives at
+    `/tmp/verify-<id>-step<i>-<slug>.log`, so this helper centralises the
+    contract — every code path that names that file goes through here.
+    """
+    return Path(f"/tmp/verify-{task_id}-step{index}-{slug}.log")
+
+
+def cmd_verify(args: argparse.Namespace, data: dict, path: Path) -> None:
+    """Execute verifySteps for task <id> in order, capturing per-step output.
+
+    Each step's stdout+stderr goes to its own log file under /tmp; the
+    loop stops on the first failing step and exits with that step's
+    exit code; a `verify[i/n] <slug> exit=<EX> log=<path>` line is
+    printed per executed step; on full success, a final
+    `verify: all <n> step(s) passed` line is printed.
+
+    Trust model: this subcommand is auto-approved by the harness's
+    PreToolUse hook (covers all `task_list_cli.py` invocations), so
+    each per-task call runs without a per-iteration permission prompt.
+    Trust for verifySteps content is delegated to the upstream
+    task-list-builder; users who need per-call interception should
+    disable the hook.
+    """
+    find_task(data, args.id, path)
+    steps = data["verifySteps"]
+    n = len(steps)
+    plural = "" if n == 1 else "s"
+    for i, step in enumerate(steps, start=1):
+        slug = _slug(step["name"])
+        log_path = _verify_log_path(args.id, i, slug)
+        try:
+            with log_path.open("w", encoding="utf-8") as log_f:
+                result = subprocess.run(
+                    step["command"],
+                    shell=True,
+                    stdout=log_f,
+                    stderr=subprocess.STDOUT,
+                )
+        except OSError as e:
+            raise TaskCliError(f"log file {log_path}: {e}", code=1) from e
+        print(f"verify[{i}/{n}] {slug} exit={result.returncode} log={log_path}")
+        if result.returncode != 0:
+            # SystemExit propagates past main()'s TaskCliError handler —
+            # different exception type — so the process exits cleanly
+            # with the failing step's code as the agent expects.
+            sys.exit(result.returncode)
+    print(f"verify: all {n} step{plural} passed")
 
 
 def cmd_next(args: argparse.Namespace, data: dict, path: Path) -> None:
@@ -308,13 +376,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser(
         "status",
-        help="print task counts + remaining count + plan path + verifySteps as JSON",
+        help="print task counts + remaining count + plan path as JSON",
     )
 
     sub.add_parser(
         "remaining",
         help="print non-terminal tasks (pending + in-progress) as a compact JSON array (id, title, effort, status)",
     )
+
+    p_verify = sub.add_parser(
+        "verify",
+        help="execute verifySteps in order, capturing per-step output to /tmp logs",
+    )
+    p_verify.add_argument("--id", type=int, required=True, help="task id (used for log-file paths)")
 
     p_list = sub.add_parser("list", help="print tasks as a pretty JSON array to stdout")
     p_list.add_argument(
@@ -339,6 +413,7 @@ def main() -> int:
             "next": cmd_next,
             "status": cmd_status,
             "remaining": cmd_remaining,
+            "verify": cmd_verify,
             "list": cmd_list,
         }
         dispatch[args.cmd](args, data, path)

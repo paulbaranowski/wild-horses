@@ -1,9 +1,15 @@
 #!/bin/bash
 # PreToolUse hook: pre-approve `python3 .../task_list_cli.py ...` invocations
 # so the auto-mode classifier doesn't gate them on every iteration of a
-# task-list-runner loop. The script being approved is bounded — it reads/writes
-# one JSON file under docs/exec-plans/active/ via atomic tmp+os.replace and
-# validates schema on each call. See task-list-runner/SKILL.md.
+# task-list-runner loop. The CLI's surface includes:
+#   - JSON read/write on one file under docs/exec-plans/active/ via atomic
+#     tmp+os.replace, schema-validated on every call
+#   - subprocess execution of that file's verifySteps (the `verify` subcommand)
+#
+# Trust for verifySteps content is delegated to the upstream task-list-builder
+# that produced the file — there is no in-loop user-vetting moment. Disable
+# this hook to restore per-call permission interception for `verify`
+# (and accept many more prompts per task-list-runner run).
 #
 # Outputs PreToolUse permissionDecision JSON on match. Silent no-op otherwise
 # (falls through to normal allow-list + classifier flow).

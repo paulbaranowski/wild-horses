@@ -25,8 +25,9 @@ The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.
 - **`finish --id <N> --status complete|failed --log-file <path>`** — flip in-progress task N to terminal status; log content is read from the file (file-only input avoids shell-arg quoting hazards).
 - **`get --id <N>`** — print one task as pretty JSON.
 - **`list [--status <s>]`** — print all tasks (or filtered) as a JSON array.
-- **`status`** — print task counts + a precomputed `remaining` integer (`pending + in_progress`, the halt-gate's one number) + `plan` path + the full `verifySteps` array. Use this for Phase 5 summary displays AND as the between-iteration halt-gate (it runs `load_and_validate` like every other command, so a non-zero exit means the file is corrupt).
+- **`status`** — print task counts + a precomputed `remaining` integer (`pending + in_progress`, the halt-gate's one number) + `plan` path. Use this for Phase 5 summary displays AND as the between-iteration halt-gate (it runs `load_and_validate` like every other command, so a non-zero exit means the file is corrupt).
 - **`remaining`** — print non-terminal tasks (pending + in-progress) as a compact JSON array — each entry has just `id`, `title`, `effort`, `status`. Use for Phase 3's user-facing summary table. The hot-path halt-gate uses `status.remaining` (the integer) instead so a 30–50-task file doesn't pay an O(N) array on every iteration.
+- **`verify --id <N>`** — execute `verifySteps` in order, capturing each step's stdout+stderr to `/tmp/verify-<id>-step<i>-<slug>.log`, stopping on the first failure with that step's exit code, and printing one `verify[i/n] <slug> exit=<EX> log=<path>` line per executed step. Auto-approved through the harness PreToolUse hook, so per-task verification runs without per-call prompts; trust for verifySteps content is upstream (task-list-builder).
 
 **Exit codes:** 0 success · 1 IO error · 2 argparse · 10 task id not found · 11 invalid state transition · 12 schema validation · 13 JSON parse · 14 no remaining tasks.
 
@@ -139,7 +140,20 @@ Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with th
 >
 > Implement the change. Verify all acceptance criteria are met.
 >
-> **Run verification.** Read the `verifySteps` array from the task file (or run `task_list_cli.py status` to see it). Run each step's `command` in order via Bash. If any step exits non-zero, **stop, fix the cause, and re-run the full sequence from step 1** — do not skip ahead. Do not invent additional verification commands; if a step you need is missing from `verifySteps`, that's a bug in the task file, not something to paper over with shell improvisation. When all steps pass, the task is verified.
+> **Run verification:**
+>
+> ```bash
+> python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
+>     --file TASK_FILE_PATH verify --id <id>
+> ```
+>
+> The CLI runs each `verifySteps` command in order, capturing stdout+stderr to a per-step log file (`/tmp/verify-<id>-step<N>-<slug>.log`), and stops on the first failing step. If the command exits non-zero, that exit code is the failing step's exit code; the last `verify[i/n]` line in stdout names the failing step's log path. `Read` that file, fix the underlying cause in your code, then re-run the same `verify --id <id>` invocation. When the command exits zero, all steps passed and the task is verified.
+>
+> Strictly forbidden during verification:
+>
+> - Re-invoking individual `verifySteps` commands directly (e.g. running `npx tsc --noEmit` yourself). The CLI is the contract; running steps by hand splits your verification rhythm and burns budget.
+> - Permuting redirection flags on the same command hoping for clearer output (`| head -50` → `2>&1` → drop `2>&1` → repeat). The CLI's redirection is canonical; the answer is in the log file. If the log is unclear, `Read` more of it — don't re-run.
+> - Inventing additional verification commands not in `verifySteps`. If a step you need is missing, that's a bug in the task file, not something to paper over with shell improvisation.
 >
 > **Step 2 — Finish:** Use the `Write` tool to dump your log to `/tmp/task-list-runner-<id>.txt`. Then:
 >
@@ -165,3 +179,4 @@ The CLI exits non-zero on any failure (task id not found → 10; invalid state t
 - **Trying to build a missing task list.** This skill consumes an existing JSON. If Phase 2 finds nothing, stop and tell the user — don't shell out to `task-list-builder` or fabricate tasks.
 - **Treating `--next` as a silent one-shot.** Even in `--next` mode, show the Phase 3 summary first so the user can see which task is about to run.
 - **Skipping the between-iteration check.** Phase 4 step 6 (`status` as halt-gate) is the canary that caught past silent-corruption bugs only after 19 iterations. Never skip it; never downgrade a non-zero exit to a warning.
+- **Re-running verification with permuted redirection flags.** A dispatched agent that runs `npx tsc --noEmit` (or any verifySteps command) directly, then re-runs it with `| head -50`, then with `2>&1`, then without — that's a re-read loop, not progress. The `verify` subcommand exists precisely so the agent never composes redirection itself; if you see this pattern, the agent has bypassed `verify` and should be steered back to it.
