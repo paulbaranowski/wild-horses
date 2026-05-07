@@ -93,7 +93,7 @@ Display, in this order:
 
 A reasonable rendering:
 
-```
+```text
 File:        docs/exec-plans/active/2026-05-07-a3f2-extract-helper.task-list-builder.json
 Counts:      6 total · 2 pending · 1 in-progress · 3 complete · 0 failed
 Plan:        docs/exec-plans/active/2026-05-07-a3f2-extract-helper.task-list-builder.md
