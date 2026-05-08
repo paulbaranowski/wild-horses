@@ -39,6 +39,23 @@
         "Tests pass"
       ],
       "log": null
+    },
+    {
+      "id": 3,
+      "title": "Document validate_session in module-level docstring",
+      "what": "Update the module docstring in src/auth/middleware.py to describe the validate_session helper and link to it from the AuthMiddleware class docstring. No behavior change.",
+      "resolves": [],
+      "effort": "low",
+      "createsNewCode": false,
+      "status": "pending",
+      "acceptanceCriteria": [
+        "Module docstring lists validate_session under the public API",
+        "AuthMiddleware class docstring cross-references the helper"
+      ],
+      "log": null,
+      "verifySteps": [
+        { "name": "typecheck", "command": "uv run pyright src/auth/middleware.py" }
+      ]
     }
   ]
 }

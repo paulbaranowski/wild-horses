@@ -169,6 +169,79 @@ class CliTestCase(unittest.TestCase):
         self.assertEqual(result.returncode, 12)
         self.assertIn("non-empty", result.stderr)
 
+    # ---- per-task verifySteps shape validation ------------------------
+    # The optional per-task `verifySteps` field shares the top-level
+    # array's shape rules. The validator threads the offending task id
+    # into every error message so a corrupt override is locatable in a
+    # 30+ task file without diffing.
+
+    def test_status_per_task_verify_steps_absent_passes(self):
+        # The default — no override — is valid; the top-level array governs.
+        data = fixture_data()
+        for t in data["tasks"]:
+            t.pop("verifySteps", None)
+        self.task_path.write_text(json.dumps(data), encoding="utf-8")
+        result = self.run_cli("status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_status_per_task_verify_steps_valid_passes(self):
+        data = fixture_data()
+        data["tasks"][0]["verifySteps"] = [
+            {"name": "linkcheck", "command": "echo ok"}
+        ]
+        self.task_path.write_text(json.dumps(data), encoding="utf-8")
+        result = self.run_cli("status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_status_per_task_verify_steps_empty_exits_twelve(self):
+        # Same rule as top-level — an empty array is rejected. Error
+        # message must include the task id so a 30+ task file is searchable.
+        data = fixture_data()
+        data["tasks"][0]["verifySteps"] = []
+        self.task_path.write_text(json.dumps(data), encoding="utf-8")
+        result = self.run_cli("status")
+        self.assertEqual(result.returncode, 12, result.stderr)
+        self.assertIn("at least one step", result.stderr)
+        self.assertIn("(id=1)", result.stderr)
+
+    def test_status_per_task_verify_steps_not_array_exits_twelve(self):
+        data = fixture_data()
+        data["tasks"][0]["verifySteps"] = "not-an-array"
+        self.task_path.write_text(json.dumps(data), encoding="utf-8")
+        result = self.run_cli("status")
+        self.assertEqual(result.returncode, 12, result.stderr)
+        self.assertIn("must be an array", result.stderr)
+        self.assertIn("(id=1)", result.stderr)
+
+    def test_status_per_task_verify_step_missing_name_exits_twelve(self):
+        data = fixture_data()
+        data["tasks"][1]["verifySteps"] = [{"command": "echo hi"}]
+        self.task_path.write_text(json.dumps(data), encoding="utf-8")
+        result = self.run_cli("status")
+        self.assertEqual(result.returncode, 12, result.stderr)
+        self.assertIn("name", result.stderr)
+        self.assertIn("non-empty", result.stderr)
+        self.assertIn("(id=2)", result.stderr)
+
+    def test_status_per_task_verify_step_missing_command_exits_twelve(self):
+        data = fixture_data()
+        data["tasks"][1]["verifySteps"] = [{"name": "thing"}]
+        self.task_path.write_text(json.dumps(data), encoding="utf-8")
+        result = self.run_cli("status")
+        self.assertEqual(result.returncode, 12, result.stderr)
+        self.assertIn("command", result.stderr)
+        self.assertIn("non-empty", result.stderr)
+        self.assertIn("(id=2)", result.stderr)
+
+    def test_status_per_task_verify_step_empty_command_exits_twelve(self):
+        data = fixture_data()
+        data["tasks"][1]["verifySteps"] = [{"name": "thing", "command": ""}]
+        self.task_path.write_text(json.dumps(data), encoding="utf-8")
+        result = self.run_cli("status")
+        self.assertEqual(result.returncode, 12, result.stderr)
+        self.assertIn("command", result.stderr)
+        self.assertIn("(id=2)", result.stderr)
+
     def test_status_duplicate_task_ids_exits_twelve(self):
         data = fixture_data()
         data["tasks"][1]["id"] = 1
@@ -279,6 +352,87 @@ class CliTestCase(unittest.TestCase):
         result = self.run_cli("verify", "--id", "1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("log=/tmp/verify-1-step1-tests-type-check.log", result.stdout)
+
+    # ---- verify with per-task override --------------------------------
+    # `verify --id N` resolves steps per task: task N's `verifySteps` if
+    # declared (total replacement, no merge), else the top-level array.
+
+    def test_verify_uses_per_task_override_when_present(self):
+        data = fixture_data()
+        # Top-level: a step that would FAIL if it accidentally ran.
+        data["verifySteps"] = [{"name": "should-not-run", "command": "exit 99"}]
+        # Per-task override on task 1: a step that succeeds.
+        data["tasks"][0]["verifySteps"] = [
+            {"name": "override-step", "command": "echo OVERRIDE-RAN"}
+        ]
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        # Pre-clean to avoid false positives from a previous run.
+        for stale in Path("/tmp").glob("verify-1-step*.log"):
+            stale.unlink()
+        result = self.run_cli("verify", "--id", "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "verify[1/1] override-step exit=0 log=/tmp/verify-1-step1-override-step.log",
+            result.stdout,
+        )
+        self.assertIn("verify: all 1 step passed", result.stdout)
+        log = Path("/tmp/verify-1-step1-override-step.log").read_text(encoding="utf-8")
+        self.assertIn("OVERRIDE-RAN", log)
+        # The top-level step's slug log must not exist for task 1.
+        self.assertFalse(
+            Path("/tmp/verify-1-step1-should-not-run.log").exists(),
+            "top-level step must not run when task has an override",
+        )
+
+    def test_verify_falls_back_to_top_level_when_task_has_no_override(self):
+        data = fixture_data()
+        data["verifySteps"] = [{"name": "default-step", "command": "echo TOP-LEVEL-RAN"}]
+        # Task 1 has no verifySteps key (default fixture state); task 2
+        # has an override that must NOT run when verifying task 1.
+        self.assertNotIn("verifySteps", data["tasks"][0])
+        data["tasks"][1]["verifySteps"] = [
+            {"name": "task-2-only", "command": "echo SHOULD-NOT-RUN-FOR-1"}
+        ]
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        for stale in Path("/tmp").glob("verify-1-step*.log"):
+            stale.unlink()
+        result = self.run_cli("verify", "--id", "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "verify[1/1] default-step exit=0 log=/tmp/verify-1-step1-default-step.log",
+            result.stdout,
+        )
+        log = Path("/tmp/verify-1-step1-default-step.log").read_text(encoding="utf-8")
+        self.assertIn("TOP-LEVEL-RAN", log)
+        # Task 2's override must not have leaked into task 1's verification.
+        self.assertFalse(
+            Path("/tmp/verify-1-step1-task-2-only.log").exists(),
+            "task 2's override must not run when verifying task 1",
+        )
+
+    def test_verify_per_task_override_runs_multi_step_in_order_and_fails_fast(self):
+        # Per-task override is a full array; ordering and fail-fast still apply.
+        data = fixture_data()
+        data["verifySteps"] = [{"name": "should-not-run", "command": "exit 1"}]
+        data["tasks"][0]["verifySteps"] = [
+            {"name": "first", "command": "true"},
+            {"name": "second-fails", "command": "exit 9"},
+            {"name": "third-skipped", "command": "echo SHOULD-NOT-RUN"},
+        ]
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        for stale in Path("/tmp").glob("verify-1-step*.log"):
+            stale.unlink()
+        result = self.run_cli("verify", "--id", "1")
+        self.assertEqual(result.returncode, 9, result.stderr)
+        self.assertIn(
+            "verify[2/3] second-fails exit=9 log=/tmp/verify-1-step2-second-fails.log",
+            result.stdout,
+        )
+        self.assertNotIn("all 3 steps passed", result.stdout)
+        self.assertFalse(
+            Path("/tmp/verify-1-step3-third-skipped.log").exists(),
+            "step 3 must be skipped after step 2 fails",
+        )
 
     # ---- status --------------------------------------------------------
 
