@@ -9,13 +9,20 @@
 # against the project's .venv. Without this, global pyright reports a flood of
 # false-positive "could not be resolved" diagnostics for project dependencies.
 
-command -v jq >/dev/null 2>&1 && command -v pyright >/dev/null 2>&1 || exit 0
+command -v jq >/dev/null 2>&1 || exit 0
 
 JSON=$(cat)
 FILE_PATH=$(echo "$JSON" | jq -r '.tool_input.file_path // empty')
 
 if [[ -z "$FILE_PATH" || ! "$FILE_PATH" =~ \.py$ ]]; then
   exit 0
+fi
+
+# Resolve to absolute path so find_uv_root walks toward / (dirname "." == ".",
+# which would loop forever) and the path passed to pyright stays valid after
+# the `cd "$UV_ROOT"` below.
+if [[ "$FILE_PATH" != /* ]]; then
+  FILE_PATH="$(cd "$(dirname -- "$FILE_PATH")" 2>/dev/null && pwd -P)/$(basename -- "$FILE_PATH")" || exit 0
 fi
 
 find_uv_root() {
@@ -35,7 +42,7 @@ echo "🔍 pyright check on: $FILE_PATH" >&2
 
 if command -v uv >/dev/null 2>&1 && UV_ROOT=$(find_uv_root "$FILE_PATH"); then
   ( cd "$UV_ROOT" && uv run --no-sync pyright "$FILE_PATH" ) >&2 || true
-else
+elif command -v pyright >/dev/null 2>&1; then
   pyright "$FILE_PATH" >&2 || true
 fi
 
