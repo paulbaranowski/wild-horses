@@ -3,8 +3,13 @@
 # (always exits 0) — surfaces type issues at edit time without derailing the
 # agent. Complements /pyright:run-and-fix, which is for bulk work.
 # Silently no-ops when deps are missing.
+#
+# uv-aware: when the edited file lives under a uv project (a uv.lock above it),
+# runs `uv run --no-sync pyright` from that project root so imports resolve
+# against the project's .venv. Without this, global pyright reports a flood of
+# false-positive "could not be resolved" diagnostics for project dependencies.
 
-command -v jq >/dev/null 2>&1 && command -v pyright >/dev/null 2>&1 || exit 0
+command -v jq >/dev/null 2>&1 || exit 0
 
 JSON=$(cat)
 FILE_PATH=$(echo "$JSON" | jq -r '.tool_input.file_path // empty')
@@ -13,6 +18,32 @@ if [[ -z "$FILE_PATH" || ! "$FILE_PATH" =~ \.py$ ]]; then
   exit 0
 fi
 
+# Resolve to absolute path so find_uv_root walks toward / (dirname "." == ".",
+# which would loop forever) and the path passed to pyright stays valid after
+# the `cd "$UV_ROOT"` below.
+if [[ "$FILE_PATH" != /* ]]; then
+  FILE_PATH="$(cd "$(dirname -- "$FILE_PATH")" 2>/dev/null && pwd -P)/$(basename -- "$FILE_PATH")" || exit 0
+fi
+
+find_uv_root() {
+  local dir
+  dir=$(dirname "$1")
+  while [[ "$dir" != "/" && -n "$dir" ]]; do
+    if [[ -f "$dir/uv.lock" ]]; then
+      printf '%s' "$dir"
+      return 0
+    fi
+    dir=$(dirname "$dir")
+  done
+  return 1
+}
+
 echo "🔍 pyright check on: $FILE_PATH" >&2
-pyright "$FILE_PATH" >&2 || true
+
+if command -v uv >/dev/null 2>&1 && UV_ROOT=$(find_uv_root "$FILE_PATH"); then
+  ( cd "$UV_ROOT" && uv run --no-sync pyright "$FILE_PATH" ) >&2 || true
+elif command -v pyright >/dev/null 2>&1; then
+  pyright "$FILE_PATH" >&2 || true
+fi
+
 exit 0
