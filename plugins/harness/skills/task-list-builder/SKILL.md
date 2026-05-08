@@ -133,8 +133,9 @@ Use the schema in `${CLAUDE_PLUGIN_ROOT}/task-list-schema.md`. Top-level fields:
 4. **Defaults.** Every task starts with `status: "pending"` and `log: null`. Don't pre-fill these.
 5. **Non-empty acceptance criteria.** Every task has at least one concrete, verifiable criterion. Most tasks should include `"Tests pass"`. Avoid vague criteria like "looks good" or "code is clean".
 6. **Repo-relative paths.** All paths in `scope` and in `resolves` must be repo-relative. No local prefixes.
+7. **Per-finding `**VerifySteps:**` ingestion.** If a finding/intervention in the input report carries a `**VerifySteps:**` subsection (or the heading variant `#### VerifySteps`), the resulting task **must** include a per-task `verifySteps` array transcribed verbatim from it. Format mirrors the top-level array (Phase 2's YAML-bullet shape: `- name: <slug>` / `command: <shell>`). The top-level array remains the default for tasks **without** an override — never copy the top-level steps into a task's `verifySteps` field "to be explicit"; absence is the inheritance signal. Empty per-task arrays are rejected by the validator (same shape rules as the top-level array). When in doubt about whether a finding's verification requirement is task-specific vs. project-wide, omit the per-task array — the top-level default is the safer fallback.
 
-A reference example with one paired implementation+test pair lives at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-builder/example.json`.
+A reference example with one paired implementation+test pair lives at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-builder/example.json`. The schema definition for the per-task `verifySteps` field lives in `${CLAUDE_PLUGIN_ROOT}/task-list-schema.md` under "Per-task `verifySteps` override".
 
 ---
 
@@ -149,20 +150,22 @@ Task list preview (<N> tasks):
 
   1. <title>           [createsNewCode: true,  effort: medium]
   2. Write tests for … [createsNewCode: false, effort: low]
-  3. <title>           [createsNewCode: false, effort: low]
+  3. <title>           [createsNewCode: false, effort: low, verifySteps: per-task]
   ...
 
 Files to write (new):
   - docs/exec-plans/active/<…>.task-list-builder.json
   - docs/exec-plans/active/<…>.task-list-builder.md
 
-verifySteps:
+verifySteps (top-level default):
   1. <name>: <command>
   2. <name>: <command>
 scope: <N files>
 
 Proceed? (yes / edit / cancel)
 ```
+
+Annotate any task with its own `verifySteps` override using `[verifySteps: per-task]` next to its title-line metadata, as task 3 above shows. Tasks that inherit the top-level default carry no such annotation — absence of the annotation means the task uses the top-level steps. The top-level array is shown once at the bottom; per-task overrides are not expanded inline (the JSON has them; the preview just flags which tasks are involved).
 
 **Rewrite:**
 

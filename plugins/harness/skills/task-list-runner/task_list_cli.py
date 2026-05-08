@@ -42,6 +42,36 @@ class TaskCliError(Exception):
         self.code = code
 
 
+def _validate_verify_steps_array(steps: Any, where: str, id_suffix: str = "") -> None:
+    """Shape-check a verifySteps array.
+
+    Used for both the top-level array and the optional per-task override.
+    The caller decides whether the field's *presence* is required; this
+    helper assumes the field is present and validates the array's shape.
+
+    `where` names the location in the JSON tree (e.g. `top-level "verifySteps"`
+    or `tasks[2].verifySteps`); `id_suffix` is an optional parenthetical
+    appended verbatim to every error message (e.g. ` (id=3)` for per-task)
+    so that a corrupt per-task override surfaces the offending task id
+    without the caller threading it through every raise site.
+    """
+    if not isinstance(steps, list):
+        raise TaskCliError(f"{where} must be an array{id_suffix}", code=12)
+    if len(steps) == 0:
+        raise TaskCliError(f"{where} must contain at least one step{id_suffix}", code=12)
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            raise TaskCliError(f"{where}[{i}] must be an object{id_suffix}", code=12)
+        if not isinstance(step.get("name"), str) or not step["name"]:
+            raise TaskCliError(
+                f"{where}[{i}].name must be a non-empty string{id_suffix}", code=12
+            )
+        if not isinstance(step.get("command"), str) or not step["command"]:
+            raise TaskCliError(
+                f"{where}[{i}].command must be a non-empty string{id_suffix}", code=12
+            )
+
+
 def load_and_validate(path: Path) -> dict:
     """Read + parse + minimal-schema-check the task file.
 
@@ -80,17 +110,9 @@ def load_and_validate(path: Path) -> dict:
             '`"testCommand": "X"` with `"verifySteps": [{"name": "tests", "command": "X"}]`.',
             code=12,
         )
-    if "verifySteps" not in data or not isinstance(data["verifySteps"], list):
+    if "verifySteps" not in data:
         raise TaskCliError('top-level "verifySteps" must be an array', code=12)
-    if len(data["verifySteps"]) == 0:
-        raise TaskCliError('"verifySteps" must contain at least one step', code=12)
-    for i, step in enumerate(data["verifySteps"]):
-        if not isinstance(step, dict):
-            raise TaskCliError(f"verifySteps[{i}] must be an object", code=12)
-        if not isinstance(step.get("name"), str) or not step["name"]:
-            raise TaskCliError(f"verifySteps[{i}].name must be a non-empty string", code=12)
-        if not isinstance(step.get("command"), str) or not step["command"]:
-            raise TaskCliError(f"verifySteps[{i}].command must be a non-empty string", code=12)
+    _validate_verify_steps_array(data["verifySteps"], where='top-level "verifySteps"')
 
     seen_ids: set = set()
     for i, task in enumerate(data["tasks"]):
@@ -109,6 +131,16 @@ def load_and_validate(path: Path) -> dict:
         log = task.get("log", None)
         if log is not None and not isinstance(log, str):
             raise TaskCliError(f'tasks[{i}].log must be a string or null (id={task["id"]})', code=12)
+        # Per-task verifySteps is an optional override that *replaces* the
+        # top-level array for this task's `verify --id <N>` call. Field is
+        # optional; when present, must satisfy the same shape rules as the
+        # top-level array. Absence inherits the top-level default.
+        if "verifySteps" in task:
+            _validate_verify_steps_array(
+                task["verifySteps"],
+                where=f"tasks[{i}].verifySteps",
+                id_suffix=f' (id={task["id"]})',
+            )
         if task["id"] in seen_ids:
             raise TaskCliError(f'duplicate task id {task["id"]}', code=12)
         seen_ids.add(task["id"])
@@ -292,8 +324,13 @@ def cmd_verify(args: argparse.Namespace, data: dict, path: Path) -> None:
     task-list-builder; users who need per-call interception should
     disable the hook.
     """
-    find_task(data, args.id, path)
-    steps = data["verifySteps"]
+    task = find_task(data, args.id, path)
+    # Per-task verifySteps, when present, *replaces* the top-level array
+    # for this task's verification — total replacement, not a merge. The
+    # validator rejects an empty per-task array, so a present field is
+    # always non-empty (the `or` short-circuit only fires when the field
+    # is absent, in which case `task.get` returns None).
+    steps = task.get("verifySteps") or data["verifySteps"]
     n = len(steps)
     plural = "" if n == 1 else "s"
     for i, step in enumerate(steps, start=1):

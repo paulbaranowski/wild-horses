@@ -65,7 +65,7 @@ A minimal valid file lives at `skills/task-list-builder/example.json`.
 ## Top-level fields
 
 - `plan` — repo-relative path to the paired `.md` file (the human-readable report). The runner does not modify this file; it is for humans.
-- `verifySteps` — array of `{name, command}` objects, each describing one verification step the per-task Agent runs after implementing a task. Steps run in order; on first failure the Agent stops and reports which step (`name`) failed. **At least one step is required.** Conventional names: `typecheck`, `tests`, `lint` — but any non-empty string is valid. Discovered once during plan creation and reused every iteration.
+- `verifySteps` — array of `{name, command}` objects, each describing one verification step the per-task Agent runs after implementing a task. Steps run in order; on first failure the Agent stops and reports which step (`name`) failed. **At least one step is required.** Conventional names: `typecheck`, `tests`, `lint` — but any non-empty string is valid. Discovered once during plan creation and reused every iteration. Individual tasks may declare their own `verifySteps` to override this default; see "Per-task `verifySteps` override" below.
 - `scope` — repo-relative file paths preserved for potential re-analysis. Use paths relative to the repository root to avoid leaking local machine structure if the file is committed.
 - `tasks` — array of task objects (see below).
 
@@ -80,6 +80,34 @@ A minimal valid file lives at `skills/task-list-builder/example.json`.
 - `acceptanceCriteria` — array of concrete, verifiable criteria derived from the task's `what` and `resolves`. Most tasks should include `"Tests pass"`. Avoid vague criteria like "looks good" or "code is clean".
 - `status` — `"pending" | "in-progress" | "complete" | "failed"`. New tasks always start as `"pending"`.
 - `log` — `null` when pending; a string describing what was done (or what went wrong) when in-progress / complete / failed.
+- `verifySteps` (optional) — array of `{name, command}` objects in the same shape as the top-level array. When present, **replaces** the top-level `verifySteps` for this task's `verify --id <N>` call (the runner does not merge the two arrays). At least one step is required when the field is present; an empty array is rejected by the validator. Omit the field entirely to inherit the top-level default.
+
+## Per-task `verifySteps` override
+
+A task may declare its own `verifySteps` array to override the top-level default for that task's verification only. The top-level array remains required and serves every task that does **not** declare an override.
+
+Resolution rule: `verify --id <N>` runs `task.verifySteps` if the task declares one, else falls back to the top-level `data.verifySteps`. **Total replacement, not a merge** — if a task overrides, the top-level steps do not run for that task.
+
+Use this when a task's verification needs to differ from the project-wide default — e.g., a docs-only task that shouldn't pay for the test suite, or a task scoped to one file where running a project-wide static check would force every other task to fix its own files first (the verify gate is hard pass/fail, so a project-wide step blocks task 1 until tasks 2..N also pass).
+
+Example: task 3 below replaces the top-level `tests` step with a single linkchecker run; tasks 1 and 2 (omitted, no `verifySteps` field) inherit the top-level default unchanged.
+
+```json
+{
+  "id": 3,
+  "title": "Update README typos",
+  "what": "Fix the three broken doc links in README.md",
+  "resolves": ["README.md:42"],
+  "effort": "low",
+  "createsNewCode": false,
+  "status": "pending",
+  "acceptanceCriteria": ["Links resolve to live pages"],
+  "log": null,
+  "verifySteps": [
+    { "name": "linkcheck", "command": "uv run linkchecker README.md" }
+  ]
+}
+```
 
 ## Paired test tasks (rule)
 
