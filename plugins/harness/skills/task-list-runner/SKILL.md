@@ -141,7 +141,7 @@ When the implementation agent reaches Step 2.5 of the Task Implementation Prompt
 > 2. Read the relevant code with the `Read` tool (or `Grep` for symbol lookups).
 > 3. Decide PASS or FAIL with one-line evidence: `<file>:<line> — <quoted snippet that confirms or refutes the statement>`.
 >
-> **Don't run pytest, pyright, tsc, lint, or any other verification command** — those are `verifySteps` and were already gated by `verify --id` before you were dispatched. Your concern is inspection-verifiable facts (structure, behavior visible in code, documentation presence) — not pass/fail signals a command can decide. The schema (`task-list-schema.md`) forbids verifyStep-covered statements in `agentValidations`, so you should never see one; if you do, treat it as a schema bug and report PASS-by-deferral with a one-line note.
+> **Don't run pytest, pyright, lint, or anything else `verifySteps` could run.** Those already executed via `verify --id` before you were dispatched. Your concern is inspection-verifiable facts (structure, behavior visible in code, documentation presence) — not pass/fail signals a command can decide. The schema (`task-list-schema.md`) forbids verifyStep-covered statements in `agentValidations`, so you should never see one; if you do, treat it as a schema bug and report PASS-by-deferral with a one-line note.
 >
 > **Don't re-implement, fix, edit, or rewrite anything.** You are read-only — the runtime will deny those tools, but mentally treat your role as audit, not repair. Repair is the implementing agent's job after seeing your report.
 >
@@ -188,7 +188,7 @@ Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with th
 >
 > Never do these during verification:
 >
-> - **Don't re-invoke individual verification steps directly** (e.g. running `npx tsc --noEmit` or `uv run pytest` yourself, either before Step 2 or after it). The CLI is the contract — `verify --id` is the entire verifySteps surface. **Don't run pytest, pyright, lint, or any verifyStep command to "double-check" `agentValidations` either** — Step 2.5's validation subagent works by code inspection, not by re-running commands the schema forbids in `agentValidations`. Running steps by hand splits your verification rhythm, burns budget, and is the exact duplicate-work pattern this prompt structure prevents.
+> - **Don't re-invoke individual verification steps directly** (e.g. running `npx tsc --noEmit` or `uv run pytest` yourself, either before Step 2 or after it). The CLI is the contract — `verify --id` is the entire verifySteps surface. **Don't run anything `verifySteps` could run to "double-check" `agentValidations` either** — Step 2.5's validation subagent works by code inspection, not by re-running commands the schema forbids in `agentValidations`. Running steps by hand splits your verification rhythm, burns budget, and is the exact duplicate-work pattern this prompt structure prevents.
 > - **Don't permute redirection flags** on the same command hoping for clearer output (`| head -50` → `2>&1` → drop `2>&1` → repeat). The CLI's redirection is canonical; the answer is in the log file. If the log is unclear, `Read` more of it — don't re-run.
 > - **Don't invent additional verification commands** beyond what `verify` runs. If a step you need is missing, that's a bug in the task file, not something to paper over with shell improvisation.
 >
