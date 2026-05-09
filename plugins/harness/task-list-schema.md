@@ -4,7 +4,7 @@ The harness loop produces and consumes a `.json` task file in `docs/exec-plans/a
 
 Referenced by:
 
-- `loop-protocol.md` — the Phase 4 options menu shared by `/harness:feedback-blockers` and `/harness:reasoning-gaps` writes files in this shape.
+- `loop-protocol.md` — the Phase 4 options menu shared by `/harness:feedback-blockers` and `/harness:reasoning-gaps` delegates file production to `task-list-builder`, which writes files in this shape.
 - `skills/task-list-builder/SKILL.md` — produces files matching this schema.
 - `skills/task-list-runner/SKILL.md` — consumes files matching this schema.
 - `skills/task-list-runner/task_list_cli.py` — does runtime validation in `load_and_validate`. The CLI deliberately validates only the subset it touches, so it doesn't need to be co-updated when fields below grow. This document is the broader human-readable contract.

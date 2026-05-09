@@ -1,8 +1,8 @@
 # Loop Protocol — shared by `/harness:feedback-blockers` and `/harness:reasoning-gaps`
 
-This file documents the post-analysis flow both commands share: the Phase 4 options menu. **The JSON task file's shape** lives in `${CLAUDE_PLUGIN_ROOT}/task-list-schema.md` — read that for field definitions and the paired-test-task rule. **Execution** (resuming an existing task file, the iterative Agent loop, and the Task Implementation Prompt) lives in the `task-list-runner` skill at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/SKILL.md`.
+This file documents the post-analysis flow both commands share: the Phase 4 options menu. **The JSON task file is built by the `task-list-builder` skill** (`${CLAUDE_PLUGIN_ROOT}/skills/task-list-builder/SKILL.md`) — re-read its SKILL.md before invoking it; do not duplicate or re-state its phases here. **Execution** (resuming an existing task file, the iterative Agent loop, and the Task Implementation Prompt) lives in the `task-list-runner` skill at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/SKILL.md`. The JSON file shape is defined in `${CLAUDE_PLUGIN_ROOT}/task-list-schema.md` — both skills link to it.
 
-**Slug substitution.** The orchestrating command substitutes `<slug>` with its own slug — `feedback-blockers` or `reasoning-gaps` — wherever it appears below.
+**Slug substitution.** The orchestrating command substitutes `<slug>` with its own slug — `feedback-blockers` or `reasoning-gaps` — wherever it appears below. The slug is passed to `task-list-builder` via `--slug <slug>` so the resulting filenames preserve provenance.
 
 ---
 
@@ -17,52 +17,26 @@ After presenting the merged report from the orchestrator's Phase 3, briefly expl
 > 3. **Save full remediation plan** — Write the plan for incremental work
 > 4. **Revise** — Provide feedback to refine the analysis or change focus
 
-Before executing any option below, generate a **run ID** by running `openssl rand -hex 2` to produce a 4-character hex string (e.g., `a3f2`). Use this same run ID in all file names produced by this run — this prevents collisions when the command is run multiple times on the same day.
-
 ### Option 1: Save plan and implement all
 
 Save the analysis and implement all interventions iteratively. Each intervention is implemented by a foreground Agent tool call within this conversation — the user sees every file read, edit, and test run as it happens. The JSON task file tracks progress between iterations.
 
-**Step 1 — Discover the verify steps.** Build the `verifySteps` array (each entry is `{name, command}`). Always include a `tests` step (check CLAUDE.md, fall back to `uv run pytest` or `npm test`). Add a `typecheck` step if the project has a static type-checker configured (`tsconfig.json` → `npx tsc --noEmit`; `pyrightconfig.json` → `uv run pyright`; `mypy.ini` → `uv run mypy .`). Order steps fastest-first so cheap checks fail fast. See the `task-list-builder` skill's Phase 2 for the full discovery procedure.
+**Step 1 — Build the task list via `task-list-builder`.** Invoke the `task-list-builder` skill with arguments `--slug <slug> --md-body-from-context`. The skill owns: verifySteps discovery, run-ID and path generation, the JSON shape, the preview confirmation, and writing both files. The merged Phase 3 analysis report is already rendered in conversation — `--md-body-from-context` directs the builder to use it verbatim as the MD body so the deliverable retains the Ratings Summary, Cross-Pillar/Cross-Dimension Findings, Findings by Severity, Interventions, and Coverage Check sections.
 
-**Step 2 — Write the markdown report** to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.<slug>.md` (where YYYY-MM-DD is today's date and `<run-id>` is the 4-character hex run ID).
+The user will see the task-list preview from `task-list-builder` Phase 5 before any files are written. If they cancel at the preview, halt — do not proceed to Step 2.
 
-Use YAML frontmatter for metadata:
+When the builder reports back, note the absolute path to the JSON file it wrote.
 
-```yaml
----
-status: in-progress
-task_file: "docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.<slug>.json"
-generated: "YYYY-MM-DDTHH:MM:SSZ"
----
-```
-
-The body contains the full report from Phase 3: Scope (with repo-relative file paths), Ratings Summary, Cross-Pillar/Cross-Dimension Findings, Findings by Severity, Interventions (with full details), and Coverage Check. This is the human-readable artifact — the loop does NOT modify this file.
-
-**Step 3 — Write the JSON task file** to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.<slug>.json`.
-
-This is the machine-readable task list that the loop reads and writes for state tracking. **The file shape — top-level fields, per-task fields, the paired-test-task rule — is defined in `${CLAUDE_PLUGIN_ROOT}/task-list-schema.md`. Read that file before writing the JSON; do not rely on memory.**
-
-Specifics for this command's output:
-
-- Convert the absolute file paths from Phase 1 to repo-relative paths for the `scope` array (strip the repository root prefix — e.g., `/Users/name/project/src/pipeline.py` becomes `src/pipeline.py`).
-- Extract each intervention from Phase 3 into a task. For interventions tagged `createsNewCode: true`, the schema requires a paired test task immediately after — generate it.
-- Set `status: "pending"` and `log: null` on every new task.
-
-**Step 4 — Implement tasks via the `task-list-runner` skill.**
-
-Hand off execution to the `task-list-runner` skill, passing the absolute path to the JSON task file from Step 3 with the `--all` flag. The skill owns the Agent loop, `MAX_ITER` math, the Task Implementation Prompt, and the final summary — re-read its `SKILL.md` for the up-to-date procedure.
+**Step 2 — Hand off to `task-list-runner`.** Invoke the `task-list-runner` skill with the absolute JSON path from Step 1 and the `--all` flag. The skill owns the Agent loop, `MAX_ITER` math, the Task Implementation Prompt, and the final summary — re-read its `SKILL.md` for the up-to-date procedure.
 
 ### Option 2: Save plan and fix top intervention
 
-- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.<slug>.md` including scope, all findings, all interventions with details.
-- Write the JSON task file (Step 3 above) so the runner has something to consume.
-- Hand off to the `task-list-runner` skill with the JSON path and the `--next` flag — it will run intervention #1 and stop.
+- **Step 1** — same as Option 1 Step 1 (invoke `task-list-builder` with `--slug <slug> --md-body-from-context`).
+- **Step 2** — hand off to `task-list-runner` with the JSON path and the `--next` flag — it will run intervention #1 and stop.
 
 ### Option 3: Save full remediation plan
 
-- Write the full remediation plan to `docs/exec-plans/active/YYYY-MM-DD-<run-id>-<short-description>.<slug>.md` including scope, all findings, all interventions with details and effort estimates
-- Do NOT implement anything
+- Invoke `task-list-builder` with `--slug <slug> --md-body-from-context`. The builder writes both files; do NOT hand off to the runner.
 
 ### Option 4: Revise
 

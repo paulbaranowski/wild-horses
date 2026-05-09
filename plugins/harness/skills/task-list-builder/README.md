@@ -21,7 +21,7 @@ Turns one of these inputs into a paired task list under `docs/exec-plans/active/
 - an existing `.json` task file (rewrite-in-place)
 - recent conversation context (when no argument is given)
 
-Output is always two files: a `.task-list-builder.json` (machine-readable, the runner's input) and a paired `.task-list-builder.md` (human-readable summary).
+Output is always two files: a `.<slug>.json` (machine-readable, the runner's input) and a paired `.<slug>.md` (human-readable summary). The default slug is `task-list-builder`; callers can override it with `--slug <name>` to preserve provenance (e.g., `/harness:feedback-blockers` passes `--slug feedback-blockers` so its output files are clearly distinguishable).
 
 ## Schema
 
