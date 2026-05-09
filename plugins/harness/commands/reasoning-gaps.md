@@ -12,7 +12,8 @@ This is NOT a code quality review. Code can be well-written and still be opaque 
 **Bundled assets at `${CLAUDE_PLUGIN_ROOT}`** (if the variable isn't substituted in this context, find the files with `Glob "**/harness/loop-protocol.md"` and read the siblings alongside it):
 
 - `loop-protocol.md` — Phase 4 options menu. Shared with `/harness:feedback-blockers`.
-- `task-list-schema.md` — JSON task file shape (referenced from `loop-protocol.md` Step 3). Shared with `/harness:feedback-blockers`, `task-list-builder`, and `task-list-runner`.
+- `task-list-schema.md` — JSON task file shape. Shared with `/harness:feedback-blockers`, `task-list-builder`, and `task-list-runner`.
+- `skills/task-list-builder/SKILL.md` — task-list construction (verifySteps discovery, run-ID, JSON + MD writing, preview). Invoked from Phase 4 Options 1, 2, and 3 with `--slug reasoning-gaps --md-body-from-context`.
 - `skills/task-list-runner/SKILL.md` — execution engine (resume, Agent loop, Task Implementation Prompt). Invoked from Phase 4 Options 1 and 2 and from `--resume`.
 - `agents/reasoning-gaps/types-and-data-contracts.md`
 - `agents/reasoning-gaps/implicit-flow-and-state.md`
@@ -155,7 +156,7 @@ Present the merged report:
 
 ## Phase 4: Propose
 
-Follow the **Phase 4 — Propose** procedure in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md`. The four options (Save plan and implement all / Save plan and fix top intervention / Save full remediation plan / Revise), the run-ID generation, the Agent loop, and the Task Implementation Prompt all live there. The JSON task file's shape is in `${CLAUDE_PLUGIN_ROOT}/task-list-schema.md`, which `loop-protocol.md` Step 3 references.
+Follow the **Phase 4 — Propose** procedure in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md`. The four options (Save plan and implement all / Save plan and fix top intervention / Save full remediation plan / Revise) live there. `loop-protocol.md` delegates task-list construction (verifySteps discovery, run-ID, JSON + MD writing, preview) to the `task-list-builder` skill (invoked with `--slug reasoning-gaps --md-body-from-context`) and execution to the `task-list-runner` skill. The JSON task file's shape is in `${CLAUDE_PLUGIN_ROOT}/task-list-schema.md`.
 
 ---
 
