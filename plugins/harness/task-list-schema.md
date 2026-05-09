@@ -99,7 +99,9 @@ Example: task 3 below replaces the top-level `tests` step with a single linkchec
   "effort": "low",
   "createsNewCode": false,
   "status": "pending",
-  "agentValidations": ["Links resolve to live pages"],
+  "agentValidations": [
+    "README.md no longer contains the broken URLs flagged at README.md:42"
+  ],
   "log": null,
   "verifySteps": [
     { "name": "linkcheck", "command": "uv run linkchecker README.md" }
