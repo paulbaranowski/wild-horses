@@ -20,7 +20,9 @@
       "agentValidations": [
         "validate_session is defined at module scope in src/auth/middleware.py",
         "AuthMiddleware.__call__ delegates token validation to validate_session",
-        "No behavior change for existing callers (caller signatures and return shapes unchanged)"
+        "AuthMiddleware.__call__ signature (parameter names, types, order) is unchanged",
+        "AuthMiddleware.__call__ return type is unchanged (still Response)",
+        "No new exception types are raised by AuthMiddleware.__call__ or validate_session"
       ],
       "log": null
     },

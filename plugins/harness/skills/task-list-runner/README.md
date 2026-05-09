@@ -18,10 +18,10 @@ Pairs with [`task-list-builder`](../task-list-builder/), which produces the JSON
 
 For each `pending` / `in-progress` task in the file:
 
-1. Claim it via `task_list_cli.py next` (atomic pending → in-progress flip).
-2. Dispatch it to a fresh foreground `Agent` with the task's `what` + `agentValidations`.
-3. On agent return, run the file's `verifySteps` (typecheck, tests, etc.) via `task_list_cli.py verify`.
-4. Mark the task `complete` or `failed` and write the agent's report to its `log` field.
+1. Dispatch a fresh foreground `Agent` with the Task Implementation Prompt.
+2. The agent claims the task (`task_list_cli.py next`), implements the change, and runs `verifySteps` (typecheck, tests, etc.) via `task_list_cli.py verify` from inside its own run.
+3. The agent dispatches a fresh-context validation subagent to evaluate `agentValidations` against the post-change code.
+4. The agent marks the task `complete` or `failed` via `task_list_cli.py finish`, writing its report to the `log` field. The runner re-checks `status` as a corruption gate before the next iteration.
 
 Modes: `--all` (run every remaining task non-interactively), `--next` (one task then stop), no flag (interactive menu).
 
