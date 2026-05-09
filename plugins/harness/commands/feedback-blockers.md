@@ -85,10 +85,10 @@ Wait for all 4 agents to return. Then synthesize their findings into a unified r
    - Have a `what` field that specifies: (a) the exact new functions/classes/methods to test, (b) specific test cases to write (at minimum: happy path, edge cases, and error handling), (c) where to put the test file (follow existing project test conventions).
    - Set `createsNewCode: false` (it does not create new production code).
    - Set `resolves: []` (it supports the preceding implementation task, not a finding).
-   - Have concrete `acceptanceCriteria` specifying minimum test count and coverage areas.
+   - Have concrete `agentValidations` entries specifying minimum test count and coverage areas (inspection-verifiable structural facts about the test file the validation subagent confirms by reading it). **Don't include "Tests pass"** — the `tests` verifyStep handles pass/fail; `agentValidations` describes what only inspection can confirm. See `task-list-schema.md`'s `agentValidations` definition.
    - Set `effort: "low"`.
 
-   Do NOT generate test tasks for interventions that only restructure existing code without creating new callable interfaces. These are verified by their own acceptance criteria.
+   Do NOT generate test tasks for interventions that only restructure existing code without creating new callable interfaces. These are verified by their own `agentValidations` entries.
 
 10. **Final check** — re-read the merged report. Every finding must have a file:line that exists and code that matches. If you cannot verify a finding, drop it.
 

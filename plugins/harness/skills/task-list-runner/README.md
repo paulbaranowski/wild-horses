@@ -19,7 +19,7 @@ Pairs with [`task-list-builder`](../task-list-builder/), which produces the JSON
 For each `pending` / `in-progress` task in the file:
 
 1. Claim it via `task_list_cli.py next` (atomic pending → in-progress flip).
-2. Dispatch it to a fresh foreground `Agent` with the task's `what` + `acceptanceCriteria`.
+2. Dispatch it to a fresh foreground `Agent` with the task's `what` + `agentValidations`.
 3. On agent return, run the file's `verifySteps` (typecheck, tests, etc.) via `task_list_cli.py verify`.
 4. Mark the task `complete` or `failed` and write the agent's report to its `log` field.
 

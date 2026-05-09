@@ -17,11 +17,10 @@
       "effort": "medium",
       "createsNewCode": true,
       "status": "pending",
-      "acceptanceCriteria": [
+      "agentValidations": [
         "validate_session is defined at module scope in src/auth/middleware.py",
         "AuthMiddleware.__call__ delegates token validation to validate_session",
-        "No behavior change for existing callers",
-        "Tests pass"
+        "No behavior change for existing callers (caller signatures and return shapes unchanged)"
       ],
       "log": null
     },
@@ -33,10 +32,9 @@
       "effort": "low",
       "createsNewCode": false,
       "status": "pending",
-      "acceptanceCriteria": [
+      "agentValidations": [
         "Test file follows project test conventions",
-        "At least 4 test cases covering happy path, expired, malformed, and missing token",
-        "Tests pass"
+        "At least 4 test cases covering happy path, expired, malformed, and missing token"
       ],
       "log": null
     },
@@ -48,7 +46,7 @@
       "effort": "low",
       "createsNewCode": false,
       "status": "pending",
-      "acceptanceCriteria": [
+      "agentValidations": [
         "Module docstring lists validate_session under the public API",
         "AuthMiddleware class docstring cross-references the helper"
       ],
