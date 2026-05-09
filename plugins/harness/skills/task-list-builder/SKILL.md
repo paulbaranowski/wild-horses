@@ -128,10 +128,10 @@ Use the schema in `${CLAUDE_PLUGIN_ROOT}/task-list-schema.md`. Top-level fields:
 **Hard rules** (enforce these — don't skip):
 
 1. **Sequential ids.** Tasks have `id: 1, 2, 3, ...` in order. No gaps, no reordering.
-2. **Paired test tasks.** For every task with `createsNewCode: true`, the next task in the array must be a test task: title starts with `"Write tests for "`, `createsNewCode: false`, `resolves: []`, `effort: "low"`, acceptance criteria like `"Test file follows project test conventions"` and `"Tests pass"` (rule documented in `task-list-schema.md`).
+2. **Paired test tasks.** For every task with `createsNewCode: true`, the next task in the array must be a test task: title starts with `"Write tests for "`, `createsNewCode: false`, `resolves: []`, `effort: "low"`, `agentValidations` like `"Test file follows project test conventions"` and `"At least N test cases covering …"` (inspection-verifiable structural facts only — see `task-list-schema.md`'s `agentValidations` definition for the no-duplication-with-verifySteps rule).
 3. **`createsNewCode` discipline.** `true` only when the task creates new callable code (functions, classes, methods, services, models, protocols). `false` for restructuring, annotations, documentation, config edits.
 4. **Defaults.** Every task starts with `status: "pending"` and `log: null`. Don't pre-fill these.
-5. **Non-empty acceptance criteria.** Every task has at least one concrete, verifiable criterion. Most tasks should include `"Tests pass"`. Avoid vague criteria like "looks good" or "code is clean".
+5. **`agentValidations` is the input array for the per-task validation prompt.** Every task has at least one entry — a factual statement about the post-change code state that the validation subagent confirms by reading code. The schema's structural rule: **if you can write a shell command that answers the question, it belongs in `verifySteps`, not here.** Entries like `"Tests pass"`, `"No type errors"`, `"No lint errors"`, `"Compiles"` are forbidden — the validation subagent has no way to evaluate them except by re-running the commands `verifySteps` already ran (the exact duplicate-work pattern this design exists to prevent). Good entries name structural facts (`"validate_session is defined at module scope"`), behavioral facts (`"AuthMiddleware delegates to the helper"`), or documentation facts (`"module docstring lists the public API"`). Avoid vague entries like `"looks good"` or `"code is clean"`. Full contract in `task-list-schema.md`.
 6. **Repo-relative paths.** All paths in `scope` and in `resolves` must be repo-relative. No local prefixes.
 7. **Per-finding `**VerifySteps:**` ingestion.** If a finding/intervention in the input report carries a `**VerifySteps:**` subsection (or the heading variant `#### VerifySteps`), the resulting task **must** include a per-task `verifySteps` array transcribed verbatim from it. Format mirrors the top-level array (Phase 2's YAML-bullet shape: `- name: <slug>` / `command: <shell>`). The top-level array remains the default for tasks **without** an override — never copy the top-level steps into a task's `verifySteps` field "to be explicit"; absence is the inheritance signal. Empty per-task arrays are rejected by the validator (same shape rules as the top-level array). When in doubt about whether a finding's verification requirement is task-specific vs. project-wide, omit the per-task array — the top-level default is the safer fallback.
 
@@ -188,7 +188,7 @@ Proceed? (yes / edit / cancel)
 ```
 
 - **yes** → continue to Phase 6.
-- **edit** → ask the user what to change (titles, splits, merges, acceptance criteria), apply changes, re-show the preview.
+- **edit** → ask the user what to change (titles, splits, merges, `agentValidations` entries), apply changes, re-show the preview.
 - **cancel** → stop. Don't write any files.
 
 ---

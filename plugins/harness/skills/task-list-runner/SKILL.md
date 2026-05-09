@@ -123,6 +123,43 @@ After the loop completes (all tasks done, max iterations reached, or `--next` fi
 
 ---
 
+## Agent Validation Prompt
+
+When the implementation agent reaches Step 2.5 of the Task Implementation Prompt, it dispatches a fresh-context validation subagent (`subagent_type: Explore`) with the prompt below as the wrapper. The implementation agent appends a task-specific suffix containing `what`, `agentValidations`, and `changedFiles` (see Step 2.5 for assembly). Pass the assembled prompt verbatim:
+
+> You are running the validation prompt for a just-completed task. The implementing agent finished its code change, and the runner has already executed every `verifySteps` command (tests, typecheck, lint) — those passed before you were dispatched, so command-answerable questions are already settled. Your job is to evaluate each entry in `agentValidations` by reading code.
+>
+> **Inputs** (provided in the task-specific suffix below):
+>
+> - `what` — what the implementing agent was asked to do.
+> - `agentValidations` — array of factual statements about the post-change code state. Each is one inspection-verifiable claim you confirm PASS or FAIL with `file:line` evidence.
+> - `changedFiles` — repo-relative paths the implementing agent modified (from `git diff --name-only HEAD`).
+>
+> **Procedure.** For each entry in `agentValidations`, in order:
+>
+> 1. Identify which file(s) and which part of the code the entry is about. Prefer files in `changedFiles`, but read other files if the evidence lives elsewhere.
+> 2. Read the relevant code with the `Read` tool (or `Grep` for symbol lookups).
+> 3. Decide PASS or FAIL with one-line evidence: `<file>:<line> — <quoted snippet that confirms or refutes the statement>`.
+>
+> **Don't run pytest, pyright, lint, or anything else `verifySteps` could run.** Those already executed via `verify --id` before you were dispatched. Your concern is inspection-verifiable facts (structure, behavior visible in code, documentation presence) — not pass/fail signals a command can decide. The schema (`task-list-schema.md`) forbids verifyStep-covered statements in `agentValidations`, so you should never see one; if you do, treat it as a schema bug and report PASS-by-deferral with a one-line note.
+>
+> **Don't re-implement, fix, edit, or rewrite anything.** You are read-only — the runtime will deny those tools, but mentally treat your role as audit, not repair. Repair is the implementing agent's job after seeing your report.
+>
+> **Output format** (exact format — the implementing agent parses this):
+>
+> ```text
+> Validation 1: <verbatim text of statement>
+>   → PASS · <file>:<line> — <quoted snippet>
+> Validation 2: <verbatim text of statement>
+>   → FAIL · <file>:<line> — <what's actually there, why it doesn't satisfy>
+> ...
+> RESULT: PASS
+> ```
+>
+> The final line is exactly `RESULT: PASS` (if every entry passed) or `RESULT: FAIL` (if any entry failed). No other final line. The implementing agent reads only the last line for the gate decision and the per-entry lines for fixup guidance.
+
+---
+
 ## Task Implementation Prompt
 
 Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with the absolute path to the JSON task file:
@@ -136,11 +173,11 @@ Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with th
 >     --file TASK_FILE_PATH next
 > ```
 >
-> The output is the full task object — note the `id` and read `what`, `resolves`, and `acceptanceCriteria`. (`next` atomically claims the first pending task and flips it to `in-progress`, or returns an already-in-progress task unchanged if a previous iteration crashed mid-task.) If the command exits with code 14, no work remains — exit cleanly.
+> The output is the full task object — note the `id` and read `what`, `resolves`, and `agentValidations`. (`next` atomically claims the first pending task and flips it to `in-progress`, or returns an already-in-progress task unchanged if a previous iteration crashed mid-task.) If the command exits with code 14, no work remains — exit cleanly.
 >
-> Implement the change. Verify all acceptance criteria are met.
+> Implement the change. The `agentValidations` array is NOT your responsibility to evaluate — Step 2.5 below dispatches a fresh-context validation subagent for that. Your job here is just to make the code change as described in `what` and `resolves`.
 >
-> **Run verification:**
+> **Step 2 — Run verification:**
 >
 > ```bash
 > python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
@@ -151,25 +188,39 @@ Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with th
 >
 > Never do these during verification:
 >
-> - **Don't re-invoke individual verification steps directly** (e.g. running `npx tsc --noEmit` yourself after seeing it run). The CLI is the contract; running steps by hand splits your verification rhythm and burns budget.
+> - **Don't re-invoke individual verification steps directly** (e.g. running `npx tsc --noEmit` or `uv run pytest` yourself, either before Step 2 or after it). The CLI is the contract — `verify --id` is the entire verifySteps surface. **Don't run anything `verifySteps` could run to "double-check" `agentValidations` either** — Step 2.5's validation subagent works by code inspection, not by re-running commands the schema forbids in `agentValidations`. Running steps by hand splits your verification rhythm, burns budget, and is the exact duplicate-work pattern this prompt structure prevents.
 > - **Don't permute redirection flags** on the same command hoping for clearer output (`| head -50` → `2>&1` → drop `2>&1` → repeat). The CLI's redirection is canonical; the answer is in the log file. If the log is unclear, `Read` more of it — don't re-run.
 > - **Don't invent additional verification commands** beyond what `verify` runs. If a step you need is missing, that's a bug in the task file, not something to paper over with shell improvisation.
 >
-> **Step 2 — Finish:** Pipe your log into `finish` via a quoted heredoc. The `--log-file -` token tells the CLI to read from stdin; the quoted `<<'EOF'` makes the shell pass the body verbatim (no `$VAR` expansion, no quote-mangling), so embedded `"`, `$`, and newlines are safe.
+> **Step 2.5 — Run agent validations (subagent):** dispatch a fresh-context subagent to evaluate each entry in `agentValidations` against the code you just changed. Read the wrapper at the top of this SKILL.md ("Agent Validation Prompt") — it is the reusable template. Construct the task-specific suffix from three inputs you already have:
+>
+> - `what`: the `what` field from your task object (`task_list_cli.py get --id <id>` returns it).
+> - `agentValidations`: the array from the same task object.
+> - `changedFiles`: output of `git diff --name-only HEAD`, repo-relative paths only.
+>
+> Dispatch with the `Agent` tool, **`subagent_type: Explore`** (read-only by design — the runtime denies `Write`/`Edit`/`NotebookEdit` to this type, which structurally prevents the validation subagent from "fixing" anything during evaluation). The subagent's last line will be either `RESULT: PASS` or `RESULT: FAIL`.
+>
+> **On `RESULT: PASS`:** proceed to Step 3.
+>
+> **On `RESULT: FAIL`:** read the per-entry failure evidence, fix the failing items in code (do not re-implement the whole task — the failures are by definition inspection-level: missing docstring, wrong scope, missing delegation, etc.), then re-dispatch the validation subagent ONCE more. If the second run also reports `RESULT: FAIL`, proceed to Step 3 with `--status failed` and include the full validation report in the finish log. **Don't loop the validation subagent more than twice per task** — repeated failures past two cycles indicate a problem the implementation agent cannot fix from inspection feedback alone.
+>
+> **Don't run any verifyStep commands during validation-fixup** (`pytest`, `pyright`, `tsc`, `lint`). The validation subagent's findings are about inspection-verifiable facts; verifyStep coverage is decided by `verify --id` only.
+>
+> **Step 3 — Finish:** Pipe your log into `finish` via a quoted heredoc. The `--log-file -` token tells the CLI to read from stdin; the quoted `<<'EOF'` makes the shell pass the body verbatim (no `$VAR` expansion, no quote-mangling), so embedded `"`, `$`, and newlines are safe.
 >
 > ```bash
 > python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
 >     --file TASK_FILE_PATH finish --id <id> --status complete --log-file - <<'EOF'
 > Task <id>: <one-line summary of what changed>
 >
-> Acceptance criteria: <which were verified>
+> Agent validations: <which were evaluated>
 > Verification: <which steps ran, all passed>
 > EOF
 > ```
 >
 > If tests failed and you cannot fix forward: same command with `--status failed`. Do NOT use the `Write` tool to stage a `/tmp/` log file — the heredoc path is one Bash call (auto-approved by the harness hook); the Write path is two tool calls each gated separately by the auto-mode classifier.
 >
-> **Step 3 — Commit.** Stage only the source files you changed. NEVER stage the task file (`TASK_FILE_PATH`) or any `docs/exec-plans/` files — these are loop metadata, not deliverables. Implement exactly ONE task per iteration.
+> **Step 4 — Commit.** Stage only the source files you changed. NEVER stage the task file (`TASK_FILE_PATH`) or any `docs/exec-plans/` files — these are loop metadata, not deliverables. Implement exactly ONE task per iteration.
 
 The CLI exits non-zero on any failure (task id not found → 10; invalid state transition → 11; schema/JSON errors → 12 / 13; no remaining tasks → 14). If a step fails, read stderr, fix the cause, and retry. Do not work around it by hand-editing the task file.
 

@@ -39,7 +39,7 @@ def fixture_data() -> dict:
                 "effort": "low",
                 "createsNewCode": True,
                 "status": "pending",
-                "acceptanceCriteria": ["it works"],
+                "agentValidations": ["it works"],
                 "log": None,
             },
             {
@@ -50,7 +50,7 @@ def fixture_data() -> dict:
                 "effort": "medium",
                 "createsNewCode": False,
                 "status": "in-progress",
-                "acceptanceCriteria": [],
+                "agentValidations": [],
                 "log": None,
             },
             {
@@ -61,7 +61,7 @@ def fixture_data() -> dict:
                 "effort": "low",
                 "createsNewCode": False,
                 "status": "complete",
-                "acceptanceCriteria": [],
+                "agentValidations": [],
                 "log": "all good",
             },
         ],
@@ -496,7 +496,7 @@ class CliTestCase(unittest.TestCase):
 
     def test_remaining_entries_are_compact_only(self):
         # Each entry must expose ONLY the four display fields — no full-task
-        # leakage (no `what`, `resolves`, `acceptanceCriteria`, `log`, etc.).
+        # leakage (no `what`, `resolves`, `agentValidations`, `log`, etc.).
         result = self.run_cli("remaining")
         self.assertEqual(result.returncode, 0, result.stderr)
         entries = json.loads(result.stdout)
@@ -607,7 +607,7 @@ class CliTestCase(unittest.TestCase):
                 "effort": "low",
                 "createsNewCode": False,
                 "status": "pending",
-                "acceptanceCriteria": [],
+                "agentValidations": [],
                 "log": None,
             }
         )

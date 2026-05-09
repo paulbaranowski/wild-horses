@@ -32,10 +32,9 @@ Illustrative example (actual `tasks` come from whichever process generated the f
       "effort": "low | medium | high",
       "createsNewCode": true,
       "status": "pending",
-      "acceptanceCriteria": [
-        "<concrete, verifiable criterion>",
-        "<another criterion>",
-        "Tests pass"
+      "agentValidations": [
+        "<inspection-verifiable statement about post-change code — NOT 'Tests pass' or 'No type errors'>",
+        "<another inspection-verifiable statement>"
       ],
       "log": null
     },
@@ -47,10 +46,9 @@ Illustrative example (actual `tasks` come from whichever process generated the f
       "effort": "low",
       "createsNewCode": false,
       "status": "pending",
-      "acceptanceCriteria": [
+      "agentValidations": [
         "Test file follows project test conventions",
-        "At least N test cases covering happy path, errors, and edge cases",
-        "Tests pass"
+        "At least N test cases covering happy path, errors, and edge cases"
       ],
       "log": null
     }
@@ -77,7 +75,7 @@ A minimal valid file lives at `skills/task-list-builder/example.json`.
 - `resolves` — array of `file:line` strings linking the task back to the findings it addresses. Repo-relative paths only.
 - `effort` — `"low" | "medium" | "high"`.
 - `createsNewCode` — `true` if the intervention creates new callable code (functions, classes, methods, services, models, protocols), `false` if it only restructures, annotates, or documents existing code. **Determines whether a paired test task is generated** (see "Paired test tasks" below).
-- `acceptanceCriteria` — array of concrete, verifiable criteria derived from the task's `what` and `resolves`. Most tasks should include `"Tests pass"`. Avoid vague criteria like "looks good" or "code is clean".
+- `agentValidations` — input array for the per-task validation prompt. After the runner executes `verifySteps` (the test / lint / typecheck commands), it dispatches a fresh-context validation subagent and passes this array as the list of statements for the subagent to evaluate by reading code. Each entry is one factual statement about the post-change code state; the subagent confirms it PASS or FAIL with `file:line` evidence. The schema-level rule for what belongs here is structural, not stylistic: **if you can write a shell command that answers the question, it belongs in `verifySteps`, not here**. The validation subagent has no way to evaluate command-answerable conditions except by re-running the commands `verifySteps` already ran (the duplicate-work pattern this design exists to prevent) or by rubber-stamping the result, so entries like `"Tests pass"`, `"No type errors"`, `"No lint errors"`, or `"Compiles"` are forbidden. Use this for facts only inspection can confirm: structural facts (`"validate_session is defined at module scope in src/auth/middleware.py"`), behavioral facts visible in code (``"`AuthMiddleware.__call__` delegates token validation to `validate_session`"``), or documentation facts (`"module docstring lists validate_session under the public API"`). Avoid vague entries like `"looks good"` or `"code is clean"` — the subagent reports `file:line` evidence, so each entry must have an inspectable target.
 - `status` — `"pending" | "in-progress" | "complete" | "failed"`. New tasks always start as `"pending"`.
 - `log` — `null` when pending; a string describing what was done (or what went wrong) when in-progress / complete / failed.
 - `verifySteps` (optional) — array of `{name, command}` objects in the same shape as the top-level array. When present, **replaces** the top-level `verifySteps` for this task's `verify --id <N>` call (the runner does not merge the two arrays). At least one step is required when the field is present; an empty array is rejected by the validator. Omit the field entirely to inherit the top-level default.
@@ -101,7 +99,9 @@ Example: task 3 below replaces the top-level `tests` step with a single linkchec
   "effort": "low",
   "createsNewCode": false,
   "status": "pending",
-  "acceptanceCriteria": ["Links resolve to live pages"],
+  "agentValidations": [
+    "README.md no longer contains the broken URLs flagged at README.md:42"
+  ],
   "log": null,
   "verifySteps": [
     { "name": "linkcheck", "command": "uv run linkchecker README.md" }
@@ -117,9 +117,9 @@ For every task with `createsNewCode: true`, the **next** task in the array must 
 - `createsNewCode: false`.
 - `resolves: []` (it supports the preceding implementation task, not a finding).
 - `effort: "low"`.
-- `acceptanceCriteria` includes something like `"Test file follows project test conventions"` and `"Tests pass"`.
+- `agentValidations` includes something like `"Test file follows project test conventions"` and `"At least N test cases covering …"` — inspection-verifiable structural facts about the test file the validation subagent confirms by reading the test file. **Don't include "Tests pass"** — the `tests` verifyStep covers that; duplicating it would tempt the validation subagent to run the suite itself, which is the duplicate-work pattern the design prevents.
 
-Tasks with `createsNewCode: false` (annotation-only or restructuring-only) do **not** get a paired test task — they are verified by their own acceptance criteria.
+Tasks with `createsNewCode: false` (annotation-only or restructuring-only) do **not** get a paired test task — they are verified by their own `agentValidations` entries.
 
 ## Path conventions
 
