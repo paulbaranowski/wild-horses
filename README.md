@@ -105,7 +105,7 @@ The harness loop runner (`/harness:task-list-builder` + `/harness:task-list-runn
 | Corruption gate     | None                                                                           | Between every iteration the runner re-runs `cli status`; any non-zero exit halts the loop on a malformed file                                    |
 | Concurrency         | `subagent-driven-development` supports parallel subagents on independent tasks | Strictly sequential foreground `Agent` calls — tasks may depend on prior tasks' edits, so parallelism is forbidden                               |
 
-Pick superpowers when the plan itself is a deliverable and a human will review each step. Pick the harness loop when the plan is a means to an end and you want strict verification and unattended execution across a homogenous batch of tasks.
+Pick superpowers when the plan itself is a deliverable and a human will review each step. Pick the harness loop when the plan is a means to an end and you want strict verification and unattended execution across a homogeneous batch of tasks.
 
 ---
 
