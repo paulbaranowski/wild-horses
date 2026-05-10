@@ -77,6 +77,36 @@ Each produces a remediation plan with ranked interventions that can be implement
 
 If you're starting on a new project, run `/harness:setup` once to scaffold the harness documentation structure that AI agents read for orientation.
 
+#### When to use the harness loop vs. superpowers plans
+
+The harness loop runner (`/harness:task-list-builder` + `/harness:task-list-runner`) and the [superpowers](https://github.com/obra/superpowers) plan skills (`writing-plans` + `executing-plans`) solve overlapping problems but are tuned for different shapes of work.
+
+**Feature-level: which one fits the work I'm doing?**
+
+| Aspect                 | `superpowers:writing-plans` + `executing-plans`                         | `task-list-builder` + `task-list-runner`                                                                                    |
+| ---------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Task type              | Exploratory — requirements ambiguous, plan shifts as you learn          | Autonomous batch execution — uniform-shape tasks defined up front                                                           |
+| Human involvement      | Review-gated — human inspects each step before the next runs            | Unattended — kick off `--all` and read the final report                                                                     |
+| Resume across sessions | Manual — re-read the plan, find your place                              | First-class — `cli status` auto-locates in-progress files; `cli next` claims the next task atomically                       |
+| Plan stability         | Plan can be revised mid-execution at review checkpoints                 | Plan is fixed up front; structural revisions go back through `task-list-builder` rewrite mode                               |
+| Failure handling       | Conversational — agent pauses at the checkpoint and asks how to proceed | Recorded — failing tasks move to `failed` status with a log; the loop continues to the next task                            |
+| Test-task discipline   | Optional — author choice                                                | Mandatory paired `"Write tests for X"` task after every task with `createsNewCode: true`                                    |
+| Typical scale          | A handful of well-scoped tasks                                          | 10–50 uniform tasks (the typical `/harness:reasoning-gaps` or `/harness:feedback-blockers` output)                          |
+| Best fit               | Greenfield features, ambiguous design, "I'm not sure what I'm building" | Large-batch refactors and remediations — especially the output of `/harness:reasoning-gaps` or `/harness:feedback-blockers` |
+
+**Technical: how does each one enforce its guarantees?**
+
+| Aspect              | `superpowers:writing-plans` + `executing-plans`                                | `task-list-builder` + `task-list-runner`                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Plan artifact       | Free-form Markdown plan                                                        | Schema-validated JSON paired with a readable Markdown summary                                                                                    |
+| Plan mutations      | Agents edit the markdown directly                                              | Every mutation goes through `task_list_cli.py` (atomic write + schema validation)                                                                |
+| Verification        | Author writes verification steps in prose; agent decides how to run them       | Top-level `verifySteps` array; the CLI runs typecheck → tests in order, fail-fast, with per-step log files                                       |
+| Per-task acceptance | Read-and-judge by the executing agent                                          | Fresh-context, read-only `Explore` subagent evaluates an `agentValidations` array of inspection-only facts (runtime denies `Write`/`Edit` to it) |
+| Corruption gate     | None                                                                           | Between every iteration the runner re-runs `cli status`; any non-zero exit halts the loop on a malformed file                                    |
+| Concurrency         | `subagent-driven-development` supports parallel subagents on independent tasks | Strictly sequential foreground `Agent` calls — tasks may depend on prior tasks' edits, so parallelism is forbidden                               |
+
+Pick superpowers when the plan itself is a deliverable and a human will review each step. Pick the harness loop when the plan is a means to an end and you want strict verification and unattended execution across a homogenous batch of tasks.
+
 ---
 
 #### /harness:reasoning-gaps
