@@ -143,78 +143,127 @@ Briefly describe the planned strategy (inline vs. parallel dispatch) so the user
 
 ---
 
-## Phase 3 — Fix
+## Phase 3 — Build the task list
+
+This phase produces a structured markdown report with one task per file with errors. It does **not** apply fixes — fixes happen in Phase 4 via the `task-list-runner` skill.
 
 ### Apply the chosen intent
 
-**This section is the authoritative source for intent behavior.** Phase 1's `--intent` flag blurb and Phase 2's interactive prompt are summaries only; if any of them drifts from this section, this section wins. When editing an intent's behavior, update _here first_ and reconcile the summaries after.
+**This section is the authoritative source for intent behavior.** Phase 1's `--intent` flag blurb and Phase 2's interactive prompt are summaries only; if any of them drifts from this section, this section wins. When editing an intent's behavior, update _here first_ and reconcile the summaries after. The matching bullet is copied verbatim into each per-task `what` field in Step 2 below; the matching template from `task-list-templates.md` populates each per-task `agentValidations` array.
 
-The intent from Phase 2 (or `--intent`) shapes how Phase 3 fixes are written. This is the primary lean; the per-rule recipes in `rules.md` / `libraries.md` still apply within that lean.
+The intent from Phase 2 (or `--intent`) shapes how each per-task agent fixes its file. This is the primary lean; the per-rule recipes in `rules.md` / `libraries.md` still apply within that lean.
 
 - **`silence`** — default to rule-specific suppressions (`# pyright: ignore[rule]` + one-line why) and `cast()` at boundaries when the recipe allows it. Still prefer documented-API alternatives where they exist (e.g., `cookies.pop()` over `cookies.set(name, None)`) and still flag `bugs.md`-class items. **Do not** rewrite signatures, widen types, or introduce new factories under this intent — those belong to `improve`.
 - **`improve`** — prefer the semantically richer fix: widen over coerce, annotate over cast, extract a factory over repeated `cast(T, ...)` (see `rules.md` § "When to extract a test factory"). Pause and ask the user before changing anything semantically loaded (e.g., `bool | None → bool`, tristate collapses). Expect a larger diff and fewer suppressions. **Also:** before considering a touched file done, scan it for `dict[str, Any]` values read through 3+ distinct literal keys; if any are found, consult `rules.md` § "Opaque `dict[str, Any]` with repeated key reads" and propose TypedDict/Pydantic extraction to the user. This scan is pyright-clean code (no error triggered it) — skipping it is not a pyright regression, so approval is required before writing the new type.
 - **`bugs-only`** — fix only rules matching patterns in `bugs.md`. For every other error, add a rule-specific suppression with the trailing marker `# TODO(types): revisit under --intent improve` so the locations are grep-able later. No widenings, no casts beyond what the suppression needs.
 
-### Decide strategy by error count
+### Step 1 — Partition errors per file
 
-**< 20 errors — inline.**
+Group `/tmp/pyright_full.txt` errors by the file they're in. **One task per file**, regardless of error count:
 
-- Fix production code first, tests after. Production fixes cascade into tests; the reverse would mean redoing work.
-- For each file: read it, read the relevant error lines from `/tmp/pyright_full.txt`, consult `rules.md` / `libraries.md` for the specific rule(s) or library, apply fixes.
-- After each file: `pyright <file>` to verify before moving on.
+- Per-task `verifySteps: pyright <file>` only works if the per-task scope is one file. Multi-file groupings would force multi-file `pyright` invocations, moving verification away from the resolution boundary.
+- The runner's atomicity guarantees apply per-task. One file per task means a partial cleanup (3 of 8 files done) leaves the runner in a clean state — every completed task corresponds to a verifiably clean file.
 
-**≥ 20 errors — parallel dispatch.**
+For each unique file with errors, build:
 
-- Partition files into **disjoint** groups of roughly equal error count. Aim for 3–5 groups.
-- Split per-file errors into `/tmp/pyright_group_<N>.txt` using `grep` against the file paths in each group.
-- Dispatch general-purpose agents **in parallel** — single message with multiple Agent tool calls, not sequential.
-- Each agent prompt includes:
-  - Its file list. **Hard rule: the agent MUST NOT touch any file outside this list.**
-  - Path to its pre-split error file (`/tmp/pyright_group_<N>.txt`).
-  - **The fix intent** selected in Phase 2 (`silence` / `improve` / `bugs-only`) and the lean it implies. **Copy the matching bullet verbatim from "Apply the chosen intent" above — do not paraphrase.** The dispatched agent only sees the prompt you give it; a paraphrase that drops a constraint (e.g., omitting "still flag `bugs.md`-class items" from `silence`) will lean the whole partition wrong. Agents operating under different intents produce very different diffs — this is not optional.
-  - Pointers to `${CLAUDE_PLUGIN_ROOT}/rules.md` and `${CLAUDE_PLUGIN_ROOT}/libraries.md` for recipes. The agent should read only the files its errors require — an agent fixing rule-keyed errors can skip `libraries.md` and vice versa. `${CLAUDE_PLUGIN_ROOT}/reference.md` for suppression policy and assert-vs-raise if suppression comes up.
-  - Project conventions: read `CLAUDE.md`, `AGENTS.md`, or the project's contributor guide and summarize line length, naming, formatting.
-  - Validation: run `pyright <files>` before finishing; re-run if errors remain.
-- Wait for all agents to complete, then re-run `pyright` over the touched file set.
-- If a new rule now dominates, re-triage and dispatch another round.
+- `<file-path>` (repo-relative; strip any local-machine prefix)
+- `<line-list>` (every `file:line` for this file from `/tmp/pyright_full.txt`)
+- `<rule-set>` (distinct rule names involved at this file)
+- `<error-count>` (used to derive `effort`)
 
-### Fix principles
+Files with `<error-count>` ≥ 30 produce a heavy task; flag those when the `task-list-builder` previews the plan so the user can split them manually if desired (the builder supports per-task editing during preview).
 
-These apply throughout Phase 3, in inline and dispatched modes. Many expand on recipes in `rules.md` / `libraries.md`:
+### Step 2 — Resolve task fields per file
 
-1. **Consult `rules.md` (or `libraries.md` for library-stub issues) for the specific rule.** Don't guess at fixes — each rule has a documented recipe.
-2. **Production code before tests.** Production type fixes cascade; tests-first means redoing work.
-3. **Rule-specific suppressions only.** `# pyright: ignore[reportOptionalMemberAccess]` — never bare `# pyright: ignore`, never `# type: ignore` (that's mypy syntax).
-4. **Prefer documented API alternatives** over `cast` or `# pyright: ignore`. Example: `cookies.pop(name)` beats `cookies.set(name, None)` — the pop form is type-clean and semantically identical.
-5. **Widen, don't coerce, when `None` carries meaning.** `bool | None` stays `bool | None` if `None` means "unknown" distinct from `False`. Coercing destroys information.
-6. **`assert x is not None` for checker-only narrowing; `raise` for runtime invariants.** Asserts disappear under `python -O` — use `raise` when the check is genuine runtime safety.
-7. **Disjoint file partitions.** No two agents touch the same file. Same for any manual parallel work.
-8. **Verify external type findings before rewriting.** If a review tool or PR comment claims a type error, run pyright on the file first — findings drift with rebases and stubs change between versions.
-9. **`cast()` vs `isinstance()` narrowing.** `cast` when the shape is your own invariant; `isinstance` when the value crosses a real trust boundary (HTTP, user input, subprocess). Catches producer regressions a cast would silently swallow.
+For each file from Step 1, build the per-finding fields the `task-list-builder` ingests (per its hard rules in `${CLAUDE_PLUGIN_ROOT}/../harness/skills/task-list-builder/SKILL.md`; find via `Glob "**/harness/skills/task-list-builder/SKILL.md"` if cross-plugin path doesn't resolve):
 
----
+- **`title`** — `Fix <rule>[, <rule>] in <file-path>` listing the rules when `<rule-set>` has ≤ 2 rules; otherwise `Fix pyright errors in <file-path>` (rule-agnostic). This avoids titles like `Fix A and B and C and D and E in src/foo.py`.
+- **`what`** — copy the matching intent's bullet **verbatim** from § "Apply the chosen intent" above. Don't paraphrase. The per-task agent reads `what` to decide its lean — paraphrasing drops constraints (e.g., omitting "still flag `bugs.md`-class items" from `silence`) and leans the task wrong.
+- **`resolves`** — repo-relative `file:line` entries from `<line-list>`.
+- **`effort`** — `low` if `<error-count>` ≤ 3; `medium` if 4–10; `high` if ≥ 11.
+- **`createsNewCode`** — always `false` for pyright tasks. Hard-code `false`; don't derive it. Pyright fixes don't create new callable code; if a future intent does, this rule must be revisited.
+- **`verifySteps`** (per-task override) — `[{name: typecheck, command: pyright <file-path>}]`. Scopes verification to one file so the verify gate doesn't deadlock on other files' errors. **Don't** include `tests` or any project-wide step here; those would trigger the deadlock the per-task override exists to prevent.
+- **`agentValidations`** — copy the `## Template: <intent>` block **verbatim** from `${CLAUDE_PLUGIN_ROOT}/task-list-templates.md`, where `<intent>` is the resolved intent. **Don't** add per-file or per-rule entries — the templates are intent-keyed and apply uniformly across all of the run's files. **Don't** synthesize entries the template doesn't list — the templates are the source of truth for what each intent's tasks must validate.
 
-## Phase 3.5 — Consolidation pass
+### Step 3 — Render the structured markdown report inline in conversation
 
-Run the orchestrator-level **consolidation pass** before full verification. Individual partition agents can't see cross-partition repetition; the orchestrator can. The full procedure (scan commands, repetition thresholds, cross-partition inconsistency check, decision flow) lives in `${CLAUDE_PLUGIN_ROOT}/reference.md` § "Consolidation pass (orchestrator-level)" — follow it there.
+Render the report as a chat message — do **not** write it to a file. Phase 4 will invoke `task-list-builder --md-body-from-context`, which copies the most recent rendered report from conversation verbatim as the MD body. Sections in order:
 
-If a threshold fires, pause and present the counts to the user before proceeding. If none fires, log "consolidation pass: clean" in the summary and proceed to Phase 4.
+1. **Scope** — repo-relative file paths from Step 1's `<file-path>` set, as a bulleted list.
+2. **Triage Summary** — copy the Phase 2 triage block (level, scope, total errors, top rules, top files).
+3. **Findings** — bucket the errors by rule, then by file. For each bucket, list `<file>:<line> <rule> — <message>`. This is the human-readable error catalog; the runner ignores it but the user reads it during the builder's preview.
+4. **Interventions** — one `### Fix ... in <file>` block per file from Step 1, with `**Resolves:**`, `**Effort:**`, `**CreatesNewCode:**`, `**What:**`, `**VerifySteps:**`, and `**AgentValidations:**` fields from Step 2. The `task-list-builder` ingests these per-finding fields per its hard rules.
+
+**Don't** include YAML frontmatter — `task-list-builder` adds its own in Phase 6 with the `task_file:` and `generated:` fields populated from the run-id and timestamp it generates. **Don't** write the report to a file — the builder finds it in conversation context (per its `--md-body-from-context` flag contract), so writing it to disk creates two copies that can drift.
+
+After rendering the report, proceed to Phase 4.
 
 ---
 
-## Phase 4 — Verify
+## Phase 4 — Build the task list and run it
 
-Full `pyright [<scope>]` run at the effective level.
+Phase 3 rendered a markdown report in this conversation. This phase invokes `task-list-builder` to materialize the paired `.md` + `.json` under `docs/exec-plans/active/`, then `task-list-runner` to execute, then post-loop consolidation + verification before Phase 5. The runner is strictly serial (foreground Agent calls); per-task verification uses the per-task `pyright <file>` step from Phase 3 Step 2.
 
-**If the count is zero:** proceed to Phase 5.
+### Step 1 — Capture the pre-loop HEAD
 
-**If the count is non-zero,** classify the residual:
+Capture the pre-loop HEAD so the post-loop diff base is unambiguous (the runner's per-task agents commit individually, so `HEAD~N` won't reach the pre-loop state):
 
-- **Library-stub gaps** (see `libraries.md`): stubs are wrong but runtime works. Add `# pyright: ignore[specificRule]` with a one-line why. Iterate on these without user input.
-- **Design decisions** needing user input: e.g. a tristate `bool | None` where the consumer currently treats it as `bool`. Semantically loaded — flag for the user before changing.
+```bash
+PRE_LOOP_HEAD="$(git rev-parse HEAD)"
+echo "$PRE_LOOP_HEAD" > /tmp/pyright_pre_loop_head.txt
+```
+
+### Step 2 — Build the JSON task list via `task-list-builder`
+
+Hand off to the `task-list-builder` skill with arguments `--slug pyright --md-body-from-context`. The builder owns:
+
+- Run-ID generation, naming convention, and output paths (`docs/exec-plans/active/<DATE>-<RUN_ID>-<short-description>.pyright.{md,json}`)
+- `verifySteps` discovery (Phase 2 of its SKILL.md — though our top-level `verifySteps` will be inherited from the project default; per-task `verifySteps` come from the rendered report)
+- Per-finding ingestion of `**Resolves:**`, `**Effort:**`, `**CreatesNewCode:**`, `**What:**`, `**VerifySteps:**`, `**AgentValidations:**` per its Phase 4 hard rules
+- Schema validation (`load_and_validate`)
+- The Phase 5 user preview where the user can edit task fields, split heavy tasks (≥30 errors), or cancel before any files are written
+
+`--md-body-from-context` directs the builder to copy the report rendered in Phase 3 Step 3 verbatim as the MD body — preserving the Scope / Triage Summary / Findings / Interventions sections. If the report is missing from conversation, the builder halts and asks; **don't** silently fall back to the synthesized body.
+
+`--slug pyright` overrides the default `task-list-builder` filename suffix so the deliverables retain pyright provenance. The slug must match `[a-z][a-z0-9-]*`; `pyright` qualifies.
+
+Find the builder's `SKILL.md` at `${CLAUDE_PLUGIN_ROOT}/../harness/skills/task-list-builder/SKILL.md`; fall back to `Glob "**/harness/skills/task-list-builder/SKILL.md"` if the cross-plugin path doesn't resolve. Re-read it for the up-to-date procedure.
+
+When the builder finishes, three outcomes are possible:
+
+- **proceed** — the `.json` and `.md` are written. Continue to Step 3 with the JSON's absolute path.
+- **cancel** — no files written; the user aborted at the preview. Skip to Phase 5 with `"task-list build cancelled"` in the summary; no fixes were applied. Restore the config-level override if one was made in Phase 1 Step 5.
+- **edit** — the user adjusted task fields. The builder re-validates and either proceeds or cancels per above; this branch is internal to the builder.
+
+### Step 3 — Run the task list
+
+Hand off to the `task-list-runner` skill, passing the absolute path to the `.json` from Step 2 with the `--all` flag. The runner owns the Agent loop, the `MAX_ITER` math, the Task Implementation Prompt (per-task agent instructions, including the per-task `verifySteps` and `agentValidations` evaluation flow), and the final summary. Re-read its `SKILL.md` (find via `Glob "**/harness/skills/task-list-runner/SKILL.md"` if needed) for the up-to-date procedure.
+
+The runner is synchronous from this orchestrator's perspective — control returns when every task is `complete` or `failed` (or `MAX_ITER` is hit). Don't proceed past this step until the runner returns.
+
+### Step 4 — Post-loop consolidation pass
+
+Run the orchestrator-level consolidation pass on the loop's diff. The diff base is `$PRE_LOOP_HEAD` (Step 1); the head is `HEAD`. The full procedure (scan commands, repetition thresholds, cross-partition inconsistency check, decision flow) lives in `${CLAUDE_PLUGIN_ROOT}/reference.md` § "Consolidation pass (orchestrator-level)" — follow it there, but pass the diff as `$PRE_LOOP_HEAD..HEAD` rather than re-scanning the whole tree.
+
+If a threshold fires, pause and present the counts to the user before proceeding. If none fires, log `"consolidation pass: clean (post-loop)"` in the summary and continue to Step 5.
+
+### Step 5 — Post-loop verify
+
+Full `pyright [<scope>]` run at the effective level. Use the count for Phase 5's persist decision and for the summary's "errors before/after" line.
+
+**If count is zero:** proceed to Phase 5.
+
+**If count is non-zero,** classify the residual into three buckets:
+
+- **Library-stub gaps** (see `libraries.md`): stubs are wrong but runtime works. Add `# pyright: ignore[specificRule]` with a one-line why. These can iterate without user input.
+- **Design decisions** needing user input: e.g., a tristate `bool | None` where the consumer currently treats it as `bool`. Semantically loaded — flag for the user before changing.
 - **Genuine bugs pyright uncovered** (see `bugs.md`): dead attribute reads, method shadowing, repeated side-effectful calls. Do NOT silently fix these — flag with `file:line` pointers for the user.
 
-After another pass at the auto-resolvable items, re-run pyright. If the residual is now entirely "design decisions" and "genuine bugs," present it to the user and ask which to take on.
+Present the residual to the user; ask whether to:
+
+- Take on another iteration (re-run `/pyright:run-and-fix` on the residual scope)
+- Accept the residual as the run's final state and proceed to Phase 5
+- Hand off the residual interventions to `/harness:reasoning-gaps` per the standard end-of-run pointer in Phase 5
 
 ---
 
