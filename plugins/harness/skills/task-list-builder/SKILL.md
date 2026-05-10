@@ -3,7 +3,7 @@ name: task-list-builder
 description: Build or rewrite a structured task list (JSON + paired markdown report) matching the harness task-list schema. Accepts free-form text, an existing reasoning-gaps/feedback-blockers report, an existing JSON task file (in-place rewrite), or recent conversation context. Use when the user says "build the task list using task-list-builder", "rewrite the plan file using task-list-builder", or otherwise asks to convert or update a chunk of work into the harness task-list format.
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "[free-form description | path to .md report | path to .json task file (rewrite) | empty for conversation context] [--slug <name>] [--md-body-from-context]"
+argument-hint: "[free-form description | path to .md report | path to .json task file (rewrite) | empty for conversation context] [--slug <name>] [--md-body-from-context] [--top-interventions N] [--yes]"
 ---
 
 # task-list-builder
@@ -18,10 +18,12 @@ Build a paired `.json` + `.md` task list in the format the harness loop runner c
 
 ## Phase 0 — Parse meta-flags
 
-Two optional flags can appear anywhere in `$ARGUMENTS`. Strip them before any other phase parses arguments.
+Four optional flags can appear anywhere in `$ARGUMENTS`. Strip them before any other phase parses arguments.
 
 - **`--slug <name>`** — overrides the default `task-list-builder` filename suffix. The output paths become `…<short-description>.<name>.{json,md}` instead of `…<short-description>.task-list-builder.{json,md}`. Validate that `<name>` matches `[a-z][a-z0-9-]*` (lowercase letters, digits, hyphens; must start with a letter). If validation fails, refuse and ask the user for a valid slug.
 - **`--md-body-from-context`** — when writing the MD file in Phase 6, use the most recent rendered analysis report from the current conversation as the MD body (instead of synthesizing a generic body). Carries through to Phase 6.
+- **`--top-interventions N`** — truncate the task array (after Phase 4 builds it) to the first N intervention tasks plus any paired test tasks immediately following each kept intervention. Renumber `id`s sequentially. N must be a positive integer; non-integer or non-positive values are a parse error and the skill refuses with `"--top-interventions N requires a positive integer"`. If N exceeds the number of intervention tasks the builder generated, treat it as a no-op (write the full array). Carries through to a new Phase 4.5.
+- **`--yes`** — skip the Phase 5 preview confirmation prompt. Useful for non-interactive callers (the orchestrator commands' `--autofix` path passes this). The preview is still rendered to the conversation so the user can see what was built, but the prompt for "yes / edit / cancel" is suppressed and Phase 6 runs immediately. Carries through to Phase 5.
 
 After stripping, what remains is the input source for Phase 1.B (path / free-form / empty).
 
@@ -167,6 +169,36 @@ A reference example with one paired implementation+test pair lives at `${CLAUDE_
 
 ---
 
+## Phase 4.5 — Truncate to top-N interventions (if `--top-interventions N` was passed)
+
+When Phase 0 captured `--top-interventions N`, slice the `tasks` array Phase 4 produced down to the first N intervention tasks plus any paired test tasks immediately following each kept intervention.
+
+Algorithm:
+
+1. Walk `tasks` left-to-right.
+2. An **intervention task** is one whose `resolves` array is non-empty. (Test tasks have `resolves: []` per the paired-test-task rule.)
+3. A **paired test task** is one matching the schema's paired-test-task rule (title starts with `"Write tests for "`, `createsNewCode: false`, `resolves: []`, `effort: "low"`) AND placed at index `i + 1` where index `i` is an intervention task already kept.
+4. Keep tasks in encounter order until N intervention tasks have been kept. For each kept intervention at index `i`, also keep `tasks[i + 1]` if it satisfies the paired-test-task rule.
+5. Discard everything else.
+6. **Renumber `id`s sequentially** (`1, 2, 3, ...`) per the schema's "Sequential ids" hard rule. The builder's `id` is purely positional — no other field references it.
+
+Edge cases:
+
+- N >= number of intervention tasks generated → keep the whole array unchanged (no warning; the orchestrator passes a user-supplied number that may overshoot a small plan, and the user's intent is "fix at least this many").
+- The truncated array contains zero intervention tasks → bail with a clear error: `"--top-interventions N truncated to zero intervention tasks; nothing to do"`. This should be unreachable (Phase 4 always emits at least one intervention task when there are findings), but guard it anyway.
+
+In rewrite mode, `--top-interventions` operates on the rebuilt task array, not on the existing one. The semantics are the same: keep the first N interventions and their pairs, discard the rest, renumber.
+
+Concrete walkthrough — given a 9-task list where odd-indexed entries are interventions and even-indexed ones are paired tests:
+
+```
+[I1, T1, I2, I3, T3, I4, I5, T5, I6]   # I = intervention, T = test for preceding I
+```
+
+`--top-interventions 3` keeps `[I1, T1, I2, I3, T3]` (first 3 interventions; T1 and T3 are kept because they immediately follow kept interventions; I2's next task is I3, an intervention, so I2 has no pair to bring along). After renumbering: ids 1..5.
+
+---
+
 ## Phase 5 — Preview to the user
 
 Before writing anything, show the user a compact preview. The "Files" section depends on the output target:
@@ -214,6 +246,10 @@ scope: <N files>
 
 Proceed? (yes / edit / cancel)
 ```
+
+When Phase 0 captured `--yes`, render the preview block above to the conversation (so the user can see what's about to be written) but **omit the `Proceed? (yes / edit / cancel)` prompt**. Treat the preview as auto-confirmed and proceed directly to Phase 6. The preview render itself is preserved — it remains a visible audit trail of what's about to be written. Only the interactive prompt is suppressed.
+
+When `--yes` is not set, await the user's response and branch:
 
 - **yes** → continue to Phase 6.
 - **edit** → ask the user what to change (titles, splits, merges, `agentValidations` entries), apply changes, re-show the preview.
@@ -308,3 +344,5 @@ Do **not** stage or commit either file. Do not run `git add`.
 - **Generating a new run-id in rewrite mode.** Reuse the existing file's path verbatim. Generating a new path for a rewrite would orphan the old file and break any external references to it.
 - **Synthesizing the MD body when `--md-body-from-context` was passed.** The flag is a contract: the caller has a specific deliverable shape (typically the merged Phase 3 analysis report from `/harness:feedback-blockers` or `/harness:reasoning-gaps`) that the synthesized body would not satisfy. If the conversation does not contain a rendered analysis report, halt and ask — do not silently fall back.
 - **Inventing a slug.** When `--slug` is not passed, the slug is `task-list-builder` (the default). Don't infer a slug from the input description or context. Slugs are explicit caller-supplied provenance markers.
+- **Don't silently coerce `--top-interventions 0` (or any non-positive integer) to 1.** Refuse with the parse-error message `"--top-interventions N requires a positive integer"`. The user explicitly asked for zero, which is meaningless; surfacing the typo is the helpful response, and silently coercing would run a fix the user didn't approve.
+- **Don't omit the preview render when `--yes` is set.** `--yes` suppresses only the `Proceed? (yes / edit / cancel)` prompt. The preview block itself must still be rendered to the conversation — it is the user's only audit trail of what is about to be written, and removing it for non-interactive callers turns the autofix path into a silent overwrite.
