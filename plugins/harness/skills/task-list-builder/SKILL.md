@@ -190,7 +190,7 @@ In rewrite mode, `--autofix N` operates on the rebuilt task array, not on the ex
 
 Concrete walkthrough — given a 9-task list where odd-indexed entries are interventions and even-indexed ones are paired tests:
 
-```
+```text
 [I1, T1, I2, I3, T3, I4, I5, T5, I6]   # I = intervention, T = test for preceding I
 ```
 
