@@ -245,7 +245,39 @@ The runner is synchronous from this orchestrator's perspective — control retur
 
 Run the orchestrator-level consolidation pass on the loop's diff. The diff base is `$PRE_LOOP_HEAD` (Step 1); the head is `HEAD`. The full procedure (scan commands, repetition thresholds, cross-partition inconsistency check, decision flow) lives in `${CLAUDE_PLUGIN_ROOT}/reference.md` § "Consolidation pass (orchestrator-level)" — follow it there, but pass the diff as `$PRE_LOOP_HEAD..HEAD` rather than re-scanning the whole tree.
 
-If a threshold fires, pause and present the counts to the user before proceeding. If none fires, log `"consolidation pass: clean (post-loop)"` in the summary and continue to Step 5.
+If a threshold fires, pause and present the counts to the user before proceeding. If none fires, log `"consolidation pass: clean (post-loop)"` in the summary and continue to Step 4.5.
+
+### Step 4.5 — Behavior-change audit
+
+The fix loop's per-task agents apply pyright fixes locally; this orchestrator-level pass scans the cumulative diff for tokens that change observable behavior. Cheap (one grep over the diff), catches behavior-change-disguised-as-typing-fix at exactly the moment it would be hardest to spot in review. Doesn't block — forces an explicit "yes, I meant to add this exception" before the run lands.
+
+Background and policy: `${CLAUDE_PLUGIN_ROOT}/reference.md` § "Type-only by default" defines the three buckets (type-only / narrowing-only / behavior-changing). This step finds candidate behavior-changing tokens in the diff and routes each one through that taxonomy.
+
+Scan the loop's diff against `$PRE_LOOP_HEAD` (Step 1):
+
+```bash
+git diff --unified=0 "$PRE_LOOP_HEAD..HEAD" -- '*.py' | grep -E '^\+' | grep -E \
+  'raise [A-Z]|^\+ *assert |\bor \{\}|\bor \[\]|else: *return|else: *continue|\bor False\b|\bor True\b'
+```
+
+For each hit, open the cited `file:line`, read enough surrounding context to classify, and route per `reference.md` § "Type-only by default":
+
+- **False positive** — `raise` was already present in a moved block; `assert` is on a value made provably non-None by an upstream guard or by `__init__`; `or []` is on a literal that can never be `None`. Skip; log as such.
+- **Type-only alternative available** — propose the alternative (e.g. `cast(str, obj.field)` instead of `if obj.field is None: raise`; declared default value instead of `or {}`; widening the parameter to `Optional[T]` instead of swallowing the None). Offer to apply.
+- **Behavior change is the right design** — keep, but record a one-line justification in the run summary that names what the function is now responsible for (e.g. _"this function is the validation point; downstream callers no longer need to guard"_).
+
+Present the audit table to the user before proceeding to Step 5:
+
+> Behavior-change audit (N candidates):
+>
+> 1. `path/to/file.py:42` — added `raise ValueError("source.foo is required")` to satisfy `reportOptionalMemberAccess`.
+>    - Type-only alternative: `cast(str, obj.field)` at the call site
+>    - `[a]pply alternative` / `[k]eep with justification` / `[s]kip (false positive)`
+> 2. ...
+
+If zero hits, log `"behavior-change audit: clean"` in the summary and continue to Step 5.
+
+This step parallels Step 4 (consolidation pass) — both run on the loop's cumulative diff and look for cross-partition patterns the per-task agents couldn't see. Step 4 catches "many duplicate suppressions = one missing root-cause fix"; Step 4.5 catches "behavior changes wearing typing-fix clothing."
 
 ### Step 5 — Post-loop verify
 

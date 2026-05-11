@@ -2,23 +2,19 @@
 
 Rule-specific recipes for the pyright errors you'll see most often during adoption. Each subsection is keyed on the pyright rule name in the error output. Policy, triage process, and dispatch guidance live in `reference.md`.
 
-## `reportOptionalMemberAccess` / `reportOptionalSubscript`
+## `reportOptionalMemberAccess` / `reportOptionalSubscript` _(usually type-only; raise variant is behavior-changing)_
 
-Access on a value that might be `None`.
+Access on a value that might be `None`. The reflexive fix is `if x is None: raise ...`, but that's a behavior change — it adds a new exception path that didn't exist before. Pick the bucket first (see `reference.md` § "Type-only by default"), then the recipe:
 
-- **In tests:** `assert x is not None` before the use. Pyright narrows through a bare `assert`; unittest's `self.assertIsNotNone(x)` does NOT narrow, it just fails the test at runtime. Different tools. Use both if you want the nice test failure message AND the narrowing, but the bare assert is what gives pyright what it needs.
-- **In production:** prefer an explicit guard that raises a descriptive error, not an `assert`. Example:
+- **Type-only fix (default).** `cast(T, value)` at the call boundary, when validation lives elsewhere (an upstream constructor, a request validator, the producer's own contract). The cast documents the call site's expectation without altering runtime behavior. If the declared type is wrong — e.g. field is annotated `Foo | None` but is always set in `__init__` — fix the declaration instead. That's the most leveraged type-only fix.
 
-  ```python
-  if self._delegate is None:
-      raise RuntimeError("delegate not set before replay")
-  ```
+- **Narrowing-only fix.** `assert x is not None` _after_ a guard or initialization that proves None is impossible. Pyright narrows through a bare assert; behavior is unchanged. Two caveats: `python -O` strips asserts (so don't rely on them for genuine runtime safety), and unittest's `self.assertIsNotNone(x)` does NOT narrow — it fails the test at runtime but pyright still sees the wide type. Use the bare `assert` for narrowing; optionally pair it with `assertIsNotNone` for the nicer failure message in tests.
 
-  Reason: `python -O` strips asserts. Asserts are for invariants pyright needs to see; raises are for genuine runtime safety. See `reference.md` § "Assert vs raise for type narrowing".
+- **Behavior-changing fix.** `if x is None: raise ValueError(...)` — _only when this function is the validation point_. Adds a new exception path. Before adding, confirm two things: (a) the surrounding orchestrator doesn't assume this function can accept None and report failure through a different channel (a database `STATE_FAILED` row, a structured error response, an outer try/except that classifies the error); and (b) the raise sits in the right place — a raise added before the existing call site bypasses any create-before-validate ordering downstream code depends on. See `reference.md` § "Assert vs raise for type narrowing" for the test-vs-production angle.
 
-- **If the declared type is wrong:** fix the declaration (e.g. field was `Foo | None` but is always set in `__init__` so should be `Foo`).
+The primary axis is **"is this function the validation point?"** — not "is this production or test code?" If validation belongs elsewhere, default to the type-only fix even in production code.
 
-## Repeated `self.<attr>` narrowing across awaits
+## Repeated `self.<attr>` narrowing across awaits _(behavior-changing — adds or relocates raises; lift to `__init__` when the attribute is immutable post-construction)_
 
 Symptom: a method body re-binds `local = self.some_attr` then `if local is None: raise` before passing `local` to a callee that requires non-None. The comment usually says _"narrowing does not survive intervening awaits."_ Triggers `reportOptionalMemberAccess` on the attribute access or `reportArgumentType` at the callee — same root cause either way.
 
@@ -44,7 +40,7 @@ When refactoring, watch for `from e` clauses that may have lived on an unreachab
 
 For orchestrator-level detection across a partition, see `reference.md` § "Consolidation pass (orchestrator-level)".
 
-## `reportArgumentType`
+## `reportArgumentType` _(usually type-only via `cast` or signature widening; `isinstance` variant is behavior-changing — see decision rule below)_
 
 Passing the wrong type to a function.
 
@@ -270,7 +266,7 @@ else:
 
 The forward declaration gives pyright a single target type; both branch assignments widen into it.
 
-## The `def f(x: str = None)` antipattern
+## The `def f(x: str = None)` antipattern _(type-only — declaration fix only; no runtime behavior change)_
 
 Widespread in older Python codebases: parameter default lies about the declared type. Pyright correctly flags "Expression of type None cannot be assigned to parameter of type str."
 
@@ -693,7 +689,7 @@ If this matches your team's style, add it to the project's contributor guide / `
 
 `for x in maybe_none:` when `maybe_none: list[...] | None`. Add `assert maybe_none is not None` before the loop, or use `for x in maybe_none or []:` if empty-iteration is the desired fallback.
 
-## `reportOptionalOperand`
+## `reportOptionalOperand` _(usually type-only; raise variant is behavior-changing — same principle as `reportOptionalMemberAccess`)_
 
 `result + 1` when `result: int | None`. Same fix: narrow with an assert first.
 
@@ -752,7 +748,7 @@ Pyright sees imports inside `if TYPE_CHECKING:` blocks when type-checking but sk
 
 **Don't overuse.** `TYPE_CHECKING` hides imports from readers who grep for dependencies. Use it for the two cases above, not as a generic "this import is only for annotations" cleanup. One-off type-only imports in an otherwise normal module don't need the machinery — normal imports are fine.
 
-## Assigning `bool | None` to a `bool` field
+## Assigning `bool | None` to a `bool` field _(behavior-changing — picks a default for None; type-only alternative is to widen the field to `Optional[bool]`)_
 
 The tempting shortcut is `dst.field = bool(src.field)` (or `src.field or False`) to silence the type error. This destroys the tristate: `None` (unknown) collapses into `False` (invalid), which matters if any consumer distinguishes the two — JSON reports serialize `false` instead of `null`, aggregates over "unknown" get lumped into "failed", and `x is False` comparisons lose information.
 
@@ -770,7 +766,7 @@ class Record:
 
 Applies to any `Optional[T]` → `T` assignment where the `None` case carries meaning (not just "absent"). Before coercing, ask: does `None` mean something different from the falsy value of `T`? If yes, widen.
 
-## When `Optional[T] → T` coercion _is_ fine
+## When `Optional[T] → T` coercion _is_ fine _(behavior-changing — `or default` picks a value for None; safe only when the default is the intended treatment of None)_
 
 The inverse case of the `bool | None` warning: when `None` genuinely means "unset, use sensible default," a simple `x or default` at the assignment site is clean and preserves information. Example: a `Config.timezone: Optional[str]` flowing into a TypedDict field `timezone: str`.
 
@@ -785,7 +781,7 @@ This is safe because the fallback (`"UTC"`) is semantically meaningful — it's 
 
 The distinction between the two sections collapses into one rule: coerce `Optional[T] → T` when the default is the intended treatment of `None`; widen the destination to `Optional[T]` when `None` carries a distinct meaning that downstream consumers rely on.
 
-## Stale `@overload` stacks become noise under strict
+## Stale `@overload` stacks become noise under strict _(type-only — deletes type-level signatures only; runtime body is unchanged)_
 
 Instinct in strict mode is to add types, not remove them. But an `@overload` stack written earlier — under `basic` or `standard`, or copied from a typing cookbook — can turn actively harmful once strict flags the callers.
 

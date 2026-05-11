@@ -76,6 +76,7 @@ Real bugs pyright surfaces (not recipes — flag these for user review, don't si
 - [Triage process for a large error count](#triage-process-for-a-large-error-count)
 - [Prefer a documented API over "works at runtime" tricks](#prefer-a-documented-api-over-works-at-runtime-tricks)
 - [`cast(Required, None)` at construction is a refactor signal, not a suppression](#castrequired-none-at-construction-is-a-refactor-signal-not-a-suppression)
+- [Type-only by default](#type-only-by-default)
 - [Suppression policy](#suppression-policy)
 - [Narrowing artifacts vs runtime checks](#narrowing-artifacts-vs-runtime-checks)
 - [Harness / CI integration](#harness--ci-integration) (includes Assert vs raise)
@@ -212,6 +213,22 @@ The `cast` silences pyright but lies at runtime — `self.supabase = None` works
 The `cast(Client, None)` + comment pattern is the smell; the refactor removes both the cast AND the comment in one edit, while letting pyright verify the new constraint structurally. A `# pyright: ignore` would preserve the smell and add a second lie on top.
 
 **Why this belongs in reference.md, not rules.md.** It's not a recipe for a pyright rule — the existing code is type-clean (the cast makes it so). The signal is the _shape_ of the cast + the narrowing-by-subset use pattern. Triggered by reading, not by a rule firing.
+
+## Type-only by default
+
+A pyright fix should change what the type checker sees, not what the program does. Categorize every candidate fix into one of three buckets before applying it:
+
+| Bucket                | Examples                                                                                                                                                                                       | Behavior change?                                                                                   | Default policy                                                                                |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **Type-only**         | `cast(T, x)`; widening a declared type (`Dict` → `Mapping`); adding `Optional` to a declaration to match reality; `# pyright: ignore[rule]`; fixing wrong stubs; reordering `@overload` stacks | None                                                                                               | Apply freely                                                                                  |
+| **Narrowing-only**    | `assert x is not None` where `x` is _provably_ non-None at runtime (e.g., guarded by an upstream `is_none → raise` or set in `__init__`)                                                       | None at runtime, but stripped by `python -O` — so any non-trivial check belongs in the next bucket | Apply with care; flag if the assert could plausibly fire                                      |
+| **Behavior-changing** | `raise` (any kind); `else: default_value`; `or {}` / `or []`; early `return None`; replacing a duck-typed call with an `isinstance` branch; coercing `bool \| None` → `bool` with `or False`   | Yes — adds, removes, or relocates a runtime side effect                                            | **Stop.** Treat as a behavior change. Justify against the larger system, not against pyright. |
+
+The rule pyright printed does not authorize the fix. Pyright sees one file at a time; behavior-changing fixes have effects that span files. **A behavior change is a behavior change even when pyright asked for it.**
+
+The most common trap: pyright complains that `obj.field` is `Optional[T]` at a call site that requires `T`. The reflexive fix is `if obj.field is None: raise ValueError(...)`. That's a behavior-changing fix — it adds a new exception path that didn't exist before. Whether that's correct depends on whether the rest of the system expects this function to validate, expects something else to validate, or expects the call to never receive None in the first place. Pyright cannot tell you which. Default to a type-only alternative (`cast`, widening) unless you've actively decided the new exception is the right design.
+
+For per-rule guidance on when each bucket is right, see `rules.md` recipes — each recipe heading carries a one-line classifier (e.g. `_(usually type-only; raise variant is behavior-changing)_`) and behavior-changing variants are labeled in the body. For the orchestrator-level grep that surfaces behavior-change tokens after a parallel fix run, see the command file's Phase 4 § "Behavior-change audit" step.
 
 ## Suppression policy
 
