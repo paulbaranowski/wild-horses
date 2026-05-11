@@ -11,7 +11,7 @@ Analyze code for **feedback-loop blockers** — encapsulation gaps, OOP design i
 
 - `loop-protocol.md` — Phase 4 options menu. Shared with `/harness:reasoning-gaps`.
 - `task-list-schema.md` — JSON task file shape. Shared with `/harness:reasoning-gaps`, `task-list-builder`, and `task-list-runner`.
-- `skills/task-list-builder/SKILL.md` — task-list construction (verifySteps discovery, run-ID, JSON + MD writing, preview). Invoked from Phase 4 Options 1, 2, and 3 with `--slug feedback-blockers --md-body-from-context`, and from the Autofix path with the addition of `--yes` (and `--top-interventions N` when `--autofix N` was given).
+- `skills/task-list-builder/SKILL.md` — task-list construction (verifySteps discovery, run-ID, JSON + MD writing, preview). Invoked from Phase 4 Options 1, 2, and 3 with `--slug feedback-blockers --md-body-from-context`, and from the Autofix path with the addition of `--autofix [N]` (passed through verbatim from the user-facing flag). The builder treats `--autofix` as both prompt-suppression and (when N is given) task-array truncation.
 - `skills/task-list-runner/SKILL.md` — execution engine (resume, Agent loop, Task Implementation Prompt). Invoked from Phase 4 Options 1 and 2 and from `--resume`.
 - `agents/feedback-blockers/encapsulation.md`
 - `agents/feedback-blockers/oop-design.md`
@@ -168,7 +168,7 @@ Present the merged report:
 
 ## Phase 4: Propose (or Autofix)
 
-If autofix mode was set in the Autofix Check above, follow the **Autofix mode** procedure in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md` instead of the menu. That procedure invokes `task-list-builder` with `--yes` (and `--top-interventions N` when N was given) so neither the menu nor the builder's Phase 5 preview asks the user for confirmation, then hands off to `task-list-runner` with `--all`.
+If autofix mode was set in the Autofix Check above, follow the **Autofix mode** procedure in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md` instead of the menu. That procedure passes `--autofix [N]` through to `task-list-builder` verbatim — the builder treats it as prompt-suppression (always) and task-array truncation (when N is given) — then hands off to `task-list-runner` with `--all`.
 
 Otherwise, follow the **Phase 4 — Propose** procedure in `${CLAUDE_PLUGIN_ROOT}/loop-protocol.md`. The four options (Save plan and implement all / Save plan and fix top intervention / Save full remediation plan / Revise) live there. `loop-protocol.md` delegates task-list construction (verifySteps discovery, run-ID, JSON + MD writing, preview) to the `task-list-builder` skill (invoked with `--slug feedback-blockers --md-body-from-context`) and execution to the `task-list-runner` skill. The JSON task file's shape is in `${CLAUDE_PLUGIN_ROOT}/task-list-schema.md`.
 
