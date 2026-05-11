@@ -9,6 +9,7 @@ This file is the entry point: it holds the index, the setup/triage process, poli
 ### By pyright rule → `rules.md`
 
 - `reportOptionalMemberAccess` / `reportOptionalSubscript`
+- Repeated `self.<attr>` narrowing across awaits
 - `reportArgumentType` (includes `cast()` vs `isinstance()` decision rule)
 - TypedDict ↔ `dict[str, Any]` asymmetry
 - `reportCallIssue` / no overloads match
@@ -265,12 +266,21 @@ grep -rhE "pyright: ignore\[[a-zA-Z]+\]" $files \
 grep -rhE "cast\([A-Z][A-Za-z_]+," $files \
   | grep -oE "cast\([A-Z][A-Za-z_]+," \
   | sort | uniq -c | sort -rn | head
+
+# count re-bind narrowing blocks added, by file
+# (heuristic — pre-filter for `<local> = self.<attr>` lines; verify each file's class
+#  membership and the following `if <local> is None: raise` by reading the hits)
+for f in $files; do
+  n=$(grep -cE '^[[:space:]]+[a-z_]+ = self\.[a-z_]+$' "$f")
+  [ "$n" -ge 2 ] && echo "$n $f"
+done | sort -rn | head
 ```
 
 **Thresholds (pause and investigate if any fire):**
 
 - **Same suppression rule ≥ 10 sites** → probable single upstream cause (pydantic/Beanie `Field(None, ...)`, a class missing a type annotation, a library-stub gap fixable with one root-cause edit). See § "Repetition as a signal" above.
 - **Same `cast(T, ...)` target type ≥ 5 sites** → probable missing factory. See `rules.md` § "When to extract a test factory."
+- **Same class with ≥ 2 re-bind narrowing blocks** (`<local> = self.<attr>` followed by `if <local> is None: raise`) → probable misplaced invariant. Two fixes (see `rules.md` § "Repeated `self.<attr>` narrowing across awaits"): lift to `__init__` when the attribute is immutable post-construction; consolidate to one validation point when it's mutated mid-method. Threshold is lower than the suppression/cast counts because each re-bind block is 3-4 lines and the fix is high-leverage — `__init__` validation eliminates the dance from every method on the class.
 - **Inconsistency across partitions** — if two agents' reports describe the same problem with different fixes (e.g., one used `cast(FastAPI, self.client.app)`, another used `from app.main import app`), unify on one approach before committing. Diverging solutions to the same problem age badly.
 
 If a threshold fires:

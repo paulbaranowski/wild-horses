@@ -59,6 +59,16 @@ Public callables without return annotations are low-cost annotation wins — esp
 
 - Under `improve`: the list is usually short — most suggestions were acted on inline.
 
+### 5. Comment-style type annotations in touched files
+
+```bash
+grep -rnE '#\s*[Tt]ype:\s*[A-Z]' $files
+```
+
+Each hit is a parameter or local declared with a `# Type:` / `# type:` comment in place of a real annotation (e.g. `def f(self, config,  # Type: MapleConfigInput`). These comments are documentation only — pyright treats the bound name as `Any` and silently bypasses type checking on every downstream attribute access of that value.
+
+**High-priority signal** — a single hit often hides large clusters of latent type errors that would otherwise drive `improve`-intent fixes. Suggest converting to a real annotation, using `"Foo"` (string-quoted) if the comment was working around a circular import.
+
 ---
 
 ## Format each suggestion as
@@ -74,11 +84,12 @@ N. <file>:<line>  —  <one-line what>
 
 ## Sort order (deterministic — same run produces the same ordering)
 
-1. **Group A** — repetition-driven (signal #1 and the `silence`/`bugs-only` intent-scoped items from signal #4): sort by (a) suppressions/sites removed, desc; (b) total site count, desc; (c) file path, asc.
-2. **Group B** — `Any` escapes (signal #2): sort by file path, asc; then line number, asc.
-3. **Group C** — missing annotations (signal #3): sort by file path, asc; then line number, asc.
+1. **Group A** — type-checker bypass (signal #5): sort by file path, asc; then line number, asc. Listed first because each hit may unmask a cluster of `improve`-intent work.
+2. **Group B** — repetition-driven (signal #1 and the `silence`/`bugs-only` intent-scoped items from signal #4): sort by (a) suppressions/sites removed, desc; (b) total site count, desc; (c) file path, asc.
+3. **Group C** — `Any` escapes (signal #2): sort by file path, asc; then line number, asc.
+4. **Group D** — missing annotations (signal #3): sort by file path, asc; then line number, asc.
 
-Emit Group A, then Group B, then Group C. No cap on length.
+Emit Group A, then Group B, then Group C, then Group D. No cap on length.
 
 ---
 

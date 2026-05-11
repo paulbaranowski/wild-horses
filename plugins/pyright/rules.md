@@ -18,6 +18,32 @@ Access on a value that might be `None`.
 
 - **If the declared type is wrong:** fix the declaration (e.g. field was `Foo | None` but is always set in `__init__` so should be `Foo`).
 
+## Repeated `self.<attr>` narrowing across awaits
+
+Symptom: a method body re-binds `local = self.some_attr` then `if local is None: raise` before passing `local` to a callee that requires non-None. The comment usually says _"narrowing does not survive intervening awaits."_ Triggers `reportOptionalMemberAccess` on the attribute access or `reportArgumentType` at the callee — same root cause either way.
+
+Pyright drops narrowing on `self.<attr>` across `await` because the awaited code could mutate `self`. The same loss happens (less commonly) across calls pyright thinks could mutate `self`, and across cross-module calls it can't see through.
+
+The re-bind is the right tactical fix when used **once**. When the same dance appears in 2+ methods of the same class, the invariant is being enforced in the wrong place — moving it to `__init__` (or to one consolidated point) deletes more lines from method bodies than it adds at the new validation site. Two fixes:
+
+- **Validate-at-construction.** If the attribute is set before `__init__` and never mutated afterward, extend `__init__`'s validation and store as a typed non-Optional attribute:
+
+  ```python
+  def __init__(self, source: SomeInput):
+      if source.foo is None or source.bar is None:
+          raise ValueError(...)
+      self.foo: str = source.foo
+      self.bar: int = source.bar
+  ```
+
+  Pyright reads the declared `str` / `int` directly — no narrowing, no awaits to worry about.
+
+- **Consolidate to one validation point.** If the attribute _is_ mutated during the method (e.g., a download side-effect rewrites it), lift the narrowing to a single point after the last mutation and use the local throughout. Don't repeat the dance at each error site.
+
+When refactoring, watch for `from e` clauses that may have lived on an unreachable `ValueError` — they need to move to the actual user-facing `raise` or the exception chain is lost.
+
+For orchestrator-level detection across a partition, see `reference.md` § "Consolidation pass (orchestrator-level)".
+
 ## `reportArgumentType`
 
 Passing the wrong type to a function.
