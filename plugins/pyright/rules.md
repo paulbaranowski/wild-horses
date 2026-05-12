@@ -748,6 +748,29 @@ Pyright sees imports inside `if TYPE_CHECKING:` blocks when type-checking but sk
 
 **Don't overuse.** `TYPE_CHECKING` hides imports from readers who grep for dependencies. Use it for the two cases above, not as a generic "this import is only for annotations" cleanup. One-off type-only imports in an otherwise normal module don't need the machinery — normal imports are fine.
 
+## Quoted type annotations: default off _(type-only — affects readability and runtime evaluation, not what pyright sees)_
+
+When you touch a function signature or variable annotation, **do not wrap the type in quotes** unless one of these specific reasons applies:
+
+1. **Self-reference inside a class body** — `def clone(self) -> "MyClass":` where `MyClass` isn't yet defined at the `def` line.
+2. **Forward reference to a name defined later in the same file** — annotation mentions a class declared further down.
+3. **Symbol only exists under `TYPE_CHECKING`** — see the preceding section. The cleaner alternative is `from __future__ import annotations`, which makes _every_ annotation a string and removes the per-site decision.
+4. **PEP 604 `X | Y` syntax on Python < 3.10** — raises `TypeError` at runtime on 3.9 and below. Not relevant if the project's `pyproject.toml` / `setup.cfg` requires 3.10+.
+
+If none of the four apply, write the annotation bare:
+
+```python
+# Wrong — pd is imported normally, project is 3.11+, no forward reference
+row: "pd.Series | Dict[str, Any]"
+
+# Right
+row: pd.Series | Dict[str, Any]
+```
+
+**Why it matters.** Quotes turn the annotation into an opaque string at function-def time, which means a typo'd identifier (`"Pd.Series"`) won't surface as a `NameError` the way a bare reference would — it sits dormant until someone calls `typing.get_type_hints()` or a runtime-typing library (pydantic, dataclasses with `eval_str=True`) tries to resolve it. For pyright specifically, quoted vs. unquoted is identical — pyright reads the AST and resolves both forms the same way. So gratuitous quoting costs you one runtime check and gains you nothing.
+
+**During a fix.** If the original annotation was already quoted and reason 1–4 doesn't apply, drop the quotes as part of the touch. If the original was bare, leave it bare — don't add quotes "to be safe."
+
 ## Assigning `bool | None` to a `bool` field _(behavior-changing — picks a default for None; type-only alternative is to widen the field to `Optional[bool]`)_
 
 The tempting shortcut is `dst.field = bool(src.field)` (or `src.field or False`) to silence the type error. This destroys the tristate: `None` (unknown) collapses into `False` (invalid), which matters if any consumer distinguishes the two — JSON reports serialize `false` instead of `null`, aggregates over "unknown" get lumped into "failed", and `x is False` comparisons lose information.

@@ -1,7 +1,7 @@
 {
   "name": "pyright",
   "description": "Run pyright on a Python codebase and fix the errors it finds via the harness task-list pipeline. Phase 3 partitions errors per-file into a structured markdown report; Phase 4 hands off to the sibling task-list-builder + task-list-runner skills for serial, audited fixes with per-task pyright <file> verifySteps and intent-keyed agentValidations templates. Supports strictness override (basic/standard/strict), persisting the level to config, progressive ratcheting, fix-intent selection (silence/improve/bugs-only), an end-of-run list of suggested type improvements, active TypedDict/Pydantic extraction from opaque dict[str, Any] under --intent improve, and a handoff pointer to /harness:reasoning-gaps.",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "author": {
     "name": "Paul Baranowski"
   }
