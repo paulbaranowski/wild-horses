@@ -218,17 +218,41 @@ The `cast(Client, None)` + comment pattern is the smell; the refactor removes bo
 
 A pyright fix should change what the type checker sees, not what the program does. Categorize every candidate fix into one of three buckets before applying it:
 
-| Bucket                | Examples                                                                                                                                                                                       | Behavior change?                                                                                   | Default policy                                                                                |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| **Type-only**         | `cast(T, x)`; widening a declared type (`Dict` → `Mapping`); adding `Optional` to a declaration to match reality; `# pyright: ignore[rule]`; fixing wrong stubs; reordering `@overload` stacks | None                                                                                               | Apply freely                                                                                  |
-| **Narrowing-only**    | `assert x is not None` where `x` is _provably_ non-None at runtime (e.g., guarded by an upstream `is_none → raise` or set in `__init__`)                                                       | None at runtime, but stripped by `python -O` — so any non-trivial check belongs in the next bucket | Apply with care; flag if the assert could plausibly fire                                      |
-| **Behavior-changing** | `raise` (any kind); `else: default_value`; `or {}` / `or []`; early `return None`; replacing a duck-typed call with an `isinstance` branch; coercing `bool \| None` → `bool` with `or False`   | Yes — adds, removes, or relocates a runtime side effect                                            | **Stop.** Treat as a behavior change. Justify against the larger system, not against pyright. |
+| Bucket                | Examples                                                                                                                                                                                                                                                                                   | Behavior change?                                                                                                    | Default policy                                                                                                                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Type-only**         | `cast(T, x)`; widening a declared type (`Dict` → `Mapping`); adding `Optional` to a declaration to match reality; `# pyright: ignore[rule]`; fixing wrong stubs; reordering `@overload` stacks                                                                                             | None                                                                                                                | Apply freely                                                                                                                                                                           |
+| **Narrowing-only**    | `assert x is not None` _only_ where `x` is **already** non-None at runtime by upstream code pyright can't follow (set in `__init__` then accessed across a method/await boundary; guaranteed by a third-party library invariant). The assert hints to pyright; it can't meaningfully fire. | None at runtime; `assert` evaporates under `python -O` but the value was already non-None, so behavior is unchanged | Apply only if you can name _why_ the value is already non-None (and add a comment if non-obvious). If the assert could plausibly fire, it belongs in the next bucket.                  |
+| **Behavior-changing** | `raise` (any kind, including `if x is None: raise ...` as a narrowing helper's body — the helper IS the check); `else: default_value`; `or {}` / `or []`; early `return None`; replacing a duck-typed call with an `isinstance` branch; coercing `bool \| None` → `bool` with `or False`   | Yes — adds, removes, or relocates a runtime side effect                                                             | **Stop.** Treat as a behavior change. Justify against the larger system, not against pyright. `raise` is the default narrowing tool; see § "Assert vs raise for type narrowing" below. |
 
 The rule pyright printed does not authorize the fix. Pyright sees one file at a time; behavior-changing fixes have effects that span files. **A behavior change is a behavior change even when pyright asked for it.**
 
 The most common trap: pyright complains that `obj.field` is `Optional[T]` at a call site that requires `T`. The reflexive fix is `if obj.field is None: raise ValueError(...)`. That's a behavior-changing fix — it adds a new exception path that didn't exist before. Whether that's correct depends on whether the rest of the system expects this function to validate, expects something else to validate, or expects the call to never receive None in the first place. Pyright cannot tell you which. Default to a type-only alternative (`cast`, widening) unless you've actively decided the new exception is the right design.
 
 For per-rule guidance on when each bucket is right, see `rules.md` recipes — each recipe heading carries a one-line classifier (e.g. `_(usually type-only; raise variant is behavior-changing)_`) and behavior-changing variants are labeled in the body. For the orchestrator-level grep that surfaces behavior-change tokens after a parallel fix run, see the command file's Phase 4 § "Behavior-change audit" step.
+
+## Don't narrate changes in comments
+
+A pyright fix changes the type signature, the assignment, or both — it should not also add a comment that _describes the change_. Comments belong on code that has a non-obvious WHY for a reader who doesn't know the change happened: a domain invariant, a hidden constraint, a library quirk, a workaround for a specific runtime bug. Comments that narrate "what was widened to what" or "why this was done as part of pyright cleanup" rot the moment the change passes out of working memory — the declaration still says `Optional[str]`, but the comment is now noise that crowds out the comment slot a future genuine WHY would need.
+
+Anti-examples (do not produce these):
+
+```python
+rate_limit: Optional[str] = None  # widened from str to Optional[str]
+self.client_id: Optional[str]
+if config:
+    self.client_id = config.client_id  # narrows str → Optional[str]
+# Phase 2 approved: bool | None → bool — None never occurs in production paths
+active: bool = False
+```
+
+Acceptable (describes a current constraint on the current code, not the change history):
+
+```python
+# bitstring's stubs declare __iter__ wrong; iteration works at runtime
+for bit in bits:  # pyright: ignore[reportGeneralTypeIssues]
+```
+
+The audit trail for semantically loaded changes (tristate collapses, intentional behavior changes from § "Type-only by default") lives in the Phase 5 run summary's "Design changes" section, not in inline comments.
 
 ## Suppression policy
 
@@ -244,7 +268,7 @@ Not acceptable:
 - `# type: ignore` with or without brackets. That's mypy syntax. Pyright uses `# pyright: ignore[...]`.
 - Suppressing a rule to avoid fixing a real bug. If pyright flags a `None` access, either narrow or fix the declared type. Don't paper over it.
 
-When suppressing, add a one-line comment explaining WHY if the reason isn't obvious from the rule name:
+When suppressing, add a one-line comment explaining WHY if the reason isn't obvious from the rule name. The WHY must describe a current constraint on the code (e.g., a library-stub bug, a runtime invariant pyright cannot see), not the change history (e.g., "added during pyright cleanup", "previously was `# type: ignore`"):
 
 ```python
 # bitstring's stubs declare __iter__ wrong; iteration works at runtime
@@ -457,12 +481,29 @@ Adapt the command to the project's package manager and to the harness's hook sem
 
 ### Assert vs raise for type narrowing
 
-`assert x is not None` and `if x is None: raise ...` both narrow for pyright. Which to use:
+`assert x is not None` and `if x is None: raise ...` both narrow for pyright — the type-narrowing benefit is identical. The choice is about runtime semantics, not pyright. **Default to `raise`.** `assert` is the special case.
 
-- **`assert`** for invariants the type checker needs to see (e.g. the line above just assigned `self._x = SomeValue`, and pyright doesn't follow that through a method call). Documents intent, no runtime safety concern.
-- **`raise`** for genuinely-invalid states that should fail loudly at runtime, including under `python -O` which strips asserts.
+Why `raise` is the default:
 
-For public library code, or code that might run with `-O` enabled, prefer explicit raises. For internal invariants that defend pyright's narrowing analysis, `assert` is fine (and more concise), but remember it disappears under `-O`.
+- `python -O` strips `assert` entirely. Code that depends on the check for correctness (not just for pyright's eyes) silently breaks under optimized builds.
+- `AssertionError` is the wrong _type_ for an invariant violation. Python convention reserves `AssertionError` for "this is impossible by construction; if it triggers, my mental model is wrong" — internal sanity checks. Lifecycle violations, missing-precondition errors, and contract failures carry semantic weight that `RuntimeError` (or a custom exception) communicates and `AssertionError` doesn't.
+- The narrowing benefit is the same. There is no pyright reason to prefer `assert`.
+
+Use `assert` _only_ when the value is **already** non-None at runtime by upstream code that pyright can't follow. The assert is then a hint to the type checker about a fact already true, not a check that could meaningfully fire. Two cases qualify:
+
+- The line above just assigned `self._x = SomeValue` and pyright doesn't propagate through the intervening method call (or `await`, or comprehension boundary).
+- A third-party library guarantees the value at this point and you can name the guarantee in a comment. The canonical example is tenacity's `before_sleep` callback, where `retry_state.outcome` is guaranteed non-None by the framework — see `libraries.md` § "Tenacity retry-callback state".
+
+**The narrowing-helper anti-pattern.** A method whose return type promises a non-None value (`def _require_df(self) -> pd.DataFrame:`) is, by definition, _enforcing_ a runtime contract — not _hinting_ to pyright. If the body uses `assert self.df is not None`, the assert evaporates under `-O` and the helper silently returns `None` to callers that immediately do `.iloc[...]`. The type system says the contract was honored; the runtime says otherwise. Helpers like this must use `raise`:
+
+```python
+def _require_df(self) -> pd.DataFrame:
+    if self.df is None:
+        raise RuntimeError("load_file() must be called before accessing the DataFrame")
+    return self.df
+```
+
+The signal that you're writing a narrowing helper rather than a hint: the function/method exists primarily to narrow `Optional[T] → T` and return it (or operate on it), and the caller's correctness depends on the narrowing actually happening at runtime. The helper IS the check; it can't simultaneously be a hint about something already true.
 
 ## Parallel agent dispatch pattern
 

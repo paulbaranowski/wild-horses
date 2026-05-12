@@ -65,8 +65,8 @@ under this intent.
 - Every `# pyright: ignore` comment added in this task uses bracketed rule form (e.g., `# pyright: ignore[reportOptionalMemberAccess]`); no bare `# pyright: ignore` (without rule bracket) was introduced.
 - Every suppression added in this task has a non-empty trailing rationale, separated by `—` or two spaces (e.g., `# pyright: ignore[reportArgumentType]  # tests use a builder that yields a wider type`).
 - No `# type: ignore` markers (mypy syntax) were added; pyright suppression is `# pyright: ignore[<rule>]` only.
-- No public function or method signature in any file the task resolves was widened or narrowed; if a private (leading-underscore) signature changed, the change site has a comment explaining why.
-- Any `cast()` call added in this task is at a trust boundary (HTTP response, user input, subprocess output) OR materializes a TypedDict from `dict[str, Any]` per a `rules.md` recipe; the call site has a one-line comment naming the boundary or the recipe.
+- No public function or method signature in any file the task resolves was widened or narrowed; private (leading-underscore) signature changes are allowed without further constraint.
+- Any `cast()` call added in this task is at a trust boundary (HTTP response, user input, subprocess output) OR materializes a TypedDict from `dict[str, Any]` per a `rules.md` recipe.
 
 ## Template: `improve`
 
@@ -75,10 +75,8 @@ extract factories, scan for opaque `dict[str, Any]`. The validation surface
 is structural change discipline — random suppressions and silent semantic
 collapses are the failure modes to catch.
 
-- If a suppression present in the resolved files before this task could have been removed via type widening, annotation, or factory extraction, it was removed; any remaining suppression has a comment at the suppression site explaining why suppression was preferred over the structural fix.
-- Any type widened in this task (e.g., `T` → `T | None`, `bool` → `bool | None`) has a one-line comment at the change site explaining the semantic rationale (what `None` means, why the broader type is the right shape).
+- If a suppression present in the resolved files before this task could have been removed via type widening, annotation, or factory extraction, it was removed.
 - If the resolved file had `dict[str, Any]` values read through 3+ distinct literal keys (per `rules.md` § "Opaque `dict[str, Any]` with repeated key reads"), either an extracted TypedDict or Pydantic model is now in use, OR the file's module-level docstring carries a `TODO(types):` marker acknowledging the deferred extraction with a one-line reason.
-- Any tristate collapse (e.g., `bool | None` → `bool`, `T | None` → `T` for an externally-set field) has a comment at the change site naming the user-approval moment from Phase 2's pause-and-ask flow (e.g., `# Phase 2 approved: bool | None → bool — None never occurs in production paths`).
 - No `# type: ignore` markers (mypy syntax) were added; any `# pyright: ignore` added uses bracketed rule form and a non-empty trailing rationale.
 
 ## Template: `bugs-only`
