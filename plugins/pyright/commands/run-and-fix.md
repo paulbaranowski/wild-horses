@@ -257,7 +257,7 @@ Scan the loop's diff against `$PRE_LOOP_HEAD` (Step 1):
 
 ```bash
 git diff --unified=0 "$PRE_LOOP_HEAD..HEAD" -- '*.py' | grep -E '^\+' | grep -E \
-  'raise [A-Z]|^\+ *assert |\bor \{\}|\bor \[\]|else: *return|else: *continue|\bor False\b|\bor True\b'
+  'raise [A-Z]|^\+ *assert |\bor \{\}|\bor \[\]|\bor ""|\bor '\'\''|\bor 0\b|else: *return|else: *continue|\bor False\b|\bor True\b'
 ```
 
 For each hit, open the cited `file:line`, read enough surrounding context to classify, and route per `reference.md` § "Type-only by default":

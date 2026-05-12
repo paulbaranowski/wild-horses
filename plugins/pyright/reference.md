@@ -224,6 +224,15 @@ A pyright fix should change what the type checker sees, not what the program doe
 | **Narrowing-only**    | `assert x is not None` _only_ where `x` is **already** non-None at runtime by upstream code pyright can't follow (set in `__init__` then accessed across a method/await boundary; guaranteed by a third-party library invariant). The assert hints to pyright; it can't meaningfully fire. | None at runtime; `assert` evaporates under `python -O` but the value was already non-None, so behavior is unchanged | Apply only if you can name _why_ the value is already non-None (and add a comment if non-obvious). If the assert could plausibly fire, it belongs in the next bucket.                  |
 | **Behavior-changing** | `raise` (any kind, including `if x is None: raise ...` as a narrowing helper's body — the helper IS the check); `else: default_value`; `or {}` / `or []`; early `return None`; replacing a duck-typed call with an `isinstance` branch; coercing `bool \| None` → `bool` with `or False`   | Yes — adds, removes, or relocates a runtime side effect                                                             | **Stop.** Treat as a behavior change. Justify against the larger system, not against pyright. `raise` is the default narrowing tool; see § "Assert vs raise for type narrowing" below. |
 
+**Why call-site coercion is behavior-changing.** `value or default` looks local but its observable consequences propagate through every None-aware sink downstream:
+
+- `model_dump(exclude_none=True)` drops `None` keys but keeps `""`, `0`, `False`, `[]`
+- SQL writes: `None` → `NULL` (matches `IS NULL`); `""` → empty string (matches `= ''`)
+- `json.dumps`: `None` → `null`; `""` → `""` (different parsers, different downstream)
+- `len()` and truthy-branch checks: `None` is a TypeError on `len`, `""` is `0`
+
+Before coercing, scan the callee chain for any of these sinks. If present, widen the parameter to `Optional[T]` instead — the type is honest and behavior is preserved. See `rules.md` § `reportArgumentType` for the per-rule recipe.
+
 The rule pyright printed does not authorize the fix. Pyright sees one file at a time; behavior-changing fixes have effects that span files. **A behavior change is a behavior change even when pyright asked for it.**
 
 The most common trap: pyright complains that `obj.field` is `Optional[T]` at a call site that requires `T`. The reflexive fix is `if obj.field is None: raise ValueError(...)`. That's a behavior-changing fix — it adds a new exception path that didn't exist before. Whether that's correct depends on whether the rest of the system expects this function to validate, expects something else to validate, or expects the call to never receive None in the first place. Pyright cannot tell you which. Default to a type-only alternative (`cast`, widening) unless you've actively decided the new exception is the right design.
