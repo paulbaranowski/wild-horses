@@ -55,6 +55,16 @@ Passing the wrong type to a function.
 
 **`cast()` vs `isinstance()` narrowing — decision rule.** Both silence `reportArgumentType` at a wide-type boundary, but they have different runtime semantics. Use `cast(T, x)` when the producer is an internal contract you control — e.g. a `Dict[str, Any]` returned by your own API client that you know matches a specific `TypedDict`. Use `isinstance(x, T)` (or `isinstance(x, str)` + conditional reassign) when the value crosses a real trust boundary: HTTP response field, user input, subprocess output. The `isinstance` adds a runtime check that catches producer regressions a `cast` would silently swallow. Rule of thumb: cast when the shape is your own invariant; isinstance when an external producer might break the invariant.
 
+### If `None` is the legitimate runtime value, widen the callee — don't coerce at the call site
+
+When pyright complains that `None` is passed where `T` is expected, two fixes silence it equivalently: widen the parameter to `Optional[T]`, or coerce at the call site (`value or default`). They are NOT equivalent.
+
+The widen path preserves what `None` meant. The coerce path replaces `None` with a non-None falsy value that flows downstream into None-aware sinks: `model_dump(exclude_none=True)`, SQL nullability, JSON `null` vs `""`, `len()` semantics. See `reference.md` § "Type-only by default" for the full sink list.
+
+**Default to widening.** Coerce only when the coerced value is genuinely the right runtime value — e.g., `tags = user_tags or []` for an iteration loop where empty-list and None mean the same thing to the loop body.
+
+**Worked example.** `get_insufficient_tokens_error_result(content: str)` was called with content that could legitimately be `None` (model ran out of tokens with no partial output). Coercing `content or ""` at the call site silenced pyright but added an empty-string `content` key to the dumped error dict (since `model_dump(exclude_none=True)` keeps `""`, drops `None`). Two existing tests broke. Fix: widen to `content: Optional[str]`. The underlying `build_error_result(content: Optional[str] = None)` was already None-aware; the widening just made the wrapper honest.
+
 ## TypedDict ↔ `dict[str, Any]` asymmetry
 
 Neither direction is assignable without a cast. That's the surprise — intuition says a `TypedDict` "is a" `dict[str, Any]` structurally, so the `TypedDict → dict[str, Any]` direction should be free. It isn't. Pyright treats them as distinct shapes because TypedDict keys are literal-string-constrained while `dict[str, Any]` keys are any `str`.
