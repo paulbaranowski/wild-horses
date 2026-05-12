@@ -6,6 +6,24 @@ This file documents the post-analysis flow both commands share: the Phase 4 opti
 
 ---
 
+## Autofix mode (skip the menu)
+
+When the orchestrating command has set autofix mode (its `Autofix Check` matched `--autofix [N]`), do **not** present the four-option menu below. Instead, execute the autofix path here. Slug substitution still applies: `<slug>` is `feedback-blockers` or `reasoning-gaps`.
+
+1. **Build the task list via `task-list-builder`** — invoke the skill with arguments `--slug <slug> --md-body-from-context --autofix [N]`. The `--autofix` flag is passed through verbatim from the orchestrator: if the user invoked `--autofix N`, pass `--autofix N`; if they invoked plain `--autofix`, pass plain `--autofix` (no integer). On the builder side, `--autofix` always suppresses its Phase 5 confirmation prompt, and the optional integer N additionally truncates the JSON's `tasks` array to the first N intervention tasks plus their paired test tasks (see the builder's Phase 0 and Phase 4.5 docs). The markdown report retains the full analysis regardless of N — every finding, every intervention, the full coverage check. To work on more interventions later, the user re-invokes `task-list-builder` in rewrite mode against the existing markdown.
+
+   The builder's Phase 5 preview still renders to the conversation so the user has a visible audit trail of what's being written; only the interactive prompt is suppressed. The merged Phase 3 analysis report is already in conversation; `--md-body-from-context` directs the builder to use it verbatim as the MD body.
+
+   When the builder reports back, note the absolute path to the JSON file it wrote (parsed from the `JSON: <path>` line in the builder's Phase 7 summary).
+
+2. **Hand off to `task-list-runner`** — invoke with the absolute JSON path from step 1 and the `--all` flag. The runner consumes whatever is in the JSON; truncation is invisible from its perspective.
+
+After the runner completes, fall through to its Phase 5 final summary. The user sees the same final summary they would have seen via Option 1 from the menu.
+
+If the orchestrator captured `--autofix 0` or a negative integer, it should have rejected the input before reaching this section. If it didn't, refuse here with the same `"--autofix N requires a positive integer"` message — do not silently coerce to 1.
+
+---
+
 ## Phase 4 — Propose
 
 After presenting the merged report from the orchestrator's Phase 3, briefly explain the interventions with trade-offs for each. Then prompt the user:

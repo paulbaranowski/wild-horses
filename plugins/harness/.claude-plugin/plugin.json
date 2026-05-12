@@ -1,7 +1,7 @@
 {
   "name": "harness",
   "description": "feedback-blockers, reasoning-gaps, and setup commands for harness engineering, plus task-list-builder, task-list-runner, and task-list-viewer skills for producing, executing, and inspecting structured task lists. Analyze code for feedback-loop blockers and AI reasoning gaps, build a paired JSON+markdown plan, drive it to completion via sequential foreground Agent calls, or inspect any active plan read-only. Includes a PreToolUse hook that auto-approves invocations of the bundled task_list_cli.py — a JSON task-list mutator under docs/exec-plans/active/ that also runs the file's verifySteps as subprocesses (the `verify` subcommand). (PostToolUse linting hooks moved to the separate linting-hooks plugin.)",
-  "version": "5.10.1",
+  "version": "5.11.2",
   "author": {
     "name": "Paul Baranowski"
   }
