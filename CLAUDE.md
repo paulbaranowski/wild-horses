@@ -32,6 +32,10 @@ plugins/marketplace/               -- plugin root (skills-based)
 - Skills, agents, commands, and hooks go at the **plugin root** level, NOT inside `.claude-plugin/`.
 - Validate with: `claude plugin validate .` or `/plugin validate .`
 
+### Repo hygiene
+
+- **Don't check in specs or plans.** Intermediate artifacts (design docs, implementation plans, brainstorm notes, scratch task lists) belong in the conversation or in a local scratch directory — not in the committed tree. Only commit the resulting code, skills, commands, hooks, and the docs that describe shipped behavior. Why: this repo is a published plugin marketplace, and every committed file is something users will see, search, or load; spec/plan files add noise, get stale immediately, and invite drift between "what we said we'd do" and "what's actually shipped."
+
 ### Versioning
 
 - **Every change to a plugin's content (commands, skills, agents, hooks) requires a version bump in that plugin's `plugin.json`.** Bump patch for fixes, minor for new features/improvements, major for breaking changes.

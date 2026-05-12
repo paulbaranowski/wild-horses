@@ -47,7 +47,7 @@ The three bundled pattern files carry the recipes. The lists below are a summary
 
 General typing patterns, keyed on the rule name pyright prints:
 
-- **`reportOptionalMemberAccess` / `reportOptionalSubscript`** — narrow with `assert x is not None` when the check is checker-only, `raise` when it's a runtime invariant.
+- **`reportOptionalMemberAccess` / `reportOptionalSubscript`** — default to `if x is None: raise ...` for narrowing; reserve `assert x is not None` for the strict case where upstream code pyright can't follow has already guaranteed non-None (the assert is a hint, not a check).
 - **`reportArgumentType`** — widen call-site types (often `Mapping[str, Any]` over `Dict[str, Any]`) instead of casting.
 - **TypedDict ↔ `dict[str, Any]` asymmetry** — widening direction that works with pyright's variance rules.
 - **`reportCallIssue` / no overloads match** — reorder / re-shape args; sometimes a stale `@overload` stack is the culprit.

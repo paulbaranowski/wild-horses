@@ -8,9 +8,13 @@ Access on a value that might be `None`. The reflexive fix is `if x is None: rais
 
 - **Type-only fix (default).** `cast(T, value)` at the call boundary, when validation lives elsewhere (an upstream constructor, a request validator, the producer's own contract). The cast documents the call site's expectation without altering runtime behavior. If the declared type is wrong — e.g. field is annotated `Foo | None` but is always set in `__init__` — fix the declaration instead. That's the most leveraged type-only fix.
 
-- **Narrowing-only fix.** `assert x is not None` _after_ a guard or initialization that proves None is impossible. Pyright narrows through a bare assert; behavior is unchanged. Two caveats: `python -O` strips asserts (so don't rely on them for genuine runtime safety), and unittest's `self.assertIsNotNone(x)` does NOT narrow — it fails the test at runtime but pyright still sees the wide type. Use the bare `assert` for narrowing; optionally pair it with `assertIsNotNone` for the nicer failure message in tests.
+- **Narrowing-only fix (`assert`) — the strict case only.** `assert x is not None` _hints_ to pyright about a value that is **already** non-None at runtime by upstream code pyright can't follow (set in `__init__` then accessed across a method/await boundary; guaranteed by a third-party library invariant; just-assigned attribute lost across an intervening call). The assert documents the fact for the type checker; it cannot meaningfully fire. If the assert _could_ fire — i.e. its truth is what the function is enforcing rather than describing — it does not belong in this bucket; use `raise`. Two caveats: `python -O` strips asserts (so the value must already be non-None for behavior to be preserved), and unittest's `self.assertIsNotNone(x)` does NOT narrow — it fails the test at runtime but pyright still sees the wide type. Use the bare `assert` for narrowing; optionally pair it with `assertIsNotNone` for the nicer failure message in tests.
 
-- **Behavior-changing fix.** `if x is None: raise ValueError(...)` — _only when this function is the validation point_. Adds a new exception path. Before adding, confirm two things: (a) the surrounding orchestrator doesn't assume this function can accept None and report failure through a different channel (a database `STATE_FAILED` row, a structured error response, an outer try/except that classifies the error); and (b) the raise sits in the right place — a raise added before the existing call site bypasses any create-before-validate ordering downstream code depends on. See `reference.md` § "Assert vs raise for type narrowing" for the test-vs-production angle.
+- **Behavior-changing fix (`raise`) — the default for narrowing helpers.** `if x is None: raise ...` is the right tool whenever the check itself is what enforces the invariant. Two common shapes:
+  - **Narrowing helper / `_require_*()` method.** A function whose return type promises a non-None value (`def _require_df(self) -> pd.DataFrame:`) is the validation point — its callers depend on the narrowing actually happening at runtime. `assert` is wrong here: under `python -O` the helper silently returns `None` to callers that immediately dereference it. Use `raise RuntimeError("...")` (or a domain exception). See `reference.md` § "Assert vs raise for type narrowing".
+  - **Function-level validation.** `if x is None: raise ValueError(...)` _when this function is the validation point_ for a parameter or attribute the rest of the body depends on. Adds a new exception path. Before adding, confirm two things: (a) the surrounding orchestrator doesn't assume this function can accept None and report failure through a different channel (a database `STATE_FAILED` row, a structured error response, an outer try/except that classifies the error); and (b) the raise sits in the right place — a raise added before the existing call site bypasses any create-before-validate ordering downstream code depends on.
+
+  Pick the exception type for the meaning, not the convention: `RuntimeError` for lifecycle violations ("you forgot to call `load_file()`"), `ValueError` for malformed input, a custom exception when the failure has a name your callers want to handle.
 
 The primary axis is **"is this function the validation point?"** — not "is this production or test code?" If validation belongs elsewhere, default to the type-only fix even in production code.
 
@@ -44,7 +48,7 @@ For orchestrator-level detection across a partition, see `reference.md` § "Cons
 
 Passing the wrong type to a function.
 
-- Narrow with `assert x is not None`.
+- Narrow with `if x is None: raise ...` (default), or `assert x is not None` only when the value is already non-None by upstream code pyright can't follow — see `reportOptionalMemberAccess` above and `reference.md` § "Assert vs raise for type narrowing".
 - Cast with `typing.cast(TargetType, value)` at API boundaries where the runtime value is known to match but the declared type is wider.
 - **`click.Choice(['a','b'])`** returns `str` at the type level even though values are constrained. Cast to the `Literal` at the CLI boundary: `cast(Literal['a','b'], value)`.
 - **Passing a `TypedDict` / pydantic model where `dict[str, Any]` is expected:** `dict(td)` for TypedDict, `model_dump()` for pydantic, or widen the callee's signature if you own it.
@@ -90,6 +94,8 @@ Often caused by `assertAlmostEqual(x, y)` when `x: float | None`. The protocol r
 assert result.some_field is not None
 self.assertAlmostEqual(result.some_field, 0.5)
 ```
+
+`assert` is appropriate here because this is test code — the surrounding test setup has already guaranteed `result.some_field` is set, the assert is a hint to pyright about a fact already true, and a failing assert just fails the test (no `-O` strip-under-prod concern). In _production_ code, narrowing the same way calls for `if x is None: raise ...` — see `reportOptionalMemberAccess` above.
 
 If a whole block reads the same `result`, one `assert result is not None` at the top of the block narrows for everything below it.
 
@@ -259,7 +265,7 @@ The annotation lives inside `__init__` on the assignment line; no separate class
 ```python
 self.client_id: Optional[str]
 if config:
-    self.client_id = config.google_client_id        # narrows str → Optional[str]
+    self.client_id = config.google_client_id
 else:
     self.client_id = os.getenv("HERDS_GOOGLE_CLIENT_ID")
 ```
@@ -687,11 +693,14 @@ If this matches your team's style, add it to the project's contributor guide / `
 
 ## `reportGeneralTypeIssues` / `"None" is not iterable`
 
-`for x in maybe_none:` when `maybe_none: list[...] | None`. Add `assert maybe_none is not None` before the loop, or use `for x in maybe_none or []:` if empty-iteration is the desired fallback.
+`for x in maybe_none:` when `maybe_none: list[...] | None`. Pick by intent:
+
+- **Empty-iteration is the right fallback:** `for x in maybe_none or []:` (type-only — the `or []` branch is unreachable given the existing data flow but satisfies pyright).
+- **`None` shouldn't reach this loop:** `if maybe_none is None: raise ...` before the loop. Default to this over `assert maybe_none is not None` — see `reportOptionalMemberAccess` above. `assert` is acceptable only when something upstream pyright can't follow has already guaranteed non-None.
 
 ## `reportOptionalOperand` _(usually type-only; raise variant is behavior-changing — same principle as `reportOptionalMemberAccess`)_
 
-`result + 1` when `result: int | None`. Same fix: narrow with an assert first.
+`result + 1` when `result: int | None`. Same shape as `reportOptionalMemberAccess`: prefer the type-only fix (`cast`, declaration fix, or default-coalesce like `(result or 0) + 1` when zero is the right semantic fallback). When narrowing is required, default to `if result is None: raise ...`; reserve `assert` for the strict case where upstream code pyright can't follow has already guaranteed non-None.
 
 ## `reportMissingImports`
 
@@ -747,6 +756,29 @@ Pyright sees imports inside `if TYPE_CHECKING:` blocks when type-checking but sk
 **The gotcha.** Without `from __future__ import annotations` (PEP 563), bare annotations still evaluate at runtime — `BillingClient` would raise `NameError` because the import didn't happen. Two fixes: quote the annotation (`def process(client: "BillingClient") -> None:`), or add the future import at the top of the file. The future import is usually cleaner — it makes _all_ annotations strings, not just the guarded one.
 
 **Don't overuse.** `TYPE_CHECKING` hides imports from readers who grep for dependencies. Use it for the two cases above, not as a generic "this import is only for annotations" cleanup. One-off type-only imports in an otherwise normal module don't need the machinery — normal imports are fine.
+
+## Quoted type annotations: default off _(type-only — affects readability and runtime evaluation, not what pyright sees)_
+
+When you touch a function signature or variable annotation, **do not wrap the type in quotes** unless one of these specific reasons applies:
+
+1. **Self-reference inside a class body** — `def clone(self) -> "MyClass":` where `MyClass` isn't yet defined at the `def` line.
+2. **Forward reference to a name defined later in the same file** — annotation mentions a class declared further down.
+3. **Symbol only exists under `TYPE_CHECKING`** — see the preceding section. The cleaner alternative is `from __future__ import annotations`, which makes _every_ annotation a string and removes the per-site decision.
+4. **PEP 604 `X | Y` syntax on Python < 3.10** — raises `TypeError` at runtime on 3.9 and below. Not relevant if the project's `pyproject.toml` / `setup.cfg` requires 3.10+.
+
+If none of the four apply, write the annotation bare:
+
+```python
+# Wrong — pd is imported normally, project is 3.11+, no forward reference
+row: "pd.Series | Dict[str, Any]"
+
+# Right
+row: pd.Series | Dict[str, Any]
+```
+
+**Why it matters.** Quotes turn the annotation into an opaque string at function-def time, which means a typo'd identifier (`"Pd.Series"`) won't surface as a `NameError` the way a bare reference would — it sits dormant until someone calls `typing.get_type_hints()` or a runtime-typing library (pydantic, dataclasses with `eval_str=True`) tries to resolve it. For pyright specifically, quoted vs. unquoted is identical — pyright reads the AST and resolves both forms the same way. So gratuitous quoting costs you one runtime check and gains you nothing.
+
+**During a fix.** If the original annotation was already quoted and reason 1–4 doesn't apply, drop the quotes as part of the touch. If the original was bare, leave it bare — don't add quotes "to be safe."
 
 ## Assigning `bool | None` to a `bool` field _(behavior-changing — picks a default for None; type-only alternative is to widen the field to `Optional[bool]`)_
 

@@ -213,6 +213,8 @@ def _log_retry(retry_state: RetryCallState) -> None:
     logger.warning("Retry %d after %s", retry_state.attempt_number, exc)
 ```
 
+This is the canonical case where `assert` (not `raise`) is the correct narrowing tool: tenacity's framework contract guarantees `outcome` is non-None at this call site, so the assert is a _hint_ to pyright about a fact already true rather than a runtime check that could meaningfully fire. If `python -O` strips it, behavior is unchanged because the value was already non-None. Contrast with the narrowing-helper anti-pattern (`def _require_df(self) -> pd.DataFrame: assert self.df is not None`), where the assert IS the check and stripping it silently breaks callers — see `reference.md` § "Assert vs raise for type narrowing".
+
 ## pymongo `OperationFailure` — `has_error_label` over private attr
 
 Reading `e._OperationFailure__details.get("errorLabels", [])` to detect transient transactions is a name-mangled private-attribute access; pyright flags it, and pymongo can rearrange internals between versions. The public API is documented:
