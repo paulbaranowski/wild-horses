@@ -275,6 +275,11 @@ def _staging_read(staging_path: Path) -> dict:
             data = json.load(f)
     except OSError as e:
         raise TaskCliError(f"staging file {staging_path}: {e}", code=1) from e
+    except UnicodeDecodeError as e:
+        raise TaskCliError(
+            f"staging file {staging_path} is not valid UTF-8: {e}",
+            code=13,
+        ) from e
     except json.JSONDecodeError as e:
         raise TaskCliError(
             f"staging file {staging_path} is not valid JSON: {e.msg}", code=1
@@ -395,6 +400,18 @@ def cmd_publish(args: argparse.Namespace, data: dict, path: Path) -> None:
         )
     staging = _staging_path(path, args.id)
     staging_data = _staging_read(staging)
+    if staging_data.get("task_id") != args.id:
+        raise TaskCliError(
+            f"staging file {staging} task_id mismatch "
+            f"(file says {staging_data.get('task_id')!r}, expected {args.id})",
+            code=1,
+        )
+    if staging_data.get("task_file") != str(path.resolve()):
+        raise TaskCliError(
+            f"staging file {staging} task_file mismatch "
+            f"(file says {staging_data.get('task_file')!r}, expected {path.resolve()})",
+            code=1,
+        )
     commit_msg = staging_data["commit_msg"]
     staged = subprocess.run(
         ["git", "diff", "--cached", "--name-only"],

@@ -1235,6 +1235,60 @@ class CliTestCase(unittest.TestCase):
         self.assertEqual(result.returncode, 10, result.stderr)
         self.assertIn("not found", result.stderr)
 
+    def test_publish_staging_file_invalid_utf8_exits_thirteen(self):
+        # _staging_read opens with encoding="utf-8"; a corrupt staging
+        # file that contains non-UTF-8 bytes must surface as a clean
+        # TaskCliError (exit 13), matching the convention used by
+        # load_and_validate (line 93) and _read_log_input (line 212).
+        # Without the explicit handler, the decode error escapes the
+        # try block and crashes the CLI with a raw traceback.
+        self._init_git_repo()
+        staging = self._make_drafted(task_id=2, commit_msg="ok", log="x")
+        # Overwrite the valid staging file with bytes that fail UTF-8
+        staging.write_bytes(b"\xff\xfe not utf-8 bytes \x80")
+        result = self.run_cli("publish", "--id", "2", cwd=self.tmp_dir)
+        self.assertEqual(result.returncode, 13, result.stderr)
+        self.assertIn("not valid UTF-8", result.stderr)
+        # No commit, task remains drafted
+        self.assertEqual(self.read_task_file()["tasks"][1]["status"], "drafted")
+        self.assertEqual(self._git_log_subjects(), ["seed"])
+
+    def test_publish_staging_task_id_mismatch_rejected(self):
+        # Defense against a stale or hand-tampered staging file: even if
+        # the per-task path scheme makes collision improbable, publishing
+        # with the wrong task_id payload would commit work under the
+        # wrong subject. The identity check refuses to proceed.
+        self._init_git_repo()
+        staging = self._make_drafted(task_id=2, commit_msg="real", log="x")
+        # Hand-rewrite the staging payload with a mismatched task_id
+        payload = json.loads(staging.read_text(encoding="utf-8"))
+        payload["task_id"] = 999
+        staging.write_text(json.dumps(payload), encoding="utf-8")
+        self._stage_file("a.txt", "1\n")
+        result = self.run_cli("publish", "--id", "2", cwd=self.tmp_dir)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("task_id mismatch", result.stderr)
+        # Task stays drafted, no commit
+        self.assertEqual(self.read_task_file()["tasks"][1]["status"], "drafted")
+        self.assertEqual(self._git_log_subjects(), ["seed"])
+
+    def test_publish_staging_task_file_mismatch_rejected(self):
+        # Same defense, but for the task_file path. Catches the case
+        # where the same task list lives at two paths (e.g., a moved
+        # or renamed file) and publish is called against the new path
+        # while the staging payload still references the old one.
+        self._init_git_repo()
+        staging = self._make_drafted(task_id=2, commit_msg="real", log="x")
+        payload = json.loads(staging.read_text(encoding="utf-8"))
+        payload["task_file"] = "/some/other/path/tasks.json"
+        staging.write_text(json.dumps(payload), encoding="utf-8")
+        self._stage_file("a.txt", "1\n")
+        result = self.run_cli("publish", "--id", "2", cwd=self.tmp_dir)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("task_file mismatch", result.stderr)
+        self.assertEqual(self.read_task_file()["tasks"][1]["status"], "drafted")
+        self.assertEqual(self._git_log_subjects(), ["seed"])
+
     # ---- atomicity -----------------------------------------------------
 
     def test_successful_write_leaves_no_tmp_file(self):
