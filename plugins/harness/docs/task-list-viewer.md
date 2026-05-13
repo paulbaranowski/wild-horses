@@ -18,7 +18,7 @@ When no `--file` is given, the viewer auto-locates the active JSON in `docs/exec
 **Summary view (no task ID):**
 
 - Task file path
-- Counts: total, complete, in-progress, pending, failed
+- Counts: total, complete, in-progress, drafted, pending, failed
 - The paired markdown plan path
 - The in-progress task ID (if any)
 - Pending task titles
@@ -31,4 +31,4 @@ When no `--file` is given, the viewer auto-locates the active JSON in `docs/exec
 
 Uses the same CLI as [task-list-runner](task-list-runner.md) (`task_list_cli.py`), but only the **read-only verbs**: `status`, `list [--status pending|in-progress]`, `get --id <N>`. A single CLI keeps the viewer's interpretation of the file in lockstep with the runner's.
 
-The viewer never calls mutation verbs (`next`, `start`, `finish`, `verify`), even though they're available — viewing must not change the file. If a user asks _"what should I work on next?"_ or _"mark task 3 done"_ mid-session, point them at [task-list-runner](task-list-runner.md) instead.
+The viewer never calls mutation verbs (`next`, `start`, `draft`, `publish`, `set-status`, `verify`), even though they're available — viewing must not change the file. If a user asks _"what should I work on next?"_ or _"mark task 3 done"_ mid-session, point them at [task-list-runner](task-list-runner.md) instead.

@@ -76,9 +76,32 @@ A minimal valid file lives at `skills/task-list-builder/example.json`.
 - `effort` — `"low" | "medium" | "high"`.
 - `createsNewCode` — `true` if the intervention creates new callable code (functions, classes, methods, services, models, protocols), `false` if it only restructures, annotates, or documents existing code. **Determines whether a paired test task is generated** (see "Paired test tasks" below).
 - `agentValidations` — input array for the per-task validation prompt. After the runner executes `verifySteps` (the test / lint / typecheck commands), it dispatches a fresh-context validation subagent and passes this array as the list of statements for the subagent to evaluate by reading code. Each entry is one factual statement about the post-change code state; the subagent confirms it PASS or FAIL with `file:line` evidence. The schema-level rule for what belongs here is structural, not stylistic: **if you can write a shell command that answers the question, it belongs in `verifySteps`, not here**. The validation subagent has no way to evaluate command-answerable conditions except by re-running the commands `verifySteps` already ran (the duplicate-work pattern this design exists to prevent) or by rubber-stamping the result, so entries like `"Tests pass"`, `"No type errors"`, `"No lint errors"`, or `"Compiles"` are forbidden. Use this for facts only inspection can confirm: structural facts (`"validate_session is defined at module scope in src/auth/middleware.py"`), behavioral facts visible in code (``"`AuthMiddleware.__call__` delegates token validation to `validate_session`"``), or documentation facts (`"module docstring lists validate_session under the public API"`). Avoid vague entries like `"looks good"` or `"code is clean"` — the subagent reports `file:line` evidence, so each entry must have an inspectable target.
-- `status` — `"pending" | "in-progress" | "complete" | "failed"`. New tasks always start as `"pending"`.
-- `log` — `null` when pending; a string describing what was done (or what went wrong) when in-progress / complete / failed.
+- `status` — `"pending" | "in-progress" | "drafted" | "complete" | "failed"`. New tasks always start as `"pending"`. See "State transitions" below.
+- `log` — `null` when pending; a string describing what was done (or what went wrong) when in-progress / drafted / complete / failed.
 - `verifySteps` (optional) — array of `{name, command}` objects in the same shape as the top-level array. When present, **replaces** the top-level `verifySteps` for this task's `verify --id <N>` call (the runner does not merge the two arrays). At least one step is required when the field is present; an empty array is rejected by the validator. Omit the field entirely to inherit the top-level default.
+
+## State transitions
+
+Status moves through a fixed state machine, enforced by `task_list_cli.py`:
+
+```text
+pending ──start/next──▶ in-progress ──draft──▶ drafted ──publish──▶ complete
+                            │                      │
+                            └──set-status failed───┴──▶ failed
+```
+
+| From          | To            | Verb                                  | Side effects                                                                                                                                                                                                |
+| ------------- | ------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pending`     | `in-progress` | `start --id N` or `next`              | Atomic claim. `next` flips the first pending task or returns an already-in-progress one.                                                                                                                    |
+| `in-progress` | `drafted`     | `draft --id N --commit-msg ...`       | Writes the log into the task; writes the commit subject to a per-task staging file at `/tmp/harness-stage-<hash>-<N>.json`. Does not touch git.                                                             |
+| `drafted`     | `complete`    | `publish --id N`                      | Reads the staging file, runs `git commit -m "<staged subject>"` against the already-staged git index, then sets status. Atomic-ish: commit first, status second.                                            |
+| `in-progress` | `complete`    | `set-status --id N --status complete` | No-commit completion (e.g., investigation tasks that produced no code change). The runner doesn't enforce "must publish to complete" — `set-status complete` is allowed from `in-progress` for these cases. |
+| `in-progress` | `failed`      | `set-status --id N --status failed`   | Implementation gave up; no commit, no staging.                                                                                                                                                              |
+| `drafted`     | `failed`      | `set-status --id N --status failed`   | Validation rejected the draft after retries. **Staging file is intentionally NOT removed** — leaves the implementer evidence to inspect.                                                                    |
+
+`drafted` is **non-terminal**: it counts toward `status.remaining` and appears in `remaining` listings, so a `drafted` task across a runner restart is automatically picked up by the next iteration's "is anything mid-flight?" check.
+
+The `pending → drafted` and `drafted → in-progress` transitions are not allowed. A drafted task that needs more code changes goes back through `set-status failed` (then re-planning) — the schema doesn't model "un-draft".
 
 ## Per-task `verifySteps` override
 

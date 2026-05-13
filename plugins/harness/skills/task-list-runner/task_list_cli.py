@@ -8,6 +8,7 @@ silent-corruption class of bug it caused.
 See SKILL.md in the same directory for invocation patterns.
 """
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -16,8 +17,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-VALID_STATUSES = {"pending", "in-progress", "complete", "failed"}
-NON_TERMINAL_STATUSES = {"pending", "in-progress"}
+VALID_STATUSES = {"pending", "in-progress", "drafted", "complete", "failed"}
+NON_TERMINAL_STATUSES = {"pending", "in-progress", "drafted"}
 
 
 class HelpfulArgumentParser(argparse.ArgumentParser):
@@ -186,6 +187,112 @@ def find_task(data: dict, task_id: int, file_path: Path) -> dict:
     raise TaskCliError(f"task id {task_id} not found in {file_path}", code=10)
 
 
+def _read_log_input(log_arg: str) -> str:
+    """Resolve the `--log-file` argument to its UTF-8 string contents.
+
+    Shared by `set-status` and `draft` — both accept either a file path or
+    `-` (read from stdin). Centralised so the stdin/file branching, error
+    mapping (UnicodeDecodeError → exit 13, missing file → exit 1), and the
+    one-trailing-newline strip stay consistent across the two callers.
+    """
+    if log_arg == "-":
+        try:
+            content = sys.stdin.read()
+        except UnicodeDecodeError as e:
+            raise TaskCliError(f"stdin is not valid UTF-8: {e}", code=13) from e
+    else:
+        log_path = Path(log_arg)
+        if not log_path.is_file():
+            raise TaskCliError(f"log file {log_path}: no such file or not readable", code=1)
+        try:
+            content = log_path.read_text(encoding="utf-8")
+        except OSError as e:
+            raise TaskCliError(f"log file {log_path}: {e}", code=1) from e
+        except UnicodeDecodeError as e:
+            raise TaskCliError(f"log file {log_path} is not valid UTF-8: {e}", code=13) from e
+    if content.endswith("\n"):
+        content = content[:-1]
+    return content
+
+
+def _staging_path(task_file: Path, task_id: int) -> Path:
+    """Per-task-file, per-task staging path under /tmp.
+
+    Hashes the absolute task-file path so two worktrees driving different
+    task files (or the same file with different IDs) cannot collide. 12
+    hex chars of md5 is plenty — collisions would require deliberate
+    crafting and the cost is just an overwrite of someone else's staging
+    file, which the runner detects on the next status-check anyway.
+    """
+    digest = hashlib.md5(str(task_file.resolve()).encode("utf-8")).hexdigest()[:12]
+    return Path(f"/tmp/harness-stage-{digest}-{task_id}.json")
+
+
+def _staging_write(staging_path: Path, payload: dict) -> None:
+    """Atomic write to the staging file (tmp + os.replace).
+
+    Same atomicity property as write_atomic for the task JSON: a crash
+    mid-write leaves either the previous staging file or no staging file —
+    never a half-written one. The staging file's only consumer is
+    `publish`, which validates required keys before acting on it.
+    """
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{staging_path.name}.",
+        suffix=".tmp",
+        dir=str(staging_path.parent),
+    )
+    os.close(fd)
+    tmp = Path(tmp_name)
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, staging_path)
+    except Exception:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _staging_read(staging_path: Path) -> dict:
+    """Read + minimally validate the staging file's required keys.
+
+    `publish` calls this; missing/malformed staging files exit 1 (IO/
+    precondition) rather than 12 (schema), since the staging file is
+    runtime scratch state, not part of the schema-governed task JSON.
+    """
+    if not staging_path.is_file():
+        raise TaskCliError(
+            f"staging file {staging_path} not found — was `draft --id <N>` called first?",
+            code=1,
+        )
+    try:
+        with staging_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except OSError as e:
+        raise TaskCliError(f"staging file {staging_path}: {e}", code=1) from e
+    except UnicodeDecodeError as e:
+        raise TaskCliError(
+            f"staging file {staging_path} is not valid UTF-8: {e}",
+            code=13,
+        ) from e
+    except json.JSONDecodeError as e:
+        raise TaskCliError(
+            f"staging file {staging_path} is not valid JSON: {e.msg}", code=1
+        ) from e
+    if not isinstance(data, dict):
+        raise TaskCliError(f"staging file {staging_path} must contain a JSON object", code=1)
+    if not isinstance(data.get("commit_msg"), str) or not data["commit_msg"].strip():
+        raise TaskCliError(
+            f"staging file {staging_path} missing or empty `commit_msg`", code=1
+        )
+    return data
+
+
 def cmd_start(args: argparse.Namespace, data: dict, path: Path) -> None:
     task = find_task(data, args.id, path)
     if task["status"] != "pending":
@@ -197,37 +304,151 @@ def cmd_start(args: argparse.Namespace, data: dict, path: Path) -> None:
     write_atomic(path, data)
 
 
-def cmd_finish(args: argparse.Namespace, data: dict, path: Path) -> None:
+def cmd_set_status(args: argparse.Namespace, data: dict, path: Path) -> None:
+    """Move a task to a terminal status without touching git.
+
+    Allowed transitions:
+      in-progress → complete  (no-code tasks like investigation work)
+      in-progress → failed    (implementation gave up)
+      drafted     → failed    (validation rejected the draft after retries)
+
+    Disallowed: drafted → complete. Force the happy path through `publish`
+    so a task cannot reach `complete` without a corresponding git commit.
+    """
+    task = find_task(data, args.id, path)
+    current = task["status"]
+    if current == "in-progress":
+        if args.status not in ("complete", "failed"):
+            raise TaskCliError(
+                f'cannot set-status task {args.id} to "{args.status}" from "in-progress"; '
+                'expected "complete" or "failed"',
+                code=11,
+            )
+    elif current == "drafted":
+        if args.status != "failed":
+            raise TaskCliError(
+                f'cannot set-status task {args.id} to "{args.status}" from "drafted"; '
+                'only "failed" is allowed (use `publish` for the success path)',
+                code=11,
+            )
+    else:
+        raise TaskCliError(
+            f'cannot set-status task {args.id}: current status is "{current}", '
+            'expected "in-progress" or "drafted"',
+            code=11,
+        )
+    task["status"] = args.status
+    task["log"] = _read_log_input(args.log_file)
+    write_atomic(path, data)
+
+
+def cmd_draft(args: argparse.Namespace, data: dict, path: Path) -> None:
+    """Move an in-progress task to `drafted`, parking the commit message.
+
+    Writes the log into the task's `log` field (so it's persisted in the
+    schema-governed file even if the staging file disappears) and writes
+    the commit subject into a per-task staging file. Does NOT touch git —
+    `publish` is the only place git is invoked. The split exists so the
+    runner-level validation step happens *between* `draft` and `publish`,
+    and a validation failure can re-route to `set-status failed` without
+    needing a "rollback the commit" path.
+    """
     task = find_task(data, args.id, path)
     if task["status"] != "in-progress":
         raise TaskCliError(
-            f'cannot finish task {args.id}: current status is "{task["status"]}", expected "in-progress"',
+            f'cannot draft task {args.id}: current status is "{task["status"]}", expected "in-progress"',
             code=11,
         )
-    if args.log_file == "-":
-        # Unix convention: `-` means read from stdin. Lets the agent pipe a
-        # heredoc directly without an intermediate /tmp file (and the Write-
-        # tool classifier gating that comes with one). Heredoc content is
-        # verbatim bytes from the shell — no shell-arg quoting hazard.
-        try:
-            log_content = sys.stdin.read()
-        except UnicodeDecodeError as e:
-            raise TaskCliError(f"stdin is not valid UTF-8: {e}", code=13) from e
-    else:
-        log_path = Path(args.log_file)
-        if not log_path.is_file():
-            raise TaskCliError(f"log file {log_path}: no such file or not readable", code=1)
-        try:
-            log_content = log_path.read_text(encoding="utf-8")
-        except OSError as e:
-            raise TaskCliError(f"log file {log_path}: {e}", code=1) from e
-        except UnicodeDecodeError as e:
-            raise TaskCliError(f"log file {log_path} is not valid UTF-8: {e}", code=13) from e
-    if log_content.endswith("\n"):
-        log_content = log_content[:-1]
-    task["status"] = args.status
+    commit_msg = args.commit_msg.strip()
+    if not commit_msg:
+        raise TaskCliError("--commit-msg must be a non-empty string", code=2)
+    log_content = _read_log_input(args.log_file)
+    staging = _staging_path(path, args.id)
+    _staging_write(
+        staging,
+        {
+            "task_id": args.id,
+            "task_file": str(path.resolve()),
+            "commit_msg": commit_msg,
+        },
+    )
+    task["status"] = "drafted"
     task["log"] = log_content
     write_atomic(path, data)
+    print(f"drafted task {args.id}; staging at {staging}")
+
+
+def cmd_publish(args: argparse.Namespace, data: dict, path: Path) -> None:
+    """Move a drafted task to `complete`, running `git commit` first.
+
+    Order matters: commit first, status second. If the commit fails (e.g.,
+    a pre-commit hook rejects it), the task stays `drafted` and the
+    staging file stays put — the runner can fix the underlying issue and
+    re-run `publish --id <N>` without re-implementing the task.
+
+    Trust model: the git index is assumed already populated by the
+    implementation agent's `git add <files>`. We verify the index has at
+    least one staged file before invoking `git commit` so the failure
+    mode is "you forgot to stage" with a useful message rather than git's
+    less-actionable "nothing to commit, working tree clean".
+    """
+    task = find_task(data, args.id, path)
+    if task["status"] != "drafted":
+        raise TaskCliError(
+            f'cannot publish task {args.id}: current status is "{task["status"]}", expected "drafted"',
+            code=11,
+        )
+    staging = _staging_path(path, args.id)
+    staging_data = _staging_read(staging)
+    if staging_data.get("task_id") != args.id:
+        raise TaskCliError(
+            f"staging file {staging} task_id mismatch "
+            f"(file says {staging_data.get('task_id')!r}, expected {args.id})",
+            code=1,
+        )
+    if staging_data.get("task_file") != str(path.resolve()):
+        raise TaskCliError(
+            f"staging file {staging} task_file mismatch "
+            f"(file says {staging_data.get('task_file')!r}, expected {path.resolve()})",
+            code=1,
+        )
+    commit_msg = staging_data["commit_msg"]
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        capture_output=True,
+        text=True,
+    )
+    if staged.returncode != 0:
+        raise TaskCliError(
+            f"git diff --cached failed (are we in a git repo?): {staged.stderr.strip()}",
+            code=15,
+        )
+    if not staged.stdout.strip():
+        raise TaskCliError(
+            f"no files staged for commit (git index is empty); did the implementation "
+            f"agent forget `git add` for task {args.id}?",
+            code=15,
+        )
+    commit = subprocess.run(
+        ["git", "commit", "-m", commit_msg],
+        capture_output=True,
+        text=True,
+    )
+    if commit.returncode != 0:
+        # Surface git's stderr verbatim — pre-commit hook rejections, signing
+        # failures, etc. all live there and are typically actionable.
+        raise TaskCliError(
+            f"git commit failed (task stays drafted; staging file preserved):\n"
+            f"{commit.stderr.strip() or commit.stdout.strip()}",
+            code=15,
+        )
+    task["status"] = "complete"
+    write_atomic(path, data)
+    try:
+        staging.unlink()
+    except FileNotFoundError:
+        pass
+    print(f"published task {args.id}; commit subject: {commit_msg}")
 
 
 def cmd_get(args: argparse.Namespace, data: dict, path: Path) -> None:
@@ -260,18 +481,20 @@ def cmd_status(args: argparse.Namespace, data: dict, path: Path) -> None:
     # schema enum value in tasks[].status is still "in-progress" — only
     # the summary count key is renamed.
     #
-    # `remaining` here is a precomputed integer (pending + in_progress)
-    # so the halt-gate can read one number without agent-side math. The
-    # full task array lives behind the separate `remaining` subcommand —
-    # Phase 3 calls it once for the user-facing summary; the loop's hot
-    # path never pays for that payload.
+    # `remaining` here is a precomputed integer summed from the same
+    # NON_TERMINAL_STATUSES set the `remaining` subcommand filters on,
+    # so the halt-gate count and the listing cannot disagree. `drafted`
+    # is non-terminal (the runner still owes it a publish-or-fail call),
+    # so it counts toward remaining; otherwise the loop would exit
+    # leaving uncommitted code in the index and a stale staging file.
     summary = {
         "total": len(data["tasks"]),
         "pending": counts["pending"],
         "in_progress": counts["in-progress"],
+        "drafted": counts["drafted"],
         "complete": counts["complete"],
         "failed": counts["failed"],
-        "remaining": counts["pending"] + counts["in-progress"],
+        "remaining": sum(counts[s] for s in NON_TERMINAL_STATUSES),
         "plan": data.get("plan"),
     }
     print(json.dumps(summary, indent=2, ensure_ascii=False))
@@ -358,6 +581,22 @@ def cmd_verify(args: argparse.Namespace, data: dict, path: Path) -> None:
 def cmd_next(args: argparse.Namespace, data: dict, path: Path) -> None:
     del args
     tasks = data["tasks"]
+    # Architectural invariant: a drafted task blocks `next`. A drafted task
+    # means the implementation agent finished but the runner has not yet
+    # called `publish` or `set-status failed` for it — typically because the
+    # runner crashed between draft and validation. Force the runner to
+    # resolve it (publish on validation pass, set-status failed on retry
+    # exhaustion) before claiming new work, otherwise the staging file
+    # would be orphaned and the git index would carry stale staged changes
+    # into the next task.
+    for task in tasks:
+        if task["status"] == "drafted":
+            raise TaskCliError(
+                f'task {task["id"]} is drafted; resolve via '
+                f'`publish --id {task["id"]}` or `set-status --id {task["id"]} --status failed` '
+                "before claiming new work",
+                code=11,
+            )
     # Resume preference: an already-in-progress task means a previous iteration
     # crashed mid-task. Return it without changing status so the agent can
     # finish what it started.
@@ -399,20 +638,49 @@ def build_parser() -> argparse.ArgumentParser:
     p_start = sub.add_parser("start", help="flip task <id> from pending → in-progress")
     p_start.add_argument("--id", type=int, required=True, help="task id")
 
-    p_finish = sub.add_parser("finish", help="flip task <id> from in-progress → complete|failed")
-    p_finish.add_argument("--id", type=int, required=True, help="task id")
-    p_finish.add_argument(
+    p_set_status = sub.add_parser(
+        "set-status",
+        help="flip task <id> to a terminal status (in-progress→complete|failed, drafted→failed). "
+        "Use `publish` for the drafted→complete success path.",
+    )
+    p_set_status.add_argument("--id", type=int, required=True, help="task id")
+    p_set_status.add_argument(
         "--status",
         required=True,
         choices=["complete", "failed"],
         help="terminal status to set",
     )
-    p_finish.add_argument(
+    p_set_status.add_argument(
         "--log-file",
         required=True,
         help="path to a file whose contents become the task's log field, "
         "or `-` to read from stdin (use a quoted heredoc to avoid shell quoting)",
     )
+
+    p_draft = sub.add_parser(
+        "draft",
+        help="flip task <id> from in-progress → drafted; writes log into the task and "
+        "the commit subject into a per-task /tmp staging file. Does not touch git.",
+    )
+    p_draft.add_argument("--id", type=int, required=True, help="task id")
+    p_draft.add_argument(
+        "--commit-msg",
+        required=True,
+        help="single-line commit subject; consumed later by `publish`",
+    )
+    p_draft.add_argument(
+        "--log-file",
+        required=True,
+        help="path to a file whose contents become the task's log field, "
+        "or `-` to read from stdin (use a quoted heredoc to avoid shell quoting)",
+    )
+
+    p_publish = sub.add_parser(
+        "publish",
+        help="flip task <id> from drafted → complete; runs `git commit` against the "
+        "already-staged git index using the staged subject. Removes the staging file on success.",
+    )
+    p_publish.add_argument("--id", type=int, required=True, help="task id")
 
     p_get = sub.add_parser("get", help="print one task as pretty JSON to stdout")
     p_get.add_argument("--id", type=int, required=True, help="task id")
@@ -429,7 +697,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser(
         "remaining",
-        help="print non-terminal tasks (pending + in-progress) as a compact JSON array (id, title, effort, status)",
+        help="print non-terminal tasks (pending + in-progress + drafted) as a compact JSON array (id, title, effort, status)",
     )
 
     p_verify = sub.add_parser(
@@ -456,7 +724,9 @@ def main() -> int:
         data = load_and_validate(path)
         dispatch = {
             "start": cmd_start,
-            "finish": cmd_finish,
+            "set-status": cmd_set_status,
+            "draft": cmd_draft,
+            "publish": cmd_publish,
             "get": cmd_get,
             "next": cmd_next,
             "status": cmd_status,

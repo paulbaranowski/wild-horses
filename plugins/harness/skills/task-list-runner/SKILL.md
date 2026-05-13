@@ -18,18 +18,20 @@ The schema this skill consumes is defined in `${CLAUDE_PLUGIN_ROOT}/task-list-sc
 
 ## CLI reference — `task_list_cli.py`
 
-The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py` is the canonical interface to the task file. **Subcommands:** `next`, `start`, `finish`, `get`, `list`, `status`, `remaining`, `verify`. All take `--file <task-file-path>`. **Don't invent verbs** like `show`, `inspect`, `info`, or `view` — argparse rejects anything outside the list above and prints the full subcommand help on rejection, so a wrong guess costs one wasted call but the right verb is always one of the eight names just enumerated.
+The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py` is the canonical interface to the task file. **Subcommands:** `next`, `start`, `set-status`, `draft`, `publish`, `get`, `list`, `status`, `remaining`, `verify`. All take `--file <task-file-path>`. **Don't invent verbs** like `show`, `inspect`, `info`, or `view` — argparse rejects anything outside the list above and prints the full subcommand help on rejection, so a wrong guess costs one wasted call but the right verb is always one of the ten names just enumerated.
 
-- **`next`** — atomically claim and print the next task. Resumes in-progress, else flips first pending → in-progress. Exits 14 if no tasks remain.
+- **`next`** — atomically claim and print the next task. Resumes in-progress, else flips first pending → in-progress. Exits 14 if no tasks remain. Exits 11 if any task is currently `drafted` — resolve via `publish` or `set-status failed` first.
 - **`start --id <N>`** — flip task N from pending → in-progress.
-- **`finish --id <N> --status complete|failed --log-file <path>`** — flip in-progress task N to terminal status; log content is read from the file (file-only input avoids shell-arg quoting hazards). Pass `--log-file -` to read the log from stdin instead — pair with a quoted heredoc (`<<'EOF' ... EOF`) so the shell passes the body byte-verbatim, no `$VAR` expansion or quote-mangling. The stdin path is preferred in the dispatched-agent flow because it's one Bash call (auto-approved by the harness hook) instead of `Write` + Bash (two tool calls, each gated separately by the auto-mode classifier).
+- **`draft --id <N> --commit-msg "<subject>" --log-file <path|->`** — flip in-progress task N to `drafted`; writes the log into the task and parks the commit subject in a per-task `/tmp` staging file. **Does NOT touch git.** This is the implementation agent's terminal step within an iteration — the runner takes over and dispatches the validation agent before either `publish` or `set-status failed` resolves the draft. Same `--log-file -` + quoted-heredoc convention as `set-status` (use stdin to keep it one Bash call).
+- **`publish --id <N>`** — flip drafted task N to `complete` by running `git commit` against the already-staged git index using the staged subject. Verifies the index is non-empty before committing. On success, removes the staging file. On commit failure (e.g., a pre-commit hook rejects), the task stays `drafted` and the staging file stays put — the runner can fix the underlying cause and re-run `publish --id N`. **Only the runner calls this** (post-validation), never the implementation agent.
+- **`set-status --id <N> --status complete|failed --log-file <path|->`** — flip task N to a terminal status without touching git. Allowed transitions: `in-progress → complete` (no-code completion, e.g., investigation tasks), `in-progress → failed` (implementation gave up), `drafted → failed` (validation rejected the draft after retries). **`drafted → complete` is forbidden** — force the happy path through `publish` so a task cannot reach `complete` without a commit. Same `--log-file -` + quoted-heredoc convention as `draft` (the stdin path is preferred in the dispatched-agent flow because it's one Bash call, not two tool calls each gated separately by the auto-mode classifier).
 - **`get --id <N>`** — print one task as pretty JSON.
 - **`list [--status <s>]`** — print all tasks (or filtered) as a JSON array.
-- **`status`** — print task counts + a precomputed `remaining` integer (`pending + in_progress`, the halt-gate's one number) + `plan` path. Use this for Phase 5 summary displays AND as the between-iteration halt-gate (it runs `load_and_validate` like every other command, so a non-zero exit means the file is corrupt).
-- **`remaining`** — print non-terminal tasks (pending + in-progress) as a compact JSON array — each entry has just `id`, `title`, `effort`, `status`. Use for Phase 3's user-facing summary table. The hot-path halt-gate uses `status.remaining` (the integer) instead so a 30–50-task file doesn't pay an O(N) array on every iteration.
+- **`status`** — print task counts (including a `drafted` count) + a precomputed `remaining` integer (`pending + in_progress + drafted`, the halt-gate's one number) + `plan` path. Use this for Phase 5 summary displays AND as the between-iteration halt-gate (it runs `load_and_validate` like every other command, so a non-zero exit means the file is corrupt). Drafted is non-terminal and counts toward `remaining` — a draft awaiting publish-or-fail still owes the runner work.
+- **`remaining`** — print non-terminal tasks (pending + in-progress + drafted) as a compact JSON array — each entry has just `id`, `title`, `effort`, `status`. Use for Phase 3's user-facing summary table. The hot-path halt-gate uses `status.remaining` (the integer) instead so a 30–50-task file doesn't pay an O(N) array on every iteration.
 - **`verify --id <N>`** — execute the resolved `verifySteps` for task N in order, capturing each step's stdout+stderr to `/tmp/verify-<id>-step<i>-<slug>.log`, stopping on the first failure with that step's exit code, and printing one `verify[i/n] <slug> exit=<EX> log=<path>` line per executed step. **Resolution rule:** if task N declares its own `verifySteps` array, those run (total replacement, not a merge); otherwise the top-level `verifySteps` runs. So `--id` selects both the log-file slug and the resolved-steps source — different tasks may run different steps. Auto-approved through the harness PreToolUse hook, so per-task verification runs without per-call prompts; trust for verifySteps content is upstream (task-list-builder).
 
-**Exit codes:** 0 success · 1 IO error · 2 argparse · 10 task id not found · 11 invalid state transition · 12 schema validation · 13 JSON parse · 14 no remaining tasks.
+**Exit codes:** 0 success · 1 IO error · 2 argparse · 10 task id not found · 11 invalid state transition · 12 schema validation · 13 JSON parse · 14 no remaining tasks · 15 git operation failed (publish only).
 
 Every subcommand calls `load_and_validate` as a precondition before doing its work — there is no separate `validate` verb because there's no need for one. **Every mutation goes through this CLI** — no exceptions. Dispatched agents never use `Edit`/`Write`/inline `python3 -c '...'` against the task JSON; the runner itself never hand-edits during the loop. For its own bookkeeping displays, the runner uses `status` and `list`, never re-reads the JSON natively. If the plan needs structural revision, run `/harness:task-list-builder` in rewrite mode — this skill consumes plans; it doesn't edit them.
 
@@ -90,25 +92,43 @@ If the user wants to revise the plan instead of running it (reorder, edit a task
 
 Implement tasks via sequential foreground `Agent` tool calls. Each Agent runs _within this conversation_ — the user sees every file read, edit, and test run in real time.
 
+**Two-phase iteration.** Each task goes through two runner-dispatched agents, both at depth-1 from the runner (never nested):
+
+1. **Implementation agent** — claims the task via `next`, makes the code change, runs `verify`, stages source files via `git add`, then calls `draft` (which parks the commit subject without touching git). Returns.
+2. **Validation agent** — fresh-context, read-only (`subagent_type: Explore`), evaluates the task's `agentValidations` against the now-drafted code. Returns `RESULT: PASS` or `RESULT: FAIL`.
+
+The runner then resolves the draft: `publish --id N` on PASS (commits the staged index, flips to `complete`), `set-status --id N --status failed` on FAIL (no commit, staging file preserved for inspection).
+
+This split is structural, not stylistic: Claude Code's runtime forbids depth-2 subagent dispatch (an agent dispatched from another agent). The previous design had the implementation agent dispatch the validation subagent — which silently fell back to inline inspection because the runtime denied the nested dispatch. Splitting `finish` into `draft` + `publish` gives the runner a safe parking state (`drafted`) between the two agents.
+
 ### Mode = `all`
 
 1. Compute `MAX_ITER` = (number of tasks with status `"pending"` or `"in-progress"`) × 1.5, rounded up, plus 1. Example: 10 remaining → `MAX_ITER = 16`.
 2. Run the loop. On each iteration:
-   1. Run `task_list_cli.py status` to get current counts and confirm the file is still well-formed (any non-zero exit = corruption — halt the loop). Note `prev_remaining = status.remaining` (the integer); you'll compare it after the agent runs.
+   1. Run `task_list_cli.py status` to get current counts and confirm the file is still well-formed (any non-zero exit = corruption — halt the loop). Note `prev_remaining = status.remaining` (the integer); you'll compare it after the iteration runs.
    2. If `status.remaining == 0`, the loop is done. Show final status:
       - Any `"failed"` tasks (`status.failed > 0`) → `"Done with failures: X/Y complete, Z failed"`.
       - Otherwise → `"All Y tasks complete"`.
    3. If `MAX_ITER` is reached → `"Max iterations (MAX_ITER) reached"` and stop.
    4. Show progress header: `"Iteration X/MAX_ITER — N tasks remaining"`.
    5. **Issue a single foreground `Agent` tool call** with the **Task Implementation Prompt** below, substituting the task file path. Do NOT issue multiple `Agent` calls in parallel — tasks may depend on prior tasks' edits. Wait for it to return.
-   6. **Re-run `task_list_cli.py status`** as the post-iteration corruption gate. `status` runs `load_and_validate` like every other subcommand, so any structural corruption surfaces as a non-zero exit — halt the loop with `"Task file corrupted on iteration X — see <path>"` and stop. Do NOT continue iterating on a malformed file.
-   7. If `status.remaining == prev_remaining`, the agent didn't move any task to a terminal state — warn `"Agent did not finish a task on iteration X, continuing"` and proceed. (Next iteration's `next` will resume any in-progress task.)
-   8. Repeat from step 1.
+   6. **Inspect the implementation agent's outcome** by calling `task_list_cli.py status` and `task_list_cli.py list`. Three terminal-for-the-iteration outcomes are possible:
+      - **`drafted` task present** — the implementation agent reached `draft` cleanly. Proceed to step 7 (validation phase).
+      - **A task moved straight to `failed`** (via `set-status failed`) — the implementation agent gave up before drafting (e.g., couldn't make the verifySteps pass). No validation phase; the failure log is in the task's `log` field. Proceed to step 9.
+      - **No task changed state** (`status.remaining == prev_remaining`) — the implementation agent crashed or returned without acting. Warn `"Agent did not advance task state on iteration X, continuing"` and proceed to step 9 (next iteration's `next` will resume any in-progress task).
+   7. **Validation phase** (only when a task is `drafted`). Read the drafted task's `id`, `what`, and `agentValidations` via `task_list_cli.py get --id <N>`, then collect the changed-files list via `git diff --cached --name-only` (the implementation agent staged its files, so the index is the source of truth). Issue a single foreground `Agent` tool call with the **Validation Agent Prompt** (below) plus the task-specific suffix containing `what`, `agentValidations`, and `changedFiles`. **`subagent_type: Explore`** (read-only by design — the runtime denies `Write`/`Edit`/`NotebookEdit`, structurally preventing the validation agent from "fixing" anything). The agent's last line will be `RESULT: PASS` or `RESULT: FAIL`.
+   8. **Resolve the draft.** Branch on the validation result:
+      - **`RESULT: PASS`** → run `task_list_cli.py publish --id <N>`. The CLI runs `git commit` against the staged index using the parked subject and flips status to `complete`. If `publish` exits non-zero (typically 15: pre-commit hook rejection or empty index), the task stays `drafted`; surface the stderr to the user and proceed to step 9 — the next iteration will see the still-drafted task and `cli next` will refuse to claim new work, forcing manual recovery.
+      - **`RESULT: FAIL`** → run `task_list_cli.py set-status --id <N> --status failed --log-file -` with the validation report piped via a quoted heredoc as the log. **Don't dispatch a fixup implementation agent** — the schema doesn't model `drafted → in-progress`, so a failed validation terminates the task; recovery happens via `/harness:task-list-builder` rewrite mode (re-plan), not within this run.
+   9. **Re-run `task_list_cli.py status`** as the post-iteration corruption gate. `status` runs `load_and_validate` like every other subcommand, so any structural corruption surfaces as a non-zero exit — halt the loop with `"Task file corrupted on iteration X — see <path>"` and stop. Do NOT continue iterating on a malformed file.
+   10. If `status.remaining == prev_remaining`, no task moved to a terminal state — proceed (the next iteration will pick up wherever the loop left off).
+   11. Repeat from step 1.
 
 ### Mode = `next`
 
 1. Issue a single foreground `Agent` tool call with the Task Implementation Prompt, substituting the task file path. (Phase 3's `status` already confirmed work remains; the dispatched agent's `next` call will claim and run it. If `next` exits 14, the agent will report no work — propagate that to the user.)
-2. After the Agent returns, run `task_list_cli.py status` to show the updated counts (complete/pending/failed), and stop.
+2. Run the validation phase + draft resolution exactly as in mode-`all` steps 6–8 above (the architecture is identical, just one iteration).
+3. Run `task_list_cli.py status` to show the updated counts (complete/pending/failed/drafted), and stop.
 
 ---
 
@@ -123,17 +143,17 @@ After the loop completes (all tasks done, max iterations reached, or `--next` fi
 
 ---
 
-## Agent Validation Prompt
+## Validation Agent Prompt
 
-When the implementation agent reaches Step 2.5 of the Task Implementation Prompt, it dispatches a fresh-context validation subagent (`subagent_type: Explore`) with the prompt below as the wrapper. The implementation agent appends a task-specific suffix containing `what`, `agentValidations`, and `changedFiles` (see Step 2.5 for assembly). Pass the assembled prompt verbatim:
+In Phase 4 step 7, the runner dispatches a fresh-context validation agent (`subagent_type: Explore`) using the prompt below as the wrapper plus a task-specific suffix containing `what`, `agentValidations`, and `changedFiles`. Construct `changedFiles` from `git diff --cached --name-only` (the implementation agent staged its files via `git add` before drafting; the staged index is the post-change snapshot). Pass the assembled prompt verbatim:
 
-> You are running the validation prompt for a just-completed task. The implementing agent finished its code change, and the runner has already executed every `verifySteps` command (tests, typecheck, lint) — those passed before you were dispatched, so command-answerable questions are already settled. Your job is to evaluate each entry in `agentValidations` by reading code.
+> You are running the validation prompt for a just-drafted task. The implementing agent finished its code change, staged source files via `git add`, and called `draft` (which parked the commit subject without committing yet). The runner has already executed every `verifySteps` command (tests, typecheck, lint) — those passed before you were dispatched, so command-answerable questions are already settled. Your job is to evaluate each entry in `agentValidations` by reading code. The runner will use your `RESULT` line to decide whether to `publish` (commit + complete) or `set-status failed` (no commit + failed).
 >
 > **Inputs** (provided in the task-specific suffix below):
 >
 > - `what` — what the implementing agent was asked to do.
 > - `agentValidations` — array of factual statements about the post-change code state. Each is one inspection-verifiable claim you confirm PASS or FAIL with `file:line` evidence.
-> - `changedFiles` — repo-relative paths the implementing agent modified (from `git diff --name-only HEAD`).
+> - `changedFiles` — repo-relative paths the implementing agent staged for commit (from `git diff --cached --name-only`). The change is not yet committed — these files are in the git index, awaiting the runner's `publish` call after your verdict.
 >
 > **Procedure.** For each entry in `agentValidations`, in order:
 >
@@ -143,9 +163,9 @@ When the implementation agent reaches Step 2.5 of the Task Implementation Prompt
 >
 > **Don't run pytest, pyright, lint, or anything else `verifySteps` could run.** Those already executed via `verify --id` before you were dispatched. Your concern is inspection-verifiable facts (structure, behavior visible in code, documentation presence) — not pass/fail signals a command can decide. The schema (`task-list-schema.md`) forbids verifyStep-covered statements in `agentValidations`, so you should never see one; if you do, treat it as a schema bug and report PASS-by-deferral with a one-line note.
 >
-> **Don't re-implement, fix, edit, or rewrite anything.** You are read-only — the runtime will deny those tools, but mentally treat your role as audit, not repair. Repair is the implementing agent's job after seeing your report.
+> **Don't re-implement, fix, edit, or rewrite anything.** You are read-only — the runtime denies `Write`/`Edit`/`NotebookEdit` for `subagent_type: Explore` so the tools won't be available, but mentally treat your role as audit, not repair. The schema does not model `drafted → in-progress`, so a `RESULT: FAIL` from you ends the task — there is no fixup loop within this run. Be precise about evidence; an over-strict FAIL terminates a task that may have been correct.
 >
-> **Output format** (exact format — the implementing agent parses this):
+> **Output format** (exact format — the runner parses this):
 >
 > ```text
 > Validation 1: <verbatim text of statement>
@@ -156,7 +176,7 @@ When the implementation agent reaches Step 2.5 of the Task Implementation Prompt
 > RESULT: PASS
 > ```
 >
-> The final line is exactly `RESULT: PASS` (if every entry passed) or `RESULT: FAIL` (if any entry failed). No other final line. The implementing agent reads only the last line for the gate decision and the per-entry lines for fixup guidance.
+> The final line is exactly `RESULT: PASS` (if every entry passed) or `RESULT: FAIL` (if any entry failed). No other final line. The runner reads only the last line for the publish-vs-fail decision and the per-entry lines for the failure log it pipes into `set-status failed`.
 
 ---
 
@@ -164,7 +184,9 @@ When the implementation agent reaches Step 2.5 of the Task Implementation Prompt
 
 Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with the absolute path to the JSON task file:
 
-> You are implementing one task from a structured task list. **Use `task_list_cli.py` for ALL task-file access — mutations AND read-only inspections of single fields.** Never use `Edit`, `Write`, `cat`, `jq`, or inline `python3 -c '...'` against the task file. The CLI's read verbs split by _what_ you're reading: `get --id <N>` and `next` return per-task objects; `list` returns the full task array; `status` returns file-level metadata (counts, the precomputed `remaining` integer, `plan`); `remaining` returns the compact pending+in-progress display array; `verify --id <N>` _executes_ the task's verifications, naming each running step in the `verify[i/n] <slug> ...` lines on stdout. There is no "get any field by name" verb. Bypassing the CLI skips atomicity and schema validation, and has caused silent JSON corruption in past runs.
+> You are implementing one task from a structured task list. **Use `task_list_cli.py` for ALL task-file access — mutations AND read-only inspections of single fields.** Never use `Edit`, `Write`, `cat`, `jq`, or inline `python3 -c '...'` against the task file. The CLI's read verbs split by _what_ you're reading: `get --id <N>` and `next` return per-task objects; `list` returns the full task array; `status` returns file-level metadata (counts, the precomputed `remaining` integer, `plan`); `remaining` returns the compact non-terminal display array; `verify --id <N>` _executes_ the task's verifications, naming each running step in the `verify[i/n] <slug> ...` lines on stdout. There is no "get any field by name" verb. Bypassing the CLI skips atomicity and schema validation, and has caused silent JSON corruption in past runs.
+>
+> **You are responsible for: claim → implement → verify → stage → draft. You are NOT responsible for: validating `agentValidations`, committing the change, or marking the task complete.** The runner orchestrates a separate validation agent (read-only, fresh context) after you return, and resolves the draft via `publish` (success) or `set-status failed` (failure). This split is structural — the runtime forbids depth-2 subagent dispatch, so validation MUST happen at the runner level, not from inside this agent.
 >
 > **Step 1 — Claim and read your task:**
 >
@@ -173,9 +195,9 @@ Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with th
 >     --file TASK_FILE_PATH next
 > ```
 >
-> The output is the full task object — note the `id` and read `what`, `resolves`, and `agentValidations`. (`next` atomically claims the first pending task and flips it to `in-progress`, or returns an already-in-progress task unchanged if a previous iteration crashed mid-task.) If the command exits with code 14, no work remains — exit cleanly.
+> The output is the full task object — note the `id` and read `what`, `resolves`, and `agentValidations`. (`next` atomically claims the first pending task and flips it to `in-progress`, or returns an already-in-progress task unchanged if a previous iteration crashed mid-task. If `next` exits 11, a previously drafted task needs to be resolved first — exit cleanly and surface the error; the runner will handle it.) If the command exits with code 14, no work remains — exit cleanly.
 >
-> Implement the change. The `agentValidations` array is NOT your responsibility to evaluate — Step 2.5 below dispatches a fresh-context validation subagent for that. Your job here is just to make the code change as described in `what` and `resolves`.
+> Implement the change. Read `agentValidations` so you know what the validation agent will check, but **do not evaluate it yourself** — that's the runner's responsibility via a separate Explore agent after you return.
 >
 > **Step 2 — Run verification:**
 >
@@ -184,55 +206,61 @@ Pass this verbatim to each `Agent` tool call, replacing `TASK_FILE_PATH` with th
 >     --file TASK_FILE_PATH verify --id <id>
 > ```
 >
-> The CLI runs each verification step in order, capturing stdout+stderr to a per-step log file (`/tmp/verify-<id>-step<N>-<slug>.log`), and stops on the first failing step. If the command exits non-zero, that exit code is the failing step's exit code; the last `verify[i/n]` line in stdout names the failing step's log path. `Read` that file, fix the underlying cause in your code, then re-run the same `verify --id <id>` invocation. When the command exits zero, all steps passed and the task is verified.
+> The CLI runs each verification step in order, capturing stdout+stderr to a per-step log file (`/tmp/verify-<id>-step<N>-<slug>.log`), and stops on the first failing step. If the command exits non-zero, that exit code is the failing step's exit code; the last `verify[i/n]` line in stdout names the failing step's log path. `Read` that file, fix the underlying cause in your code, then re-run the same `verify --id <id>` invocation. When the command exits zero, all steps passed.
 >
-> Never do these during verification:
->
-> - **Don't re-invoke individual verification steps directly** (e.g. running `npx tsc --noEmit` or `uv run pytest` yourself, either before Step 2 or after it). The CLI is the contract — `verify --id` is the entire verifySteps surface. **Don't run anything `verifySteps` could run to "double-check" `agentValidations` either** — Step 2.5's validation subagent works by code inspection, not by re-running commands the schema forbids in `agentValidations`. Running steps by hand splits your verification rhythm, burns budget, and is the exact duplicate-work pattern this prompt structure prevents.
-> - **Don't permute redirection flags** on the same command hoping for clearer output (`| head -50` → `2>&1` → drop `2>&1` → repeat). The CLI's redirection is canonical; the answer is in the log file. If the log is unclear, `Read` more of it — don't re-run.
-> - **Don't invent additional verification commands** beyond what `verify` runs. If a step you need is missing, that's a bug in the task file, not something to paper over with shell improvisation.
->
-> **Step 2.5 — Run agent validations (subagent):** dispatch a fresh-context subagent to evaluate each entry in `agentValidations` against the code you just changed. Read the wrapper at the top of this SKILL.md ("Agent Validation Prompt") — it is the reusable template. Construct the task-specific suffix from three inputs you already have:
->
-> - `what`: the `what` field from your task object (`task_list_cli.py get --id <id>` returns it).
-> - `agentValidations`: the array from the same task object.
-> - `changedFiles`: output of `git diff --name-only HEAD`, repo-relative paths only.
->
-> Dispatch with the `Agent` tool, **`subagent_type: Explore`** (read-only by design — the runtime denies `Write`/`Edit`/`NotebookEdit` to this type, which structurally prevents the validation subagent from "fixing" anything during evaluation). The subagent's last line will be either `RESULT: PASS` or `RESULT: FAIL`.
->
-> **On `RESULT: PASS`:** proceed to Step 3.
->
-> **On `RESULT: FAIL`:** read the per-entry failure evidence, fix the failing items in code (do not re-implement the whole task — the failures are by definition inspection-level: missing docstring, wrong scope, missing delegation, etc.), then re-dispatch the validation subagent ONCE more. If the second run also reports `RESULT: FAIL`, proceed to Step 3 with `--status failed` and include the full validation report in the finish log. **Don't loop the validation subagent more than twice per task** — repeated failures past two cycles indicate a problem the implementation agent cannot fix from inspection feedback alone.
->
-> **Don't run any verifyStep commands during validation-fixup** (`pytest`, `pyright`, `tsc`, `lint`). The validation subagent's findings are about inspection-verifiable facts; verifyStep coverage is decided by `verify --id` only.
->
-> **Step 3 — Finish:** Pipe your log into `finish` via a quoted heredoc. The `--log-file -` token tells the CLI to read from stdin; the quoted `<<'EOF'` makes the shell pass the body verbatim (no `$VAR` expansion, no quote-mangling), so embedded `"`, `$`, and newlines are safe.
+> If you cannot make `verify` pass after a reasonable number of attempts, skip steps 3–4 and call `set-status` directly with `--status failed`:
 >
 > ```bash
 > python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
->     --file TASK_FILE_PATH finish --id <id> --status complete --log-file - <<'EOF'
+>     --file TASK_FILE_PATH set-status --id <id> --status failed --log-file - <<'EOF'
+> Task <id>: verification failed — <which step, what error>
+> EOF
+> ```
+>
+> Never do these during verification:
+>
+> - **Don't re-invoke individual verification steps directly** (e.g. running `npx tsc --noEmit` or `uv run pytest` yourself, either before Step 2 or after it). The CLI is the contract — `verify --id` is the entire verifySteps surface. **Don't run anything `verifySteps` could run to "double-check" `agentValidations` either** — the runner's validation agent works by code inspection, not by re-running commands the schema forbids in `agentValidations`. Running steps by hand splits your verification rhythm, burns budget, and is the exact duplicate-work pattern this prompt structure prevents.
+> - **Don't permute redirection flags** on the same command hoping for clearer output (`| head -50` → `2>&1` → drop `2>&1` → repeat). The CLI's redirection is canonical; the answer is in the log file. If the log is unclear, `Read` more of it — don't re-run.
+> - **Don't invent additional verification commands** beyond what `verify` runs. If a step you need is missing, that's a bug in the task file, not something to paper over with shell improvisation.
+>
+> **Step 3 — Stage source files.** Run `git add <files>` for each source file you changed. Stage ONLY source files — NEVER stage the task file (`TASK_FILE_PATH`) or any `docs/exec-plans/` files (these are loop metadata, not deliverables). The runner's `publish` step (which you do NOT call) will run `git commit` against this staged index after the validation agent reports PASS; if you forget to stage a file, `publish` will exit 15 with a clear message and the task will stay drafted for manual recovery.
+>
+> **Step 4 — Draft.** Pipe your log into `draft` via a quoted heredoc. The `--commit-msg` argument is the commit subject `publish` will use later (single line, conventional-commits style). The `--log-file -` token tells the CLI to read the log from stdin; the quoted `<<'EOF'` makes the shell pass the body verbatim (no `$VAR` expansion, no quote-mangling), so embedded `"`, `$`, and newlines are safe.
+>
+> ```bash
+> python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
+>     --file TASK_FILE_PATH draft --id <id> \
+>     --commit-msg "<type>: <one-line subject for the commit>" \
+>     --log-file - <<'EOF'
 > Task <id>: <one-line summary of what changed>
 >
-> Agent validations: <which were evaluated>
+> Files staged: <list>
 > Verification: <which steps ran, all passed>
 > EOF
 > ```
 >
-> If tests failed and you cannot fix forward: same command with `--status failed`. Do NOT use the `Write` tool to stage a `/tmp/` log file — the heredoc path is one Bash call (auto-approved by the harness hook); the Write path is two tool calls each gated separately by the auto-mode classifier.
+> `draft` flips the task to `drafted`, parks the commit subject in a per-task `/tmp` staging file, and writes the log into the task. **It does NOT touch git.** That's the runner's job via `publish` after the validation agent has read the staged code and reported PASS.
 >
-> **Step 4 — Commit.** Stage only the source files you changed. NEVER stage the task file (`TASK_FILE_PATH`) or any `docs/exec-plans/` files — these are loop metadata, not deliverables. Implement exactly ONE task per iteration.
+> **Don't call `publish` from this agent.** That verb is the runner's contract — calling it from the implementation agent skips the validation phase entirely, which is the architectural bug this design exists to prevent.
+>
+> **Don't use the `Write` tool to stage a `/tmp/` log file.** The heredoc + stdin path is one Bash call (auto-approved by the harness hook); the Write path is two tool calls, each gated separately by the auto-mode classifier.
+>
+> Implement exactly ONE task per iteration. After `draft` returns successfully, your job is done — return control to the runner.
 
-The CLI exits non-zero on any failure (task id not found → 10; invalid state transition → 11; schema/JSON errors → 12 / 13; no remaining tasks → 14). If a step fails, read stderr, fix the cause, and retry. Do not work around it by hand-editing the task file.
+The CLI exits non-zero on any failure (task id not found → 10; invalid state transition → 11; schema/JSON errors → 12 / 13; no remaining tasks → 14; git operation failed → 15). If a step fails, read stderr, fix the cause, and retry. Do not work around it by hand-editing the task file.
 
 ---
 
 ## Failure modes — prevent these
 
-- **Parallel `Agent` calls.** Never issue multiple `Agent` tool calls in the same response during the loop. Tasks may depend on prior tasks' edits. Always sequential, always foreground.
-- **Skipping the re-read.** After every `Agent` returns, re-run `status` — both to corruption-check and to compare `status.remaining` (integer) against `prev_remaining` for the no-progress warn. Don't trust in-memory state — the Agent has been writing to the file and the in-memory copy is stale.
-- **Committing the task file.** The Task Implementation Prompt forbids staging `docs/exec-plans/` files. If an Agent does it anyway, that's a bug — flag it to the user and don't propagate.
-- **Auto-locating multiple files silently.** If Phase 2 finds more than one validated match, _always_ ask the user. Don't pick by recency or alphabetical order.
-- **Trying to build a missing task list.** This skill consumes an existing JSON. If Phase 2 finds nothing, stop and tell the user — don't shell out to `task-list-builder` or fabricate tasks.
-- **Treating `--next` as a silent one-shot.** Even in `--next` mode, show the Phase 3 summary first so the user can see which task is about to run.
-- **Skipping the between-iteration check.** Phase 4 step 6 (`status` as halt-gate) is the canary that caught past silent-corruption bugs only after 19 iterations. Never skip it; never downgrade a non-zero exit to a warning.
-- **Re-running verification with permuted redirection flags.** A dispatched agent that runs `npx tsc --noEmit` (or any verifySteps command) directly, then re-runs it with `| head -50`, then with `2>&1`, then without — that's a re-read loop, not progress. The `verify` subcommand exists precisely so the agent never composes redirection itself; if you see this pattern, the agent has bypassed `verify` and should be steered back to it.
+- **Don't issue parallel `Agent` calls during the loop.** Tasks may depend on prior tasks' edits, and the implementation/validation pair within an iteration is strictly sequential. Always one `Agent` call per response, always foreground.
+- **Don't dispatch the validation agent from inside the implementation agent.** The runtime forbids depth-2 subagent dispatch — a nested call silently fails over to inline inspection, defeating the structural read-only guarantee. Validation is dispatched by the runner, between the implementation agent's return and the `publish`/`set-status failed` resolver.
+- **Don't skip the post-iteration `status` re-read.** Phase 4 step 9 (`status` as corruption gate) is the canary that caught past silent-corruption bugs only after 19 iterations. Never skip it; never downgrade a non-zero exit to a warning.
+- **Don't allow the implementation agent to call `publish`.** `publish` is the runner's contract — calling it from inside the implementation agent skips the validation phase entirely, which is the architectural bug this design exists to prevent. The implementation agent's terminal verb is `draft` (or `set-status failed` if verification couldn't be made to pass); the runner calls `publish` after the validation agent reports PASS.
+- **Don't let a drafted task linger across iterations without resolution.** If `publish` exits non-zero (e.g., a pre-commit hook rejects the commit), the task stays drafted and the next iteration's `cli next` will refuse to claim new work (exit 11). Surface the publish failure to the user — they need to fix the underlying cause (hook, missing config, wrong staged content) before the loop can continue.
+- **Don't commit the task file or `docs/exec-plans/` files.** The Task Implementation Prompt forbids staging these. If an agent does it anyway, that's a bug — flag it to the user and don't propagate.
+- **Don't auto-pick when Phase 2 finds multiple validated matches.** Always ask the user. Never pick by recency or alphabetical order.
+- **Don't try to build a missing task list.** This skill consumes an existing JSON. If Phase 2 finds nothing, stop and tell the user — don't shell out to `task-list-builder` or fabricate tasks.
+- **Don't treat `--next` as a silent one-shot.** Even in `--next` mode, show the Phase 3 summary first so the user can see which task is about to run.
+- **Don't accept verification re-runs with permuted redirection flags.** A dispatched agent that runs `npx tsc --noEmit` (or any verifySteps command) directly, then re-runs it with `| head -50`, then with `2>&1`, then without — that's a re-read loop, not progress. The `verify` subcommand exists precisely so the agent never composes redirection itself; if you see this pattern, the agent has bypassed `verify` and should be steered back to it.
+- **Don't add a fixup loop on validation FAIL.** The schema doesn't model `drafted → in-progress`, so a `RESULT: FAIL` from the validation agent terminates the task via `set-status failed`. Recovery happens via `/harness:task-list-builder` rewrite mode (re-plan), not within this run. A retry loop would require an "un-draft" transition the schema deliberately omits.

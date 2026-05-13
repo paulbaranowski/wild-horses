@@ -13,7 +13,9 @@ Tests invoke the CLI as a subprocess so exit codes, argparse behaviour,
 and stdout/stderr separation are exercised exactly as a dispatched
 agent would see them.
 """
+import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -76,13 +78,28 @@ class CliTestCase(unittest.TestCase):
         self.task_path.write_text(json.dumps(fixture_data(), indent=2), encoding="utf-8")
 
     def tearDown(self) -> None:
+        # Mirror task_list_cli._staging_path: md5 of the resolved abs path,
+        # 12 hex chars. Cleans up any drafted-state staging files this test
+        # may have created so /tmp doesn't accumulate cruft across runs and
+        # so set-status-failed tests (which intentionally leave the staging
+        # file) don't leak into the next test's fixtures.
+        digest = hashlib.md5(str(self.task_path.resolve()).encode("utf-8")).hexdigest()[:12]
+        for stale in Path("/tmp").glob(f"harness-stage-{digest}-*.json"):
+            try:
+                stale.unlink()
+            except FileNotFoundError:
+                pass
         self._tmp.cleanup()
 
-    def run_cli(self, *args: str) -> subprocess.CompletedProcess:
+    def run_cli(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
+        # `cwd` only matters for `publish` (it shells out to git). Keeping
+        # it default-None preserves the existing test behavior; publish
+        # tests pass `cwd=self.tmp_dir` after `_init_git_repo()`.
         return subprocess.run(
             [sys.executable, str(CLI), "--file", str(self.task_path), *args],
             capture_output=True,
             text=True,
+            cwd=str(cwd) if cwd is not None else None,
         )
 
     def run_cli_stdin(self, stdin: str, *args: str) -> subprocess.CompletedProcess:
@@ -95,6 +112,109 @@ class CliTestCase(unittest.TestCase):
 
     def read_task_file(self) -> dict:
         return json.loads(self.task_path.read_text(encoding="utf-8"))
+
+    # ---- helpers for drafted-state and publish tests ------------------
+
+    def _staging_path_for(self, task_id: int) -> Path:
+        """Mirror of task_list_cli._staging_path — same hash, same shape."""
+        digest = hashlib.md5(str(self.task_path.resolve()).encode("utf-8")).hexdigest()[:12]
+        return Path(f"/tmp/harness-stage-{digest}-{task_id}.json")
+
+    def _make_drafted(self, task_id: int, commit_msg: str, log: str) -> Path:
+        """Drive a task through `draft` and return its staging path.
+
+        Used by tests that need a task in the `drafted` state without
+        re-asserting `draft`'s own behavior. Goes through the real CLI so
+        the staging file the test then inspects matches the production
+        layout exactly. Caller must guarantee the named task is currently
+        in-progress (the fixture's task 2 satisfies this).
+        """
+        result = self.run_cli_stdin(
+            log,
+            "draft",
+            "--id",
+            str(task_id),
+            "--commit-msg",
+            commit_msg,
+            "--log-file",
+            "-",
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"_make_drafted: `draft --id {task_id}` failed (exit {result.returncode}): "
+                f"{result.stderr.strip()}"
+            )
+        return self._staging_path_for(task_id)
+
+    def _init_git_repo(self) -> None:
+        """Initialize a self-contained git repo in self.tmp_dir.
+
+        Publish runs `git diff --cached` and `git commit` in the CWD, so
+        publish tests pass `cwd=self.tmp_dir` to `run_cli`. We need a real
+        repo with at least one initial commit (so HEAD exists) and a local
+        user.* config (so `git commit` doesn't probe the global one).
+        Hooks are disabled via core.hooksPath=/dev/null to keep these
+        tests independent of any pre-commit machinery the host may have.
+        """
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+        for cmd in (
+            ["git", "init", "-q", "-b", "main"],
+            ["git", "config", "user.email", "test@example.com"],
+            ["git", "config", "user.name", "Test User"],
+            ["git", "config", "commit.gpgsign", "false"],
+            ["git", "config", "core.hooksPath", "/dev/null"],
+        ):
+            result = subprocess.run(cmd, cwd=str(self.tmp_dir), env=env, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"_init_git_repo: `{' '.join(cmd)}` failed (exit {result.returncode}): "
+                    f"{result.stderr.strip()}"
+                )
+        # Initial commit so HEAD exists; otherwise `git commit` on an
+        # empty repo behaves differently from a normal mid-history commit.
+        seed = self.tmp_dir / ".gitkeep"
+        seed.write_text("seed\n", encoding="utf-8")
+        for cmd in (
+            ["git", "add", ".gitkeep"],
+            ["git", "commit", "-q", "-m", "seed"],
+        ):
+            result = subprocess.run(cmd, cwd=str(self.tmp_dir), env=env, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"_init_git_repo: `{' '.join(cmd)}` failed (exit {result.returncode}): "
+                    f"{result.stderr.strip()}"
+                )
+
+    def _stage_file(self, name: str, content: str) -> Path:
+        """Create + `git add` a file in the test's git repo."""
+        path = self.tmp_dir / name
+        path.write_text(content, encoding="utf-8")
+        result = subprocess.run(
+            ["git", "add", name],
+            cwd=str(self.tmp_dir),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"_stage_file: `git add {name}` failed (exit {result.returncode}): "
+                f"{result.stderr.strip()}"
+            )
+        return path
+
+    def _git_log_subjects(self) -> list[str]:
+        """Return commit subjects in the test repo, newest first."""
+        result = subprocess.run(
+            ["git", "log", "--format=%s"],
+            cwd=str(self.tmp_dir),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"_git_log_subjects: `git log` failed: {result.stderr.strip()}"
+            )
+        return [line for line in result.stdout.splitlines() if line]
 
     # ---- load_and_validate (exercised via `status`) -------------------
     # `validate` was removed in v5.0.0; `load_and_validate` runs as a
@@ -437,13 +557,14 @@ class CliTestCase(unittest.TestCase):
     # ---- status --------------------------------------------------------
 
     def test_status_returns_counts_and_plan(self):
-        # Fixture: 1 pending, 1 in-progress, 1 complete, 0 failed → total 3
+        # Fixture: 1 pending, 1 in-progress, 0 drafted, 1 complete, 0 failed → total 3
         result = self.run_cli("status")
         self.assertEqual(result.returncode, 0, result.stderr)
         summary = json.loads(result.stdout)
         self.assertEqual(summary["total"], 3)
         self.assertEqual(summary["pending"], 1)
         self.assertEqual(summary["in_progress"], 1)
+        self.assertEqual(summary["drafted"], 0)
         self.assertEqual(summary["complete"], 1)
         self.assertEqual(summary["failed"], 0)
         self.assertEqual(summary["plan"], "docs/exec-plans/active/test.md")
@@ -454,15 +575,38 @@ class CliTestCase(unittest.TestCase):
 
     def test_status_remaining_is_precomputed_integer(self):
         # `status.remaining` is the halt-gate's one number — pending +
-        # in_progress, computed by the CLI so the agent reads it without
-        # any addition. The full task array lives behind the `remaining`
-        # subcommand so a 30–50-task file doesn't pay an O(N) payload on
-        # every loop iteration.
+        # in_progress + drafted, computed by the CLI so the agent reads it
+        # without any addition. The full task array lives behind the
+        # `remaining` subcommand so a 30–50-task file doesn't pay an O(N)
+        # payload on every loop iteration.
         result = self.run_cli("status")
         self.assertEqual(result.returncode, 0, result.stderr)
         summary = json.loads(result.stdout)
         self.assertEqual(summary["remaining"], 2)
-        self.assertEqual(summary["remaining"], summary["pending"] + summary["in_progress"])
+        self.assertEqual(
+            summary["remaining"],
+            summary["pending"] + summary["in_progress"] + summary["drafted"],
+        )
+
+    def test_status_drafted_count_included(self):
+        # Drafted tasks must surface in both the count breakdown and the
+        # `remaining` integer. The runner uses `remaining` as its halt gate;
+        # a missing drafted count would make the loop think it's done while
+        # a staging file is still parked.
+        data = fixture_data()
+        # Task 2 was in-progress in the fixture — flip it to drafted directly.
+        # We can't go through `draft` here (would need `--commit-msg` etc.) but
+        # the schema allows the literal string in tasks[].status.
+        data["tasks"][1]["status"] = "drafted"
+        data["tasks"][1]["log"] = "implementation log"
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        result = self.run_cli("status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["drafted"], 1)
+        self.assertEqual(summary["in_progress"], 0)
+        # Drafted is non-terminal, so it must still count as "remaining"
+        self.assertEqual(summary["remaining"], 2)
 
     def test_status_no_remaining_array_field_leaks_through(self):
         # Guard against accidental reintroduction of the heavy array
@@ -474,10 +618,10 @@ class CliTestCase(unittest.TestCase):
         summary = json.loads(result.stdout)
         self.assertIsInstance(summary["remaining"], int)
 
-    def test_remaining_returns_pending_and_in_progress_in_source_order(self):
+    def test_remaining_returns_non_terminal_in_source_order(self):
         # The new subcommand replaces what `status.remaining` used to
         # carry. Same compact projection (id/title/effort/status), same
-        # filter (pending + in-progress), same source order.
+        # filter (pending + in-progress + drafted), same source order.
         result = self.run_cli("remaining")
         self.assertEqual(result.returncode, 0, result.stderr)
         entries = json.loads(result.stdout)
@@ -493,6 +637,22 @@ class CliTestCase(unittest.TestCase):
                 },
             ],
         )
+
+    def test_remaining_includes_drafted(self):
+        # Drafted tasks count as "remaining" — the runner still owes them a
+        # publish-or-fail call. Pin this to the same NON_TERMINAL_STATUSES
+        # set the count uses so the two views stay consistent.
+        data = fixture_data()
+        data["tasks"][1]["status"] = "drafted"
+        data["tasks"][1]["log"] = "x"
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        result = self.run_cli("remaining")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        entries = json.loads(result.stdout)
+        statuses = [e["status"] for e in entries]
+        self.assertIn("drafted", statuses)
+        self.assertIn("pending", statuses)
+        self.assertEqual(len(entries), 2)
 
     def test_remaining_entries_are_compact_only(self):
         # Each entry must expose ONLY the four display fields — no full-task
@@ -618,15 +778,18 @@ class CliTestCase(unittest.TestCase):
         self.assertEqual(task["id"], 4)
         self.assertEqual(task["status"], "in-progress")
 
-    def test_next_finish_round_trip(self):
-        # Resume task 2 via next, finish it, next picks up task 1
+    def test_next_set_status_round_trip(self):
+        # Resume task 2 via next, terminate it via set-status, next picks up task 1.
+        # The no-commit completion path (set-status complete from in-progress) is
+        # the right round-trip target here: it exercises the "next pulls the next
+        # pending after a terminal flip" loop without needing a real git repo.
         log = self._write_log("done")
         first = self.run_cli("next")
         self.assertEqual(json.loads(first.stdout)["id"], 2)
-        finish = self.run_cli(
-            "finish", "--id", "2", "--status", "complete", "--log-file", str(log)
+        flip = self.run_cli(
+            "set-status", "--id", "2", "--status", "complete", "--log-file", str(log)
         )
-        self.assertEqual(finish.returncode, 0, finish.stderr)
+        self.assertEqual(flip.returncode, 0, flip.stderr)
         second = self.run_cli("next")
         self.assertEqual(second.returncode, 0)
         second_task = json.loads(second.stdout)
@@ -655,107 +818,168 @@ class CliTestCase(unittest.TestCase):
         result = self.run_cli("start", "--id", "999")
         self.assertEqual(result.returncode, 10)
 
-    # ---- finish --------------------------------------------------------
+    # ---- set-status ----------------------------------------------------
+    # `set-status` replaces the old `finish` verb (v6.0.0 hard-rename) and
+    # narrows the legal transitions: in-progress → complete | failed, and
+    # drafted → failed. The drafted → complete success path is exclusively
+    # `publish` so a task cannot reach `complete` without a git commit.
 
     def _write_log(self, content: str) -> Path:
         log = self.tmp_dir / "log.txt"
         log.write_text(content, encoding="utf-8")
         return log
 
-    def test_finish_in_progress_to_complete(self):
+    def test_set_status_in_progress_to_complete(self):
         log = self._write_log("done\nthings\n")
         result = self.run_cli(
-            "finish", "--id", "2", "--status", "complete", "--log-file", str(log)
+            "set-status", "--id", "2", "--status", "complete", "--log-file", str(log)
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         task = self.read_task_file()["tasks"][1]
         self.assertEqual(task["status"], "complete")
         self.assertEqual(task["log"], "done\nthings")  # one trailing \n stripped
 
-    def test_finish_preserves_quotes_and_unicode(self):
+    def test_set_status_preserves_quotes_and_unicode(self):
         payload = 'embedded "quotes", unicode 漢字, and {"json": "looking"}'
         log = self._write_log(payload)
         result = self.run_cli(
-            "finish", "--id", "2", "--status", "complete", "--log-file", str(log)
+            "set-status", "--id", "2", "--status", "complete", "--log-file", str(log)
         )
         self.assertEqual(result.returncode, 0)
         self.assertEqual(self.read_task_file()["tasks"][1]["log"], payload)
 
-    def test_finish_strips_only_one_trailing_newline(self):
+    def test_set_status_strips_only_one_trailing_newline(self):
         log = self._write_log("line\n\n")
         result = self.run_cli(
-            "finish", "--id", "2", "--status", "complete", "--log-file", str(log)
+            "set-status", "--id", "2", "--status", "complete", "--log-file", str(log)
         )
         self.assertEqual(result.returncode, 0)
         self.assertEqual(self.read_task_file()["tasks"][1]["log"], "line\n")
 
-    def test_finish_log_file_dash_reads_stdin(self):
+    def test_set_status_log_file_dash_reads_stdin(self):
         # `--log-file -` is the Unix convention for stdin. Lets the dispatched
         # agent pipe a heredoc directly without an intermediate /tmp file
         # (and the Write-tool classifier gating that comes with one).
         result = self.run_cli_stdin(
             "log content from stdin\nmultiple lines\n",
-            "finish", "--id", "2", "--status", "complete", "--log-file", "-",
+            "set-status", "--id", "2", "--status", "complete", "--log-file", "-",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         task = self.read_task_file()["tasks"][1]
         self.assertEqual(task["status"], "complete")
         self.assertEqual(task["log"], "log content from stdin\nmultiple lines")
 
-    def test_finish_log_file_dash_preserves_quotes_and_unicode(self):
+    def test_set_status_log_file_dash_preserves_quotes_and_unicode(self):
         # Same safety property as --log-file <path>: stdin bytes are verbatim,
         # no shell-arg quoting hazard. The agent's heredoc payload arrives
         # untransformed.
         payload = 'embedded "quotes", unicode 漢字, and {"json": "looking"}'
         result = self.run_cli_stdin(
             payload,
-            "finish", "--id", "2", "--status", "complete", "--log-file", "-",
+            "set-status", "--id", "2", "--status", "complete", "--log-file", "-",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.read_task_file()["tasks"][1]["log"], payload)
 
-    def test_finish_log_file_dash_with_empty_stdin(self):
+    def test_set_status_log_file_dash_with_empty_stdin(self):
         # An empty heredoc yields an empty log — accepted (the "did the agent
         # actually do anything" check belongs to the runner's iteration count
         # delta, not the CLI's input validation).
         result = self.run_cli_stdin(
             "",
-            "finish", "--id", "2", "--status", "complete", "--log-file", "-",
+            "set-status", "--id", "2", "--status", "complete", "--log-file", "-",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.read_task_file()["tasks"][1]["log"], "")
 
-    def test_finish_pending_task_exits_eleven(self):
+    def test_set_status_pending_task_exits_eleven(self):
         log = self._write_log("x")
         result = self.run_cli(
-            "finish", "--id", "1", "--status", "complete", "--log-file", str(log)
+            "set-status", "--id", "1", "--status", "complete", "--log-file", str(log)
         )
         self.assertEqual(result.returncode, 11)
         self.assertIn('current status is "pending"', result.stderr)
 
-    def test_finish_with_failed_status(self):
+    def test_set_status_with_failed_status_from_in_progress(self):
         log = self._write_log("broke")
         result = self.run_cli(
-            "finish", "--id", "2", "--status", "failed", "--log-file", str(log)
+            "set-status", "--id", "2", "--status", "failed", "--log-file", str(log)
         )
         self.assertEqual(result.returncode, 0)
         self.assertEqual(self.read_task_file()["tasks"][1]["status"], "failed")
 
-    def test_finish_rejects_non_terminal_status(self):
+    def test_set_status_drafted_to_failed_allowed(self):
+        # Drafted → failed is the validation-rejected path. The staging file
+        # is intentionally NOT removed (the implementer needs the evidence to
+        # diagnose why the draft was rejected). See the next test for that.
+        self._make_drafted(task_id=2, commit_msg="wip: subject", log="impl notes")
+        log = self._write_log("validation rejected")
+        result = self.run_cli(
+            "set-status", "--id", "2", "--status", "failed", "--log-file", str(log)
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task = self.read_task_file()["tasks"][1]
+        self.assertEqual(task["status"], "failed")
+        self.assertEqual(task["log"], "validation rejected")
+
+    def test_set_status_drafted_to_failed_preserves_staging_file(self):
+        # Per the documented design: failure path keeps the staging file so the
+        # implementer has the parked commit subject for inspection. The runner
+        # garbage-collects orphaned staging files separately if it ever needs to.
+        self._make_drafted(task_id=2, commit_msg="wip: subject for inspection", log="x")
+        staging = self._staging_path_for(task_id=2)
+        self.assertTrue(staging.is_file(), "precondition: staging file exists post-draft")
+        log = self._write_log("rejected")
+        result = self.run_cli(
+            "set-status", "--id", "2", "--status", "failed", "--log-file", str(log)
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(
+            staging.is_file(),
+            "staging file must survive set-status failed so the implementer can inspect it",
+        )
+
+    def test_set_status_drafted_to_complete_rejected(self):
+        # The drafted → complete success path is `publish` (which runs git commit).
+        # `set-status complete` from drafted is forbidden so a task cannot reach
+        # `complete` without a corresponding commit.
+        self._make_drafted(task_id=2, commit_msg="wip", log="x")
+        log = self._write_log("trying to skip publish")
+        result = self.run_cli(
+            "set-status", "--id", "2", "--status", "complete", "--log-file", str(log)
+        )
+        self.assertEqual(result.returncode, 11, result.stderr)
+        self.assertIn("publish", result.stderr)
+        # Task must remain drafted, log must remain unchanged
+        task = self.read_task_file()["tasks"][1]
+        self.assertEqual(task["status"], "drafted")
+        self.assertEqual(task["log"], "x")
+
+    def test_set_status_complete_task_rejected(self):
+        # set-status only operates on in-progress and drafted; a `complete` task
+        # is terminal and cannot be moved by this verb.
         log = self._write_log("x")
         result = self.run_cli(
-            "finish", "--id", "2", "--status", "in-progress", "--log-file", str(log)
+            "set-status", "--id", "3", "--status", "failed", "--log-file", str(log)
+        )
+        self.assertEqual(result.returncode, 11)
+        self.assertIn('current status is "complete"', result.stderr)
+
+    def test_set_status_rejects_non_terminal_status(self):
+        log = self._write_log("x")
+        result = self.run_cli(
+            "set-status", "--id", "2", "--status", "in-progress", "--log-file", str(log)
         )
         self.assertEqual(result.returncode, 2)
         self.assertIn("invalid choice", result.stderr)
 
-    def test_finish_non_utf8_log_file_exits_thirteen(self):
+    def test_set_status_non_utf8_log_file_exits_thirteen(self):
         # Non-UTF-8 bytes (e.g. latin-1 0xff) must map to a controlled
         # CLI error, not a Python UnicodeDecodeError traceback.
         log = self.tmp_dir / "log.bin"
         log.write_bytes(b"\xff\xfe\xfd not utf-8 here")
         result = self.run_cli(
-            "finish", "--id", "2", "--status", "complete", "--log-file", str(log)
+            "set-status", "--id", "2", "--status", "complete", "--log-file", str(log)
         )
         self.assertEqual(result.returncode, 13)
         self.assertIn("not valid UTF-8", result.stderr)
@@ -766,9 +990,9 @@ class CliTestCase(unittest.TestCase):
         self.assertEqual(result.returncode, 13)
         self.assertIn("not valid UTF-8", result.stderr)
 
-    def test_finish_missing_log_file_exits_one(self):
+    def test_set_status_missing_log_file_exits_one(self):
         result = self.run_cli(
-            "finish",
+            "set-status",
             "--id",
             "2",
             "--status",
@@ -778,6 +1002,292 @@ class CliTestCase(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 1)
         self.assertIn("no such file", result.stderr)
+
+    # ---- next blocks on drafted ---------------------------------------
+    # Architectural invariant: a drafted task means the runner skipped the
+    # publish-or-fail step (typically because of a crash). `next` must
+    # refuse to claim new work while one is parked, so the runner can't
+    # accumulate two non-terminal tasks competing for the same agent.
+
+    def test_next_refuses_when_a_drafted_task_exists(self):
+        # Drive task 2 to drafted, then ask `next` for the next claim.
+        # Should exit 11 with a message naming both recovery paths so the
+        # runner (or a human reading stderr) knows publish vs set-status.
+        self._make_drafted(task_id=2, commit_msg="wip: x", log="impl notes")
+        result = self.run_cli("next")
+        self.assertEqual(result.returncode, 11, result.stderr)
+        self.assertIn("drafted", result.stderr)
+        self.assertIn("publish", result.stderr)
+        self.assertIn("set-status", result.stderr)
+        # No claim happened: task 1 must still be pending
+        self.assertEqual(self.read_task_file()["tasks"][0]["status"], "pending")
+
+    # ---- draft ---------------------------------------------------------
+    # `draft` is the in-progress → drafted transition. It writes the log
+    # into the task and parks the commit subject in a per-task /tmp
+    # staging file. Does NOT touch git — `publish` is the only verb that
+    # invokes git commit. The split exists so runner-level validation can
+    # run between draft and publish, with set-status-failed as the rejection
+    # exit. Source: task_list_cli.cmd_draft.
+
+    def test_draft_in_progress_to_drafted_writes_staging_and_log(self):
+        staging = self._make_drafted(
+            task_id=2, commit_msg="feat: implement thing", log="impl notes line 1"
+        )
+        # Task state: drafted, with log persisted in the task file
+        task = self.read_task_file()["tasks"][1]
+        self.assertEqual(task["status"], "drafted")
+        self.assertEqual(task["log"], "impl notes line 1")
+        # Staging file present at the deterministic per-task path with the
+        # commit subject parked (publish reads it from here later)
+        self.assertTrue(staging.is_file(), f"staging file missing at {staging}")
+        payload = json.loads(staging.read_text(encoding="utf-8"))
+        self.assertEqual(payload["task_id"], 2)
+        self.assertEqual(payload["commit_msg"], "feat: implement thing")
+        self.assertEqual(payload["task_file"], str(self.task_path.resolve()))
+
+    def test_draft_prints_staging_path(self):
+        # The runner reads stdout to learn where the staging file landed
+        # (used by error messages when publish is later asked to clean up).
+        result = self.run_cli_stdin(
+            "log",
+            "draft", "--id", "2", "--commit-msg", "subject", "--log-file", "-",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected_staging = self._staging_path_for(2)
+        self.assertIn(str(expected_staging), result.stdout)
+        self.assertIn("drafted task 2", result.stdout)
+
+    def test_draft_pending_task_rejected(self):
+        # `draft` requires in-progress; the schema's pending → drafted
+        # transition is forbidden (must go through `start` or `next` first).
+        result = self.run_cli_stdin(
+            "log",
+            "draft", "--id", "1", "--commit-msg", "subject", "--log-file", "-",
+        )
+        self.assertEqual(result.returncode, 11, result.stderr)
+        self.assertIn('current status is "pending"', result.stderr)
+        # No staging file should have been written
+        self.assertFalse(self._staging_path_for(1).exists())
+        # Task 1 must still be pending
+        self.assertEqual(self.read_task_file()["tasks"][0]["status"], "pending")
+
+    def test_draft_complete_task_rejected(self):
+        result = self.run_cli_stdin(
+            "log",
+            "draft", "--id", "3", "--commit-msg", "subject", "--log-file", "-",
+        )
+        self.assertEqual(result.returncode, 11, result.stderr)
+        self.assertIn('current status is "complete"', result.stderr)
+        self.assertFalse(self._staging_path_for(3).exists())
+
+    def test_draft_already_drafted_rejected(self):
+        # Drafted → drafted is not a valid transition (the staging file
+        # would silently overwrite). cmd_draft requires in-progress source.
+        self._make_drafted(task_id=2, commit_msg="first subject", log="x")
+        result = self.run_cli_stdin(
+            "log",
+            "draft", "--id", "2", "--commit-msg", "second subject", "--log-file", "-",
+        )
+        self.assertEqual(result.returncode, 11, result.stderr)
+        self.assertIn('current status is "drafted"', result.stderr)
+        # First staging file's commit subject must be intact
+        payload = json.loads(self._staging_path_for(2).read_text(encoding="utf-8"))
+        self.assertEqual(payload["commit_msg"], "first subject")
+
+    def test_draft_empty_commit_msg_rejected(self):
+        # An empty/whitespace-only commit subject is a usage error (exit 2,
+        # not 11) — git would reject it later anyway, and we want the
+        # failure at the draft step where the human-readable error lives.
+        result = self.run_cli_stdin(
+            "log",
+            "draft", "--id", "2", "--commit-msg", "   ", "--log-file", "-",
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("commit-msg", result.stderr)
+        # Task must remain in-progress; staging file must not exist
+        self.assertEqual(self.read_task_file()["tasks"][1]["status"], "in-progress")
+        self.assertFalse(self._staging_path_for(2).exists())
+
+    def test_draft_preserves_quotes_and_unicode_in_log(self):
+        payload = 'embedded "quotes", unicode 漢字, and {"json": "looking"}'
+        self._make_drafted(task_id=2, commit_msg="subject", log=payload)
+        self.assertEqual(self.read_task_file()["tasks"][1]["log"], payload)
+
+    def test_draft_missing_id_exits_ten(self):
+        result = self.run_cli_stdin(
+            "log",
+            "draft", "--id", "999", "--commit-msg", "x", "--log-file", "-",
+        )
+        self.assertEqual(result.returncode, 10, result.stderr)
+        self.assertIn("not found", result.stderr)
+
+    # ---- publish -------------------------------------------------------
+    # `publish` is the drafted → complete transition. Reads the staging
+    # file's commit subject, verifies the git index has at least one staged
+    # file, runs `git commit`, then flips status. Order matters: commit
+    # first, status second, so a commit failure leaves the task drafted
+    # and re-runnable. Source: task_list_cli.cmd_publish.
+
+    def test_publish_drafted_to_complete_runs_git_commit(self):
+        self._init_git_repo()
+        self._make_drafted(task_id=2, commit_msg="feat: real commit subject", log="x")
+        self._stage_file("hello.txt", "world\n")
+        result = self.run_cli("publish", "--id", "2", cwd=self.tmp_dir)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # Task is now complete
+        self.assertEqual(self.read_task_file()["tasks"][1]["status"], "complete")
+        # Git history's newest subject is the staged subject
+        self.assertEqual(self._git_log_subjects()[0], "feat: real commit subject")
+        # Staging file has been removed on the success path
+        self.assertFalse(self._staging_path_for(2).exists())
+        # CLI announces what it did so the runner can log it
+        self.assertIn("published task 2", result.stdout)
+
+    def test_publish_in_progress_task_rejected(self):
+        # publish must only run from drafted — running it on an
+        # in-progress task means the agent skipped the draft step.
+        self._init_git_repo()
+        self._stage_file("a.txt", "1\n")
+        result = self.run_cli("publish", "--id", "2", cwd=self.tmp_dir)
+        self.assertEqual(result.returncode, 11, result.stderr)
+        self.assertIn('current status is "in-progress"', result.stderr)
+        # Git history must be unchanged (only the seed commit)
+        self.assertEqual(self._git_log_subjects(), ["seed"])
+
+    def test_publish_pending_task_rejected(self):
+        self._init_git_repo()
+        result = self.run_cli("publish", "--id", "1", cwd=self.tmp_dir)
+        self.assertEqual(result.returncode, 11, result.stderr)
+        self.assertIn('current status is "pending"', result.stderr)
+
+    def test_publish_complete_task_rejected(self):
+        self._init_git_repo()
+        result = self.run_cli("publish", "--id", "3", cwd=self.tmp_dir)
+        self.assertEqual(result.returncode, 11, result.stderr)
+        self.assertIn('current status is "complete"', result.stderr)
+
+    def test_publish_missing_staging_file_exits_one(self):
+        # Manually flip task 2 to drafted but skip the staging-file write.
+        # publish must surface a clear "did you call draft?" error rather
+        # than crashing with FileNotFoundError or silently committing the
+        # index with a placeholder message.
+        self._init_git_repo()
+        data = fixture_data()
+        data["tasks"][1]["status"] = "drafted"
+        data["tasks"][1]["log"] = "synthetic"
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        # Make sure no leftover staging file from a previous test run
+        self._staging_path_for(2).unlink(missing_ok=True)
+        self._stage_file("a.txt", "1\n")
+        result = self.run_cli("publish", "--id", "2", cwd=self.tmp_dir)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("staging file", result.stderr)
+        self.assertIn("draft", result.stderr)
+
+    def test_publish_empty_git_index_exits_fifteen(self):
+        # A drafted task with no `git add` output is the "implementer
+        # forgot to stage" failure mode. publish should surface that
+        # explicitly rather than letting git's "nothing to commit" message
+        # confuse the runner.
+        self._init_git_repo()
+        self._make_drafted(task_id=2, commit_msg="will-not-commit", log="x")
+        result = self.run_cli("publish", "--id", "2", cwd=self.tmp_dir)
+        self.assertEqual(result.returncode, 15, result.stderr)
+        self.assertIn("no files staged", result.stderr)
+        # Task must remain drafted; staging file must remain present
+        self.assertEqual(self.read_task_file()["tasks"][1]["status"], "drafted")
+        self.assertTrue(self._staging_path_for(2).is_file())
+        # No commit happened
+        self.assertEqual(self._git_log_subjects(), ["seed"])
+
+    def test_publish_git_commit_failure_keeps_task_drafted(self):
+        # Wire up a pre-commit hook that always fails. publish must
+        # surface the hook's stderr verbatim and leave the task drafted
+        # + staging file intact so the runner can fix the underlying
+        # cause and re-run `publish --id N`.
+        self._init_git_repo()
+        # Override the /dev/null hooksPath set by _init_git_repo
+        subprocess.run(
+            ["git", "config", "--unset", "core.hooksPath"],
+            cwd=str(self.tmp_dir), capture_output=True, text=True,
+        )
+        hooks_dir = self.tmp_dir / ".git" / "hooks"
+        hook = hooks_dir / "pre-commit"
+        hook.write_text("#!/bin/sh\necho HOOK-REJECTED 1>&2\nexit 1\n", encoding="utf-8")
+        hook.chmod(0o755)
+
+        self._make_drafted(task_id=2, commit_msg="should-not-land", log="x")
+        self._stage_file("a.txt", "1\n")
+        result = self.run_cli("publish", "--id", "2", cwd=self.tmp_dir)
+        self.assertEqual(result.returncode, 15, result.stderr)
+        self.assertIn("git commit failed", result.stderr)
+        self.assertIn("HOOK-REJECTED", result.stderr)
+        # Task stays drafted, staging file stays put — the runner can
+        # disable the hook (or fix the underlying problem) and re-run.
+        self.assertEqual(self.read_task_file()["tasks"][1]["status"], "drafted")
+        self.assertTrue(self._staging_path_for(2).is_file())
+        self.assertEqual(self._git_log_subjects(), ["seed"])
+
+    def test_publish_missing_id_exits_ten(self):
+        self._init_git_repo()
+        result = self.run_cli("publish", "--id", "999", cwd=self.tmp_dir)
+        self.assertEqual(result.returncode, 10, result.stderr)
+        self.assertIn("not found", result.stderr)
+
+    def test_publish_staging_file_invalid_utf8_exits_thirteen(self):
+        # _staging_read opens with encoding="utf-8"; a corrupt staging
+        # file that contains non-UTF-8 bytes must surface as a clean
+        # TaskCliError (exit 13), matching the convention used by
+        # load_and_validate (line 93) and _read_log_input (line 212).
+        # Without the explicit handler, the decode error escapes the
+        # try block and crashes the CLI with a raw traceback.
+        self._init_git_repo()
+        staging = self._make_drafted(task_id=2, commit_msg="ok", log="x")
+        # Overwrite the valid staging file with bytes that fail UTF-8
+        staging.write_bytes(b"\xff\xfe not utf-8 bytes \x80")
+        result = self.run_cli("publish", "--id", "2", cwd=self.tmp_dir)
+        self.assertEqual(result.returncode, 13, result.stderr)
+        self.assertIn("not valid UTF-8", result.stderr)
+        # No commit, task remains drafted
+        self.assertEqual(self.read_task_file()["tasks"][1]["status"], "drafted")
+        self.assertEqual(self._git_log_subjects(), ["seed"])
+
+    def test_publish_staging_task_id_mismatch_rejected(self):
+        # Defense against a stale or hand-tampered staging file: even if
+        # the per-task path scheme makes collision improbable, publishing
+        # with the wrong task_id payload would commit work under the
+        # wrong subject. The identity check refuses to proceed.
+        self._init_git_repo()
+        staging = self._make_drafted(task_id=2, commit_msg="real", log="x")
+        # Hand-rewrite the staging payload with a mismatched task_id
+        payload = json.loads(staging.read_text(encoding="utf-8"))
+        payload["task_id"] = 999
+        staging.write_text(json.dumps(payload), encoding="utf-8")
+        self._stage_file("a.txt", "1\n")
+        result = self.run_cli("publish", "--id", "2", cwd=self.tmp_dir)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("task_id mismatch", result.stderr)
+        # Task stays drafted, no commit
+        self.assertEqual(self.read_task_file()["tasks"][1]["status"], "drafted")
+        self.assertEqual(self._git_log_subjects(), ["seed"])
+
+    def test_publish_staging_task_file_mismatch_rejected(self):
+        # Same defense, but for the task_file path. Catches the case
+        # where the same task list lives at two paths (e.g., a moved
+        # or renamed file) and publish is called against the new path
+        # while the staging payload still references the old one.
+        self._init_git_repo()
+        staging = self._make_drafted(task_id=2, commit_msg="real", log="x")
+        payload = json.loads(staging.read_text(encoding="utf-8"))
+        payload["task_file"] = "/some/other/path/tasks.json"
+        staging.write_text(json.dumps(payload), encoding="utf-8")
+        self._stage_file("a.txt", "1\n")
+        result = self.run_cli("publish", "--id", "2", cwd=self.tmp_dir)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("task_file mismatch", result.stderr)
+        self.assertEqual(self.read_task_file()["tasks"][1]["status"], "drafted")
+        self.assertEqual(self._git_log_subjects(), ["seed"])
 
     # ---- atomicity -----------------------------------------------------
 
@@ -804,7 +1314,9 @@ class CliTestCase(unittest.TestCase):
 
     SUBCOMMAND_NAMES = (
         "start",
-        "finish",
+        "set-status",
+        "draft",
+        "publish",
         "get",
         "next",
         "status",
