@@ -28,9 +28,9 @@ The viewer uses only the read-only verbs:
 
 Every CLI invocation takes `--file <task-file-path>` first.
 
-**Don't invent verbs** like `view`, `inspect`, `show`, or `info` — argparse rejects anything outside `next`, `start`, `finish`, `get`, `list`, `status`, `remaining`, `verify`. The right read verb is always one of those eight names.
+**Don't invent verbs** like `view`, `inspect`, `show`, or `info` — argparse rejects anything outside `next`, `start`, `draft`, `publish`, `set-status`, `get`, `list`, `status`, `remaining`, `verify`. The right read verb is always `status`, `list`, or `get` — the only three this skill calls.
 
-**Don't call mutation verbs** (`next`, `start`, `finish`, `verify`) from this skill, even though they're available. Viewing must not change the file. If the user asks "what should I work on next?" or "mark task 3 done" mid-session, point them at `/task-list-runner` (which atomically claims the next task) — don't invoke `next` here as a read.
+**Don't call mutation verbs** (`next`, `start`, `draft`, `publish`, `set-status`, `verify`) from this skill, even though they're available. Viewing must not change the file. If the user asks "what should I work on next?" or "mark task 3 done" mid-session, point them at `/task-list-runner` (which atomically claims the next task) — don't invoke `next` here as a read.
 
 **Exit codes used by the viewer:** 0 success · 1 IO error · 10 task id not found · 12 schema validation · 13 JSON parse. Treat 10 as a clean "no such id" message back to the user; 1/12/13 mean the file itself is broken — surface the error and stop.
 
@@ -107,7 +107,7 @@ Pending:
 
 ## Failure modes — prevent these
 
-- **Don't mutate the task file.** This skill is read-only. Never call `next`, `start`, `finish`, or `verify` from here, and never `Edit`/`Write` the JSON. If the user wants to advance the plan, send them to `/task-list-runner`; if they want to revise it, send them to `/task-list-builder` in rewrite mode.
+- **Don't mutate the task file.** This skill is read-only. Never call `next`, `start`, `draft`, `publish`, `set-status`, or `verify` from here, and never `Edit`/`Write` the JSON. If the user wants to advance the plan, send them to `/task-list-runner`; if they want to revise it, send them to `/task-list-builder` in rewrite mode.
 - **Don't invent CLI verbs** like `view`, `inspect`, `show`, or `info`. The CLI's verb set is fixed — argparse rejects anything else and prints help on every wrong guess. The right read verb is always `status`, `list`, or `get`.
 - **Don't bypass the CLI** with `cat`, `jq`, inline `python3 -c '...'`, or `Read` against the task JSON to extract a single field. Every read goes through `task_list_cli.py`. Bypassing the CLI skips schema validation; a corrupt file should fail loudly here, not be silently parsed.
 - **Don't auto-pick when multiple files match.** Phase 2 step 3's "ask the user" branch is non-negotiable. Picking by recency or alphabetical order has burned past iterations.

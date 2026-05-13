@@ -16,12 +16,17 @@ Pairs with [`task-list-builder`](../task-list-builder/), which produces the JSON
 
 ## What it does
 
-For each `pending` / `in-progress` task in the file:
+For each `pending` / `in-progress` task in the file, the runner dispatches **two foreground `Agent` calls** at depth-1 (never nested — the runtime forbids depth-2 dispatch):
 
-1. Dispatch a fresh foreground `Agent` with the Task Implementation Prompt.
-2. The agent claims the task (`task_list_cli.py next`), implements the change, and runs `verifySteps` (typecheck, tests, etc.) via `task_list_cli.py verify` from inside its own run.
-3. The agent dispatches a fresh-context validation subagent to evaluate `agentValidations` against the post-change code.
-4. The agent marks the task `complete` or `failed` via `task_list_cli.py finish`, writing its report to the `log` field. The runner re-checks `status` as a corruption gate before the next iteration.
+1. **Implementation agent.** Claims the task (`task_list_cli.py next`), implements the change, runs `verifySteps` via `task_list_cli.py verify`, stages source files via `git add`, and calls `task_list_cli.py draft` (parks the commit subject in a `/tmp` staging file without touching git). Returns.
+2. **Validation agent.** Fresh-context `Explore` subagent (read-only — runtime denies `Write`/`Edit`) that evaluates `agentValidations` against the staged code. Returns `RESULT: PASS` or `RESULT: FAIL`.
+
+The runner then resolves the draft:
+
+- **PASS** → `task_list_cli.py publish` (runs `git commit` against the staged index using the parked subject, flips status to `complete`).
+- **FAIL** → `task_list_cli.py set-status --status failed` (no commit, staging file preserved for inspection).
+
+The runner re-runs `task_list_cli.py status` as a corruption gate between every iteration.
 
 Modes: `--all` (run every remaining task non-interactively), `--next` (one task then stop), no flag (interactive menu).
 
@@ -57,26 +62,38 @@ flowchart TD
     MaxCheck -->|no| Dispatch
 
     Dispatch["Dispatch ONE foreground Agent<br/>with the Task Implementation Prompt<br/>(sequential, never parallel)"]
-    Dispatch --> AgentRun
+    Dispatch --> ImplAgent
 
-    subgraph AgentRun["Per-task Agent (fresh context)"]
+    subgraph ImplAgent["Implementation Agent (depth-1, fresh context)"]
       direction TB
       A1["Step 1 — cli next<br/>atomically claim →<br/>flips first pending to in-progress"]
       A1 --> A2["Implement the change"]
       A2 --> A3["Step 2 — cli verify --id N<br/>runs verifySteps in order,<br/>fail-fast, per-step log files"]
       A3 -->|exit non-zero| A2
-      A3 -->|exit 0| A25["Step 2.5 — dispatch read-only<br/>Explore subagent: evaluates<br/>agentValidations against code<br/>(runtime denies Write/Edit)"]
-      A25 -->|RESULT: PASS| A4Ok
-      A25 -->|"RESULT: FAIL<br/>(retry once)"| A2
-      A25 -->|"RESULT: FAIL twice"| A4Fail
-      A4Ok["Step 3 — cli finish<br/>--status complete<br/>--log-file - via heredoc"]
-      A4Fail["Step 3 — cli finish<br/>--status failed"]
-      A4Ok --> A5
-      A4Fail --> A5
-      A5["Step 4 — git commit source files<br/>NEVER stage the task file"]
+      A3 -->|"cannot fix"| AFail["cli set-status<br/>--status failed"]
+      A3 -->|exit 0| A4["Step 3 — git add source files<br/>NEVER stage the task file"]
+      A4 --> A5["Step 4 — cli draft --id N<br/>--commit-msg subject<br/>--log-file - via heredoc<br/>(parks subject; does not touch git)"]
     end
 
-    AgentRun --> PostCheck["cli status<br/>(post-iteration<br/>corruption gate)"]
+    ImplAgent -->|"task drafted"| ValidationDispatch["Runner inspects status:<br/>drafted task present?"]
+    ImplAgent -->|"task failed"| PostCheck
+    ValidationDispatch -->|yes| ValAgent
+    ValidationDispatch -->|no, no progress| PostCheck
+
+    subgraph ValAgent["Validation Agent (depth-1, fresh context, read-only)"]
+      direction TB
+      V1["Dispatched by runner with:<br/>what + agentValidations + changedFiles<br/>(git diff --cached --name-only)"]
+      V1 --> V2["Evaluate each agentValidations entry<br/>by reading code (Read/Grep)<br/>subagent_type: Explore<br/>(runtime denies Write/Edit/NotebookEdit)"]
+      V2 --> V3["Print per-entry PASS/FAIL with<br/>file:line evidence"]
+      V3 --> V4["Final line:<br/>RESULT: PASS or RESULT: FAIL"]
+    end
+
+    ValAgent -->|RESULT: PASS| Publish["cli publish --id N<br/>git commit against staged index<br/>using parked subject<br/>flips status → complete<br/>(exit 15 on git failure;<br/>task stays drafted)"]
+    ValAgent -->|RESULT: FAIL| FailDraft["cli set-status --id N<br/>--status failed<br/>(staging file preserved for inspection)<br/>NO retry — schema forbids drafted → in-progress"]
+    Publish --> PostCheck
+    FailDraft --> PostCheck
+
+    PostCheck["cli status<br/>(post-iteration<br/>corruption gate)"]
     PostCheck -->|exit non-zero| Corrupt([Halt: task file corrupted])
     PostCheck -->|"remaining unchanged"| Warn[Warn: no progress this iteration]
     PostCheck -->|"remaining decreased"| Iter
@@ -90,7 +107,7 @@ All mutations to the JSON go through `task_list_cli.py`. The CLI is auto-approve
 
 ## The bundled CLI
 
-`task_list_cli.py` is the canonical interface to the task JSON — the runner and dispatched agents never edit the file directly. Subcommands: `next`, `start`, `finish`, `get`, `list`, `status`, `remaining`, `verify`. See the "CLI reference" section of [`SKILL.md`](./SKILL.md) for the full surface.
+`task_list_cli.py` is the canonical interface to the task JSON — the runner and dispatched agents never edit the file directly. Subcommands: `next`, `start`, `draft`, `publish`, `set-status`, `get`, `list`, `status`, `remaining`, `verify`. See the "CLI reference" section of [`SKILL.md`](./SKILL.md) for the full surface.
 
 The harness plugin's PreToolUse hook auto-approves invocations of this CLI so the loop runs without per-call permission prompts.
 
