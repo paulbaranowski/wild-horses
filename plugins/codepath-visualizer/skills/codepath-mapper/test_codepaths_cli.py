@@ -396,5 +396,102 @@ class SetArchitectureTests(unittest.TestCase):
         self.assertEqual(on_disk, payload)
 
 
+class AddCodepathTests(unittest.TestCase):
+    """Exercise `add-codepath` end-to-end via the CLI subprocess.
+
+    setUp writes a valid `architecture.json` into the tempdir so the
+    cross-ref validator inside `_validate_single_codepath` has its
+    source — the verb runs `load_both` first, which requires arch on
+    disk. Each case targets one of the four documented exit-code
+    branches (success, duplicate id -> 11, bad cross-ref -> 15) plus
+    the auto-create-on-first-add path, matching plan §Task 6.1.
+
+    The exit-code split (11 vs 15 vs 12) is the contract that lets
+    dispatched agents distinguish "you re-used an id" from "you typo'd
+    a component id" from "you sent malformed schema" — these tests are
+    the canonical regression for that contract.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp_dir = Path(self._tmp.name)
+        (self.tmp_dir / "architecture.json").write_text(
+            json.dumps(valid_arch_with_components())
+        )
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _cp(self, id_: str = "make-request") -> dict:
+        """Build a minimal valid codepath whose steps reference the
+        'web' and 'srv' components from `valid_arch_with_components`.
+        """
+        return {
+            "id": id_,
+            "name": "Test cp",
+            "description": "...",
+            "steps": [{"from": "web", "to": "srv", "annotation": "POST"}],
+        }
+
+    def test_auto_creates_codepaths_json(self) -> None:
+        # No codepaths.json on disk — first add must create the file
+        # with the new codepath as the sole entry. Exercises the
+        # skeleton-on-missing-file path in load_and_validate_codepaths.
+        self.assertFalse((self.tmp_dir / "codepaths.json").exists())
+        result = run(
+            "add-codepath", "--json", "-",
+            dir_=self.tmp_dir,
+            stdin=json.dumps(self._cp()),
+        )
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        data = json.loads((self.tmp_dir / "codepaths.json").read_text())
+        self.assertEqual(len(data["codepaths"]), 1)
+        self.assertEqual(data["codepaths"][0]["id"], "make-request")
+
+    def test_appends_to_existing(self) -> None:
+        # Pre-seed codepaths.json with one entry, then add a second.
+        # Asserts BOTH entries are present AND that insertion order is
+        # preserved (first, second) — the documented append semantics.
+        first = {"$schemaVersion": 1, "codepaths": [self._cp("first")]}
+        (self.tmp_dir / "codepaths.json").write_text(json.dumps(first))
+        result = run(
+            "add-codepath", "--json", "-",
+            dir_=self.tmp_dir,
+            stdin=json.dumps(self._cp("second")),
+        )
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        data = json.loads((self.tmp_dir / "codepaths.json").read_text())
+        self.assertEqual(
+            [cp["id"] for cp in data["codepaths"]],
+            ["first", "second"],
+        )
+
+    def test_duplicate_id_fails_11(self) -> None:
+        # Pre-seed with a codepath whose id collides with the payload.
+        # Must exit 11 (duplicate id), NOT 12 (generic schema) — the
+        # split is what makes "you re-used an id" actionable.
+        first = {"$schemaVersion": 1, "codepaths": [self._cp("dup")]}
+        (self.tmp_dir / "codepaths.json").write_text(json.dumps(first))
+        result = run(
+            "add-codepath", "--json", "-",
+            dir_=self.tmp_dir,
+            stdin=json.dumps(self._cp("dup")),
+        )
+        self.assertEqual(result.returncode, 11)
+
+    def test_bad_component_ref_fails_15(self) -> None:
+        # Step references a component id not in architecture.components.
+        # Must exit 15 (cross-ref), NOT 12 (generic schema) — the split
+        # is what makes "you typo'd a component id" actionable.
+        cp = self._cp()
+        cp["steps"][0]["from"] = "ghost"
+        result = run(
+            "add-codepath", "--json", "-",
+            dir_=self.tmp_dir,
+            stdin=json.dumps(cp),
+        )
+        self.assertEqual(result.returncode, 15)
+
+
 if __name__ == "__main__":
     unittest.main()
