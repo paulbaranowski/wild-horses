@@ -28,6 +28,18 @@ CODEPATHS_FILE = "codepaths.json"
 DEFAULT_DIR = "docs/codepaths"
 ID_PATTERN = r"^[a-z0-9-]+$"
 ID_RE = re.compile(ID_PATTERN)
+TEMPLATE_PATH = Path(__file__).parent / "template.html"
+
+
+def _html_escape(s: str) -> str:
+    """Escape the five HTML special characters for safe attribute/text substitution."""
+    return (
+        s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
 
 
 class HelpfulArgumentParser(argparse.ArgumentParser):
@@ -631,6 +643,44 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(json.dumps(out, indent=2))
 
 
+def cmd_render(args: argparse.Namespace) -> None:
+    """Bake architecture + codepaths JSON into the HTML template.
+
+    Reads `TEMPLATE_PATH` (sibling `template.html` in this skill directory)
+    and substitutes three placeholders: `__APP_NAME__` and `__APP_SUBTITLE__`
+    receive `_html_escape`d values (they're rendered as text content in the
+    page header), while `__DATA__` receives the JSON payload pre-processed
+    so it can sit inside a `<script type="application/json">` block —
+    every `</` is rewritten to `<\\/` so the browser's HTML parser doesn't
+    prematurely terminate the script element on a stray closing tag in
+    user-supplied strings (component names, annotations, etc.). Same
+    validate-before-write discipline as the mutating verbs: `load_both`
+    raises on schema/IO/JSON errors before any file is touched, so a
+    corrupt input never produces a partial HTML file.
+    """
+    dir_ = Path(args.dir)
+    arch, cps = load_both(dir_)
+    output = Path(args.output) if args.output else (dir_ / "architecture.html")
+
+    try:
+        template = TEMPLATE_PATH.read_text(encoding="utf-8")
+    except FileNotFoundError as e:
+        raise CliError(f"template.html missing at {TEMPLATE_PATH}: {e}", code=1) from e
+
+    inlined = json.dumps({"architecture": arch, "codepaths": cps}, ensure_ascii=False)
+    inlined = inlined.replace("</", "<\\/")
+
+    html = (
+        template
+        .replace("__APP_NAME__", _html_escape(arch["app"]["name"]))
+        .replace("__APP_SUBTITLE__", _html_escape(arch["app"].get("subtitle", "")))
+        .replace("__DATA__", inlined)
+    )
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(html, encoding="utf-8")
+
+
 # DISPATCH maps subcommand string to handler. Subsequent tasks register
 # their cmd_* handlers here. main() looks up the handler by `args.cmd`;
 # a missing entry surfaces as "not yet implemented" with exit code 2 so
@@ -644,6 +694,7 @@ DISPATCH: dict[str, Callable[[argparse.Namespace], None]] = {
     "list": cmd_list,
     "get": cmd_get,
     "status": cmd_status,
+    "render": cmd_render,
 }
 
 
