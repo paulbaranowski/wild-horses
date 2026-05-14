@@ -210,5 +210,95 @@ class WriteAtomicTests(unittest.TestCase):
     pass
 
 
+def valid_codepaths() -> dict:
+    """Fixture: a one-codepath codepaths.json whose steps reference the
+    'web' and 'srv' components in valid_arch_with_components(). Cross-ref
+    validation in load_and_validate_codepaths() only passes when both
+    files agree on component ids — so this helper is paired with
+    valid_arch_with_components() by construction.
+    """
+    return {
+        "$schemaVersion": 1,
+        "codepaths": [
+            {
+                "id": "make-request",
+                "name": "Make a request",
+                "description": "User clicks, server responds.",
+                "steps": [
+                    {
+                        "from": "web",
+                        "to": "srv",
+                        "annotation": "POST /api",
+                        "payload": "{q}",
+                        "ref": "src/web/req.ts:10",
+                    }
+                ],
+            }
+        ],
+    }
+
+
+class LoadAndValidateCodepathsTests(unittest.TestCase):
+    """Exercise load_and_validate_codepaths() via `list --kind codepaths`.
+
+    setUp writes a valid architecture.json into the tempdir so the
+    cross-ref validator has its source — codepaths validation depends on
+    arch being loadable first (see load_both()). Cases that target the
+    codepaths-only failure modes still need the arch file present;
+    otherwise the test would conflate "bad arch" with "bad codepaths".
+
+    Cases requiring `list --kind codepaths` to actually run (not just
+    error with "not yet implemented") are gated on LIST_WIRED — same
+    pattern as LoadAndValidateArchTests. The `test_missing_codepaths_returns_empty`
+    case is the exception: it only checks the exit code is NOT 1, which
+    is satisfied even by the unwired-dispatch path (exit 2).
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp_dir = Path(self._tmp.name)
+        (self.tmp_dir / "architecture.json").write_text(
+            json.dumps(valid_arch_with_components())
+        )
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_missing_codepaths_returns_empty(self) -> None:
+        # No codepaths.json on disk — loader should return the skeleton,
+        # not crash with the generic IO error code (1).
+        result = run("list", "--kind", "codepaths", dir_=self.tmp_dir)
+        self.assertNotEqual(result.returncode, 1, msg=f"stderr={result.stderr}")
+
+    @unittest.skipUnless(LIST_WIRED, "list verb not yet wired (Task 14)")
+    def test_step_references_missing_component_fails_15(self) -> None:
+        bad = valid_codepaths()
+        bad["codepaths"][0]["steps"][0]["to"] = "ghost"
+        (self.tmp_dir / "codepaths.json").write_text(json.dumps(bad))
+        result = run("list", "--kind", "codepaths", dir_=self.tmp_dir)
+        self.assertEqual(result.returncode, 15)
+        self.assertIn("ghost", result.stderr)
+
+    @unittest.skipUnless(LIST_WIRED, "list verb not yet wired (Task 14)")
+    def test_duplicate_codepath_id_fails_12(self) -> None:
+        bad = valid_codepaths()
+        bad["codepaths"].append(dict(bad["codepaths"][0]))
+        (self.tmp_dir / "codepaths.json").write_text(json.dumps(bad))
+        result = run("list", "--kind", "codepaths", dir_=self.tmp_dir)
+        self.assertEqual(result.returncode, 12)
+
+    @unittest.skipUnless(LIST_WIRED, "list verb not yet wired (Task 14)")
+    def test_codepaths_not_array_fails_12(self) -> None:
+        (self.tmp_dir / "codepaths.json").write_text('{"codepaths": "no"}')
+        result = run("list", "--kind", "codepaths", dir_=self.tmp_dir)
+        self.assertEqual(result.returncode, 12)
+
+    @unittest.skipUnless(LIST_WIRED, "list verb not yet wired (Task 14)")
+    def test_codepaths_malformed_json_fails_13(self) -> None:
+        (self.tmp_dir / "codepaths.json").write_text("{")
+        result = run("list", "--kind", "codepaths", dir_=self.tmp_dir)
+        self.assertEqual(result.returncode, 13)
+
+
 if __name__ == "__main__":
     unittest.main()
