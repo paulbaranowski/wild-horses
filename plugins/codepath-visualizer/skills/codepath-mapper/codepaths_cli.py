@@ -15,13 +15,19 @@ See `codepaths-schema.md` in the plugin root for the JSON shapes,
 invariants, and the full exit-code table.
 """
 import argparse
+import json
+import os
+import re
 import sys
-from typing import Callable
+import tempfile
+from pathlib import Path
+from typing import Any, Callable
 
 ARCH_FILE = "architecture.json"
 CODEPATHS_FILE = "codepaths.json"
 DEFAULT_DIR = "docs/codepaths"
 ID_PATTERN = r"^[a-z0-9-]+$"
+ID_RE = re.compile(ID_PATTERN)
 
 
 class HelpfulArgumentParser(argparse.ArgumentParser):
@@ -47,6 +53,137 @@ class CliError(Exception):
     def __init__(self, msg: str, code: int):
         super().__init__(msg)
         self.code = code
+
+
+def default_arch_skeleton() -> dict:
+    return {
+        "$schemaVersion": 1,
+        "app": {"name": "Untitled app", "subtitle": ""},
+        "categories": [
+            {"id": "actor",    "label": "Actor",            "color": "#a78bfa", "column": 0},
+            {"id": "ui",       "label": "UI / Client",      "color": "#60a5fa", "column": 1},
+            {"id": "api",      "label": "API / Backend",    "color": "#fbbf24", "column": 2},
+            {"id": "data",     "label": "Data store",       "color": "#34d399", "column": 3},
+            {"id": "job",      "label": "Background job",   "color": "#f87171", "column": 4},
+            {"id": "external", "label": "External service", "color": "#9ca3af", "column": 5},
+        ],
+        "components": [],
+        "edges": [],
+    }
+
+
+def _check_id(value: Any, where: str) -> None:
+    if not isinstance(value, str) or not ID_RE.match(value):
+        raise CliError(f'{where} must be a kebab-case id matching {ID_PATTERN!r}, got {value!r}', code=12)
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        raise
+    except OSError as e:
+        raise CliError(f"file {path}: {e}", code=1) from e
+    except UnicodeDecodeError as e:
+        raise CliError(f"file {path} is not valid UTF-8: {e}", code=13) from e
+    except json.JSONDecodeError as e:
+        raise CliError(
+            f"file {path}: not valid JSON at line {e.lineno} column {e.colno}: {e.msg}",
+            code=13,
+        ) from e
+
+
+def _validate_arch_dict(data: Any) -> None:
+    """Validate architecture dict in place; raise CliError(code=12) on any violation."""
+    if not isinstance(data, dict):
+        raise CliError("architecture.json: top-level must be a JSON object", code=12)
+    for field in ("categories", "components", "edges"):
+        if field not in data or not isinstance(data[field], list):
+            raise CliError(f'architecture.json: "{field}" must be an array', code=12)
+
+    # Categories
+    cat_ids: set[str] = set()
+    cat_columns: set[int] = set()
+    for i, c in enumerate(data["categories"]):
+        if not isinstance(c, dict):
+            raise CliError(f"architecture.json: categories[{i}] must be an object", code=12)
+        _check_id(c.get("id"), f"architecture.json: categories[{i}].id")
+        if c["id"] in cat_ids:
+            raise CliError(f"architecture.json: duplicate category id {c['id']!r}", code=12)
+        cat_ids.add(c["id"])
+        col = c.get("column")
+        if not isinstance(col, int) or isinstance(col, bool) or col < 0:
+            raise CliError(
+                f"architecture.json: categories[{i}].column must be a non-negative integer", code=12
+            )
+        if col in cat_columns:
+            raise CliError(
+                f"architecture.json: duplicate category column {col} (each must be unique)", code=12
+            )
+        cat_columns.add(col)
+        if not isinstance(c.get("label"), str) or not c["label"]:
+            raise CliError(f"architecture.json: categories[{i}].label must be a non-empty string", code=12)
+
+    # Components
+    comp_ids: set[str] = set()
+    for i, comp in enumerate(data["components"]):
+        if not isinstance(comp, dict):
+            raise CliError(f"architecture.json: components[{i}] must be an object", code=12)
+        _check_id(comp.get("id"), f"architecture.json: components[{i}].id")
+        if comp["id"] in comp_ids:
+            raise CliError(f"architecture.json: duplicate component id {comp['id']!r}", code=12)
+        comp_ids.add(comp["id"])
+        if comp.get("category") not in cat_ids:
+            raise CliError(
+                f"architecture.json: components[{i}].category {comp.get('category')!r} not in categories",
+                code=12,
+            )
+
+    # Edges
+    for i, e in enumerate(data["edges"]):
+        if not isinstance(e, dict):
+            raise CliError(f"architecture.json: edges[{i}] must be an object", code=12)
+        if e.get("from") not in comp_ids:
+            raise CliError(
+                f"architecture.json: edges[{i}].from {e.get('from')!r} not in components", code=12
+            )
+        if e.get("to") not in comp_ids:
+            raise CliError(
+                f"architecture.json: edges[{i}].to {e.get('to')!r} not in components", code=12
+            )
+
+
+def load_and_validate_arch(dir_: Path) -> dict:
+    """Load architecture.json from dir_. Missing file → default skeleton (auto-init)."""
+    path = dir_ / ARCH_FILE
+    try:
+        data = _read_json(path)
+    except FileNotFoundError:
+        return default_arch_skeleton()
+    _validate_arch_dict(data)
+    return data
+
+
+def write_atomic(path: Path, data: dict) -> None:
+    """Atomic write: tmp file + fsync + os.replace."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        prefix=path.name + ".", dir=str(path.parent), suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def build_parser() -> argparse.ArgumentParser:
