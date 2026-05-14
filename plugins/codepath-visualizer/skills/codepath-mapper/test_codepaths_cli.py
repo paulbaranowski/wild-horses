@@ -300,5 +300,101 @@ class LoadAndValidateCodepathsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 13)
 
 
+class SetArchitectureTests(unittest.TestCase):
+    """Exercise `set-architecture` end-to-end via the CLI subprocess.
+
+    Atomicity is the key invariant: `cmd_set_architecture` must validate
+    BEFORE `write_atomic`, so a malformed or schema-violating payload
+    leaves the on-disk `architecture.json` untouched (or absent, on a
+    fresh dir). `test_invalid_arch_fails_12` enforces this by asserting
+    the file was NOT created — the canonical regression test for the
+    "validate-before-write" discipline called out in plan §Task 8.
+
+    Cases use `--json -` (stdin) where possible to mirror the dispatched-
+    agent invocation pattern (`cli set-architecture --json - <<'EOF' ...`),
+    plus one `test_read_from_file` case covering the file-path branch of
+    `read_json_arg`.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp_dir = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_writes_valid_arch(self) -> None:
+        payload = valid_arch_with_components()
+        result = run(
+            "set-architecture", "--json", "-",
+            dir_=self.tmp_dir,
+            stdin=json.dumps(payload),
+        )
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        on_disk = json.loads((self.tmp_dir / "architecture.json").read_text())
+        self.assertEqual(on_disk, payload)
+
+    def test_auto_creates_directory(self) -> None:
+        # Pass a nested non-existent --dir; the verb must create it before
+        # writing architecture.json (write_atomic uses os.makedirs internally
+        # via Path.mkdir(parents=True) — verify the contract end-to-end).
+        nested = self.tmp_dir / "deep" / "nested" / "out"
+        self.assertFalse(nested.exists())
+        payload = valid_arch_with_components()
+        result = run(
+            "set-architecture", "--json", "-",
+            dir_=nested,
+            stdin=json.dumps(payload),
+        )
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        self.assertTrue((nested / "architecture.json").exists())
+
+    def test_invalid_arch_fails_12(self) -> None:
+        # Schema-violating but JSON-valid payload: missing "categories".
+        # The atomic-discipline assertion is that the on-disk file was NOT
+        # created — if validate ran AFTER write, this would silently corrupt
+        # state. This is the canonical regression test for the validate-
+        # before-write ordering.
+        bad = valid_arch_with_components()
+        del bad["categories"]
+        arch_path = self.tmp_dir / "architecture.json"
+        self.assertFalse(arch_path.exists())
+        result = run(
+            "set-architecture", "--json", "-",
+            dir_=self.tmp_dir,
+            stdin=json.dumps(bad),
+        )
+        self.assertEqual(result.returncode, 12)
+        self.assertFalse(
+            arch_path.exists(),
+            msg="architecture.json must NOT exist after invalid payload — "
+                "validate-before-write discipline violated",
+        )
+
+    def test_invalid_json_fails_13(self) -> None:
+        result = run(
+            "set-architecture", "--json", "-",
+            dir_=self.tmp_dir,
+            stdin="{not valid json",
+        )
+        self.assertEqual(result.returncode, 13)
+        self.assertFalse((self.tmp_dir / "architecture.json").exists())
+
+    def test_read_from_file(self) -> None:
+        # Write the payload to a file inside the tempdir and pass its path
+        # as --json (not "-"); exercises the file-path branch of
+        # read_json_arg().
+        payload = valid_arch_with_components()
+        payload_path = self.tmp_dir / "payload.json"
+        payload_path.write_text(json.dumps(payload))
+        result = run(
+            "set-architecture", "--json", str(payload_path),
+            dir_=self.tmp_dir,
+        )
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        on_disk = json.loads((self.tmp_dir / "architecture.json").read_text())
+        self.assertEqual(on_disk, payload)
+
+
 if __name__ == "__main__":
     unittest.main()
