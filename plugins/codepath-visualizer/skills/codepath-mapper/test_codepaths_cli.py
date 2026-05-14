@@ -603,5 +603,77 @@ class UpdateRemoveCodepathTests(unittest.TestCase):
         self.assertEqual(result.returncode, 10)
 
 
+class ListGetTests(unittest.TestCase):
+    """Exercise `list` and `get` end-to-end via the CLI subprocess.
+
+    setUp writes BOTH `architecture.json` (via valid_arch_with_components)
+    and `codepaths.json` (via valid_codepaths) so the cross-ref validator
+    inside load_both has its source — list/get both call load_both, which
+    requires both files to be present and mutually consistent.
+
+    Each happy-path test parses the CLI's stdout as JSON via json.loads
+    and asserts structural content (ids, labels) — not stdout substring
+    matches — so the contract is "list/get print a JSON document" not
+    "list/get print a particular textual format". The unknown-id case
+    asserts exit 10, the documented not-found code shared with
+    cmd_update_codepath / cmd_remove_codepath.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp_dir = Path(self._tmp.name)
+        (self.tmp_dir / "architecture.json").write_text(
+            json.dumps(valid_arch_with_components())
+        )
+        (self.tmp_dir / "codepaths.json").write_text(
+            json.dumps(valid_codepaths())
+        )
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_list_components(self) -> None:
+        result = run("list", "--kind", "components", dir_=self.tmp_dir)
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        data = json.loads(result.stdout)
+        self.assertEqual([c["id"] for c in data], ["web", "srv"])
+
+    def test_list_codepaths(self) -> None:
+        result = run("list", "--kind", "codepaths", dir_=self.tmp_dir)
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        data = json.loads(result.stdout)
+        self.assertEqual([cp["id"] for cp in data], ["make-request"])
+
+    def test_list_categories(self) -> None:
+        result = run("list", "--kind", "categories", dir_=self.tmp_dir)
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        data = json.loads(result.stdout)
+        self.assertEqual([c["id"] for c in data], ["ui", "api"])
+
+    def test_list_edges(self) -> None:
+        result = run("list", "--kind", "edges", dir_=self.tmp_dir)
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        data = json.loads(result.stdout)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["from"], "web")
+        self.assertEqual(data[0]["to"], "srv")
+
+    def test_get_component(self) -> None:
+        result = run(
+            "get", "--kind", "components", "--id", "web",
+            dir_=self.tmp_dir,
+        )
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        data = json.loads(result.stdout)
+        self.assertEqual(data["label"], "Web app")
+
+    def test_get_unknown_fails_10(self) -> None:
+        result = run(
+            "get", "--kind", "components", "--id", "ghost",
+            dir_=self.tmp_dir,
+        )
+        self.assertEqual(result.returncode, 10)
+
+
 if __name__ == "__main__":
     unittest.main()
