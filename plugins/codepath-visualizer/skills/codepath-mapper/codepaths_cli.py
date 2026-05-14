@@ -472,6 +472,54 @@ def cmd_add_codepath(args: argparse.Namespace) -> None:
     write_atomic(dir_ / CODEPATHS_FILE, cps)
 
 
+def cmd_update_codepath(args: argparse.Namespace) -> None:
+    """Replace one codepath in place by id.
+
+    Two guards before the in-place write: (a) `--id` must match `payload.id`
+    — mismatched ids surface as `CliError(code=11)` so an agent that
+    typo'd one of the two doesn't silently re-key the codepath; (b) the
+    target id must already exist, else `CliError(code=10)`. When we
+    validate the payload, the existing-id set EXCLUDES the index being
+    replaced — otherwise `_validate_single_codepath` would flag the
+    payload's own id as a duplicate (it shares the on-disk id by design).
+    Same validate-before-write discipline as `cmd_add_codepath`.
+    """
+    dir_ = Path(args.dir)
+    arch, cps = load_both(dir_)
+    payload = read_json_arg(args.json)
+    if not isinstance(payload, dict) or payload.get("id") != args.id:
+        raise CliError(
+            f"--id ({args.id!r}) must match payload.id ({payload.get('id') if isinstance(payload, dict) else None!r})",
+            code=11,
+        )
+    for i, cp in enumerate(cps["codepaths"]):
+        if cp["id"] == args.id:
+            other_ids = {c["id"] for j, c in enumerate(cps["codepaths"]) if j != i}
+            _validate_single_codepath(payload, arch, other_ids)
+            cps["codepaths"][i] = payload
+            write_atomic(dir_ / CODEPATHS_FILE, cps)
+            return
+    raise CliError(f"codepath id {args.id!r} not found", code=10)
+
+
+def cmd_remove_codepath(args: argparse.Namespace) -> None:
+    """Delete one codepath by id.
+
+    `load_both` first so a corrupt on-disk file fails loudly instead of
+    being silently rewritten short one entry. Unknown id raises
+    `CliError(code=10)` — same not-found semantics as
+    `cmd_update_codepath`, so callers can branch on exit code alone.
+    """
+    dir_ = Path(args.dir)
+    _, cps = load_both(dir_)
+    for i, cp in enumerate(cps["codepaths"]):
+        if cp["id"] == args.id:
+            del cps["codepaths"][i]
+            write_atomic(dir_ / CODEPATHS_FILE, cps)
+            return
+    raise CliError(f"codepath id {args.id!r} not found", code=10)
+
+
 # DISPATCH maps subcommand string to handler. Subsequent tasks register
 # their cmd_* handlers here. main() looks up the handler by `args.cmd`;
 # a missing entry surfaces as "not yet implemented" with exit code 2 so
@@ -480,6 +528,8 @@ def cmd_add_codepath(args: argparse.Namespace) -> None:
 DISPATCH: dict[str, Callable[[argparse.Namespace], None]] = {
     "set-architecture": cmd_set_architecture,
     "add-codepath": cmd_add_codepath,
+    "update-codepath": cmd_update_codepath,
+    "remove-codepath": cmd_remove_codepath,
 }
 
 
