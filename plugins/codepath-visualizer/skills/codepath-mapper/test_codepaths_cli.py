@@ -493,5 +493,115 @@ class AddCodepathTests(unittest.TestCase):
         self.assertEqual(result.returncode, 15)
 
 
+class UpdateRemoveCodepathTests(unittest.TestCase):
+    """Exercise `update-codepath` and `remove-codepath` end-to-end.
+
+    setUp seeds the tempdir with a valid `architecture.json` AND a
+    `codepaths.json` containing one codepath (`make-request`) — both
+    verbs require an existing on-disk codepaths state, and update's
+    cross-ref validation runs against the architecture. Each case
+    targets one of the documented exit-code branches:
+
+    - update happy path: exit 0, in-place replacement preserves the
+      array slot (asserted by reading codepaths.json back and checking
+      `name` was overwritten).
+    - update with unknown id: exit 10 — "you addressed something that
+      isn't there".
+    - update with `--id != payload.id`: exit 11 — guards against an
+      agent that typo'd one of the two ids and would otherwise silently
+      re-key the codepath.
+    - remove happy path: exit 0, codepaths array becomes empty.
+    - remove with unknown id: exit 10 — same not-found contract as
+      update, so callers can branch on exit code alone.
+
+    The 10/11 split is the canonical regression for the
+    "not-found vs id-mismatch" contract in `cmd_update_codepath`.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp_dir = Path(self._tmp.name)
+        (self.tmp_dir / "architecture.json").write_text(
+            json.dumps(valid_arch_with_components())
+        )
+        cp = {
+            "id": "make-request",
+            "name": "old name",
+            "description": "old",
+            "steps": [{"from": "web", "to": "srv", "annotation": "old"}],
+        }
+        (self.tmp_dir / "codepaths.json").write_text(
+            json.dumps({"$schemaVersion": 1, "codepaths": [cp]})
+        )
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_update_replaces_in_place(self) -> None:
+        new = {
+            "id": "make-request",
+            "name": "new name",
+            "description": "new",
+            "steps": [{"from": "web", "to": "srv", "annotation": "new"}],
+        }
+        result = run(
+            "update-codepath", "--id", "make-request", "--json", "-",
+            dir_=self.tmp_dir,
+            stdin=json.dumps(new),
+        )
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        data = json.loads((self.tmp_dir / "codepaths.json").read_text())
+        self.assertEqual(data["codepaths"][0]["name"], "new name")
+
+    def test_update_unknown_id_fails_10(self) -> None:
+        new = {
+            "id": "ghost",
+            "name": "x",
+            "description": "",
+            "steps": [{"from": "web", "to": "srv", "annotation": "x"}],
+        }
+        result = run(
+            "update-codepath", "--id", "ghost", "--json", "-",
+            dir_=self.tmp_dir,
+            stdin=json.dumps(new),
+        )
+        self.assertEqual(result.returncode, 10)
+
+    def test_update_id_mismatch_fails_11(self) -> None:
+        # Payload id != --id: must exit 11 (mismatch), NOT 10 (not-found)
+        # — the split is what makes "you typo'd one of the two ids"
+        # actionable. Without this guard, an agent could silently re-key
+        # an existing codepath by addressing it with --id <old> while
+        # sending payload.id = <new>.
+        new = {
+            "id": "other",
+            "name": "x",
+            "description": "",
+            "steps": [{"from": "web", "to": "srv", "annotation": "x"}],
+        }
+        result = run(
+            "update-codepath", "--id", "make-request", "--json", "-",
+            dir_=self.tmp_dir,
+            stdin=json.dumps(new),
+        )
+        self.assertEqual(result.returncode, 11)
+
+    def test_remove_deletes(self) -> None:
+        result = run(
+            "remove-codepath", "--id", "make-request",
+            dir_=self.tmp_dir,
+        )
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        data = json.loads((self.tmp_dir / "codepaths.json").read_text())
+        self.assertEqual(data["codepaths"], [])
+
+    def test_remove_unknown_fails_10(self) -> None:
+        result = run(
+            "remove-codepath", "--id", "ghost",
+            dir_=self.tmp_dir,
+        )
+        self.assertEqual(result.returncode, 10)
+
+
 if __name__ == "__main__":
     unittest.main()
