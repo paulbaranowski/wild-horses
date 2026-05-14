@@ -416,6 +416,62 @@ def cmd_set_architecture(args: argparse.Namespace) -> None:
     write_atomic(dir_ / ARCH_FILE, payload)
 
 
+def _validate_single_codepath(cp: Any, arch: dict, existing_ids: set[str]) -> None:
+    """Validate one codepath payload against the architecture and existing-id set.
+
+    Top-level helper so `add-codepath` and `update-codepath` apply identical
+    rules to incoming payloads — same discipline as `_validate_arch_dict`.
+    Duplicate id raises `CliError(code=11)`; cross-ref violations against
+    `arch["components"]` raise `CliError(code=15)`; every other schema
+    violation raises `CliError(code=12)`. The exit-code split is what lets
+    dispatched agents (and humans) distinguish "you re-used an id" from
+    "you typo'd a component id" from "you sent malformed schema" without
+    parsing stderr.
+    """
+    if not isinstance(cp, dict):
+        raise CliError("codepath payload must be an object", code=12)
+    _check_id(cp.get("id"), "codepath.id")
+    if cp["id"] in existing_ids:
+        raise CliError(f"codepath id {cp['id']!r} already exists", code=11)
+    if not isinstance(cp.get("name"), str) or not cp["name"]:
+        raise CliError("codepath.name must be a non-empty string", code=12)
+    if not isinstance(cp.get("steps"), list) or not cp["steps"]:
+        raise CliError("codepath.steps must be a non-empty array", code=12)
+    comp_ids = {c["id"] for c in arch["components"]}
+    for j, step in enumerate(cp["steps"]):
+        if not isinstance(step, dict):
+            raise CliError(f"codepath.steps[{j}] must be an object", code=12)
+        for k in ("from", "to"):
+            v = step.get(k)
+            if v not in comp_ids:
+                raise CliError(
+                    f"codepath.steps[{j}].{k} {v!r} not in architecture.components",
+                    code=15,
+                )
+        if not isinstance(step.get("annotation"), str) or not step["annotation"]:
+            raise CliError(
+                f"codepath.steps[{j}].annotation must be a non-empty string", code=12
+            )
+
+
+def cmd_add_codepath(args: argparse.Namespace) -> None:
+    """Append one codepath payload to codepaths.json.
+
+    Order matters: load_both (which validates the existing on-disk state)
+    runs first, then payload validation against the live architecture, and
+    only then the append + write_atomic. A bad payload — duplicate id,
+    bad cross-ref, schema violation — never touches disk, matching the
+    validate-before-write discipline from `cmd_set_architecture`.
+    """
+    dir_ = Path(args.dir)
+    arch, cps = load_both(dir_)
+    payload = read_json_arg(args.json)
+    existing_ids = {cp["id"] for cp in cps["codepaths"]}
+    _validate_single_codepath(payload, arch, existing_ids)
+    cps["codepaths"].append(payload)
+    write_atomic(dir_ / CODEPATHS_FILE, cps)
+
+
 # DISPATCH maps subcommand string to handler. Subsequent tasks register
 # their cmd_* handlers here. main() looks up the handler by `args.cmd`;
 # a missing entry surfaces as "not yet implemented" with exit code 2 so
@@ -423,6 +479,7 @@ def cmd_set_architecture(args: argparse.Namespace) -> None:
 # schema/IO failures.
 DISPATCH: dict[str, Callable[[argparse.Namespace], None]] = {
     "set-architecture": cmd_set_architecture,
+    "add-codepath": cmd_add_codepath,
 }
 
 
