@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Wild Horses Marketplace — Architecture &amp; Codepaths</title>
+    <style>
+      :root {
+        --bg: #0b0f1a;
+        --bg-2: #131a2b;
+        --fg: #e5e7eb;
+        --fg-dim: #6b7280;
+        --line: #1f2937;
+        --lit: #facc15;
+        --dim-opacity: 0.18;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 13px;
+        height: 100%;
+      }
+      header {
+        padding: 18px 24px 6px;
+        border-bottom: 1px solid var(--line);
+      }
+      header h1 {
+        margin: 0 0 2px;
+        font-size: 16px;
+        font-weight: 600;
+      }
+      header .subtitle {
+        color: var(--fg-dim);
+        font-size: 12px;
+      }
+      .legend {
+        display: flex;
+        gap: 14px;
+        padding: 6px 24px 12px;
+        border-bottom: 1px solid var(--line);
+        flex-wrap: wrap;
+      }
+      .legend .item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        color: var(--fg-dim);
+      }
+      .legend .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
+      }
+      .main {
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        height: calc(100% - 88px);
+      }
+      .graph {
+        position: relative;
+        overflow: auto;
+        padding: 16px;
+      }
+      .columns {
+        display: grid;
+        gap: 12px;
+        min-width: 100%;
+        min-height: 100%;
+      }
+      .column {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .column h3 {
+        margin: 0 0 4px;
+        font-size: 10px;
+        text-transform: uppercase;
+        color: var(--fg-dim);
+        letter-spacing: 0.06em;
+        font-weight: 600;
+      }
+      .node {
+        background: var(--bg-2);
+        border: 1px solid var(--line);
+        border-left-width: 3px;
+        border-radius: 4px;
+        padding: 6px 10px;
+        font-size: 12px;
+        transition: opacity 150ms;
+      }
+      .node.lit {
+        border-color: var(--lit);
+        background: rgba(250, 204, 21, 0.08);
+      }
+      .node.dim {
+        opacity: var(--dim-opacity);
+      }
+      svg.edges {
+        position: absolute;
+        left: 0;
+        top: 0;
+        pointer-events: none;
+      }
+      svg.edges path {
+        stroke: var(--fg-dim);
+        stroke-width: 1;
+        fill: none;
+        opacity: 0.4;
+        transition:
+          opacity 150ms,
+          stroke 150ms;
+      }
+      svg.edges path.lit {
+        stroke: var(--lit);
+        opacity: 1;
+        stroke-width: 1.5;
+      }
+      svg.edges path.dim {
+        opacity: var(--dim-opacity);
+      }
+      aside {
+        display: grid;
+        grid-template-rows: 1fr 1fr;
+        border-left: 1px solid var(--line);
+      }
+      .panel {
+        overflow: auto;
+        padding: 12px 16px;
+      }
+      .panel + .panel {
+        border-top: 1px solid var(--line);
+      }
+      .panel h2 {
+        margin: 0 0 8px;
+        font-size: 10px;
+        text-transform: uppercase;
+        color: var(--fg-dim);
+        letter-spacing: 0.08em;
+        font-weight: 600;
+      }
+      .cp-card {
+        width: 100%;
+        text-align: left;
+        cursor: pointer;
+        background: var(--bg-2);
+        color: var(--fg);
+        border: 1px solid var(--line);
+        padding: 8px 10px;
+        border-radius: 4px;
+        margin-bottom: 6px;
+        transition:
+          background 150ms,
+          border-color 150ms;
+      }
+      .cp-card:hover {
+        background: #1c2540;
+      }
+      .cp-card.active {
+        border-color: var(--lit);
+        background: rgba(250, 204, 21, 0.08);
+      }
+      .cp-card .name {
+        font-weight: 600;
+        font-size: 12px;
+      }
+      .cp-card .desc {
+        font-size: 11px;
+        color: var(--fg-dim);
+        margin-top: 2px;
+        line-height: 1.4;
+      }
+      .cp-card .send {
+        margin-top: 6px;
+        font-size: 10px;
+        padding: 3px 8px;
+        background: var(--lit);
+        color: #0b0f1a;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .step {
+        background: var(--bg-2);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 8px 10px;
+        margin-bottom: 6px;
+        font-size: 12px;
+      }
+      .step .head {
+        display: flex;
+        gap: 6px;
+        align-items: baseline;
+      }
+      .step .num {
+        color: var(--fg-dim);
+        font-size: 11px;
+        min-width: 18px;
+      }
+      .step .arrow {
+        color: var(--fg-dim);
+      }
+      .step .annotation {
+        margin-top: 4px;
+        color: var(--fg);
+      }
+      .step .payload {
+        font-family: ui-monospace, monospace;
+        font-size: 11px;
+        color: var(--fg-dim);
+        margin-top: 2px;
+      }
+      .step .ref a {
+        color: var(--lit);
+        text-decoration: none;
+        font-size: 11px;
+      }
+      .empty {
+        color: var(--fg-dim);
+        font-style: italic;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1 id="app-title">Wild Horses Marketplace — Architecture &amp; Codepaths</h1>
+      <div class="subtitle" id="app-subtitle">Claude Code plugin marketplace — 5 plugins, their skills, and the CLIs that back them</div>
+    </header>
+    <div class="legend" id="legend"></div>
+    <div class="main">
+      <div class="graph">
+        <div class="columns" id="columns"></div>
+        <svg class="edges" id="edges"></svg>
+      </div>
+      <aside>
+        <div class="panel">
+          <h2>Codepaths</h2>
+          <div id="codepaths"></div>
+        </div>
+        <div class="panel">
+          <h2>Steps</h2>
+          <div id="steps">
+            <div class="empty">Click a codepath to see its steps.</div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <script type="application/json" id="data">
+      {"architecture": {"$schemaVersion": 1, "app": {"name": "Wild Horses Marketplace", "subtitle": "Claude Code plugin marketplace — 5 plugins, their skills, and the CLIs that back them"}, "categories": [{"id": "actor", "label": "Actor", "color": "#a78bfa", "column": 0}, {"id": "runtime", "label": "Claude Code", "color": "#60a5fa", "column": 1}, {"id": "plugin", "label": "Plugin", "color": "#fbbf24", "column": 2}, {"id": "skill", "label": "Skill / Command", "color": "#34d399", "column": 3}, {"id": "cli", "label": "CLI helper", "color": "#f87171", "column": 4}, {"id": "external", "label": "External service", "color": "#9ca3af", "column": 5}], "components": [{"id": "user", "category": "actor", "label": "User / dev", "description": "Plugin author or consumer driving Claude Code from the terminal."}, {"id": "claude-code", "category": "runtime", "label": "Claude Code CLI", "description": "Anthropic's Claude Code runtime — loads plugins, dispatches skills, runs slash commands."}, {"id": "marketplace-catalog", "category": "runtime", "label": ".claude-plugin/marketplace.json", "description": "Marketplace manifest at repo root; Claude Code reads this to enumerate installable plugins."}, {"id": "harness-plugin", "category": "plugin", "label": "harness plugin", "description": "Plugin providing reasoning-gaps / feedback-blockers analyses and task-list-runner/builder skills."}, {"id": "linting-hooks-plugin", "category": "plugin", "label": "linting-hooks plugin", "description": "Plugin that installs PostToolUse hooks for prettier, markdownlint, pyright, jq."}, {"id": "marketplace-plugin", "category": "plugin", "label": "marketplace plugin", "description": "Plugin providing scaffolding skills for creating new marketplace entries."}, {"id": "pyright-plugin", "category": "plugin", "label": "pyright plugin", "description": "Plugin wrapping pyright type-checking with run-and-fix loops and config ratcheting."}, {"id": "codepath-visualizer-plugin", "category": "plugin", "label": "codepath-visualizer plugin", "description": "Plugin that maps a repo into architecture.json + codepaths.json and renders an interactive HTML viz."}, {"id": "task-list-runner", "category": "skill", "label": "task-list-runner skill", "description": "Drives a structured JSON task list to completion, dispatching each task to a foreground Agent."}, {"id": "task-list-builder", "category": "skill", "label": "task-list-builder skill", "description": "Builds or rewrites a JSON task list matching the harness task-list schema."}, {"id": "feedback-blockers", "category": "skill", "label": "feedback-blockers command", "description": "Slash command that spawns parallel specialist agents to find encapsulation/testability blockers."}, {"id": "reasoning-gaps", "category": "skill", "label": "reasoning-gaps command", "description": "Slash command that finds AI reasoning gaps — untyped signatures, hidden state, etc."}, {"id": "pyright-run-and-fix", "category": "skill", "label": "pyright run-and-fix skill", "description": "Runs pyright and systematically fixes errors using documented fix patterns."}, {"id": "codepath-mapper", "category": "skill", "label": "codepath-mapper skill", "description": "Agent-facing skill that proposes architecture + codepaths against a target repo."}, {"id": "codepath-visualizer", "category": "skill", "label": "codepath-visualizer skill", "description": "Opens architecture.html in a browser; supports --select for merged-JSON dispatch back to an agent."}, {"id": "marketplace-create", "category": "skill", "label": "marketplace/create skill", "description": "Scaffolds a new plugin entry within the marketplace structure."}, {"id": "task-list-cli", "category": "cli", "label": "task_list_cli.py", "description": "Python CLI that mutates and reads task-list JSON files atomically via stdin or path args."}, {"id": "codepaths-cli", "category": "cli", "label": "codepaths_cli.py", "description": "Python CLI that mutates and reads architecture.json + codepaths.json; also renders HTML and runs select mode."}, {"id": "github", "category": "external", "label": "GitHub", "description": "Remote git host — source of /plugin install URLs and PR/issue surface."}, {"id": "browser", "category": "external", "label": "Web browser", "description": "Local default browser; renders architecture.html for the visualizer's interactive UI."}], "edges": [{"from": "user", "to": "claude-code"}, {"from": "claude-code", "to": "marketplace-catalog"}, {"from": "marketplace-catalog", "to": "harness-plugin"}, {"from": "marketplace-catalog", "to": "linting-hooks-plugin"}, {"from": "marketplace-catalog", "to": "marketplace-plugin"}, {"from": "marketplace-catalog", "to": "pyright-plugin"}, {"from": "marketplace-catalog", "to": "codepath-visualizer-plugin"}, {"from": "harness-plugin", "to": "task-list-runner"}, {"from": "harness-plugin", "to": "task-list-builder"}, {"from": "harness-plugin", "to": "feedback-blockers"}, {"from": "harness-plugin", "to": "reasoning-gaps"}, {"from": "pyright-plugin", "to": "pyright-run-and-fix"}, {"from": "codepath-visualizer-plugin", "to": "codepath-mapper"}, {"from": "codepath-visualizer-plugin", "to": "codepath-visualizer"}, {"from": "marketplace-plugin", "to": "marketplace-create"}, {"from": "task-list-runner", "to": "task-list-cli"}, {"from": "task-list-builder", "to": "task-list-cli"}, {"from": "codepath-mapper", "to": "codepaths-cli"}, {"from": "codepath-visualizer", "to": "codepaths-cli"}, {"from": "codepath-visualizer", "to": "browser"}, {"from": "claude-code", "to": "github"}]}, "codepaths": {"$schemaVersion": 1, "codepaths": [{"id": "install-plugin", "name": "Install a plugin from wild-horses", "summary": "User runs /plugin install <name>@wild-horses; Claude Code reads the marketplace catalog and loads the plugin.", "steps": [{"from": "user", "to": "claude-code", "annotation": "User runs `/plugin install pyright@wild-horses` in their Claude Code session."}, {"from": "claude-code", "to": "marketplace-catalog", "annotation": "Claude Code reads `.claude-plugin/marketplace.json` to resolve the plugin entry."}, {"from": "marketplace-catalog", "to": "pyright-plugin", "annotation": "Catalog points at `./plugins/pyright/` — manifest is read and skills/commands registered."}, {"from": "pyright-plugin", "to": "pyright-run-and-fix", "annotation": "The plugin exposes the `run-and-fix` skill, which now shows up in the slash menu as `/pyright:run-and-fix`."}]}, {"id": "run-task-list-runner", "name": "Run task-list-runner against a plan", "summary": "User asks Claude to drive a task list; runner dispatches each task and persists state through task_list_cli.py.", "steps": [{"from": "user", "to": "claude-code", "annotation": "User says 'run the plan' or '/task-list-runner' in their session."}, {"from": "claude-code", "to": "harness-plugin", "annotation": "Claude Code resolves the request to the `harness` plugin's task-list-runner skill."}, {"from": "harness-plugin", "to": "task-list-runner", "annotation": "Skill loads SKILL.md and begins the runner loop."}, {"from": "task-list-runner", "to": "task-list-cli", "annotation": "Runner calls `task_list_cli.py next` to claim a task, then `verify` / `finish` after the agent reports back."}, {"from": "task-list-cli", "to": "task-list-runner", "annotation": "CLI returns the task JSON over stdout (atomic stdin/`os.replace` discipline keeps state safe across iterations)."}]}, {"id": "build-task-list", "name": "Build a task list from a plan", "summary": "User has a free-form spec; task-list-builder converts it into the harness task-list schema via task_list_cli.py.", "steps": [{"from": "user", "to": "claude-code", "annotation": "User says 'build the task list' against a spec or report."}, {"from": "claude-code", "to": "harness-plugin", "annotation": "Claude Code resolves to harness's task-list-builder skill."}, {"from": "harness-plugin", "to": "task-list-builder", "annotation": "Skill reads its SKILL.md instructions and the linked task-list-schema.md."}, {"from": "task-list-builder", "to": "task-list-cli", "annotation": "Builder validates and writes the JSON file using the same CLI the runner consumes — single source of truth for schema."}]}, {"id": "map-codepaths", "name": "Map codepaths in a target repo", "summary": "User invokes /codepath-mapper; the skill proposes an architecture and codepaths, persists via codepaths_cli.py, and renders HTML.", "steps": [{"from": "user", "to": "claude-code", "annotation": "User runs `/codepath-mapper` from the target repo (or names a slice)."}, {"from": "claude-code", "to": "codepath-visualizer-plugin", "annotation": "Claude Code dispatches into the codepath-visualizer plugin."}, {"from": "codepath-visualizer-plugin", "to": "codepath-mapper", "annotation": "Plugin loads the codepath-mapper SKILL.md; the agent scans the repo and drafts architecture + codepaths."}, {"from": "codepath-mapper", "to": "codepaths-cli", "annotation": "Skill writes via `codepaths_cli.py set-architecture --json -` and `add-codepath --json -`, then `render`."}, {"from": "codepaths-cli", "to": "browser", "annotation": "`render` bakes JSON into `architecture.html`; the visualizer skill opens it locally in the user's browser."}]}, {"id": "visualize-and-select", "name": "Visualize architecture and select a codepath", "summary": "User invokes /codepath-visualizer --select; the skill spins up a local server, the user clicks a codepath, and the merged JSON is dispatched back to the agent.", "steps": [{"from": "user", "to": "claude-code", "annotation": "User runs `/codepath-visualizer --select` to surface the picker UI."}, {"from": "claude-code", "to": "codepath-visualizer-plugin", "annotation": "Claude Code resolves to the visualizer plugin."}, {"from": "codepath-visualizer-plugin", "to": "codepath-visualizer", "annotation": "Plugin loads the codepath-visualizer SKILL.md and invokes the CLI in select mode."}, {"from": "codepath-visualizer", "to": "codepaths-cli", "annotation": "`codepaths_cli.py select` binds an ephemeral 127.0.0.1 port and waits on `/pick`."}, {"from": "codepaths-cli", "to": "browser", "annotation": "Opens `architecture.html?select=true&port=N`; user clicks a codepath card and the page POSTs `{id}` back."}, {"from": "codepaths-cli", "to": "codepath-visualizer", "annotation": "Merged JSON `{codepath, components}` is printed to stdout; the skill hands it to the calling agent for follow-up work."}]}]}}
+    </script>
+    <script>
+      (function () {
+        const data = JSON.parse(document.getElementById("data").textContent);
+        const arch = data.architecture;
+        const cps = data.codepaths.codepaths;
+        const isSelectMode =
+          new URLSearchParams(window.location.search).get("select") === "true";
+        const selectPort = new URLSearchParams(window.location.search).get(
+          "port",
+        );
+
+        document.getElementById("app-title").textContent =
+          arch.app.name + " — Architecture & Codepaths";
+        document.getElementById("app-subtitle").textContent =
+          arch.app.subtitle || "";
+
+        // Legend
+        const legendEl = document.getElementById("legend");
+        for (const c of [...arch.categories].sort(
+          (a, b) => a.column - b.column,
+        )) {
+          const item = document.createElement("span");
+          item.className = "item";
+          item.innerHTML = `<span class="dot" style="background:${c.color}"></span>${c.label}`;
+          legendEl.appendChild(item);
+        }
+
+        // Columns + components
+        const columnsEl = document.getElementById("columns");
+        const sortedCats = [...arch.categories].sort(
+          (a, b) => a.column - b.column,
+        );
+        columnsEl.style.gridTemplateColumns = `repeat(${sortedCats.length}, minmax(140px, 1fr))`;
+        const nodeEls = {}; // id -> DOM node
+        for (const cat of sortedCats) {
+          const col = document.createElement("div");
+          col.className = "column";
+          col.dataset.category = cat.id;
+          const heading = document.createElement("h3");
+          heading.textContent = cat.label;
+          heading.style.color = cat.color;
+          col.appendChild(heading);
+          const comps = arch.components.filter((c) => c.category === cat.id);
+          for (const comp of comps) {
+            const node = document.createElement("div");
+            node.className = "node";
+            node.style.borderLeftColor = cat.color;
+            node.dataset.id = comp.id;
+            node.textContent = comp.label;
+            col.appendChild(node);
+            nodeEls[comp.id] = node;
+          }
+          columnsEl.appendChild(col);
+        }
+
+        // Edges (drawn after layout)
+        const svg = document.getElementById("edges");
+        const edgePaths = {}; // "from->to" -> path
+
+        function drawEdges() {
+          const graphRect = document
+            .querySelector(".graph")
+            .getBoundingClientRect();
+          svg.setAttribute("width", graphRect.width);
+          svg.setAttribute("height", graphRect.height);
+          svg.innerHTML = "";
+          for (const e of arch.edges) {
+            const a = nodeEls[e.from],
+              b = nodeEls[e.to];
+            if (!a || !b) continue;
+            const ar = a.getBoundingClientRect(),
+              br = b.getBoundingClientRect();
+            const x1 = ar.right - graphRect.left,
+              y1 = ar.top + ar.height / 2 - graphRect.top;
+            const x2 = br.left - graphRect.left,
+              y2 = br.top + br.height / 2 - graphRect.top;
+            const cx = (x1 + x2) / 2;
+            const path = document.createElementNS(
+              "http://www.w3.org/2000/svg",
+              "path",
+            );
+            path.setAttribute(
+              "d",
+              `M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`,
+            );
+            svg.appendChild(path);
+            edgePaths[`${e.from}->${e.to}`] = path;
+          }
+        }
+        drawEdges();
+        window.addEventListener("resize", drawEdges);
+
+        // Codepaths panel
+        const cpListEl = document.getElementById("codepaths");
+        const cpCards = {};
+        for (const cp of cps) {
+          const card = document.createElement("button");
+          card.className = "cp-card";
+          card.dataset.id = cp.id;
+          card.innerHTML = `<div class="name"></div><div class="desc"></div>`;
+          card.querySelector(".name").textContent = cp.name;
+          card.querySelector(".desc").textContent = cp.description || "";
+          if (isSelectMode) {
+            const send = document.createElement("button");
+            send.className = "send";
+            send.textContent = "Send to agent →";
+            send.onclick = (ev) => {
+              ev.stopPropagation();
+              sendSelection(cp.id);
+            };
+            card.appendChild(send);
+          }
+          card.onclick = () => selectCodepath(cp.id);
+          cpListEl.appendChild(card);
+          cpCards[cp.id] = card;
+        }
+
+        // Step rendering + highlight
+        const stepsEl = document.getElementById("steps");
+
+        function selectCodepath(id) {
+          window.location.hash = "codepath=" + id;
+          const cp = cps.find((c) => c.id === id);
+          if (!cp) return;
+          Object.values(cpCards).forEach((el) => el.classList.remove("active"));
+          cpCards[id].classList.add("active");
+
+          const litComps = new Set();
+          const litEdges = new Set();
+          for (const s of cp.steps) {
+            litComps.add(s.from);
+            litComps.add(s.to);
+            litEdges.add(`${s.from}->${s.to}`);
+          }
+          for (const [cid, el] of Object.entries(nodeEls)) {
+            el.classList.toggle("lit", litComps.has(cid));
+            el.classList.toggle("dim", !litComps.has(cid));
+          }
+          for (const [key, path] of Object.entries(edgePaths)) {
+            path.classList.toggle("lit", litEdges.has(key));
+            path.classList.toggle("dim", !litEdges.has(key));
+          }
+
+          stepsEl.innerHTML = "";
+          cp.steps.forEach((s, i) => {
+            const step = document.createElement("div");
+            step.className = "step";
+            const refHtml = s.ref
+              ? `<div class="ref"><a href="vscode://file/${encodeURIComponent(s.ref)}">${s.ref}</a></div>`
+              : "";
+            const payloadHtml = s.payload
+              ? `<div class="payload">${escapeHtml(s.payload)}</div>`
+              : "";
+            step.innerHTML = `
+        <div class="head"><span class="num">${i + 1}.</span><span><b></b><span class="arrow"> → </span><b></b></span></div>
+        <div class="annotation"></div>
+        ${payloadHtml}
+        ${refHtml}
+      `;
+            const bolds = step.querySelectorAll("b");
+            bolds[0].textContent = s.from;
+            bolds[1].textContent = s.to;
+            step.querySelector(".annotation").textContent = s.annotation;
+            stepsEl.appendChild(step);
+          });
+        }
+
+        function escapeHtml(s) {
+          return s.replace(
+            /[&<>"']/g,
+            (c) =>
+              ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;",
+              })[c],
+          );
+        }
+
+        async function sendSelection(id) {
+          if (!selectPort) {
+            alert("Not in select mode");
+            return;
+          }
+          try {
+            const r = await fetch(`http://127.0.0.1:${selectPort}/pick`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id }),
+            });
+            if (r.ok)
+              document.body.innerHTML = `<div style="padding:32px;color:var(--lit);font-size:14px">Sent ${id} to agent. You can close this window.</div>`;
+          } catch (e) {
+            alert("Failed to send: " + e);
+          }
+        }
+
+        // Restore selection from hash on load
+        const m = window.location.hash.match(/codepath=([a-z0-9-]+)/);
+        if (m && cps.find((c) => c.id === m[1])) selectCodepath(m[1]);
+      })();
+    </script>
+  </body>
+</html>
