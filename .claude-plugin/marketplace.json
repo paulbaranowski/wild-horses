@@ -46,6 +46,16 @@
       },
       "category": "development",
       "license": "MIT"
+    },
+    {
+      "name": "codepath-visualizer",
+      "source": "./plugins/codepath-visualizer",
+      "description": "Map and visualize codepaths in any codebase as an interactive architecture diagram. /codepath-mapper extracts call chains from entry points into a structured JSON file; /codepath-visualizer renders the resulting graph as an interactive HTML diagram you can explore in the browser.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "documentation",
+      "license": "MIT"
     }
   ]
 }
