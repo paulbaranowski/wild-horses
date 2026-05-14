@@ -17,6 +17,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -673,6 +674,73 @@ class ListGetTests(unittest.TestCase):
             dir_=self.tmp_dir,
         )
         self.assertEqual(result.returncode, 10)
+
+
+class StatusTests(unittest.TestCase):
+    """Exercise the `status` verb end-to-end via the CLI subprocess.
+
+    The status verb's value is a cheap precondition gate for the
+    visualizer skill — "are the JSON files OK + is the rendered HTML
+    stale relative to the inputs?" — so the tests cover both axes:
+    schema validity (corrupt arch → exit 12) and freshness
+    (renderStale flips with mtime ordering between the JSONs and
+    architecture.html). Each freshness test uses time.sleep(0.01)
+    between writes to guarantee deterministic mtime ordering on
+    filesystems whose stat resolution is coarse enough to otherwise
+    collapse "before" and "after" writes onto the same timestamp.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp_dir = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_status_on_empty_dir(self) -> None:
+        result = run("status", dir_=self.tmp_dir)
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        data = json.loads(result.stdout)
+        self.assertEqual(data["categories"], 6)  # default seed
+        self.assertEqual(data["components"], 0)
+        self.assertEqual(data["codepaths"], 0)
+        self.assertFalse(data["htmlExists"])
+        self.assertTrue(data["renderStale"])
+
+    def test_status_html_fresh(self) -> None:
+        (self.tmp_dir / "architecture.json").write_text(
+            json.dumps(valid_arch_with_components())
+        )
+        (self.tmp_dir / "codepaths.json").write_text(
+            json.dumps(valid_codepaths())
+        )
+        # Make HTML newer than both JSONs.
+        time.sleep(0.01)
+        (self.tmp_dir / "architecture.html").write_text("<html></html>")
+        result = run("status", dir_=self.tmp_dir)
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        data = json.loads(result.stdout)
+        self.assertTrue(data["htmlExists"])
+        self.assertFalse(data["renderStale"])
+
+    def test_status_html_stale(self) -> None:
+        (self.tmp_dir / "architecture.html").write_text("<html></html>")
+        time.sleep(0.01)
+        (self.tmp_dir / "architecture.json").write_text(
+            json.dumps(valid_arch_with_components())
+        )
+        (self.tmp_dir / "codepaths.json").write_text(
+            json.dumps(valid_codepaths())
+        )
+        result = run("status", dir_=self.tmp_dir)
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        data = json.loads(result.stdout)
+        self.assertTrue(data["renderStale"])
+
+    def test_status_exit_12_on_corrupt_arch(self) -> None:
+        (self.tmp_dir / "architecture.json").write_text("[1,2,3]")
+        result = run("status", dir_=self.tmp_dir)
+        self.assertEqual(result.returncode, 12)
 
 
 if __name__ == "__main__":
