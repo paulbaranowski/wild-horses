@@ -242,6 +242,41 @@ def load_both(dir_: Path) -> tuple[dict, dict]:
     return arch, cps
 
 
+def merge_selected_codepath(codepath_id: str, arch: dict, cps: dict) -> dict:
+    """Filter `arch` down to the components reachable through one codepath.
+
+    Pure function — takes already-loaded/validated `arch` and `cps`, does no
+    IO and mutates no global state, so it composes cleanly with both the
+    `select` command path (live load_both → merge → print) and any future
+    test or batch caller that already has the dicts in hand.
+
+    Lookup: scans `cps["codepaths"]` for the matching id; not-found raises
+    `CliError(code=10)` — same not-found semantics as `cmd_update_codepath`
+    / `cmd_remove_codepath` / `cmd_get`, so callers can branch on exit code
+    alone without parsing stderr.
+
+    Filter: gathers `from`/`to` ids from every step into a `referenced` set,
+    then walks `arch["components"]` in its original order and keeps the ones
+    whose id is referenced. We iterate the architecture (not the step
+    traversal) so the returned `components` array preserves the architecture
+    author's component ordering — important because downstream renderers
+    use list position for layout stability (a component that always sits
+    above another in the full diagram keeps that relative position in the
+    filtered diagram).
+    """
+    for cp in cps["codepaths"]:
+        if cp["id"] == codepath_id:
+            referenced: set[str] = set()
+            for step in cp["steps"]:
+                referenced.add(step["from"])
+                referenced.add(step["to"])
+            return {
+                "codepath": cp,
+                "components": [c for c in arch["components"] if c["id"] in referenced],
+            }
+    raise CliError(f"codepath id {codepath_id!r} not found", code=10)
+
+
 def write_atomic(path: Path, data: dict) -> None:
     """Atomic write: tmp file + fsync + os.replace."""
     path.parent.mkdir(parents=True, exist_ok=True)
