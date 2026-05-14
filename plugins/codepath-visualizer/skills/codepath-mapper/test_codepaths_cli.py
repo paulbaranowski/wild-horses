@@ -23,6 +23,15 @@ from pathlib import Path
 
 CLI = Path(__file__).parent / "codepaths_cli.py"
 
+# Allow direct (in-process) imports from codepaths_cli for tests that target
+# pure functions — subprocess invocations still go via `run(...)` below.
+# merge_selected_codepath is a pure function (no IO, no global state), so
+# SelectMergeTests imports it directly rather than paying the subprocess
+# cost per case. CliError is imported alongside so the not-found case can
+# assertRaises on the typed exception.
+sys.path.insert(0, str(CLI.parent))
+from codepaths_cli import CliError, merge_selected_codepath  # noqa: E402
+
 # All nine subcommands registered by build_parser() in codepaths_cli.py.
 # Kept in lock-step with the parser surface so `test_help_works` fails
 # loudly if a subcommand is renamed, removed, or added without updating
@@ -809,6 +818,44 @@ class RenderTests(unittest.TestCase):
             msg="architecture.html must NOT exist after corrupt input — "
                 "validate-before-write discipline violated",
         )
+
+
+class SelectMergeTests(unittest.TestCase):
+    """Exercise `merge_selected_codepath` directly (in-process).
+
+    Unlike the subprocess-driven tests above, these import the helper
+    directly because it's a pure function (no IO, no global state) —
+    the dispatched-agent invocation pattern doesn't apply here, and
+    paying the subprocess cost per case would be wasted overhead.
+
+    test_merge_inlines_referenced_components is the canonical regression
+    for the "filter components by step references, preserve arch order"
+    contract — downstream renderers depend on the architecture-order
+    invariant for layout stability, so the assertion checks the exact
+    id sequence (`["web", "srv"]`) and not just set-equality.
+
+    test_merge_unknown_id_raises locks in the exit-code 10 contract
+    shared with cmd_update_codepath / cmd_remove_codepath / cmd_get —
+    callers can branch on the typed exception's `.code` attribute alone
+    without parsing stderr.
+    """
+
+    def test_merge_inlines_referenced_components(self) -> None:
+        arch = valid_arch_with_components()
+        cps = valid_codepaths()
+        merged = merge_selected_codepath("make-request", arch, cps)
+        self.assertEqual(merged["codepath"]["id"], "make-request")
+        # web + srv are referenced by the step's from/to; assertion checks
+        # the order matches arch.components (architecture-author order),
+        # not the step traversal order, per the helper's docstring.
+        self.assertEqual([c["id"] for c in merged["components"]], ["web", "srv"])
+
+    def test_merge_unknown_id_raises(self) -> None:
+        arch = valid_arch_with_components()
+        cps = valid_codepaths()
+        with self.assertRaises(CliError) as ctx:
+            merge_selected_codepath("ghost", arch, cps)
+        self.assertEqual(ctx.exception.code, 10)
 
 
 if __name__ == "__main__":
