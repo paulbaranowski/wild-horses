@@ -165,6 +165,71 @@ def load_and_validate_arch(dir_: Path) -> dict:
     return data
 
 
+def default_codepaths_skeleton() -> dict:
+    return {"$schemaVersion": 1, "codepaths": []}
+
+
+def load_and_validate_codepaths(dir_: Path, arch: dict) -> dict:
+    """Load codepaths.json from dir_. Missing file → empty skeleton.
+
+    Validates schema, unique ids, and cross-refs against the given `arch`
+    (call `load_and_validate_arch(dir_)` first). Cross-ref violations
+    raise CliError(code=15); other schema violations raise CliError(code=12).
+    """
+    path = dir_ / CODEPATHS_FILE
+    try:
+        data = _read_json(path)
+    except FileNotFoundError:
+        return default_codepaths_skeleton()
+
+    if not isinstance(data, dict):
+        raise CliError("codepaths.json: top-level must be a JSON object", code=12)
+    if "codepaths" not in data or not isinstance(data["codepaths"], list):
+        raise CliError('codepaths.json: "codepaths" must be an array', code=12)
+
+    comp_ids = {c["id"] for c in arch["components"]}
+    seen: set[str] = set()
+    for i, cp in enumerate(data["codepaths"]):
+        if not isinstance(cp, dict):
+            raise CliError(f"codepaths.json: codepaths[{i}] must be an object", code=12)
+        _check_id(cp.get("id"), f"codepaths.json: codepaths[{i}].id")
+        if cp["id"] in seen:
+            raise CliError(f"codepaths.json: duplicate codepath id {cp['id']!r}", code=12)
+        seen.add(cp["id"])
+        if not isinstance(cp.get("name"), str) or not cp["name"]:
+            raise CliError(f"codepaths.json: codepaths[{i}].name must be a non-empty string", code=12)
+        if "steps" not in cp or not isinstance(cp["steps"], list) or not cp["steps"]:
+            raise CliError(
+                f"codepaths.json: codepaths[{i}].steps must be a non-empty array", code=12
+            )
+        for j, step in enumerate(cp["steps"]):
+            if not isinstance(step, dict):
+                raise CliError(
+                    f"codepaths.json: codepaths[{i}].steps[{j}] must be an object", code=12
+                )
+            for k in ("from", "to"):
+                v = step.get(k)
+                if v not in comp_ids:
+                    raise CliError(
+                        f"codepaths.json: codepaths[{i}].steps[{j}].{k} {v!r} not in architecture.components",
+                        code=15,
+                    )
+            if not isinstance(step.get("annotation"), str) or not step["annotation"]:
+                raise CliError(
+                    f"codepaths.json: codepaths[{i}].steps[{j}].annotation must be a non-empty string",
+                    code=12,
+                )
+
+    return data
+
+
+def load_both(dir_: Path) -> tuple[dict, dict]:
+    """Convenience: validate arch first, then codepaths against that arch."""
+    arch = load_and_validate_arch(dir_)
+    cps = load_and_validate_codepaths(dir_, arch)
+    return arch, cps
+
+
 def write_atomic(path: Path, data: dict) -> None:
     """Atomic write: tmp file + fsync + os.replace."""
     path.parent.mkdir(parents=True, exist_ok=True)
