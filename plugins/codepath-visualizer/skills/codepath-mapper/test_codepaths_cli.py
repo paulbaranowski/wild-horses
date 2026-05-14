@@ -30,7 +30,7 @@ CLI = Path(__file__).parent / "codepaths_cli.py"
 # cost per case. CliError is imported alongside so the not-found case can
 # assertRaises on the typed exception.
 sys.path.insert(0, str(CLI.parent))
-from codepaths_cli import CliError, merge_selected_codepath  # noqa: E402
+from codepaths_cli import CliError, merge_selected_codepath  # noqa: E402  # pyright: ignore[reportMissingImports]
 
 # All nine subcommands registered by build_parser() in codepaths_cli.py.
 # Kept in lock-step with the parser surface so `test_help_works` fails
