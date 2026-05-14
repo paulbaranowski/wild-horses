@@ -22,7 +22,6 @@ import re
 import sys
 import tempfile
 import threading
-import urllib.parse  # noqa: F401  # reserved for future query-string parsing on the picker server
 import webbrowser
 from pathlib import Path
 from typing import Any, Callable
@@ -767,8 +766,8 @@ def cmd_select(args: argparse.Namespace) -> None:
     done = threading.Event()
 
     class Handler(http.server.BaseHTTPRequestHandler):
-        def log_message(self, format: str, *args: Any) -> None:
-            pass  # silence access log — keeps stderr clean for CliError messages
+        def log_message(self, format: str, *args: Any) -> None:  # noqa: A002  # pyright: ignore[reportUnusedParameter]
+            del format, args  # base class signature; we intentionally drop both to silence stdlib's access log
 
         def do_OPTIONS(self) -> None:  # CORS preflight for fetch() from file:// origin
             self.send_response(204)
