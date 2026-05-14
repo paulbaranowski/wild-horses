@@ -147,15 +147,11 @@ After the loop completes (all tasks done, max iterations reached, or `--next` fi
 
 In Phase 4 step 7, the runner dispatches a fresh-context validation agent (`subagent_type: Explore`). The prompt body lives in `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/validation-agent-prompt.md` — `Read` that file and use its raw contents (not the cat-n line-number prefixes the Read tool displays) as the wrapper, then append a task-specific suffix containing `what`, `agentValidations`, and `changedFiles`. Construct `changedFiles` from `git diff --cached --name-only` (the implementation agent staged its files via `git add` before drafting; the staged index is the post-change snapshot). Pass the assembled prompt verbatim.
 
-The prompt is a separate file rather than inlined here so it can be edited and version-controlled independently of the orchestration logic in this SKILL.md, and so the SKILL.md stays focused on the runner's flow.
-
 ---
 
 ## Task Implementation Prompt
 
 The prompt body lives in `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task-implementation-prompt.md` — `Read` that file and use its raw contents (not the cat-n line-number prefixes the Read tool displays) as the prompt for each `Agent` tool call. Replace every literal `TASK_FILE_PATH` token in the prompt body with the absolute path to the JSON task file before passing.
-
-The prompt is a separate file rather than inlined here so it can be edited and version-controlled independently of the orchestration logic in this SKILL.md, and so the SKILL.md stays focused on the runner's flow.
 
 The CLI exits non-zero on any failure (task id not found → 10; invalid state transition → 11; schema/JSON errors → 12 / 13; no remaining tasks → 14; git operation failed → 15). If a step fails, the implementation agent reads stderr, fixes the cause, and retries. The agent must not work around failures by hand-editing the task file.
 
