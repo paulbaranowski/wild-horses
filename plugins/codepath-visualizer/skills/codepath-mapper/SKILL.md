@@ -130,7 +130,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/codepath-mapper/codepaths_cli.py" render
 
 Print to the user:
 
-```
+```text
 Mapping complete.
   Architecture: {X} components, {Y} edges, {Z} categories
   Codepaths:    {N}
