@@ -14,6 +14,7 @@ and stdout/stderr separation are exercised exactly as a dispatched
 agent would see them.
 """
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -856,6 +857,78 @@ class SelectMergeTests(unittest.TestCase):
         with self.assertRaises(CliError) as ctx:
             merge_selected_codepath("ghost", arch, cps)
         self.assertEqual(ctx.exception.code, 10)
+
+
+class SelectServerTests(unittest.TestCase):
+    """Exercise `select` end-to-end via the CLI subprocess — timeout-exit path.
+
+    The happy path requires a human clicking a card in the browser, so it's
+    documented as a manual smoke in SKILL.md rather than automated here. The
+    automated coverage targets the OTHER documented exit branch — the
+    "user did not pick within timeout" path that returns exit code 16 — so
+    dispatched agents have a regression for "did `select` actually wire up
+    the timeout?" without needing a GUI.
+
+    setUp writes valid `architecture.json` and `codepaths.json` AND renders
+    `architecture.html` (by invoking `render`) so the HTML-exists precondition
+    inside `cmd_select` is satisfied. We are exercising the timeout branch,
+    NOT the missing-HTML branch — running `render` first is what isolates
+    the test to that single failure mode.
+
+    Test env knobs:
+    - `CODEPATH_NO_BROWSER=1` suppresses `webbrowser.open` so CI doesn't try
+      to spawn a GUI process (URL is printed to stderr instead).
+    - `CODEPATH_SELECT_TIMEOUT=1` bounds the server's `done.wait` to 1 second
+      so the timeout branch trips quickly.
+
+    subprocess.run is invoked directly (not via the module-level `run()`
+    helper) because this is the only test that needs to pass a custom `env`
+    dict — adding an `env` kwarg to the shared helper for one caller would
+    be over-engineering. The 5-second outer `timeout=` is a safeguard:
+    if the CLI's internal timeout logic ever regressed and stopped firing,
+    the test would hang the suite without it.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp_dir = Path(self._tmp.name)
+        (self.tmp_dir / "architecture.json").write_text(
+            json.dumps(valid_arch_with_components())
+        )
+        (self.tmp_dir / "codepaths.json").write_text(
+            json.dumps(valid_codepaths())
+        )
+        # Render architecture.html so the HTML-exists precondition in
+        # cmd_select is satisfied — we are exercising the timeout-exit
+        # path (code 16), not the missing-HTML path (code 1).
+        render_result = run("render", dir_=self.tmp_dir)
+        self.assertEqual(
+            render_result.returncode, 0,
+            msg=f"setUp render failed: stderr={render_result.stderr}",
+        )
+        self.assertTrue((self.tmp_dir / "architecture.html").exists())
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_select_timeout_exits_16(self) -> None:
+        env = {
+            **os.environ,
+            "CODEPATH_NO_BROWSER": "1",
+            "CODEPATH_SELECT_TIMEOUT": "1",
+        }
+        result = subprocess.run(
+            [sys.executable, str(CLI), "--dir", str(self.tmp_dir), "select"],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=5,
+        )
+        self.assertEqual(
+            result.returncode, 16,
+            msg=f"expected exit 16 (timeout); got {result.returncode}; "
+                f"stderr={result.stderr}",
+        )
 
 
 if __name__ == "__main__":
