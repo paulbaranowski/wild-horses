@@ -743,5 +743,73 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(result.returncode, 12)
 
 
+class RenderTests(unittest.TestCase):
+    """Exercise `render` end-to-end via the CLI subprocess.
+
+    setUp writes BOTH valid architecture.json and codepaths.json into the
+    tempdir so load_both inside cmd_render has its source. The canonical
+    invariant under test is "substitution actually happened" — the output
+    HTML must NOT contain the literal placeholders (__APP_NAME__, __DATA__)
+    that template.html ships with. If a future refactor accidentally
+    skipped the .replace() chain (or renamed a placeholder), the test
+    would still see a file on disk, so the substring assertions on
+    placeholders are what catches that silent failure.
+
+    test_render_fails_12_on_corrupt_inputs is the canonical regression for
+    the validate-before-write discipline in cmd_render: a corrupt
+    architecture.json must surface as exit 12 AND leave the output HTML
+    absent — same contract as cmd_set_architecture's
+    test_invalid_arch_fails_12.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp_dir = Path(self._tmp.name)
+        (self.tmp_dir / "architecture.json").write_text(
+            json.dumps(valid_arch_with_components())
+        )
+        (self.tmp_dir / "codepaths.json").write_text(
+            json.dumps(valid_codepaths())
+        )
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_render_writes_html(self) -> None:
+        result = run("render", dir_=self.tmp_dir)
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        output = self.tmp_dir / "architecture.html"
+        self.assertTrue(output.exists())
+        html = output.read_text(encoding="utf-8")
+        # Content actually substituted in (app name + component + codepath id).
+        self.assertIn("Demo", html)
+        self.assertIn("web", html)
+        self.assertIn("make-request", html)
+        # Substitution actually happened — placeholders are GONE.
+        self.assertNotIn("__APP_NAME__", html)
+        self.assertNotIn("__DATA__", html)
+
+    def test_render_custom_output(self) -> None:
+        custom = self.tmp_dir / "sub" / "out.html"
+        result = run("render", "--output", str(custom), dir_=self.tmp_dir)
+        self.assertEqual(result.returncode, 0, msg=f"stderr={result.stderr}")
+        self.assertTrue(custom.exists())
+        # Default path must NOT have been written when --output is given.
+        self.assertFalse((self.tmp_dir / "architecture.html").exists())
+
+    def test_render_fails_12_on_corrupt_inputs(self) -> None:
+        # Corrupt arch.json — top-level not an object (schema violation).
+        (self.tmp_dir / "architecture.json").write_text("[1,2,3]")
+        output = self.tmp_dir / "architecture.html"
+        self.assertFalse(output.exists())
+        result = run("render", dir_=self.tmp_dir)
+        self.assertEqual(result.returncode, 12)
+        self.assertFalse(
+            output.exists(),
+            msg="architecture.html must NOT exist after corrupt input — "
+                "validate-before-write discipline violated",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
