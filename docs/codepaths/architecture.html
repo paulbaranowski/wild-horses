@@ -264,11 +264,14 @@
         const data = JSON.parse(document.getElementById("data").textContent);
         const arch = data.architecture;
         const cps = data.codepaths.codepaths;
-        const isSelectMode =
-          new URLSearchParams(window.location.search).get("select") === "true";
-        const selectPort = new URLSearchParams(window.location.search).get(
-          "port",
-        );
+        // Select-mode flag and picker server port are baked directly into the
+        // HTML at render time, not derived from URL params. We tried both
+        // ?query and #fragment routes earlier — both lose on macOS when `open`
+        // refocuses an already-open file:// tab without reloading. Embedding
+        // the values in the source means the browser has nothing to parse,
+        // and select mode produces a separate ephemeral HTML file anyway.
+        const isSelectMode = false;
+        const selectPort = null;
 
         document.getElementById("app-title").textContent =
           arch.app.name + " — Architecture & Codepaths";
