@@ -520,6 +520,64 @@ def cmd_remove_codepath(args: argparse.Namespace) -> None:
     raise CliError(f"codepath id {args.id!r} not found", code=10)
 
 
+def cmd_list(args: argparse.Namespace) -> None:
+    """Print a JSON array of entries for the requested `--kind`.
+
+    Loads both architecture and codepaths via `load_both` so cross-ref
+    validation runs (codepaths reference component ids) — the read verb
+    behaves like the write verbs in trusting the on-disk state only after
+    full validation. A corrupt file therefore surfaces as the appropriate
+    schema/cross-ref/JSON exit code rather than as a silently-truncated
+    list. Output is `json.dumps(..., indent=2, ensure_ascii=False)` to
+    stdout, matching the docstring contract in the task description.
+    """
+    dir_ = Path(args.dir)
+    arch, cps = load_both(dir_)
+    if args.kind == "components":
+        out: list = arch["components"]
+    elif args.kind == "categories":
+        out = arch["categories"]
+    elif args.kind == "edges":
+        out = arch["edges"]
+    else:  # "codepaths"
+        out = cps["codepaths"]
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+
+
+def cmd_get(args: argparse.Namespace) -> None:
+    """Print one entry by id (or composite `from->to` for edges).
+
+    Edges have no id field — they're keyed by `from`/`to` pairs — so
+    `get --kind edges --id <a>-><b>` matches on the composite. Every
+    other kind matches on `item["id"]`. Not-found raises
+    `CliError(code=10)`, matching the not-found semantics in
+    `cmd_update_codepath` / `cmd_remove_codepath` so callers can branch
+    on exit code alone.
+    """
+    dir_ = Path(args.dir)
+    arch, cps = load_both(dir_)
+    if args.kind == "components":
+        pool: list = arch["components"]
+    elif args.kind == "categories":
+        pool = arch["categories"]
+    elif args.kind == "edges":
+        pool = arch["edges"]
+    else:  # "codepaths"
+        pool = cps["codepaths"]
+
+    if args.kind == "edges":
+        for e in pool:
+            if f"{e['from']}->{e['to']}" == args.id:
+                print(json.dumps(e, indent=2, ensure_ascii=False))
+                return
+    else:
+        for item in pool:
+            if item["id"] == args.id:
+                print(json.dumps(item, indent=2, ensure_ascii=False))
+                return
+    raise CliError(f"{args.kind} id {args.id!r} not found", code=10)
+
+
 # DISPATCH maps subcommand string to handler. Subsequent tasks register
 # their cmd_* handlers here. main() looks up the handler by `args.cmd`;
 # a missing entry surfaces as "not yet implemented" with exit code 2 so
@@ -530,6 +588,8 @@ DISPATCH: dict[str, Callable[[argparse.Namespace], None]] = {
     "add-codepath": cmd_add_codepath,
     "update-codepath": cmd_update_codepath,
     "remove-codepath": cmd_remove_codepath,
+    "list": cmd_list,
+    "get": cmd_get,
 }
 
 
