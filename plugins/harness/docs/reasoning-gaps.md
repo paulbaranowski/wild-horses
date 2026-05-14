@@ -44,4 +44,4 @@ A ranked list of interventions. Each intervention is a coherent change like _"Cr
 | Lens        | comprehension                        | correctness & observability                       |
 | Typical fix | add types, docs, narrow control flow | tighten assertions, surface effects, shrink seams |
 
-In Python, run `/pyright:run-and-fix --intent improve` first. Pyright resolves the typing axis rigorously, freeing this command's attention for the implicit-flow and structure axes that only it sees.
+In Python, **run this command before `/pyright:run-and-fix --intent improve`, not after.** Design the types here first — turning `str` into `Literal[...]`, `dict[str, Any]` into `TypedDict`, etc. — then pyright propagates that design across every call site. Pyright-first invites silencing with `: Any` and `# type: ignore` before any design pass runs. Full rationale: [pyright README — Relationship to /harness:reasoning-gaps](../../pyright/README.md#relationship-to-harnessreasoning-gaps).

@@ -120,6 +120,27 @@ At the end of a run, the command offers to save the improvement suggestions to `
 
 ## Relationship to `/harness:reasoning-gaps`
 
-Pyright (especially under `--intent improve`) owns the **typing axis** of what reasoning-gaps analyzes: annotations, `Any` escapes, opaque `dict[str, Any]` containers. It does not cover the other two axes reasoning-gaps inspects — **implicit control flow** (decorators, signals, dynamic dispatch, metaclasses) and **structure / documentation** (missing docstrings, long functions, deep nesting).
+### Recommended order: reasoning-gaps **first**, then pyright
 
-Running `/pyright:run-and-fix --intent improve` first resolves the typing-axis gaps rigorously so reasoning-gaps' attention lands on the flow and docs axes it uniquely sees. Every run ends with a plain-text pointer at `/harness:reasoning-gaps` as the natural next step. The two commands do not share state or flags — the handoff is a recommendation, not a coupling.
+> **Counter-intuitive.** The natural assumption — "lock in types with the type checker first, then go redesign things" — gets the order backwards. **Design before enforcement.**
+
+Pyright is a **consistency** checker, not a **design** tool. Run it first on weakly-typed code and the path of least resistance is `: Any` and `# type: ignore` to silence errors. The checker turns green, but the types stay junk — and the silencing gets baked in before any design pass runs.
+
+Reasoning-gaps does type **design**: turning `str` into `Literal['draft','published']`, `int` into `NewType('UserId', int)`, `dict[str, Any]` into a proper `TypedDict` or Pydantic model. Once the types carry invariants, pyright's job becomes propagating that design across every call site — which is what pyright is actually good at.
+
+So the order is:
+
+1. **`/harness:reasoning-gaps`** — design pass. Decides what the types _should_ be.
+2. **`/pyright:run-and-fix --intent improve`** — enforcement pass. Propagates the design across every call site that doesn't match.
+
+(Optional pragmatic pre-pass: a cheap `/pyright:run-and-fix --intent silence` first can surface obvious signature gaps — untyped params, missing return types — that reasoning-gaps would have to rediscover anyway. The load-bearing pyright run is still the second one, after the design is in place.)
+
+### Why the order matters
+
+The order in which you apply quality tools determines what the codebase optimizes for. If pyright is the first bar, the bar is "no type errors" — satisfiable with `Any`. If reasoning-gaps is the first bar, the bar is "types express invariants" — and pyright then enforces _that_ bar instead of undermining it.
+
+This generalizes: any enforcement tool downstream of a design decision will lock in whatever design exists when it runs. Run the design pass first or the enforcement pass will calcify the wrong thing.
+
+### Coverage split
+
+Pyright owns the **typing axis** of what reasoning-gaps analyzes: annotations, `Any` escapes, opaque `dict[str, Any]` containers. Reasoning-gaps additionally covers **implicit control flow** (decorators, signals, dynamic dispatch, metaclasses) and **structure / documentation** (missing docstrings, long functions, deep nesting). The two commands do not share state or flags — the handoff is a recommendation, not a coupling.
