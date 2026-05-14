@@ -681,25 +681,23 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(json.dumps(out, indent=2))
 
 
-def cmd_render(args: argparse.Namespace) -> None:
-    """Bake architecture + codepaths JSON into the HTML template.
+def _bake_template(arch: dict, cps: dict, select_port: int | None) -> str:
+    """Substitute placeholders in template.html. Shared by `render` and `select`.
 
-    Reads `TEMPLATE_PATH` (sibling `template.html` in this skill directory)
-    and substitutes three placeholders: `__APP_NAME__` and `__APP_SUBTITLE__`
-    receive `_html_escape`d values (they're rendered as text content in the
-    page header), while `__DATA__` receives the JSON payload pre-processed
-    so it can sit inside a `<script type="application/json">` block —
-    every `</` is rewritten to `<\\/` so the browser's HTML parser doesn't
-    prematurely terminate the script element on a stray closing tag in
-    user-supplied strings (component names, annotations, etc.). Same
-    validate-before-write discipline as the mutating verbs: `load_both`
-    raises on schema/IO/JSON errors before any file is touched, so a
-    corrupt input never produces a partial HTML file.
+    Five placeholders:
+      __APP_NAME__, __APP_SUBTITLE__: _html_escape'd page header text.
+      __DATA__:        JSON payload, with `</` rewritten to `<\\/` so the
+                       browser's HTML parser doesn't prematurely terminate
+                       the script tag on user-supplied strings.
+      __SELECT_MODE__: literal JS boolean `true` or `false`. Embedded at
+                       bake time instead of derived from URL params because
+                       both ?query and #fragment lose on macOS file:// when
+                       `open` refocuses an existing tab without reloading.
+      __SELECT_PORT__: literal JS expression — `null` for view mode, or a
+                       quoted port string like `"54321"` for select mode.
+                       String type matches the previous URLSearchParams
+                       return value so fetch URL construction stays uniform.
     """
-    dir_ = Path(args.dir)
-    arch, cps = load_both(dir_)
-    output = Path(args.output) if args.output else (dir_ / "architecture.html")
-
     try:
         template = TEMPLATE_PATH.read_text(encoding="utf-8")
     except FileNotFoundError as e:
@@ -708,54 +706,78 @@ def cmd_render(args: argparse.Namespace) -> None:
     inlined = json.dumps({"architecture": arch, "codepaths": cps}, ensure_ascii=False)
     inlined = inlined.replace("</", "<\\/")
 
-    html = (
+    select_mode_js = "true" if select_port is not None else "false"
+    select_port_js = f'"{select_port}"' if select_port is not None else "null"
+
+    return (
         template
         .replace("__APP_NAME__", _html_escape(arch["app"]["name"]))
         .replace("__APP_SUBTITLE__", _html_escape(arch["app"].get("subtitle", "")))
+        .replace("__SELECT_MODE__", select_mode_js)
+        .replace("__SELECT_PORT__", select_port_js)
         .replace("__DATA__", inlined)
     )
+
+
+def cmd_render(args: argparse.Namespace) -> None:
+    """Bake architecture + codepaths JSON into the HTML template (view mode).
+
+    Validate-before-write discipline: `load_both` raises on schema/IO/JSON
+    errors before any file is touched, so a corrupt input never produces a
+    partial HTML file. View-mode bake sets `__SELECT_MODE__` to `false` and
+    `__SELECT_PORT__` to `null` — the "Send to agent" buttons don't render.
+    """
+    dir_ = Path(args.dir)
+    arch, cps = load_both(dir_)
+    output = Path(args.output) if args.output else (dir_ / "architecture.html")
+
+    html = _bake_template(arch, cps, select_port=None)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(html, encoding="utf-8")
 
 
 def cmd_select(args: argparse.Namespace) -> None:
-    """Open the rendered viz in browser select-mode and block on the user's pick.
+    """Open a freshly-baked select-mode HTML in browser; block on the user's pick.
 
     Spins up a one-shot HTTP server on `127.0.0.1:<ephemeral-port>` (kernel-
-    assigned via port `0` — no fixed-port firewall-prompt friction), opens
-    `architecture.html?select=true&port=<N>` in the default browser, and
-    waits for a `POST /pick {"id": "..."}` to arrive. On a pick, prints the
-    same merged JSON shape that `merge_selected_codepath` produces (the pure
-    helper is shared with any future batch caller) and exits 0. On timeout,
-    exits 16 — distinguished from "id not found" (10) so dispatched agents
-    can branch on exit code alone without parsing stderr.
+    assigned via port `0` — no fixed-port firewall-prompt friction), writes
+    a session-scoped HTML file to a tempdir with `__SELECT_MODE__=true` and
+    `__SELECT_PORT__="<port>"` baked directly into the source, then opens
+    that file. Waits for a `POST /pick {"id": "..."}` to arrive. On a pick,
+    prints the same merged JSON shape that `merge_selected_codepath` produces
+    and exits 0. On timeout, exits 16 — distinguished from "id not found" (10)
+    so dispatched agents can branch on exit code alone without parsing stderr.
 
-    Render gate: `architecture.html` must already exist (built by
-    `cmd_render`). We don't auto-render here because `select` is the
-    user-interaction path — silently rebuilding HTML mid-flow would mask a
-    forgotten `render` step in the agent's playbook. Clear "run render first"
-    message points at the missing precondition explicitly.
+    Why a fresh tempfile instead of opening `architecture.html` with URL
+    params: macOS `open` strips/ignores `?query` strings on `file://` URLs,
+    and `#fragment` navigation in an already-open tab doesn't trigger a JS
+    reload (so the "Send to agent" buttons that depend on `isSelectMode`
+    being true never render). Baking the flags into the HTML source means
+    the page has nothing to parse from the URL — every load is deterministic.
+
+    Cleanup: the tempfile is unlinked in the `try/finally` after the wait,
+    regardless of which branch returns. Browser may still hold an open tab
+    pointing at a missing file after that; that's fine — the page is fully
+    self-contained and continues to render from the bytes the browser already
+    loaded.
 
     Test escape hatches: `CODEPATH_SELECT_TIMEOUT` (seconds, default 300)
     lets tests bound the wait without redefining argv, and `CODEPATH_NO_BROWSER=1`
     suppresses the `webbrowser.open` call (printing the URL to stderr instead)
-    so CI runs don't try to spawn a GUI process. Same env-var pattern as
-    the `--log-file -` heredoc convention elsewhere in this CLI: keep the
-    happy-path defaults agent-friendly, surface the integration-test knobs
-    via env so they don't pollute `--help`.
+    so CI runs don't try to spawn a GUI process.
 
-    try/finally around the `done.wait` guarantees `server.shutdown()` +
-    `server.server_close()` always run — without it, a CliError from the
-    timeout branch would leak the daemon thread and the ephemeral port
-    binding for the rest of the test-runner process.
+    try/finally around `done.wait` guarantees `server.shutdown()` +
+    `server.server_close()` always run, and the tempfile is unlinked.
     """
     dir_ = Path(args.dir)
     arch, cps = load_both(dir_)
-    html_path = (Path(args.output) if args.output else dir_ / "architecture.html").resolve()
-    if not html_path.exists():
+    # We still check for architecture.html as a "did the user run render?" gate —
+    # if they haven't, point them there before they hit a less-obvious error.
+    canonical_html = (Path(args.output) if args.output else dir_ / "architecture.html").resolve()
+    if not canonical_html.exists():
         raise CliError(
-            f"{html_path} does not exist — run `render` first (or run /codepath-mapper)",
+            f"{canonical_html} does not exist — run `render` first (or run /codepath-mapper)",
             code=1,
         )
 
@@ -806,8 +828,18 @@ def cmd_select(args: argparse.Namespace) -> None:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 
+    # Bake a session-scoped HTML with the port embedded directly in the
+    # source. Tempfile lives just long enough for the browser to load it;
+    # cleaned up in finally regardless of pick/timeout/error.
+    session_html_bytes = _bake_template(arch, cps, select_port=port).encode("utf-8")
+    fd, session_html_str = tempfile.mkstemp(
+        prefix="codepath-select-", suffix=".html"
+    )
+    session_html = Path(session_html_str)
     try:
-        url = html_path.as_uri() + f"?select=true&port={port}"
+        with os.fdopen(fd, "wb") as f:
+            f.write(session_html_bytes)
+        url = session_html.as_uri()
         if not no_browser:
             webbrowser.open(url)
         else:
@@ -817,6 +849,10 @@ def cmd_select(args: argparse.Namespace) -> None:
     finally:
         server.shutdown()
         server.server_close()
+        try:
+            session_html.unlink()
+        except OSError:
+            pass
 
     merged = merge_selected_codepath(picked["id"], arch, cps)
     print(json.dumps(merged, indent=2, ensure_ascii=False))
