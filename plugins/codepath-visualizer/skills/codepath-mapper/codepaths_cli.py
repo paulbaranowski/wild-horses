@@ -578,6 +578,59 @@ def cmd_get(args: argparse.Namespace) -> None:
     raise CliError(f"{args.kind} id {args.id!r} not found", code=10)
 
 
+def cmd_status(args: argparse.Namespace) -> None:
+    """Print counts, mtimes, and render-staleness as JSON.
+
+    Cheap precondition gate for the visualizer skill: surfaces "are the
+    JSON files OK?" (any schema/JSON/IO error from `load_both` propagates
+    with its native exit code — 12 schema, 13 JSON parse, etc.) and "is
+    the rendered HTML stale relative to the inputs?" (`renderStale`).
+    Stale = HTML missing OR any input JSON has a newer mtime than the
+    HTML. Missing inputs don't drive staleness on their own — an empty
+    dir with no architecture.json is "stale" only because there's no
+    HTML either, and the seeded skeleton has nothing to render anyway.
+    Output is `json.dumps(..., indent=2)` so it's both human-readable
+    and trivially `jq`-able from the skill wrapper.
+    """
+    dir_ = Path(args.dir)
+    arch, cps = load_both(dir_)
+    arch_path = dir_ / ARCH_FILE
+    cps_path = dir_ / CODEPATHS_FILE
+    html_path = dir_ / "architecture.html"
+
+    def mtime_or_none(p: Path) -> float | None:
+        try:
+            return p.stat().st_mtime
+        except FileNotFoundError:
+            return None
+
+    arch_mt = mtime_or_none(arch_path)
+    cps_mt = mtime_or_none(cps_path)
+    html_mt = mtime_or_none(html_path)
+
+    html_exists = html_mt is not None
+    input_mtimes = [t for t in (arch_mt, cps_mt) if t is not None]
+    inputs_max = max(input_mtimes) if input_mtimes else None
+    render_stale = (not html_exists) or (
+        inputs_max is not None and html_mt is not None and html_mt < inputs_max
+    )
+
+    out = {
+        "app": arch["app"]["name"],
+        "categories": len(arch["categories"]),
+        "components": len(arch["components"]),
+        "edges": len(arch["edges"]),
+        "codepaths": len(cps["codepaths"]),
+        "archMtime": arch_mt,
+        "codepathsMtime": cps_mt,
+        "htmlMtime": html_mt,
+        "htmlExists": html_exists,
+        "renderStale": render_stale,
+        "dir": str(dir_),
+    }
+    print(json.dumps(out, indent=2))
+
+
 # DISPATCH maps subcommand string to handler. Subsequent tasks register
 # their cmd_* handlers here. main() looks up the handler by `args.cmd`;
 # a missing entry surfaces as "not yet implemented" with exit code 2 so
@@ -590,6 +643,7 @@ DISPATCH: dict[str, Callable[[argparse.Namespace], None]] = {
     "remove-codepath": cmd_remove_codepath,
     "list": cmd_list,
     "get": cmd_get,
+    "status": cmd_status,
 }
 
 
