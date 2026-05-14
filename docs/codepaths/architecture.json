@@ -1,0 +1,253 @@
+{
+  "$schemaVersion": 1,
+  "app": {
+    "name": "Wild Horses Marketplace",
+    "subtitle": "Claude Code plugin marketplace — 5 plugins, their skills, and the CLIs that back them"
+  },
+  "categories": [
+    {
+      "id": "actor",
+      "label": "Actor",
+      "color": "#a78bfa",
+      "column": 0
+    },
+    {
+      "id": "runtime",
+      "label": "Claude Code",
+      "color": "#60a5fa",
+      "column": 1
+    },
+    {
+      "id": "plugin",
+      "label": "Plugin",
+      "color": "#fbbf24",
+      "column": 2
+    },
+    {
+      "id": "skill",
+      "label": "Skill / Command",
+      "color": "#34d399",
+      "column": 3
+    },
+    {
+      "id": "cli",
+      "label": "CLI helper",
+      "color": "#f87171",
+      "column": 4
+    },
+    {
+      "id": "external",
+      "label": "External service",
+      "color": "#9ca3af",
+      "column": 5
+    }
+  ],
+  "components": [
+    {
+      "id": "user",
+      "category": "actor",
+      "label": "User / dev",
+      "description": "Plugin author or consumer driving Claude Code from the terminal."
+    },
+    {
+      "id": "claude-code",
+      "category": "runtime",
+      "label": "Claude Code CLI",
+      "description": "Anthropic's Claude Code runtime — loads plugins, dispatches skills, runs slash commands."
+    },
+    {
+      "id": "marketplace-catalog",
+      "category": "runtime",
+      "label": ".claude-plugin/marketplace.json",
+      "description": "Marketplace manifest at repo root; Claude Code reads this to enumerate installable plugins."
+    },
+    {
+      "id": "harness-plugin",
+      "category": "plugin",
+      "label": "harness plugin",
+      "description": "Plugin providing reasoning-gaps / feedback-blockers analyses and task-list-runner/builder skills."
+    },
+    {
+      "id": "linting-hooks-plugin",
+      "category": "plugin",
+      "label": "linting-hooks plugin",
+      "description": "Plugin that installs PostToolUse hooks for prettier, markdownlint, pyright, jq."
+    },
+    {
+      "id": "marketplace-plugin",
+      "category": "plugin",
+      "label": "marketplace plugin",
+      "description": "Plugin providing scaffolding skills for creating new marketplace entries."
+    },
+    {
+      "id": "pyright-plugin",
+      "category": "plugin",
+      "label": "pyright plugin",
+      "description": "Plugin wrapping pyright type-checking with run-and-fix loops and config ratcheting."
+    },
+    {
+      "id": "codepath-visualizer-plugin",
+      "category": "plugin",
+      "label": "codepath-visualizer plugin",
+      "description": "Plugin that maps a repo into architecture.json + codepaths.json and renders an interactive HTML viz."
+    },
+    {
+      "id": "task-list-runner",
+      "category": "skill",
+      "label": "task-list-runner skill",
+      "description": "Drives a structured JSON task list to completion, dispatching each task to a foreground Agent."
+    },
+    {
+      "id": "task-list-builder",
+      "category": "skill",
+      "label": "task-list-builder skill",
+      "description": "Builds or rewrites a JSON task list matching the harness task-list schema."
+    },
+    {
+      "id": "feedback-blockers",
+      "category": "skill",
+      "label": "feedback-blockers command",
+      "description": "Slash command that spawns parallel specialist agents to find encapsulation/testability blockers."
+    },
+    {
+      "id": "reasoning-gaps",
+      "category": "skill",
+      "label": "reasoning-gaps command",
+      "description": "Slash command that finds AI reasoning gaps — untyped signatures, hidden state, etc."
+    },
+    {
+      "id": "pyright-run-and-fix",
+      "category": "skill",
+      "label": "pyright run-and-fix skill",
+      "description": "Runs pyright and systematically fixes errors using documented fix patterns."
+    },
+    {
+      "id": "codepath-mapper",
+      "category": "skill",
+      "label": "codepath-mapper skill",
+      "description": "Agent-facing skill that proposes architecture + codepaths against a target repo."
+    },
+    {
+      "id": "codepath-visualizer",
+      "category": "skill",
+      "label": "codepath-visualizer skill",
+      "description": "Opens architecture.html in a browser; supports --select for merged-JSON dispatch back to an agent."
+    },
+    {
+      "id": "marketplace-create",
+      "category": "skill",
+      "label": "marketplace/create skill",
+      "description": "Scaffolds a new plugin entry within the marketplace structure."
+    },
+    {
+      "id": "task-list-cli",
+      "category": "cli",
+      "label": "task_list_cli.py",
+      "description": "Python CLI that mutates and reads task-list JSON files atomically via stdin or path args."
+    },
+    {
+      "id": "codepaths-cli",
+      "category": "cli",
+      "label": "codepaths_cli.py",
+      "description": "Python CLI that mutates and reads architecture.json + codepaths.json; also renders HTML and runs select mode."
+    },
+    {
+      "id": "github",
+      "category": "external",
+      "label": "GitHub",
+      "description": "Remote git host — source of /plugin install URLs and PR/issue surface."
+    },
+    {
+      "id": "browser",
+      "category": "external",
+      "label": "Web browser",
+      "description": "Local default browser; renders architecture.html for the visualizer's interactive UI."
+    }
+  ],
+  "edges": [
+    {
+      "from": "user",
+      "to": "claude-code"
+    },
+    {
+      "from": "claude-code",
+      "to": "marketplace-catalog"
+    },
+    {
+      "from": "marketplace-catalog",
+      "to": "harness-plugin"
+    },
+    {
+      "from": "marketplace-catalog",
+      "to": "linting-hooks-plugin"
+    },
+    {
+      "from": "marketplace-catalog",
+      "to": "marketplace-plugin"
+    },
+    {
+      "from": "marketplace-catalog",
+      "to": "pyright-plugin"
+    },
+    {
+      "from": "marketplace-catalog",
+      "to": "codepath-visualizer-plugin"
+    },
+    {
+      "from": "harness-plugin",
+      "to": "task-list-runner"
+    },
+    {
+      "from": "harness-plugin",
+      "to": "task-list-builder"
+    },
+    {
+      "from": "harness-plugin",
+      "to": "feedback-blockers"
+    },
+    {
+      "from": "harness-plugin",
+      "to": "reasoning-gaps"
+    },
+    {
+      "from": "pyright-plugin",
+      "to": "pyright-run-and-fix"
+    },
+    {
+      "from": "codepath-visualizer-plugin",
+      "to": "codepath-mapper"
+    },
+    {
+      "from": "codepath-visualizer-plugin",
+      "to": "codepath-visualizer"
+    },
+    {
+      "from": "marketplace-plugin",
+      "to": "marketplace-create"
+    },
+    {
+      "from": "task-list-runner",
+      "to": "task-list-cli"
+    },
+    {
+      "from": "task-list-builder",
+      "to": "task-list-cli"
+    },
+    {
+      "from": "codepath-mapper",
+      "to": "codepaths-cli"
+    },
+    {
+      "from": "codepath-visualizer",
+      "to": "codepaths-cli"
+    },
+    {
+      "from": "codepath-visualizer",
+      "to": "browser"
+    },
+    {
+      "from": "claude-code",
+      "to": "github"
+    }
+  ]
+}

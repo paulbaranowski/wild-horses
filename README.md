@@ -68,6 +68,21 @@ Scaffold a new Claude Code plugin marketplace with proper structure, schema vali
 
 See **[plugins/marketplace/README.md](plugins/marketplace/README.md)** for the scaffolding flow.
 
+### [codepath-visualizer](plugins/codepath-visualizer/README.md)
+
+Map and visualize codepaths in any codebase as an interactive architecture diagram. `/codepath-mapper` walks entry points and extracts call chains into a structured JSON file; `/codepath-visualizer` renders the resulting graph as an interactive HTML diagram you can explore in the browser. Scope the mapper to a user-facing flow (e.g. "invite new user") to produce a focused diagram of just that path.
+
+```text
+/plugin install codepath-visualizer@wild-horses
+
+/codepath-mapper
+/codepath-mapper "invite new user"
+/codepath-visualizer
+/codepath-visualizer --select
+```
+
+See **[plugins/codepath-visualizer/README.md](plugins/codepath-visualizer/README.md)** for the JSON schema, scoping behavior, and rendering options.
+
 ## Install
 
 1. Run `/plugin` in Claude Code
