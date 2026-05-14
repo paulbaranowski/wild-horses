@@ -15,11 +15,15 @@ See `codepaths-schema.md` in the plugin root for the JSON shapes,
 invariants, and the full exit-code table.
 """
 import argparse
+import http.server
 import json
 import os
 import re
 import sys
 import tempfile
+import threading
+import urllib.parse  # noqa: F401  # reserved for future query-string parsing on the picker server
+import webbrowser
 from pathlib import Path
 from typing import Any, Callable
 
@@ -716,6 +720,109 @@ def cmd_render(args: argparse.Namespace) -> None:
     output.write_text(html, encoding="utf-8")
 
 
+def cmd_select(args: argparse.Namespace) -> None:
+    """Open the rendered viz in browser select-mode and block on the user's pick.
+
+    Spins up a one-shot HTTP server on `127.0.0.1:<ephemeral-port>` (kernel-
+    assigned via port `0` — no fixed-port firewall-prompt friction), opens
+    `architecture.html?select=true&port=<N>` in the default browser, and
+    waits for a `POST /pick {"id": "..."}` to arrive. On a pick, prints the
+    same merged JSON shape that `merge_selected_codepath` produces (the pure
+    helper is shared with any future batch caller) and exits 0. On timeout,
+    exits 16 — distinguished from "id not found" (10) so dispatched agents
+    can branch on exit code alone without parsing stderr.
+
+    Render gate: `architecture.html` must already exist (built by
+    `cmd_render`). We don't auto-render here because `select` is the
+    user-interaction path — silently rebuilding HTML mid-flow would mask a
+    forgotten `render` step in the agent's playbook. Clear "run render first"
+    message points at the missing precondition explicitly.
+
+    Test escape hatches: `CODEPATH_SELECT_TIMEOUT` (seconds, default 300)
+    lets tests bound the wait without redefining argv, and `CODEPATH_NO_BROWSER=1`
+    suppresses the `webbrowser.open` call (printing the URL to stderr instead)
+    so CI runs don't try to spawn a GUI process. Same env-var pattern as
+    the `--log-file -` heredoc convention elsewhere in this CLI: keep the
+    happy-path defaults agent-friendly, surface the integration-test knobs
+    via env so they don't pollute `--help`.
+
+    try/finally around the `done.wait` guarantees `server.shutdown()` +
+    `server.server_close()` always run — without it, a CliError from the
+    timeout branch would leak the daemon thread and the ephemeral port
+    binding for the rest of the test-runner process.
+    """
+    dir_ = Path(args.dir)
+    arch, cps = load_both(dir_)
+    html_path = (Path(args.output) if args.output else dir_ / "architecture.html").resolve()
+    if not html_path.exists():
+        raise CliError(
+            f"{html_path} does not exist — run `render` first (or run /codepath-mapper)",
+            code=1,
+        )
+
+    timeout_s = int(os.environ.get("CODEPATH_SELECT_TIMEOUT", "300"))
+    no_browser = os.environ.get("CODEPATH_NO_BROWSER") == "1"
+
+    picked: dict = {}
+    done = threading.Event()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: Any) -> None:
+            pass  # silence access log — keeps stderr clean for CliError messages
+
+        def do_OPTIONS(self) -> None:  # CORS preflight for fetch() from file:// origin
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.end_headers()
+
+        def do_POST(self) -> None:
+            if self.path != "/pick":
+                self.send_response(404)
+                self.end_headers()
+                return
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length).decode("utf-8")
+            try:
+                payload = json.loads(body)
+                cp_id = payload.get("id")
+                if not isinstance(cp_id, str):
+                    raise ValueError("id missing")
+                picked["id"] = cp_id
+            except Exception:
+                self.send_response(400)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            done.set()
+
+    # Bind to ephemeral port on localhost — port 0 asks the kernel to pick
+    # a free port, which avoids the firewall-prompt friction a fixed port
+    # would create on first run on macOS.
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_port
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        url = html_path.as_uri() + f"?select=true&port={port}"
+        if not no_browser:
+            webbrowser.open(url)
+        else:
+            print(f"select-url: {url}", file=sys.stderr)
+        if not done.wait(timeout=timeout_s):
+            raise CliError("select: user did not pick within timeout", code=16)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    merged = merge_selected_codepath(picked["id"], arch, cps)
+    print(json.dumps(merged, indent=2, ensure_ascii=False))
+
+
 # DISPATCH maps subcommand string to handler. Subsequent tasks register
 # their cmd_* handlers here. main() looks up the handler by `args.cmd`;
 # a missing entry surfaces as "not yet implemented" with exit code 2 so
@@ -730,6 +837,7 @@ DISPATCH: dict[str, Callable[[argparse.Namespace], None]] = {
     "get": cmd_get,
     "status": cmd_status,
     "render": cmd_render,
+    "select": cmd_select,
 }
 
 
