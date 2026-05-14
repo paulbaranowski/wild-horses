@@ -251,6 +251,38 @@ def write_atomic(path: Path, data: dict) -> None:
         raise
 
 
+def read_json_arg(arg: str) -> Any:
+    """Read JSON from a file path, or from stdin when `arg == '-'`.
+
+    Mirrors the `--log-file -` pattern from `task_list_cli.py`: dispatched
+    agents can pipe payloads through a single auto-approved Bash call
+    (`cli mutate --json - <<'EOF' ... EOF`) without writing temp files
+    first. JSON decode failures raise `CliError(code=13)` so partial /
+    malformed input is distinguishable from schema-violation input
+    (`code=12`) and IO failures (`code=1`).
+    """
+    if arg == "-":
+        raw = sys.stdin.read()
+        source = "<stdin>"
+    else:
+        try:
+            raw = Path(arg).read_text(encoding="utf-8")
+        except FileNotFoundError as e:
+            raise CliError(f"file {arg}: not found", code=1) from e
+        except OSError as e:
+            raise CliError(f"file {arg}: {e}", code=1) from e
+        except UnicodeDecodeError as e:
+            raise CliError(f"file {arg} is not valid UTF-8: {e}", code=13) from e
+        source = arg
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise CliError(
+            f"{source}: not valid JSON at line {e.lineno} column {e.colno}: {e.msg}",
+            code=13,
+        ) from e
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argparse tree for all nine subcommands.
 
@@ -368,12 +400,30 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-# DISPATCH maps subcommand string to handler. Bootstrap leaves it empty;
-# subsequent tasks register their cmd_* handlers here. main() looks up
-# the handler by `args.cmd`; a missing entry surfaces as "not yet
-# implemented" with exit code 2 so partial-implementation failures stay
-# distinguishable from real schema/IO failures.
-DISPATCH: dict[str, Callable[[argparse.Namespace], None]] = {}
+def cmd_set_architecture(args: argparse.Namespace) -> None:
+    """Write a new architecture.json (replaces any existing).
+
+    Validation runs BEFORE `write_atomic` so a bad payload never touches
+    disk — atomicity here means "either the new architecture is on disk
+    intact, or the old one is untouched". This is why `_validate_arch_dict`
+    is a top-level helper shared with `load_and_validate_arch`: load and
+    write apply identical rules, so a payload that round-trips through
+    `set-architecture` is guaranteed loadable.
+    """
+    payload = read_json_arg(args.json)
+    _validate_arch_dict(payload)
+    dir_ = Path(args.dir)
+    write_atomic(dir_ / ARCH_FILE, payload)
+
+
+# DISPATCH maps subcommand string to handler. Subsequent tasks register
+# their cmd_* handlers here. main() looks up the handler by `args.cmd`;
+# a missing entry surfaces as "not yet implemented" with exit code 2 so
+# partial-implementation failures stay distinguishable from real
+# schema/IO failures.
+DISPATCH: dict[str, Callable[[argparse.Namespace], None]] = {
+    "set-architecture": cmd_set_architecture,
+}
 
 
 def main(argv: list[str] | None = None) -> int:
