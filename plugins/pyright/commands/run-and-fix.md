@@ -345,7 +345,7 @@ Unless `--no-suggestions` was given, follow the procedure in `${CLAUDE_PLUGIN_RO
 After the summary (and suggestions, if any), **always** print a single-line handoff pointer, regardless of intent, whether zero was reached, or whether `--no-suggestions` was set:
 
 ```text
-Next: for control-flow and documentation gaps beyond types (implicit flow, missing docstrings, structural complexity), run /harness:reasoning-gaps. Pyright covers the typing axis; reasoning-gaps covers the two axes pyright cannot see.
+Next: pyright covers the **typing axis**. The **implicit-flow** and **structure/docs** axes belong to /harness:reasoning-gaps — which ideally runs *before* pyright, since it does the type design that this command then propagates. If you haven't run it yet, run /harness:reasoning-gaps and re-run this command after.
 ```
 
 This is a plain text pointer — no coupling, no shared state, no arguments passed. The user decides whether to run it.
