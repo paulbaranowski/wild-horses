@@ -1,9 +1,9 @@
 ---
 name: codepath-mapper
-description: Scan a codebase and produce architecture.json + codepaths.json describing components, edges, and traced codepaths. Renders architecture.html at the end. Use when the user says "map my app", "build the architecture viz", "scan my codepaths", "map the X flow", etc.
+description: Scan a codebase and produce architecture.json + codepaths.json describing components, edges, and traced codepaths. Renders architecture.html at the end. Use when the user says "map my app", "build the architecture viz", "scan my codepaths", "map the X flow", etc. Pass `--render-only` to skip all mapping work and just re-bake architecture.html from existing JSONs — use when the user says "re-render the visualizer", "rebuild the viewer HTML", "regenerate architecture.html", or after a template/CSS edit.
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "[scope: sentence | file | dir]"
+argument-hint: "[scope: sentence | file | dir | --render-only]"
 ---
 
 # codepath-mapper
@@ -45,8 +45,11 @@ Extract the optional scope:
 - A file path → trace codepaths that touch this file (inward + outward).
 - A directory path → entry points rooted in this dir.
 - The flag `--remap-architecture` → rebuild architecture from scratch even if it exists.
+- The flag `--render-only` → skip Phases 2 and 3 entirely; jump straight to Phase 4. Use this when only the HTML template, CSS, or JSON inputs changed and no re-tracing is needed. Don't combine with a scope or `--remap-architecture` — those imply mapping work.
 
 If the input is ambiguous (could be a sentence or a file path), prefer the file-path interpretation iff the path exists.
+
+**`--render-only` short-circuit:** if this flag is present, do not run any mapping work. Run only Phase 4 (one CLI call), then print a one-line confirmation in place of Phase 5: `Re-rendered: docs/codepaths/architecture.html`. Do not touch `architecture.json` or `codepaths.json`.
 
 ---
 

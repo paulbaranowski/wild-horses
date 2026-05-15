@@ -322,11 +322,12 @@
         const edgePaths = {}; // "from->to" -> path
 
         function drawEdges() {
-          const graphRect = document
-            .querySelector(".graph")
-            .getBoundingClientRect();
-          svg.setAttribute("width", graphRect.width);
-          svg.setAttribute("height", graphRect.height);
+          const graphEl = document.querySelector(".graph");
+          const graphRect = graphEl.getBoundingClientRect();
+          const scrollX = graphEl.scrollLeft;
+          const scrollY = graphEl.scrollTop;
+          svg.setAttribute("width", graphEl.scrollWidth);
+          svg.setAttribute("height", graphEl.scrollHeight);
           svg.innerHTML = "";
           for (const e of arch.edges) {
             const a = nodeEls[e.from],
@@ -334,10 +335,10 @@
             if (!a || !b) continue;
             const ar = a.getBoundingClientRect(),
               br = b.getBoundingClientRect();
-            const x1 = ar.right - graphRect.left,
-              y1 = ar.top + ar.height / 2 - graphRect.top;
-            const x2 = br.left - graphRect.left,
-              y2 = br.top + br.height / 2 - graphRect.top;
+            const x1 = ar.right - graphRect.left + scrollX,
+              y1 = ar.top + ar.height / 2 - graphRect.top + scrollY;
+            const x2 = br.left - graphRect.left + scrollX,
+              y2 = br.top + br.height / 2 - graphRect.top + scrollY;
             const cx = (x1 + x2) / 2;
             const path = document.createElementNS(
               "http://www.w3.org/2000/svg",
