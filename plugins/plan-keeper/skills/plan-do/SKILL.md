@@ -5,7 +5,7 @@ description: Use when the user asks to work on a saved plan, do a plan, implemen
 
 # plan-do
 
-Pick up a saved plan from `~/plans/<repo>/` and route it to the right next step in the planning pipeline.
+Pick up a saved plan from `~/plans/<repo>/` and route it to the right next step in the planning pipeline. The bundled `plan_keeper_cli.py` handles listing (repo derivation, newest-first sort, empty-state fallback); this skill classifies the picked plan and routes to the matching next skill.
 
 The skill is the entry point that joins this pipeline at the right stage:
 
@@ -14,32 +14,46 @@ idea ──► brainstorming ──► spec ──► writing-plans ──► im
                                                                           └──► task-list-builder ──► task-list-runner
 ```
 
+## Quick reference
+
+- **Reads:** `~/plans/<repo>/*.md` (newest first by filename); never writes.
+- **`<repo>`:** auto-derived or override — see [../../repo-derivation.md](../../repo-derivation.md).
+- **Classification:** idea / spec / sequential impl plan / task-list-shaped.
+- **Routing:** `superpowers:brainstorming` (idea), `superpowers:writing-plans` (spec), `superpowers:executing-plans` (sequential), `harness:task-list-builder` (task-list).
+- **Confirmation:** required before reading any plan file and before invoking any next skill.
+
 ## Procedure
 
 Follow these steps in order. Do not skip steps.
 
-### 1. Determine `<repo>`
+### 1. List the plans
 
-Follow the algorithm in [../../repo-derivation.md](../../repo-derivation.md). Override phrases to recognize in this skill's invocation:
+First, check the user's invocation for a repo override. Recognize:
 
 - "do a plan from `<name>`"
 - "plan-do `<name>`"
 - "pick a plan from `<name>`"
 - "in the `<name>` folder/bucket"
 
-### 2. List the plans
+Then invoke the CLI:
 
-Run `ls -1 ~/plans/<repo>/*.md 2>/dev/null | sort -r` to list plans newest-first (the `YYYY-MM-DD-` filename prefix sorts naturally).
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list
+```
 
-**If the directory doesn't exist or is empty:**
+Add `--override <name>` if you found one. The CLI handles repo derivation, the `*.md` glob, and newest-first sort. Output is one filename per line (no leading numbering).
 
-- Tell the user there are no plans for this repo.
-- Offer alternatives: list plans in `~/plans/general/` if it exists, and/or list which other repos under `~/plans/` have plans (`ls -d ~/plans/*/`).
-- Wait for the user to decide before continuing.
+**If the output is empty**, the current repo has no active plans. Tell the user and list alternatives by running:
 
-**If plans exist**, display them as a numbered list with filenames only. Do not read or classify any files yet — classification only happens on the picked plan.
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list-repos
+```
 
-Example output:
+Output is one repo per line with state counts (e.g., `herds: active=15 done=22 deferred=2`). Wait for the user to pick a different repo (re-run step 1 with `--override`) or steer manually.
+
+**If the output has lines**, display them as a numbered list to the user and ask which one. Do not read or classify any files yet — classification only happens on the picked plan.
+
+Example output to the user:
 
 ```text
 Plans in ~/plans/wild-horses/:
@@ -52,15 +66,15 @@ Plans in ~/plans/wild-horses/:
 Which one?
 ```
 
-### 3. User picks a plan
+### 2. User picks a plan
 
-The user replies with a number or a filename fragment. Resolve to a single file. If ambiguous (e.g., a fragment matches multiple), ask the user to disambiguate.
+The user replies with a number or a filename fragment. Resolve to a single filename from the CLI's output. If ambiguous (a fragment matches multiple), ask the user to disambiguate.
 
-### 4. Read the picked plan
+### 3. Read the picked plan
 
-Use the `Read` tool on the full file. The content stays in conversation context for the rest of this skill and for whatever skill is invoked next.
+Use the `Read` tool on `~/plans/<repo>/<filename>` (the full path is the repo dir from step 1 plus the picked filename). The content stays in conversation context for the rest of this skill and for whatever skill is invoked next.
 
-### 5. Classify the plan
+### 4. Classify the plan
 
 Classify the plan as one of four types using the signals below. The model should make a judgment call from reading the file — these are heuristics, not exact-match rules.
 
@@ -75,7 +89,7 @@ Classify the plan as one of four types using the signals below. The model should
 
 **If the plan doesn't fit any of the four types** (e.g., it's a research note, a meeting log, a list of TODOs), say so and offer to let the user steer manually.
 
-### 6. Suggest the matching next skill
+### 5. Suggest the matching next skill
 
 Map type → suggested skill:
 
@@ -86,7 +100,7 @@ Map type → suggested skill:
 | sequential implementation plan | `superpowers:executing-plans` | Execute the plan with human review at each phase                                                      |
 | task-list-shaped plan          | `harness:task-list-builder`   | Convert the plan into a structured JSON task-list, then dispatch tasks via `harness:task-list-runner` |
 
-### 7. Confirm before invoking
+### 6. Confirm before invoking
 
 Tell the user what you read, what you'll do, and give them a chance to redirect:
 
@@ -98,18 +112,25 @@ For implementation plans where signals are mixed, mention the alternative:
 
 Wait for the user's response. Do not auto-invoke without confirmation.
 
-### 8. Invoke the chosen skill
+### 7. Invoke the chosen skill
 
-On confirmation, use the `Skill` tool to invoke the chosen skill. The plan content is already in conversation context from step 4, so the invoked skill has full access — no explicit handoff payload is needed.
+On confirmation, use the `Skill` tool to invoke the chosen skill. The plan content is already in conversation context from step 3, so the invoked skill has full access — no explicit handoff payload is needed.
 
 If the user picked a different skill than the suggestion, invoke that one instead.
 
 If the user wants to steer manually, just stop the skill here. The plan is read into context and they can drive freely.
 
+## Common mistakes
+
+- **Reading and classifying multiple plans before the user picks.** Step 1 lists filenames only. Reading multiple plans wastes context and biases classification toward whatever was read last.
+- **Auto-invoking the next skill without confirmation.** Step 6 requires a check-in even when the classification feels obvious. The skill's job is to _suggest_ the next stage, not jump to it.
+- **Conflating sequential vs task-list-shaped plans.** Both use "phases" and "tasks" in their vocabulary. The discriminator is **independence** of work units, not the words used.
+- **Silently falling back when the current repo has no plans.** Step 1 says: tell the user, run `list-repos`, wait for direction. Don't auto-route to another folder.
+
 ## Edge cases
 
-- **No plans for the current repo** — list alternatives (`~/plans/general/`, other repos with plans). Do not silently fall back.
-- **`~/plans/` doesn't exist at all** — tell the user `plan-save` hasn't been used yet on this machine.
+- **No plans for the current repo** — show `list-repos` output to the user and let them pick another repo. Do not silently fall back.
+- **`~/plans/` doesn't exist at all** — `list-repos` returns empty. Tell the user `plan-save` hasn't been used yet on this machine.
 - **Plan is none of the four types** — say so explicitly; offer to read into context and let the user steer.
 - **Filename fragment matches multiple plans** — ask the user to disambiguate; do not pick one arbitrarily.
 
@@ -117,3 +138,4 @@ If the user wants to steer manually, just stop the skill here. The plan is read 
 
 - This skill is read-only against `~/plans/` — it never modifies, moves, or deletes plans. Sibling skill `plan-done` is responsible for archiving completed plans.
 - The classification distinguishes _sequential_ implementation plans (linear, review-gated) from _task-list-shaped_ plans (parallel, dispatched). Same vocabulary ("phase", "task") can appear in both — the discriminating signal is task **independence**, not the words used.
+- Sibling skills in the `plan-` family (`plan-save`, `plan-done`) share the same CLI and the same `~/plans/<repo>/` tree.
