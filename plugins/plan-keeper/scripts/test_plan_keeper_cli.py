@@ -1300,5 +1300,81 @@ class TestTicketApiJiraViewer(unittest.TestCase):
         self.assertEqual(decoded, "p@x.com:tok")
 
 
+class TestTicketApiJiraLists(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+        self.site, self.email, self.token = "herds.atlassian.net", "p@x.com", "tok"
+
+    def _mock_response(self, body):
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def test_projects_paginates(self) -> None:
+        page1 = {
+            "values": [{"key": "HERDS", "id": "1", "name": "Herds"}],
+            "isLast": False,
+            "startAt": 0,
+            "maxResults": 1,
+            "total": 2,
+        }
+        page2 = {
+            "values": [{"key": "INT", "id": "2", "name": "Internal"}],
+            "isLast": True,
+            "startAt": 1,
+            "maxResults": 1,
+            "total": 2,
+        }
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[self._mock_response(page1), self._mock_response(page2)],
+        ) as mock_open:
+            result = self.cli.jira_projects(self.site, self.email, self.token)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(mock_open.call_count, 2)
+        # Second call should have startAt=50 (pagination uses page size 50 in helper)
+        url2 = mock_open.call_args_list[1][0][0].full_url
+        self.assertIn("startAt=50", url2)
+
+    def test_components_per_project(self) -> None:
+        response = [{"id": "10001", "name": "Backend"}]
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_response(response),
+        ) as mock_open:
+            result = self.cli.jira_components(self.site, self.email, self.token, "HERDS")
+        self.assertEqual(result, [{"id": "10001", "name": "Backend", "projectKey": "HERDS"}])
+        self.assertIn("/project/HERDS/components", mock_open.call_args[0][0].full_url)
+
+    def test_users_per_project(self) -> None:
+        response = [
+            {"accountId": "5e8f", "displayName": "Paul", "emailAddress": "p@x.com"},
+        ]
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_response(response),
+        ) as mock_open:
+            result = self.cli.jira_users(self.site, self.email, self.token, "HERDS")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["accountId"], "5e8f")
+        self.assertIn(
+            "/user/assignable/multiProjectSearch",
+            mock_open.call_args[0][0].full_url,
+        )
+        self.assertIn("projectKeys=HERDS", mock_open.call_args[0][0].full_url)
+
+    def test_issuetypes_per_project(self) -> None:
+        response = [{"id": "10001", "name": "Task"}]
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_response(response),
+        ) as mock_open:
+            result = self.cli.jira_issuetypes(self.site, self.email, self.token, "1")
+        self.assertEqual(result, [{"id": "10001", "name": "Task", "projectId": "1"}])
+        self.assertIn("projectId=1", mock_open.call_args[0][0].full_url)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

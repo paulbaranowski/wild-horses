@@ -22,6 +22,7 @@ import urllib.request
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
+from urllib.parse import urlencode
 
 
 PLAN_ROOT = Path.home() / "plans"
@@ -1014,6 +1015,81 @@ def jira_viewer(site: str, email: str, api_token: str) -> dict:
     return http_get_json(url, {"Authorization": _jira_auth_header(email, api_token)})
 
 
+def _jira_paginated(
+    site: str, email: str, api_token: str,
+    path: str, query_params: dict[str, str],
+) -> list[dict]:
+    """Walk Jira's startAt/maxResults pagination and return all `values`."""
+    all_values: list[dict] = []
+    start_at = 0
+    page_size = 50
+    while True:
+        params = {**query_params, "startAt": str(start_at), "maxResults": str(page_size)}
+        url = f"https://{site}/rest/api/3/{path}?{urlencode(params)}"
+        resp = http_get_json(url, {"Authorization": _jira_auth_header(email, api_token)})
+        page_values = resp.get("values", [])
+        all_values.extend(page_values)
+        if "isLast" in resp:
+            if resp["isLast"]:
+                break
+        elif len(page_values) < page_size:
+            break
+        start_at += page_size
+    return all_values
+
+
+def jira_projects(site: str, email: str, api_token: str) -> list[dict]:
+    raw = _jira_paginated(site, email, api_token, "project/search", {})
+    return [{"key": p["key"], "id": p["id"], "name": p["name"]} for p in raw]
+
+
+def jira_components(site: str, email: str, api_token: str, project_key: str) -> list[dict]:
+    url = f"https://{site}/rest/api/3/project/{project_key}/components"
+    raw = http_get_json(url, {"Authorization": _jira_auth_header(email, api_token)})
+    # Endpoint returns a flat list, not a paginated object.
+    if not isinstance(raw, list):
+        raise PlanKeeperCliError(f"unexpected Jira components response: {raw!r}", code=5)
+    return [{"id": c["id"], "name": c["name"], "projectKey": project_key} for c in raw]
+
+
+def jira_users(site: str, email: str, api_token: str, project_key: str) -> list[dict]:
+    all_users: list[dict] = []
+    start_at = 0
+    page_size = 50
+    while True:
+        url = (
+            f"https://{site}/rest/api/3/user/assignable/multiProjectSearch?"
+            + urlencode({
+                "projectKeys": project_key,
+                "startAt": str(start_at),
+                "maxResults": str(page_size),
+            })
+        )
+        raw = http_get_json(url, {"Authorization": _jira_auth_header(email, api_token)})
+        if not isinstance(raw, list):
+            raise PlanKeeperCliError(f"unexpected Jira users response: {raw!r}", code=5)
+        all_users.extend(raw)
+        if len(raw) < page_size:
+            break
+        start_at += page_size
+    return [
+        {"accountId": u["accountId"], "name": u["displayName"],
+         "email": u.get("emailAddress", "")}
+        for u in all_users
+    ]
+
+
+def jira_issuetypes(site: str, email: str, api_token: str, project_id: str) -> list[dict]:
+    url = (
+        f"https://{site}/rest/api/3/issuetype/project?"
+        + urlencode({"projectId": project_id})
+    )
+    raw = http_get_json(url, {"Authorization": _jira_auth_header(email, api_token)})
+    if not isinstance(raw, list):
+        raise PlanKeeperCliError(f"unexpected Jira issuetypes response: {raw!r}", code=5)
+    return [{"id": t["id"], "name": t["name"], "projectId": project_id} for t in raw]
+
+
 def cmd_push(args) -> int:
     result = push_subcommand(args.name, args.file, force_new=args.force_new)
     print(json.dumps(result))
@@ -1035,9 +1111,14 @@ def cmd_ticket_api(args) -> int:
             "users": lambda: linear_users(args.api_key),
         }
     else:  # jira
-        headers_args = (args.site, args.email, args.api_key)
+        site, email, token = args.site, args.email, args.api_key
+        pkey = args.project_key
         impl = {
-            "viewer": lambda: jira_viewer(*headers_args),
+            "viewer":     lambda: jira_viewer(site, email, token),
+            "projects":   lambda: jira_projects(site, email, token),
+            "components": lambda: jira_components(site, email, token, pkey),
+            "users":      lambda: jira_users(site, email, token, pkey),
+            "issuetypes": lambda: jira_issuetypes(site, email, token, pkey),
         }
     fn = impl.get(args.ticket_api_kind)
     if fn is None:
