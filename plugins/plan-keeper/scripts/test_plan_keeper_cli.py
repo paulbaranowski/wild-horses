@@ -508,5 +508,79 @@ class TestRepoFull(IsolatedHomeTestCase):
         self.assertEqual(result.stdout.strip(), "unknown/workdir")
 
 
+class TestFileMetaGet(IsolatedHomeTestCase):
+    def _write_plan(self, content: str) -> Path:
+        path = self.cwd / "plan.md"
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def test_no_frontmatter_returns_empty_fields(self) -> None:
+        path = self._write_plan("# Just a heading\n\nBody.\n")
+        result = run_cli(
+            "file-meta", "get", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        import json
+        data = json.loads(result.stdout)
+        self.assertEqual(data, {"Ticket": "", "Ticket System": "", "Completed on": ""})
+
+    def test_full_frontmatter_parses(self) -> None:
+        path = self._write_plan(
+            "---\n"
+            "Ticket: ENG-123\n"
+            "Ticket System: linear\n"
+            "Completed on: 2026-05-20\n"
+            "---\n"
+            "\n# Heading\n"
+        )
+        result = run_cli(
+            "file-meta", "get", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        import json
+        data = json.loads(result.stdout)
+        self.assertEqual(data, {
+            "Ticket": "ENG-123",
+            "Ticket System": "linear",
+            "Completed on": "2026-05-20",
+        })
+
+    def test_partial_frontmatter_returns_present_fields(self) -> None:
+        path = self._write_plan(
+            "---\n"
+            "Ticket: ENG-99\n"
+            "Ticket System: linear\n"
+            "---\n"
+            "# H\n"
+        )
+        result = run_cli(
+            "file-meta", "get", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        import json
+        data = json.loads(result.stdout)
+        self.assertEqual(data["Ticket"], "ENG-99")
+        self.assertEqual(data["Completed on"], "")
+
+    def test_malformed_frontmatter_exits_5(self) -> None:
+        path = self._write_plan("---\nTicket ENG-123\n---\n")  # missing colon
+        result = run_cli(
+            "file-meta", "get", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 5)
+        self.assertIn("malformed", result.stderr.lower())
+
+    def test_missing_file_exits_3(self) -> None:
+        result = run_cli(
+            "file-meta", "get", "--file", str(self.cwd / "nope.md"),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 3)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

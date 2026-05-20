@@ -10,6 +10,7 @@ The algorithm for repo derivation lives in
 See each `plan-*` SKILL.md for invocation patterns.
 """
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -395,6 +396,73 @@ def cmd_archive(args) -> int:
     return 0
 
 
+# --- Frontmatter ------------------------------------------------------------
+
+# Order matters in the output — keep this canonical so callers see a stable shape.
+_FRONTMATTER_FIELDS = ("Ticket", "Ticket System", "Completed on")
+
+
+def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
+    """Split a plan file into (frontmatter_dict, body_text).
+
+    Frontmatter is the optional top block delimited by `---` lines. Each
+    inner line is "Key: value" (whitespace around the colon ignored).
+    Missing block ⇒ empty dict + entire text as body.
+
+    Returns:
+        (meta, body) where meta has exactly the fields in _FRONTMATTER_FIELDS
+        (empty string for missing ones), and body is the text after the
+        closing `---` (or all of `text` if no frontmatter).
+
+    Raises:
+        PlanKeeperCliError(code=5) on malformed frontmatter (no closing `---`,
+        unrecognized field, missing colon).
+    """
+    meta = {k: "" for k in _FRONTMATTER_FIELDS}
+    if not (text.startswith("---\n") or text.startswith("---\r\n")):
+        return meta, text
+    lines = text.split("\n")
+    # First line is "---". Find the closing "---".
+    closing_idx = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            closing_idx = i
+            break
+    if closing_idx is None:
+        raise PlanKeeperCliError("malformed frontmatter: no closing '---'", code=5)
+    for line in lines[1:closing_idx]:
+        if not line.strip():
+            continue
+        if ":" not in line:
+            raise PlanKeeperCliError(
+                f"malformed frontmatter: missing ':' on line {line!r}", code=5
+            )
+        key, _, value = line.partition(":")
+        key = key.strip()
+        value = value.strip()
+        if key not in _FRONTMATTER_FIELDS:
+            raise PlanKeeperCliError(
+                f"malformed frontmatter: unknown field {key!r}", code=5
+            )
+        meta[key] = value
+    body = "\n".join(lines[closing_idx + 1 :])
+    # Drop a single leading blank line if present (cosmetic — frontmatter
+    # is usually followed by a blank line before the H1).
+    if body.startswith("\n"):
+        body = body[1:]
+    return meta, body
+
+
+def cmd_file_meta_get(args) -> int:
+    path = Path(args.file)
+    if not path.exists():
+        raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
+    text = path.read_text(encoding="utf-8")
+    meta, _body = parse_frontmatter(text)
+    print(json.dumps(meta))
+    return 0
+
+
 # --- Parser -----------------------------------------------------------------
 
 
@@ -474,6 +542,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="YYYY-MM-DD date for the completion stamp (default: today)",
     )
 
+    p_file_meta = sub.add_parser("file-meta", help="read/write/strip plan-file frontmatter")
+    file_meta_sub = p_file_meta.add_subparsers(
+        dest="file_meta_cmd",
+        required=True,
+        metavar="<subcommand>",
+        parser_class=HelpfulArgumentParser,
+    )
+
+    p_fm_get = file_meta_sub.add_parser("get", help="print frontmatter as JSON")
+    p_fm_get.add_argument("--file", required=True, help="absolute path to a plan .md file")
+
     return parser
 
 
@@ -486,6 +565,9 @@ def main() -> int:
         "list-repos": cmd_list_repos,
         "save": cmd_save,
         "archive": cmd_archive,
+        "file-meta": lambda a: {
+            "get": cmd_file_meta_get,
+        }[a.file_meta_cmd](a),
     }
     try:
         return dispatch[args.cmd](args)
