@@ -962,6 +962,7 @@ def _push_linear(section: dict, title: str, description: str, meta: dict, force_
 
 def _push_linear_update(api_key: str, identifier: str, title: str, description: str) -> dict:
     # Stub — implemented in Task 10.
+    del api_key, identifier, title, description
     raise PlanKeeperCliError("update flow not yet implemented", code=2)
 
 
