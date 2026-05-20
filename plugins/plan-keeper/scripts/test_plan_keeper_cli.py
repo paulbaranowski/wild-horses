@@ -696,5 +696,35 @@ class TestFileMetaSet(IsolatedHomeTestCase):
         self.assertEqual(path.read_text(encoding="utf-8"), original)
 
 
+class TestFileMetaStrip(IsolatedHomeTestCase):
+    def _write_plan(self, content: str) -> Path:
+        path = self.cwd / "plan.md"
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def test_strips_frontmatter(self) -> None:
+        path = self._write_plan(
+            "---\n"
+            "Ticket: ENG-1\n"
+            "---\n"
+            "\n# Body\n\nWords.\n"
+        )
+        result = run_cli(
+            "file-meta", "strip", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "# Body\n\nWords.\n")
+
+    def test_no_frontmatter_returns_input_verbatim(self) -> None:
+        path = self._write_plan("# Bare\n\nNo frontmatter here.\n")
+        result = run_cli(
+            "file-meta", "strip", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "# Bare\n\nNo frontmatter here.\n")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

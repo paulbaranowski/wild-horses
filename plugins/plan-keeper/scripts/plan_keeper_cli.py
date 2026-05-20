@@ -489,6 +489,16 @@ def cmd_file_meta_get(args) -> int:
     return 0
 
 
+def cmd_file_meta_strip(args) -> int:
+    path = Path(args.file)
+    if not path.exists():
+        raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
+    text = path.read_text(encoding="utf-8")
+    _, body = parse_frontmatter(text)
+    sys.stdout.write(body)
+    return 0
+
+
 def cmd_file_meta_set(args) -> int:
     # At least one of the set flags must be provided.
     if (
@@ -616,6 +626,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_fm_set.add_argument("--ticket-system", choices=["linear", "jira"], help="ticket system")
     p_fm_set.add_argument("--completed-on", help="completion date YYYY-MM-DD")
 
+    p_fm_strip = file_meta_sub.add_parser("strip", help="print body without frontmatter")
+    p_fm_strip.add_argument("--file", required=True)
+
     return parser
 
 
@@ -625,6 +638,7 @@ def build_parser() -> argparse.ArgumentParser:
 _FILE_META_DISPATCH = {
     "get": cmd_file_meta_get,
     "set": cmd_file_meta_set,
+    "strip": cmd_file_meta_strip,
 }
 
 
