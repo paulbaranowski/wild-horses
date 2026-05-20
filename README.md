@@ -83,6 +83,20 @@ Map and visualize codepaths in any codebase as an interactive architecture diagr
 
 See **[plugins/codepath-visualizer/README.md](plugins/codepath-visualizer/README.md)** for the JSON schema, scoping behavior, and rendering options.
 
+### [plan-keeper](plugins/plan-keeper/README.md)
+
+Three skills for organizing markdown plans in `~/plans/<repo>/`. `plan-save` captures the latest plan from the current conversation into a dated file; `plan-do` lists saved plans and routes the picked one to the right next skill (brainstorming / writing-plans / executing-plans / task-list-builder) based on whether it reads as an idea, spec, sequential impl plan, or task-list-shaped plan; `plan-done` archives a completed plan into `~/plans/<repo>/done/` with a completion stamp. All three are model-invoked by description — no slash command required.
+
+```text
+/plugin install plan-keeper@wild-horses
+
+"save this plan"
+"do a plan from herds"
+"I'm done with the plan"
+```
+
+See **[plugins/plan-keeper/README.md](plugins/plan-keeper/README.md)** for the three-skill pipeline, the shared `~/plans/<repo>/` tree, and the bundled CLI.
+
 ## Install
 
 1. Run `/plugin` in Claude Code
