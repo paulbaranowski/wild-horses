@@ -247,13 +247,14 @@ class TestArchive(IsolatedHomeTestCase):
         source = self._save_one()
         run_cli("archive", "--override", "scratch", "--file", source.name, home=self.home)
         target = self.plans_root / "scratch" / "done" / source.name
-        body = target.read_text()
+        text = target.read_text()
         today = date.today().isoformat()
-        # Body should end with: ...content\n\n---\n*Completed: YYYY-MM-DD*\n
-        self.assertTrue(
-            body.endswith(f"\n\n---\n*Completed: {today}*\n"),
-            f"unexpected stamp tail: {body[-80:]!r}",
-        )
+        # NEW: completion date in frontmatter at the top.
+        self.assertTrue(text.startswith("---\n"), "file must start with frontmatter")
+        front = text.split("\n---\n", 1)[0]
+        self.assertIn(f"Completed on: {today}", front)
+        # OLD: bottom stamp must NOT be present.
+        self.assertNotIn("*Completed:", text)
 
     def test_completed_date_override(self) -> None:
         source = self._save_one()
@@ -262,8 +263,13 @@ class TestArchive(IsolatedHomeTestCase):
             "--completed-date", "2020-01-15",
             home=self.home,
         )
-        body = (self.plans_root / "scratch" / "done" / source.name).read_text()
-        self.assertIn("*Completed: 2020-01-15*", body)
+        text = (self.plans_root / "scratch" / "done" / source.name).read_text()
+        # NEW: completion date in frontmatter.
+        self.assertTrue(text.startswith("---\n"), "file must start with frontmatter")
+        front = text.split("\n---\n", 1)[0]
+        self.assertIn("Completed on: 2020-01-15", front)
+        # OLD: bottom stamp must NOT be present.
+        self.assertNotIn("*Completed:", text)
 
     def test_missing_source_exits_3(self) -> None:
         r = run_cli(

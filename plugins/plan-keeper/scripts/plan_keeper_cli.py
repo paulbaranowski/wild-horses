@@ -437,10 +437,12 @@ def cmd_archive(args) -> int:
         if args.completed_date
         else date.today().isoformat()
     )
-    body = source.read_text(encoding="utf-8")
-    if not body.endswith("\n"):
-        body += "\n"
-    stamped = body + f"\n---\n*Completed: {completed}*\n"
+    text = source.read_text(encoding="utf-8")
+    meta, body = parse_frontmatter(text)
+    meta["Completed on"] = completed
+    stamped = serialize_frontmatter(meta, body)
+    if not stamped.endswith("\n"):
+        stamped += "\n"
 
     write_atomic(target, stamped)
     source.unlink()
