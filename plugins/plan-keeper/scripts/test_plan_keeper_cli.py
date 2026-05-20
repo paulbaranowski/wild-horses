@@ -727,13 +727,6 @@ class TestFileMetaStrip(IsolatedHomeTestCase):
 
 
 class TestTicketSystemConfig(IsolatedHomeTestCase):
-    def _init_git_repo(self, remote_url: str) -> None:
-        subprocess.run(["git", "init", "-q"], cwd=self.cwd, check=True)
-        subprocess.run(
-            ["git", "remote", "add", "origin", remote_url],
-            cwd=self.cwd, check=True,
-        )
-
     def test_list_no_config(self) -> None:
         result = run_cli(
             "ticket-system-config", "list",
