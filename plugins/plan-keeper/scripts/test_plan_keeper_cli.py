@@ -1174,5 +1174,98 @@ class TestPushLinearCreate(unittest.TestCase):
         self.assertIn("65000", str(ctx.exception))
 
 
+class TestPushLinearUpdate(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.plans_root = self.home / "plans"
+        self.cwd = self.home / "workdir"
+        self.cwd.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=self.cwd, check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin",
+             "https://github.com/herds-social/herds.git"],
+            cwd=self.cwd, check=True,
+        )
+        self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
+        self._home_patch.start()
+        self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
+        self._cwd_patch.start()
+        self.cli.save_config("herds", {"linear": {
+            "apiKey": "lin_test",
+            "defaults": {"teamId": "t1"},
+            "cache": {"refreshedAt": "now"},
+        }})
+
+    def tearDown(self) -> None:
+        self._home_patch.stop()
+        self._cwd_patch.stop()
+        self._tmp.cleanup()
+
+    def _mock_update_response(self):
+        body = {"data": {"issueUpdate": {
+            "success": True,
+            "issue": {
+                "id": "uuid-1",
+                "identifier": "ENG-123",
+                "url": "https://linear.app/herds/issue/ENG-123/foo",
+                "title": "Updated Title",
+            },
+        }}}
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def test_update_omits_team_project_assignee_labels(self) -> None:
+        repo_dir = self.plans_root / "herds"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        path = repo_dir / "plan.md"
+        path.write_text(
+            "---\nTicket: ENG-123\nTicket System: linear\n---\n\n"
+            "# Updated Title\n\n## Body\n",
+            encoding="utf-8",
+        )
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_update_response(),
+        ) as mock_open:
+            result = self.cli.push_subcommand(name="linear", file_path=str(path), force_new=False)
+        self.assertEqual(result["action"], "update")
+        self.assertEqual(result["id"], "ENG-123")
+        sent = json.loads(mock_open.call_args[0][0].data.decode("utf-8"))
+        self.assertIn("issueUpdate", sent["query"])
+        input_dict = sent["variables"]["input"]
+        self.assertEqual(set(input_dict.keys()), {"title", "description"})  # nothing else
+        self.assertEqual(sent["variables"]["id"], "ENG-123")
+
+    def test_update_uses_force_new_when_set(self) -> None:
+        repo_dir = self.plans_root / "herds"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        path = repo_dir / "plan.md"
+        path.write_text(
+            "---\nTicket: OLD-1\nTicket System: linear\n---\n\n# T\n",
+            encoding="utf-8",
+        )
+        # With force_new=True, this should call create, not update.
+        body = {"data": {"issueCreate": {
+            "success": True, "issue": {
+                "id": "u2", "identifier": "ENG-200",
+                "url": "https://x", "title": "T",
+            },
+        }}}
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        with patch("urllib.request.urlopen", return_value=m) as mock_open:
+            result = self.cli.push_subcommand(name="linear", file_path=str(path), force_new=True)
+        self.assertEqual(result["action"], "create")
+        sent = json.loads(mock_open.call_args[0][0].data.decode("utf-8"))
+        self.assertIn("issueCreate", sent["query"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

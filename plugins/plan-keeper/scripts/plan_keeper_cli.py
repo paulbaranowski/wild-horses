@@ -961,9 +961,43 @@ def _push_linear(section: dict, title: str, description: str, meta: dict, force_
 
 
 def _push_linear_update(api_key: str, identifier: str, title: str, description: str) -> dict:
-    # Stub — implemented in Task 10.
-    del api_key, identifier, title, description
-    raise PlanKeeperCliError("update flow not yet implemented", code=2)
+    query = (
+        "mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {"
+        "  issueUpdate(id: $id, input: $input) {"
+        "    success"
+        "    issue { id identifier url title }"
+        "  }"
+        "}"
+    )
+    resp = http_post_json(
+        LINEAR_GRAPHQL_URL,
+        {
+            "query": query,
+            "variables": {
+                "id": identifier,  # Linear accepts identifier as id
+                "input": {"title": title, "description": description},
+            },
+        },
+        {"Authorization": api_key},
+    )
+    if "errors" in resp:
+        # 404-style errors come back as a GraphQL error with code EntityNotFound.
+        for err in resp.get("errors", []):
+            ext = err.get("extensions", {})
+            if ext.get("code") == "EntityNotFound" or "not found" in err.get("message", "").lower():
+                raise PlanKeeperCliError(f"Linear ticket {identifier} not found", code=5)
+        raise PlanKeeperCliError(f"Linear API error: {resp['errors']}", code=5)
+    payload = resp["data"]["issueUpdate"]
+    if not payload["success"]:
+        raise PlanKeeperCliError("Linear API reported success=false", code=5)
+    issue = payload["issue"]
+    return {
+        "action": "update",
+        "system": "linear",
+        "id": issue["identifier"],
+        "url": issue["url"],
+        "title": issue["title"],
+    }
 
 
 def cmd_push(args) -> int:
