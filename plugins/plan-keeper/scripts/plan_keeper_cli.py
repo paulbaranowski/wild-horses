@@ -1357,12 +1357,52 @@ def _resolve_jira_project_id(
     )
 
 
+_LINEAR_KINDS = {"viewer", "teams", "projects", "labels", "users"}
+_JIRA_KINDS_BASE = {"viewer", "projects", "components", "users", "issuetypes"}
+_JIRA_KINDS_NEED_PROJECT_KEY = {"components", "users", "issuetypes"}
+
+
+def _validate_ticket_api_args(args) -> None:
+    """Verify required flags are present for the requested (name, kind).
+
+    Without this, missing flags slip through and cause downstream calls
+    like `jira_viewer(None, None, None)` that surface as network or
+    `_resolve_jira_project_id(... None)` errors. Validation up-front gives
+    the user a clear CLI message instead.
+    """
+    kind = args.ticket_api_kind
+    if args.name == "linear":
+        if kind in _LINEAR_KINDS and not args.api_key:
+            raise PlanKeeperCliError(
+                f"ticket-api {kind} --name linear requires --api-key", code=2,
+            )
+    else:  # jira
+        if kind in _JIRA_KINDS_BASE:
+            for flag, value in (
+                ("--site", args.site),
+                ("--email", args.email),
+                ("--api-key", args.api_key),
+            ):
+                if not value:
+                    raise PlanKeeperCliError(
+                        f"ticket-api {kind} --name jira requires {flag}",
+                        code=2,
+                    )
+            _validate_jira_site(args.site)
+        if kind in _JIRA_KINDS_NEED_PROJECT_KEY and not args.project_key:
+            raise PlanKeeperCliError(
+                f"ticket-api {kind} --name jira requires --project-key",
+                code=2,
+            )
+
+
 def cmd_ticket_api(args) -> int:
     """Dispatch ticket-api subcommands.
 
     Each kind ({viewer, teams, projects, labels, users, components, issuetypes})
     is implemented by a per-system function. Output is always JSON to stdout.
     """
+    _validate_ticket_api_args(args)
     if args.name == "linear":
         impl = {
             "viewer": lambda: linear_viewer(args.api_key),
@@ -1373,8 +1413,6 @@ def cmd_ticket_api(args) -> int:
         }
     else:  # jira
         site, email, token = args.site, args.email, args.api_key
-        if site:
-            _validate_jira_site(site)
         pkey = args.project_key
         impl = {
             "viewer":     lambda: jira_viewer(site, email, token),

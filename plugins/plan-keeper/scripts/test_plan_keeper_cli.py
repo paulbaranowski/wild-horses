@@ -899,6 +899,48 @@ class TestTicketApiLinearViewer(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 4)
 
 
+class TestTicketApiArgValidation(IsolatedHomeTestCase):
+    """Verify cmd_ticket_api rejects calls with missing required flags
+    before any network call is attempted."""
+
+    def test_linear_viewer_without_api_key_exits_2(self) -> None:
+        r = run_cli(
+            "ticket-api", "viewer", "--name", "linear",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--api-key", r.stderr)
+
+    def test_jira_viewer_without_site_exits_2(self) -> None:
+        r = run_cli(
+            "ticket-api", "viewer", "--name", "jira",
+            "--email", "p@x.com", "--api-key", "tok",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--site", r.stderr)
+
+    def test_jira_components_without_project_key_exits_2(self) -> None:
+        r = run_cli(
+            "ticket-api", "components", "--name", "jira",
+            "--site", "x.atlassian.net",
+            "--email", "p@x.com", "--api-key", "tok",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--project-key", r.stderr)
+
+    def test_jira_invalid_site_exits_2(self) -> None:
+        r = run_cli(
+            "ticket-api", "viewer", "--name", "jira",
+            "--site", "https://x.atlassian.net",  # scheme not allowed
+            "--email", "p@x.com", "--api-key", "tok",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("bare hostname", r.stderr)
+
+
 class TestTicketApiLinearLists(unittest.TestCase):
     def setUp(self) -> None:
         self.cli = _import_cli_module()
