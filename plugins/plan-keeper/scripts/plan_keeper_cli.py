@@ -16,6 +16,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from datetime import date
 from pathlib import Path
 from typing import Optional
@@ -610,6 +612,102 @@ def cmd_file_meta_set(args) -> int:
     return 0
 
 
+# --- HTTP helpers -----------------------------------------------------------
+
+LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
+HTTP_TIMEOUT = 30
+
+
+def http_post_json(
+    url: str,
+    payload: dict,
+    headers: dict[str, str],
+) -> dict:
+    """POST a JSON body, return the decoded JSON response.
+
+    Single chokepoint for all outbound HTTP. Maps urllib exceptions to
+    PlanKeeperCliError with the documented exit codes:
+        3 — 401/403 auth failures
+        4 — DNS/connection/timeout failures
+        5 — non-2xx HTTP responses with the body in the error message
+    """
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", **headers},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            body = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise PlanKeeperCliError(f"auth failure ({e.code}): {e.reason}", code=3)
+        raise PlanKeeperCliError(f"HTTP {e.code}: {e.reason}", code=5)
+    except urllib.error.URLError as e:
+        raise PlanKeeperCliError(f"network error: {e.reason}", code=4)
+    except Exception as e:
+        raise PlanKeeperCliError(f"unexpected error: {e}", code=5)
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as e:
+        raise PlanKeeperCliError(f"non-JSON response: {e}; body={body[:200]!r}", code=5)
+
+
+def http_get_json(url: str, headers: dict[str, str]) -> dict:
+    """GET a URL, return the decoded JSON response. Same error mapping as http_post_json."""
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            body = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise PlanKeeperCliError(f"auth failure ({e.code}): {e.reason}", code=3)
+        raise PlanKeeperCliError(f"HTTP {e.code}: {e.reason}", code=5)
+    except urllib.error.URLError as e:
+        raise PlanKeeperCliError(f"network error: {e.reason}", code=4)
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as e:
+        raise PlanKeeperCliError(f"non-JSON response: {e}; body={body[:200]!r}", code=5)
+
+
+def linear_viewer(api_key: str) -> dict:
+    """Call Linear's viewer query — returns {id, name, email} on success."""
+    query = "query { viewer { id name email } }"
+    resp = http_post_json(
+        LINEAR_GRAPHQL_URL,
+        {"query": query},
+        {"Authorization": api_key},
+    )
+    if "errors" in resp:
+        raise PlanKeeperCliError(f"Linear API error: {resp['errors']}", code=5)
+    return resp["data"]["viewer"]
+
+
+def cmd_ticket_api(args) -> int:
+    """Dispatch ticket-api subcommands.
+
+    Each kind ({viewer, teams, projects, labels, users, components, issuetypes})
+    is implemented by a per-system function. Output is always JSON to stdout.
+    """
+    if args.name == "linear":
+        impl = {
+            "viewer": lambda: linear_viewer(args.api_key),
+            # other kinds added in subsequent tasks
+        }
+    else:  # jira
+        impl = {}  # filled in Phase C
+    fn = impl.get(args.ticket_api_kind)
+    if fn is None:
+        raise PlanKeeperCliError(
+            f"ticket-api {args.ticket_api_kind} not implemented for {args.name}",
+            code=2,
+        )
+    print(json.dumps(fn()))
+    return 0
+
+
 # --- Parser -----------------------------------------------------------------
 
 
@@ -726,6 +824,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     _ = tsc_sub.add_parser("list", help="list configured ticket-system names")
 
+    p_ta = sub.add_parser(
+        "ticket-api",
+        help="low-level Linear/Jira API calls (used by setup and refresh)",
+    )
+    p_ta.add_argument(
+        "ticket_api_kind",
+        choices=["viewer", "teams", "projects", "labels", "users", "components", "issuetypes"],
+    )
+    p_ta.add_argument("--name", required=True, choices=["linear", "jira"])
+    p_ta.add_argument("--api-key", help="API key (Linear) or token (Jira)")
+    p_ta.add_argument("--email", help="email for Jira Basic auth")
+    p_ta.add_argument("--site", help="Jira site URL (e.g., herds.atlassian.net)")
+    p_ta.add_argument(
+        "--project-key",
+        help="project key (Jira; required for per-project kinds)",
+    )
+
     return parser
 
 
@@ -756,6 +871,7 @@ def main() -> int:
         "archive": cmd_archive,
         "file-meta": lambda a: _FILE_META_DISPATCH[a.file_meta_cmd](a),
         "ticket-system-config": lambda a: _TICKET_SYSTEM_CONFIG_DISPATCH[a.tsc_cmd](a),
+        "ticket-api": cmd_ticket_api,
     }
     try:
         return dispatch[args.cmd](args)

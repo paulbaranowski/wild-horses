@@ -16,16 +16,35 @@ agent would see them. Isolation: HOME=<tmpdir> per test so the CLI's
 the user's real ~/plans/. Mirrors the precedent at
 plugins/harness/skills/task-list-runner/test_task_list_cli.py.
 """
+import importlib.util
 import json
 import os
 import subprocess
+import sys as _sys
 import tempfile
 import unittest
+import urllib.error
 from datetime import date
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 CLI = Path(__file__).parent / "plan_keeper_cli.py"
 ALLOW_SCRIPT = Path(__file__).parent / "plan-keeper-cli-allow.sh"
+
+
+def _import_cli_module():
+    """Import plan_keeper_cli.py as a module for in-process testing.
+
+    Network subcommands are tested by patching urllib.request.urlopen and
+    calling the CLI's internal functions directly. The subprocess pattern
+    (run_cli) can't reach through the process boundary to patch urllib.
+    """
+    spec = importlib.util.spec_from_file_location("plan_keeper_cli_under_test", CLI)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    _sys.modules["plan_keeper_cli_under_test"] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def run_cli(
@@ -803,6 +822,59 @@ class TestTicketSystemConfig(IsolatedHomeTestCase):
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 2)
+
+
+class TestTicketApiLinearViewer(unittest.TestCase):
+    """Network tests run in-process with urllib patched. No subprocess."""
+
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+
+    def _mock_urlopen_returning(self, status: int, body: dict):
+        """Build a urlopen-style context-manager mock with a fixed JSON body."""
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.status = status
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def test_viewer_returns_identity_on_200(self) -> None:
+        response_body = {
+            "data": {"viewer": {"id": "u1", "name": "Paul", "email": "p@x.com"}}
+        }
+        mock_resp = self._mock_urlopen_returning(200, response_body)
+        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_open:
+            result = self.cli.linear_viewer(api_key="lin_test_key")
+        self.assertEqual(result, {"id": "u1", "name": "Paul", "email": "p@x.com"})
+        # Verify the request itself.
+        call_args = mock_open.call_args
+        req = call_args[0][0]  # first positional arg is the Request object
+        self.assertEqual(req.full_url, "https://api.linear.app/graphql")
+        self.assertEqual(req.get_header("Authorization"), "lin_test_key")
+        body = json.loads(req.data.decode("utf-8"))
+        self.assertIn("viewer", body["query"])
+
+    def test_viewer_raises_on_401(self) -> None:
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.HTTPError(
+                url="https://api.linear.app/graphql",
+                code=401, msg="Unauthorized", hdrs=None, fp=None,
+            ),
+        ):
+            with self.assertRaises(self.cli.PlanKeeperCliError) as ctx:
+                self.cli.linear_viewer(api_key="bad_key")
+        self.assertEqual(ctx.exception.code, 3)
+
+    def test_viewer_raises_on_network_error(self) -> None:
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("connection refused"),
+        ):
+            with self.assertRaises(self.cli.PlanKeeperCliError) as ctx:
+                self.cli.linear_viewer(api_key="k")
+        self.assertEqual(ctx.exception.code, 4)
 
 
 if __name__ == "__main__":
