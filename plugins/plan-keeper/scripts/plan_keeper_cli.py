@@ -458,7 +458,7 @@ def cmd_file_meta_get(args) -> int:
     if not path.exists():
         raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
     text = path.read_text(encoding="utf-8")
-    meta, _body = parse_frontmatter(text)
+    meta, _ = parse_frontmatter(text)
     print(json.dumps(meta))
     return 0
 
