@@ -17,7 +17,7 @@ cmd=$(jq -r '.tool_input.command // empty')
 
 # Match: `python3` immediately followed by the plan-keeper CLI as its first
 # positional argument, possibly wrapped in single or double quotes. The path
-# must contain `/plan-keeper/` somewhere AND end in `/scripts/plan_keeper_cli.py`.
+# must end in `/scripts/plan_keeper_cli.py` AND contain `/plan-keeper/` somewhere.
 #
 # Anchoring on `^python3<space>` + first-token-is-the-script (not anywhere in
 # the command) prevents over-approval of unusual invocations like
@@ -28,13 +28,20 @@ cmd=$(jq -r '.tool_input.command // empty')
 # Works for both layouts:
 #   - dev:       /...checkout.../plugins/plan-keeper/scripts/plan_keeper_cli.py
 #   - installed: /...cache/wild-horses/plan-keeper/<version>/scripts/plan_keeper_cli.py
-# A version directory sits between `plan-keeper` and `scripts` in the installed
-# path; the inner `[^"'[:space:]]*` segment accepts that interior gracefully.
+#
+# Implementation: a single regex captures the path token in group 1, then a
+# plain substring check on that captured value verifies `/plan-keeper/` is
+# present. Splitting the check (instead of a single regex like
+# `.../plan-keeper/[^...]*/scripts/...`) avoids relying on bash ERE's
+# backtracking into a middle `*` segment, which doesn't fire reliably on
+# macOS libc when the surrounding literals are adjacent (e.g., the dev path
+# `/plan-keeper/scripts/...` with no intermediate dir).
 #
 # Handles Claude Code's defensive path-quoting (paths may be wrapped in `"` or
 # `'`) via the optional `[\"\']?` tokens flanking the script path. Path
 # interiors exclude quote and whitespace characters, so quoted/unquoted forms
 # can't blur into each other.
-if [[ "$cmd" =~ ^python3[[:space:]]+[\"\']?[^\"\'[:space:]]*/plan-keeper/[^\"\'[:space:]]*/scripts/plan_keeper_cli\.py[\"\']?([[:space:]]|$) ]]; then
+if [[ "$cmd" =~ ^python3[[:space:]]+[\"\']?([^\"\'[:space:]]+/scripts/plan_keeper_cli\.py)[\"\']?([[:space:]]|$) ]] \
+   && [[ "${BASH_REMATCH[1]}" == *"/plan-keeper/"* ]]; then
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"plan-keeper CLI is plugin-approved"}}'
 fi
