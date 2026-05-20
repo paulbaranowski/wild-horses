@@ -1064,5 +1064,115 @@ class TestTicketSystemConfigRefreshLinear(unittest.TestCase):
         self.assertTrue(any("t-deleted" in w for w in warnings))
 
 
+class TestPushLinearCreate(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.plans_root = self.home / "plans"
+        self.cwd = self.home / "workdir"
+        self.cwd.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=self.cwd, check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin",
+             "https://github.com/herds-social/herds.git"],
+            cwd=self.cwd, check=True,
+        )
+        self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
+        self._home_patch.start()
+        self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
+        self._cwd_patch.start()
+
+    def tearDown(self) -> None:
+        self._home_patch.stop()
+        self._cwd_patch.stop()
+        self._tmp.cleanup()
+
+    def _seed_config(self):
+        self.cli.save_config("herds", {"linear": {
+            "apiKey": "lin_test",
+            "defaults": {
+                "teamId": "t1", "teamName": "Engineering",
+                "projectId": "p1", "projectName": "Backend",
+                "assigneeId": "u1", "assigneeName": "Paul",
+                "labelIds": ["l1"], "labelNames": ["plan"],
+            },
+            "cache": {"refreshedAt": "2026-05-20T00:00:00Z"},
+        }})
+
+    def _seed_plan(self, frontmatter: str = "", h1: str = "# Multi-Event Design"):
+        repo_dir = self.plans_root / "herds"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        path = repo_dir / "2026-05-20-multi-event-design.md"
+        path.write_text(f"{frontmatter}{h1}\n\n## Context\n\nBody text.\n", encoding="utf-8")
+        return path
+
+    def _mock_create_response(self):
+        body = {"data": {"issueCreate": {
+            "success": True,
+            "issue": {
+                "id": "uuid-1",
+                "identifier": "ENG-123",
+                "url": "https://linear.app/herds/issue/ENG-123/multi-event-design",
+                "title": "Multi-Event Design",
+            },
+        }}}
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def test_create_sends_expected_payload(self) -> None:
+        self._seed_config()
+        path = self._seed_plan()
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_create_response(),
+        ) as mock_open:
+            result = self.cli.push_subcommand(name="linear", file_path=str(path), force_new=False)
+        self.assertEqual(result["action"], "create")
+        self.assertEqual(result["id"], "ENG-123")
+        # Inspect the GraphQL request payload.
+        call = mock_open.call_args
+        req = call[0][0]
+        sent = json.loads(req.data.decode("utf-8"))
+        self.assertIn("issueCreate", sent["query"])
+        variables_input = sent["variables"]["input"]
+        self.assertEqual(variables_input["title"], "Multi-Event Design")
+        self.assertEqual(variables_input["teamId"], "t1")
+        self.assertEqual(variables_input["projectId"], "p1")
+        self.assertEqual(variables_input["assigneeId"], "u1")
+        self.assertEqual(variables_input["labelIds"], ["l1"])
+        # Description must start with "Repo: ..." line.
+        self.assertTrue(variables_input["description"].startswith("Repo: herds-social/herds\n"))
+        # And contain the plan body.
+        self.assertIn("## Context", variables_input["description"])
+
+    def test_create_strips_existing_frontmatter_from_description(self) -> None:
+        self._seed_config()
+        path = self._seed_plan(frontmatter="---\nTicket: \nTicket System: \n---\n\n")
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_create_response(),
+        ) as mock_open:
+            self.cli.push_subcommand(name="linear", file_path=str(path), force_new=False)
+        sent = json.loads(mock_open.call_args[0][0].data.decode("utf-8"))
+        # The "---" lines must not appear in the description.
+        self.assertNotIn("---", sent["variables"]["input"]["description"])
+
+    def test_create_aborts_if_description_exceeds_limit(self) -> None:
+        self._seed_config()
+        repo_dir = self.plans_root / "herds"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        big_body = "x" * 70_000
+        path = repo_dir / "2026-05-20-big.md"
+        path.write_text(f"# Big\n\n{big_body}\n", encoding="utf-8")
+        with self.assertRaises(self.cli.PlanKeeperCliError) as ctx:
+            self.cli.push_subcommand(name="linear", file_path=str(path), force_new=False)
+        self.assertEqual(ctx.exception.code, 2)
+        self.assertIn("65000", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

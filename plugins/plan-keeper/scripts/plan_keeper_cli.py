@@ -864,6 +864,113 @@ def cmd_ticket_system_config_refresh(args) -> int:
     return 0
 
 
+LINEAR_DESCRIPTION_LIMIT = 65_000
+
+
+def _extract_h1(body: str) -> str:
+    """Find the first H1 or H2 in a plan body. Returns the heading text only."""
+    for raw_line in body.split("\n"):
+        line = raw_line.strip()
+        if line.startswith("# "):
+            return line[2:].strip()
+        if line.startswith("## "):
+            return line[3:].strip()
+    raise PlanKeeperCliError("plan has no H1 or H2 heading", code=2)
+
+
+def _compose_description(repo_full: str, body: str) -> str:
+    return f"Repo: {repo_full}\n\n{body.rstrip()}\n"
+
+
+def linear_create_issue(api_key: str, input_dict: dict) -> dict:
+    query = (
+        "mutation IssueCreate($input: IssueCreateInput!) {"
+        "  issueCreate(input: $input) {"
+        "    success"
+        "    issue { id identifier url title }"
+        "  }"
+        "}"
+    )
+    resp = http_post_json(
+        LINEAR_GRAPHQL_URL,
+        {"query": query, "variables": {"input": input_dict}},
+        {"Authorization": api_key},
+    )
+    if "errors" in resp:
+        raise PlanKeeperCliError(f"Linear API error: {resp['errors']}", code=5)
+    payload = resp["data"]["issueCreate"]
+    if not payload["success"]:
+        raise PlanKeeperCliError("Linear API reported success=false", code=5)
+    return payload["issue"]
+
+
+def push_subcommand(name: str, file_path: str, force_new: bool = False) -> dict:
+    """Create or update a ticket. Returns the result JSON.
+
+    Called both from cmd_push (CLI entrypoint) and directly from tests.
+    """
+    path = Path(file_path)
+    if not path.exists():
+        raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
+    text = path.read_text(encoding="utf-8")
+    meta, body = parse_frontmatter(text)
+    title = _extract_h1(body)
+    repo_full = derive_repo_full()
+    description = _compose_description(repo_full, body)
+    if len(description) > LINEAR_DESCRIPTION_LIMIT and name == "linear":
+        raise PlanKeeperCliError(
+            f"description is {len(description)} chars, exceeds Linear limit of 65000",
+            code=2,
+        )
+    repo = derive_repo(None)
+    config = load_config(repo)
+    section = config.get(name)
+    if section is None:
+        raise PlanKeeperCliError(f"{name} not configured for repo {repo!r}", code=2)
+    if name == "linear":
+        return _push_linear(section, title, description, meta, force_new)
+    raise PlanKeeperCliError(f"push to {name!r} not yet implemented", code=2)
+
+
+def _push_linear(section: dict, title: str, description: str, meta: dict, force_new: bool) -> dict:
+    api_key = section["apiKey"]
+    defaults = section["defaults"]
+    has_existing = bool(meta.get("Ticket")) and meta.get("Ticket System") == "linear"
+    if has_existing and not force_new:
+        # update path — implemented in Task 10
+        return _push_linear_update(api_key, meta["Ticket"], title, description)
+    input_dict = {
+        "title": title,
+        "description": description,
+        "teamId": defaults["teamId"],
+    }
+    if defaults.get("projectId"):
+        input_dict["projectId"] = defaults["projectId"]
+    if defaults.get("assigneeId"):
+        input_dict["assigneeId"] = defaults["assigneeId"]
+    if defaults.get("labelIds"):
+        input_dict["labelIds"] = list(defaults["labelIds"])
+    issue = linear_create_issue(api_key, input_dict)
+    return {
+        "action": "create",
+        "system": "linear",
+        "id": issue["identifier"],
+        "url": issue["url"],
+        "title": issue["title"],
+    }
+
+
+def _push_linear_update(api_key: str, identifier: str, title: str, description: str) -> dict:
+    # Stub — implemented in Task 10.
+    raise PlanKeeperCliError("update flow not yet implemented", code=2)
+
+
+def cmd_push(args) -> int:
+    result = push_subcommand(args.name, args.file, force_new=args.force_new)
+    print(json.dumps(result))
+    return 0
+
+
 def cmd_ticket_api(args) -> int:
     """Dispatch ticket-api subcommands.
 
@@ -1029,6 +1136,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="project key (Jira; required for per-project kinds)",
     )
 
+    p_push = sub.add_parser("push", help="create or update a ticket from a plan file")
+    p_push.add_argument("--name", required=True, choices=["linear", "jira"])
+    p_push.add_argument("--file", required=True)
+    p_push.add_argument(
+        "--force-new",
+        action="store_true",
+        help="ignore existing Ticket frontmatter and create a fresh ticket",
+    )
+
     return parser
 
 
@@ -1061,6 +1177,7 @@ def main() -> int:
         "file-meta": lambda a: _FILE_META_DISPATCH[a.file_meta_cmd](a),
         "ticket-system-config": lambda a: _TICKET_SYSTEM_CONFIG_DISPATCH[a.tsc_cmd](a),
         "ticket-api": cmd_ticket_api,
+        "push": cmd_push,
     }
     try:
         return dispatch[args.cmd](args)
