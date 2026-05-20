@@ -450,6 +450,25 @@ def cmd_archive(args) -> int:
     return 0
 
 
+_SECRET_CONFIG_FIELDS = ("apiKey", "apiToken")
+
+
+def _redact_section(section: dict) -> dict:
+    """Return a copy of `section` with credential fields masked.
+
+    Credentials live in the section root (e.g., `apiKey` for linear,
+    `apiToken` for jira). The picker UI in the setup wizard reads
+    everything ELSE from the section (`defaults`, `cache`) — those are
+    not sensitive. Masking only the secret-named fields preserves the
+    structure callers expect.
+    """
+    out = dict(section)
+    for key in _SECRET_CONFIG_FIELDS:
+        if key in out and out[key]:
+            out[key] = "***redacted***"
+    return out
+
+
 def cmd_ticket_system_config_get(args) -> int:
     repo = derive_repo(None)
     config = load_config(repo)
@@ -459,7 +478,8 @@ def cmd_ticket_system_config_get(args) -> int:
             f"no config for ticket system {args.name!r} in repo {repo!r}",
             code=3,
         )
-    print(json.dumps(section))
+    output = section if args.show_secrets else _redact_section(section)
+    print(json.dumps(output))
     return 0
 
 
@@ -909,6 +929,7 @@ def cmd_ticket_system_config_refresh(args) -> int:
             raise PlanKeeperCliError(
                 "jira refresh requires --site, --email, --api-key", code=2,
             )
+        _validate_jira_site(args.site)
         refresh_jira_cache(args.site, args.email, args.api_key)
     return 0
 
@@ -976,11 +997,58 @@ def push_subcommand(name: str, file_path: str, force_new: bool = False) -> dict:
     section = config.get(name)
     if section is None:
         raise PlanKeeperCliError(f"{name} not configured for repo {repo!r}", code=2)
+    _validate_config_for_push(name, section)
     if name == "linear":
         return _push_linear(section, title, description, meta, force_new)
     elif name == "jira":
         return _push_jira(section, title, description, meta, force_new)
     raise PlanKeeperCliError(f"push to {name!r} not yet implemented", code=2)
+
+
+def _validate_config_for_push(name: str, section: object) -> None:
+    """Verify the config section has the fields push needs.
+
+    Surfaces a friendly PlanKeeperCliError instead of letting a downstream
+    KeyError leak as an internal stack trace. Each branch checks the minimum
+    set of credentials + defaults that push will index into.
+
+    `section` is typed as `object` because it comes from `json.loads` and
+    could in principle be any JSON value (string/number/list) if the config
+    file was hand-edited — the isinstance check below is meaningful.
+    """
+    if not isinstance(section, dict):
+        raise PlanKeeperCliError(
+            f"config section for {name!r} must be a JSON object", code=2,
+        )
+    defaults = section.get("defaults")
+    if not isinstance(defaults, dict):
+        raise PlanKeeperCliError(
+            f"config section for {name!r} is missing 'defaults' — "
+            f"run /plan-push setup to configure",
+            code=2,
+        )
+    if name == "linear":
+        if not section.get("apiKey"):
+            raise PlanKeeperCliError(
+                "linear config missing apiKey — run /plan-push setup", code=2,
+            )
+        if not defaults.get("teamId"):
+            raise PlanKeeperCliError(
+                "linear config defaults missing teamId — run /plan-push setup",
+                code=2,
+            )
+    elif name == "jira":
+        for field in ("site", "email", "apiToken"):
+            if not section.get(field):
+                raise PlanKeeperCliError(
+                    f"jira config missing {field} — run /plan-push setup",
+                    code=2,
+                )
+        if not defaults.get("projectKey"):
+            raise PlanKeeperCliError(
+                "jira config defaults missing projectKey — run /plan-push setup",
+                code=2,
+            )
 
 
 def _push_linear(section: dict, title: str, description: str, meta: dict, force_new: bool) -> dict:
@@ -1052,6 +1120,27 @@ def _push_linear_update(api_key: str, identifier: str, title: str, description: 
 
 
 # --- Jira helpers -----------------------------------------------------------
+
+
+_JIRA_SITE_RE = re.compile(r"^[A-Za-z0-9.\-]+(?::\d+)?$")
+
+
+def _validate_jira_site(site: str) -> str:
+    """Reject anything that isn't a bare hostname (optionally with :port).
+
+    Inputs like `https://herds.atlassian.net`, `herds.atlassian.net/path`,
+    or `herds.atlassian.net@evil.test` would break URL construction or
+    redirect the Basic-auth header to the wrong host. Accept only
+    `<host>` or `<host>:<port>`.
+    """
+    if not site or not isinstance(site, str):
+        raise PlanKeeperCliError("jira site must be a non-empty string", code=2)
+    if not _JIRA_SITE_RE.match(site):
+        raise PlanKeeperCliError(
+            f"jira site must be a bare hostname (no scheme, path, userinfo, or whitespace); got {site!r}",
+            code=2,
+        )
+    return site
 
 
 def _jira_auth_header(email: str, api_token: str) -> str:
@@ -1202,7 +1291,7 @@ def jira_update_issue(
 
 
 def _push_jira(section: dict, title: str, description: str, meta: dict, force_new: bool) -> dict:
-    site = section["site"]
+    site = _validate_jira_site(section["site"])
     email = section["email"]
     token = section["apiToken"]
     defaults = section["defaults"]
@@ -1250,6 +1339,24 @@ def cmd_push(args) -> int:
     return 0
 
 
+def _resolve_jira_project_id(
+    site: str, email: str, api_token: str, project_key: str,
+) -> str:
+    """Look up the numeric Jira project id for a given key.
+
+    `jira_issuetypes` calls `/issuetype/project?projectId=<id>` which requires
+    the numeric id, not the human-readable key. Other per-project endpoints
+    (`jira_components`, `jira_users`) accept the key directly. This helper
+    bridges the gap by fetching projects and matching on key.
+    """
+    for p in jira_projects(site, email, api_token):
+        if p["key"] == project_key:
+            return p["id"]
+    raise PlanKeeperCliError(
+        f"Jira project key {project_key!r} not found", code=2,
+    )
+
+
 def cmd_ticket_api(args) -> int:
     """Dispatch ticket-api subcommands.
 
@@ -1266,13 +1373,18 @@ def cmd_ticket_api(args) -> int:
         }
     else:  # jira
         site, email, token = args.site, args.email, args.api_key
+        if site:
+            _validate_jira_site(site)
         pkey = args.project_key
         impl = {
             "viewer":     lambda: jira_viewer(site, email, token),
             "projects":   lambda: jira_projects(site, email, token),
             "components": lambda: jira_components(site, email, token, pkey),
             "users":      lambda: jira_users(site, email, token, pkey),
-            "issuetypes": lambda: jira_issuetypes(site, email, token, pkey),
+            "issuetypes": lambda: jira_issuetypes(
+                site, email, token,
+                _resolve_jira_project_id(site, email, token, pkey),
+            ),
         }
     fn = impl.get(args.ticket_api_kind)
     if fn is None:
@@ -1394,6 +1506,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_tsc_get = tsc_sub.add_parser("get", help="print one ticket-system section as JSON")
     p_tsc_get.add_argument("--name", required=True, choices=["linear", "jira"])
+    p_tsc_get.add_argument(
+        "--show-secrets",
+        action="store_true",
+        help="include credentials in output (default: redact apiKey/apiToken)",
+    )
 
     p_tsc_save = tsc_sub.add_parser("save", help="write a ticket-system section (JSON on stdin)")
     p_tsc_save.add_argument("--name", required=True, choices=["linear", "jira"])

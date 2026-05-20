@@ -762,7 +762,7 @@ class TestTicketSystemConfig(IsolatedHomeTestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(json.loads(result.stdout), [])
 
-    def test_save_then_get(self) -> None:
+    def test_save_then_get_redacts_secrets_by_default(self) -> None:
         payload = (
             '{"apiKey": "k", "defaults": {"teamId": "t"}, '
             '"cache": {"teams": [{"id": "t", "name": "Eng"}]}}'
@@ -772,15 +772,29 @@ class TestTicketSystemConfig(IsolatedHomeTestCase):
             stdin=payload, home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        # Now read back.
+        # Default read: apiKey is masked, other fields visible.
         result = run_cli(
             "ticket-system-config", "get", "--name", "linear",
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
-        self.assertEqual(data["apiKey"], "k")
+        self.assertEqual(data["apiKey"], "***redacted***")
         self.assertEqual(data["defaults"]["teamId"], "t")
+
+    def test_get_show_secrets_reveals_credentials(self) -> None:
+        run_cli(
+            "ticket-system-config", "save", "--name", "linear",
+            stdin='{"apiKey": "k", "defaults": {"teamId": "t"}}',
+            home=self.home, cwd=self.cwd,
+        )
+        result = run_cli(
+            "ticket-system-config", "get", "--name", "linear", "--show-secrets",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["apiKey"], "k")
 
     def test_get_missing_system_exits_3(self) -> None:
         result = run_cli(

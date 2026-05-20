@@ -11,7 +11,7 @@ The bundled `plan_keeper_cli.py` does every mutation: config CRUD, metadata fetc
 
 ## Invocation
 
-```
+```text
 /plan-push [linear|jira] [last|file]
 ```
 
@@ -205,7 +205,7 @@ If this fails (extremely rare — atomic local write): show the ticket URL from 
 
 > Created ticket `<URL>` but couldn't update local frontmatter: `<error>`. Manually add to top of `<path>`:
 >
-> ```
+> ```yaml
 > ---
 > Ticket: <ID>
 > Ticket System: <sys>
