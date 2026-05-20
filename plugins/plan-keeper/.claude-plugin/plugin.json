@@ -1,7 +1,7 @@
 {
   "name": "plan-keeper",
-  "description": "Three skills for organizing markdown plans in ~/plans/<repo>/. plan-save captures the latest plan from a conversation; plan-do lists and routes a saved plan to the right next superpowers/harness skill based on its shape (idea / spec / sequential impl plan / task-list-shaped); plan-done archives a completed plan into ~/plans/<repo>/done/ with a completion stamp. Backed by a bundled plan_keeper_cli.py that handles the I/O, naming, and atomic-write mutation. Includes a PreToolUse hook that auto-approves invocations of the bundled CLI so each skill flow runs without per-call permission prompts.",
-  "version": "1.1.0",
+  "description": "Four skills for organizing markdown plans in ~/plans/<repo>/. plan-save captures plans from conversation; plan-do routes a plan to the right next skill; plan-done archives a completed plan into ~/plans/<repo>/done/ with a frontmatter completion stamp; plan-push files the plan as a Linear or Jira ticket and writes the ticket reference into the plan's frontmatter for re-push. Backed by a bundled plan_keeper_cli.py that handles I/O, naming, atomic-write mutation, per-repo config (~/plans/<repo>/.plankeeper.json) for Linear/Jira credentials and defaults, and the network calls to Linear GraphQL / Jira REST. Includes a PreToolUse hook that auto-approves invocations of the bundled CLI.",
+  "version": "1.2.0",
   "author": {
     "name": "Paul Baranowski"
   }

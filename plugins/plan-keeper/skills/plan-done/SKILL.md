@@ -5,12 +5,12 @@ description: Use when the user finishes a plan, marks a plan done, archives a pl
 
 # plan-done
 
-Archive a completed plan from `~/plans/<repo>/` into `~/plans/<repo>/done/`, with a completion-date stamp appended to the file. The bundled `plan_keeper_cli.py` handles the actual stamp-and-move (atomic write to `done/`, then unlink the source). This skill identifies which plan to archive, confirms with the user, and handles collisions.
+Archive a completed plan from `~/plans/<repo>/` into `~/plans/<repo>/done/`, with a `Completed on:` date written into the file's frontmatter. The bundled `plan_keeper_cli.py` handles the actual stamp-and-move (atomic write to `done/`, then unlink the source). This skill identifies which plan to archive, confirms with the user, and handles collisions.
 
 ## Quick reference
 
 - **Moves:** `~/plans/<repo>/<file>.md` → `~/plans/<repo>/done/<file>.md`.
-- **Stamp:** the CLI appends a blank line, `---`, then `*Completed: YYYY-MM-DD*`.
+- **Stamp:** the CLI writes `Completed on: YYYY-MM-DD` into the YAML frontmatter at the top of the archived file.
 - **`<repo>`:** auto-derived or override — see [../../repo-derivation.md](../../repo-derivation.md).
 - **Collision in `done/`:** ask the user; never overwrite silently.
 - **Confirmation:** required before any file mutation.
@@ -54,7 +54,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list
 
 Show the user the source and destination paths and the action:
 
-> Will move `~/plans/<repo>/<file>.md` → `~/plans/<repo>/done/<file>.md` and append a completion stamp. Proceed?
+> Will move `~/plans/<repo>/<file>.md` → `~/plans/<repo>/done/<file>.md` and record today's date as `Completed on:` in the frontmatter. Proceed?
 
 Wait for the user's response. Do not proceed without an answer.
 
@@ -65,7 +65,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" archive \
   --file <filename>
 ```
 
-Add `--override <name>` if step 1 found one. The CLI does: read source, append `\n---\n*Completed: <today>*\n`, atomic-write to `~/plans/<repo>/done/<filename>`, unlink the source. Today's date is in the user's local timezone.
+Add `--override <name>` if step 1 found one. The CLI does: read source, write `Completed on: <today>` into the YAML frontmatter, atomic-write to `~/plans/<repo>/done/<filename>`, unlink the source. Today's date is in the user's local timezone.
 
 **On exit 0:** the CLI prints the archived absolute path on stdout. Go to step 5.
 
@@ -106,6 +106,6 @@ Tell the user the archived path that the CLI returned in step 3. One line is eno
 ## Notes
 
 - This skill is the only `plan-*` skill that mutates the `~/plans/` tree by moving files. `plan-save` creates; `plan-do` reads only.
-- The completion stamp uses a horizontal rule + italic to render cleanly when the archived plan is viewed in any markdown reader, without disturbing the original plan body. The CLI always inserts a blank line before the rule, which prevents Markdown from parsing the rule as a setext-H2 underline on the last content line.
+- The completion date is stored as `Completed on: YYYY-MM-DD` in the YAML frontmatter, keeping the plan body intact and making the date machine-readable without disturbing markdown rendering.
 - Archived plans live in `~/plans/<repo>/done/`. `plan-do`'s `list` only enumerates direct children of the repo dir — `done/` files are excluded from the active-plans list automatically.
 - Sibling skills in the `plan-` family (`plan-save`, `plan-do`) share the same CLI and the same `~/plans/<repo>/` tree.

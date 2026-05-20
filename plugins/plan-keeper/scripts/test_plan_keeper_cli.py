@@ -16,15 +16,37 @@ agent would see them. Isolation: HOME=<tmpdir> per test so the CLI's
 the user's real ~/plans/. Mirrors the precedent at
 plugins/harness/skills/task-list-runner/test_task_list_cli.py.
 """
+import base64
+import importlib.util
+import json
 import os
 import subprocess
+import sys as _sys
 import tempfile
 import unittest
+import urllib.error
 from datetime import date
+from email.message import Message
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 CLI = Path(__file__).parent / "plan_keeper_cli.py"
 ALLOW_SCRIPT = Path(__file__).parent / "plan-keeper-cli-allow.sh"
+
+
+def _import_cli_module():
+    """Import plan_keeper_cli.py as a module for in-process testing.
+
+    Network subcommands are tested by patching urllib.request.urlopen and
+    calling the CLI's internal functions directly. The subprocess pattern
+    (run_cli) can't reach through the process boundary to patch urllib.
+    """
+    spec = importlib.util.spec_from_file_location("plan_keeper_cli_under_test", CLI)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    _sys.modules["plan_keeper_cli_under_test"] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def run_cli(
@@ -225,13 +247,14 @@ class TestArchive(IsolatedHomeTestCase):
         source = self._save_one()
         run_cli("archive", "--override", "scratch", "--file", source.name, home=self.home)
         target = self.plans_root / "scratch" / "done" / source.name
-        body = target.read_text()
+        text = target.read_text()
         today = date.today().isoformat()
-        # Body should end with: ...content\n\n---\n*Completed: YYYY-MM-DD*\n
-        self.assertTrue(
-            body.endswith(f"\n\n---\n*Completed: {today}*\n"),
-            f"unexpected stamp tail: {body[-80:]!r}",
-        )
+        # NEW: completion date in frontmatter at the top.
+        self.assertTrue(text.startswith("---\n"), "file must start with frontmatter")
+        front = text.split("\n---\n", 1)[0]
+        self.assertIn(f"Completed on: {today}", front)
+        # OLD: bottom stamp must NOT be present.
+        self.assertNotIn("*Completed:", text)
 
     def test_completed_date_override(self) -> None:
         source = self._save_one()
@@ -240,8 +263,13 @@ class TestArchive(IsolatedHomeTestCase):
             "--completed-date", "2020-01-15",
             home=self.home,
         )
-        body = (self.plans_root / "scratch" / "done" / source.name).read_text()
-        self.assertIn("*Completed: 2020-01-15*", body)
+        text = (self.plans_root / "scratch" / "done" / source.name).read_text()
+        # NEW: completion date in frontmatter.
+        self.assertTrue(text.startswith("---\n"), "file must start with frontmatter")
+        front = text.split("\n---\n", 1)[0]
+        self.assertIn("Completed on: 2020-01-15", front)
+        # OLD: bottom stamp must NOT be present.
+        self.assertNotIn("*Completed:", text)
 
     def test_missing_source_exits_3(self) -> None:
         r = run_cli(
@@ -471,6 +499,1138 @@ class TestAllowScript(unittest.TestCase):
         self.assert_no_match(
             "python3 /a/b/scripts/plan_keeper_cli.py list"
         )
+
+
+class TestRepoFull(IsolatedHomeTestCase):
+    def _init_git_repo(self, remote_url: str) -> None:
+        """Initialize a minimal git repo in self.cwd with the given origin URL."""
+        subprocess.run(["git", "init", "-q"], cwd=self.cwd, check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin", remote_url],
+            cwd=self.cwd,
+            check=True,
+        )
+
+    def test_full_parses_https_github(self) -> None:
+        self._init_git_repo("https://github.com/herds-social/herds.git")
+        result = run_cli("repo", "--full", home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), "herds-social/herds")
+
+    def test_full_parses_ssh_github(self) -> None:
+        self._init_git_repo("git@github.com:herds-social/herds.git")
+        result = run_cli("repo", "--full", home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), "herds-social/herds")
+
+    def test_full_parses_https_no_dotgit(self) -> None:
+        self._init_git_repo("https://github.com/herds-social/herds")
+        result = run_cli("repo", "--full", home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), "herds-social/herds")
+
+    def test_full_unparsable_returns_unknown_prefix(self) -> None:
+        # No git remote at all — falls back to cwd basename with unknown/ prefix.
+        result = run_cli("repo", "--full", home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), "unknown/workdir")
+
+
+class TestFileMetaGet(IsolatedHomeTestCase):
+    def _write_plan(self, content: str) -> Path:
+        path = self.cwd / "plan.md"
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def test_no_frontmatter_returns_empty_fields(self) -> None:
+        path = self._write_plan("# Just a heading\n\nBody.\n")
+        result = run_cli(
+            "file-meta", "get", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertEqual(data, {"Ticket": "", "Ticket System": "", "Completed on": ""})
+
+    def test_full_frontmatter_parses(self) -> None:
+        path = self._write_plan(
+            "---\n"
+            "Ticket: ENG-123\n"
+            "Ticket System: linear\n"
+            "Completed on: 2026-05-20\n"
+            "---\n"
+            "\n# Heading\n"
+        )
+        result = run_cli(
+            "file-meta", "get", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertEqual(data, {
+            "Ticket": "ENG-123",
+            "Ticket System": "linear",
+            "Completed on": "2026-05-20",
+        })
+
+    def test_partial_frontmatter_returns_present_fields(self) -> None:
+        path = self._write_plan(
+            "---\n"
+            "Ticket: ENG-99\n"
+            "Ticket System: linear\n"
+            "---\n"
+            "# H\n"
+        )
+        result = run_cli(
+            "file-meta", "get", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["Ticket"], "ENG-99")
+        self.assertEqual(data["Completed on"], "")
+
+    def test_malformed_frontmatter_missing_colon_exits_5(self) -> None:
+        path = self._write_plan("---\nTicket ENG-123\n---\n")  # missing colon
+        result = run_cli(
+            "file-meta", "get", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 5)
+        self.assertIn("malformed", result.stderr.lower())
+
+    def test_malformed_frontmatter_no_closing_exits_5(self) -> None:
+        # Opening --- but no closing --- before EOF.
+        path = self._write_plan("---\nTicket: ENG-1\n")
+        result = run_cli(
+            "file-meta", "get", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 5)
+        self.assertIn("closing", result.stderr.lower())
+
+    def test_malformed_frontmatter_unknown_field_exits_5(self) -> None:
+        path = self._write_plan("---\nUnknownField: x\n---\n")
+        result = run_cli(
+            "file-meta", "get", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 5)
+        self.assertIn("unknown field", result.stderr.lower())
+
+    def test_missing_file_exits_3(self) -> None:
+        result = run_cli(
+            "file-meta", "get", "--file", str(self.cwd / "nope.md"),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 3)
+
+
+class TestFileMetaSet(IsolatedHomeTestCase):
+    def _write_plan(self, content: str) -> Path:
+        path = self.cwd / "plan.md"
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def test_creates_frontmatter_on_bare_file(self) -> None:
+        path = self._write_plan("# Heading\n\nBody.\n")
+        result = run_cli(
+            "file-meta", "set",
+            "--file", str(path),
+            "--ticket", "ENG-123",
+            "--ticket-system", "linear",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        new_text = path.read_text(encoding="utf-8")
+        self.assertEqual(
+            new_text,
+            "---\n"
+            "Ticket: ENG-123\n"
+            "Ticket System: linear\n"
+            "---\n"
+            "\n# Heading\n\nBody.\n"
+        )
+
+    def test_updates_existing_frontmatter_in_place(self) -> None:
+        path = self._write_plan(
+            "---\n"
+            "Ticket: OLD-1\n"
+            "Ticket System: jira\n"
+            "---\n"
+            "\n# H\n"
+        )
+        result = run_cli(
+            "file-meta", "set",
+            "--file", str(path),
+            "--ticket", "ENG-99",
+            "--ticket-system", "linear",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        new_text = path.read_text(encoding="utf-8")
+        self.assertIn("Ticket: ENG-99", new_text)
+        self.assertIn("Ticket System: linear", new_text)
+        self.assertNotIn("OLD-1", new_text)
+        self.assertNotIn("Ticket System: jira", new_text)
+
+    def test_preserves_unmodified_fields(self) -> None:
+        path = self._write_plan(
+            "---\n"
+            "Ticket: KEEP-1\n"
+            "Ticket System: linear\n"
+            "Completed on: 2026-05-19\n"
+            "---\n"
+            "\n# H\n"
+        )
+        # Only setting --completed-on, Ticket fields should stay.
+        result = run_cli(
+            "file-meta", "set",
+            "--file", str(path),
+            "--completed-on", "2026-05-20",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        new_text = path.read_text(encoding="utf-8")
+        self.assertIn("Ticket: KEEP-1", new_text)
+        self.assertIn("Completed on: 2026-05-20", new_text)
+
+    def test_omits_empty_fields(self) -> None:
+        path = self._write_plan("# H\n\nBody.\n")
+        result = run_cli(
+            "file-meta", "set",
+            "--file", str(path),
+            "--ticket", "ENG-1",
+            "--ticket-system", "linear",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        new_text = path.read_text(encoding="utf-8")
+        # Completed on was never set, so the line should be absent.
+        self.assertNotIn("Completed on:", new_text)
+
+    def test_requires_at_least_one_flag(self) -> None:
+        # No --ticket, --ticket-system, or --completed-on should exit 2.
+        path = self._write_plan("# Original\n")
+        original = path.read_text(encoding="utf-8")
+        result = run_cli(
+            "file-meta", "set",
+            "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 2)
+        # Original file content unchanged.
+        self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+
+class TestFileMetaStrip(IsolatedHomeTestCase):
+    def _write_plan(self, content: str) -> Path:
+        path = self.cwd / "plan.md"
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def test_strips_frontmatter(self) -> None:
+        path = self._write_plan(
+            "---\n"
+            "Ticket: ENG-1\n"
+            "---\n"
+            "\n# Body\n\nWords.\n"
+        )
+        result = run_cli(
+            "file-meta", "strip", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "# Body\n\nWords.\n")
+
+    def test_no_frontmatter_returns_input_verbatim(self) -> None:
+        path = self._write_plan("# Bare\n\nNo frontmatter here.\n")
+        result = run_cli(
+            "file-meta", "strip", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "# Bare\n\nNo frontmatter here.\n")
+
+
+class TestTicketSystemConfig(IsolatedHomeTestCase):
+    def test_list_no_config(self) -> None:
+        result = run_cli(
+            "ticket-system-config", "list",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout), [])
+
+    def test_save_then_get_redacts_secrets_by_default(self) -> None:
+        # Linear: apiKey masked.
+        linear_payload = (
+            '{"apiKey": "k", "defaults": {"teamId": "t"}, '
+            '"cache": {"teams": [{"id": "t", "name": "Eng"}]}}'
+        )
+        result = run_cli(
+            "ticket-system-config", "save", "--name", "linear",
+            stdin=linear_payload, home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = run_cli(
+            "ticket-system-config", "get", "--name", "linear",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["apiKey"], "***redacted***")
+        self.assertEqual(data["defaults"]["teamId"], "t")
+
+        # Jira: apiToken masked.
+        jira_payload = (
+            '{"site": "x.atlassian.net", "email": "p@x.com", "apiToken": "j", '
+            '"defaults": {"projectKey": "HERDS"}}'
+        )
+        result = run_cli(
+            "ticket-system-config", "save", "--name", "jira",
+            stdin=jira_payload, home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = run_cli(
+            "ticket-system-config", "get", "--name", "jira",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["apiToken"], "***redacted***")
+        self.assertEqual(data["defaults"]["projectKey"], "HERDS")
+
+    def test_get_show_secrets_reveals_credentials(self) -> None:
+        # Linear: apiKey visible with --show-secrets.
+        run_cli(
+            "ticket-system-config", "save", "--name", "linear",
+            stdin='{"apiKey": "k", "defaults": {"teamId": "t"}}',
+            home=self.home, cwd=self.cwd,
+        )
+        result = run_cli(
+            "ticket-system-config", "get", "--name", "linear", "--show-secrets",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["apiKey"], "k")
+
+        # Jira: apiToken visible with --show-secrets.
+        run_cli(
+            "ticket-system-config", "save", "--name", "jira",
+            stdin='{"site": "x.atlassian.net", "email": "p@x.com", "apiToken": "j"}',
+            home=self.home, cwd=self.cwd,
+        )
+        result = run_cli(
+            "ticket-system-config", "get", "--name", "jira", "--show-secrets",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["apiToken"], "j")
+
+    def test_get_missing_system_exits_3(self) -> None:
+        result = run_cli(
+            "ticket-system-config", "get", "--name", "linear",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 3)
+
+    def test_list_after_save_returns_configured(self) -> None:
+        run_cli(
+            "ticket-system-config", "save", "--name", "linear",
+            stdin='{"apiKey": "k"}',
+            home=self.home, cwd=self.cwd,
+        )
+        result = run_cli(
+            "ticket-system-config", "list",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout), ["linear"])
+
+    def test_save_then_list_two_systems(self) -> None:
+        run_cli("ticket-system-config", "save", "--name", "linear",
+                stdin='{"apiKey": "k1"}', home=self.home, cwd=self.cwd)
+        run_cli("ticket-system-config", "save", "--name", "jira",
+                stdin='{"apiToken": "t"}', home=self.home, cwd=self.cwd)
+        result = run_cli(
+            "ticket-system-config", "list",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(sorted(json.loads(result.stdout)), ["jira", "linear"])
+
+    def test_save_sets_chmod_600(self) -> None:
+        run_cli("ticket-system-config", "save", "--name", "linear",
+                stdin='{"apiKey": "k"}', home=self.home, cwd=self.cwd)
+        repo_dir = self.plans_root / "workdir"
+        config = repo_dir / ".plankeeper.json"
+        self.assertTrue(config.exists())
+        mode = config.stat().st_mode & 0o777
+        self.assertEqual(mode, 0o600, oct(mode))
+
+    def test_save_rejects_invalid_json(self) -> None:
+        result = run_cli(
+            "ticket-system-config", "save", "--name", "linear",
+            stdin="not json",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 2)
+
+
+class TestTicketApiLinearViewer(unittest.TestCase):
+    """Network tests run in-process with urllib patched. No subprocess."""
+
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+
+    def _mock_urlopen_returning(self, status: int, body: dict):
+        """Build a urlopen-style context-manager mock with a fixed JSON body."""
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.status = status
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def test_viewer_returns_identity_on_200(self) -> None:
+        response_body = {
+            "data": {"viewer": {"id": "u1", "name": "Paul", "email": "p@x.com"}}
+        }
+        mock_resp = self._mock_urlopen_returning(200, response_body)
+        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_open:
+            result = self.cli.linear_viewer(api_key="lin_test_key")
+        self.assertEqual(result, {"id": "u1", "name": "Paul", "email": "p@x.com"})
+        # Verify the request itself.
+        call_args = mock_open.call_args
+        req = call_args[0][0]  # first positional arg is the Request object
+        self.assertEqual(req.full_url, "https://api.linear.app/graphql")
+        self.assertEqual(req.get_header("Authorization"), "lin_test_key")
+        body = json.loads(req.data.decode("utf-8"))
+        self.assertIn("viewer", body["query"])
+
+    def test_viewer_raises_on_401(self) -> None:
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.HTTPError(
+                url="https://api.linear.app/graphql",
+                code=401, msg="Unauthorized", hdrs=Message(), fp=None,
+            ),
+        ):
+            with self.assertRaises(self.cli.PlanKeeperCliError) as ctx:
+                self.cli.linear_viewer(api_key="bad_key")
+        self.assertEqual(ctx.exception.code, 3)
+
+    def test_viewer_raises_on_network_error(self) -> None:
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("connection refused"),
+        ):
+            with self.assertRaises(self.cli.PlanKeeperCliError) as ctx:
+                self.cli.linear_viewer(api_key="k")
+        self.assertEqual(ctx.exception.code, 4)
+
+
+class TestTicketApiArgValidation(IsolatedHomeTestCase):
+    """Verify cmd_ticket_api rejects calls with missing required flags
+    before any network call is attempted."""
+
+    def test_linear_viewer_without_api_key_exits_2(self) -> None:
+        r = run_cli(
+            "ticket-api", "viewer", "--name", "linear",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--api-key", r.stderr)
+
+    def test_jira_viewer_without_site_exits_2(self) -> None:
+        r = run_cli(
+            "ticket-api", "viewer", "--name", "jira",
+            "--email", "p@x.com", "--api-key", "tok",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--site", r.stderr)
+
+    def test_jira_components_without_project_key_exits_2(self) -> None:
+        r = run_cli(
+            "ticket-api", "components", "--name", "jira",
+            "--site", "x.atlassian.net",
+            "--email", "p@x.com", "--api-key", "tok",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--project-key", r.stderr)
+
+    def test_jira_invalid_site_exits_2(self) -> None:
+        r = run_cli(
+            "ticket-api", "viewer", "--name", "jira",
+            "--site", "https://x.atlassian.net",  # scheme not allowed
+            "--email", "p@x.com", "--api-key", "tok",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("bare hostname", r.stderr)
+
+
+class TestTicketApiLinearLists(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+
+    def _mock_response(self, body: dict):
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.status = 200
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def test_teams_returns_node_array(self) -> None:
+        response = {"data": {"teams": {
+            "nodes": [{"id": "t1", "name": "Engineering"}, {"id": "t2", "name": "Design"}],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        with patch("urllib.request.urlopen", return_value=self._mock_response(response)):
+            result = self.cli.linear_teams(api_key="k")
+        self.assertEqual(result, [
+            {"id": "t1", "name": "Engineering"},
+            {"id": "t2", "name": "Design"},
+        ])
+
+    def test_teams_paginates_multiple_pages(self) -> None:
+        page1 = {"data": {"teams": {
+            "nodes": [{"id": "t1", "name": "Engineering"}],
+            "pageInfo": {"endCursor": "cur1", "hasNextPage": True},
+        }}}
+        page2 = {"data": {"teams": {
+            "nodes": [{"id": "t2", "name": "Design"}],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[self._mock_response(page1), self._mock_response(page2)],
+        ) as mock_open:
+            result = self.cli.linear_teams(api_key="k")
+        self.assertEqual(len(result), 2)
+        self.assertEqual(mock_open.call_count, 2)
+        # Second call should pass after=cur1 in its variables.
+        second_call_body = json.loads(mock_open.call_args_list[1][0][0].data)
+        self.assertEqual(second_call_body["variables"]["after"], "cur1")
+
+    def test_projects_includes_team_ids(self) -> None:
+        response = {"data": {"projects": {
+            "nodes": [{
+                "id": "p1",
+                "name": "Backend",
+                "teams": {"nodes": [{"id": "t1"}, {"id": "t2"}]},
+            }],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        with patch("urllib.request.urlopen", return_value=self._mock_response(response)):
+            result = self.cli.linear_projects(api_key="k")
+        self.assertEqual(result, [{"id": "p1", "name": "Backend", "teamIds": ["t1", "t2"]}])
+
+    def test_labels_preserves_optional_team_scope(self) -> None:
+        response = {"data": {"issueLabels": {
+            "nodes": [
+                {"id": "l1", "name": "plan", "team": None},  # workspace-wide
+                {"id": "l2", "name": "bug",  "team": {"id": "t1"}},  # team-scoped
+            ],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        with patch("urllib.request.urlopen", return_value=self._mock_response(response)):
+            result = self.cli.linear_labels(api_key="k")
+        self.assertEqual(result, [
+            {"id": "l1", "name": "plan", "teamId": None},
+            {"id": "l2", "name": "bug", "teamId": "t1"},
+        ])
+
+    def test_users_returns_name_and_email(self) -> None:
+        response = {"data": {"users": {
+            "nodes": [{"id": "u1", "name": "Paul", "email": "p@x.com"}],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        with patch("urllib.request.urlopen", return_value=self._mock_response(response)):
+            result = self.cli.linear_users(api_key="k")
+        self.assertEqual(result, [{"id": "u1", "name": "Paul", "email": "p@x.com"}])
+
+
+class TestTicketSystemConfigRefreshLinear(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.plans_root = self.home / "plans"
+        self.cwd = self.home / "workdir"
+        self.cwd.mkdir()
+        # Tests in this class patch Path.home directly because they
+        # call into module-level functions, not subprocess.
+        self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
+        self._home_patch.start()
+        self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
+        self._cwd_patch.start()
+
+    def tearDown(self) -> None:
+        self._home_patch.stop()
+        self._cwd_patch.stop()
+        self._tmp.cleanup()
+
+    def _mock_response(self, body: dict):
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.status = 200
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def test_refresh_writes_all_kinds_into_cache(self) -> None:
+        # Seed existing config with credentials and defaults.
+        self.cli.save_config("workdir", {"linear": {
+            "apiKey": "k",
+            "defaults": {"teamId": "t1"},
+            "cache": {"refreshedAt": "2020-01-01T00:00:00Z"},
+        }})
+        teams = {"data": {"teams": {
+            "nodes": [{"id": "t1", "name": "Engineering"}],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        projects = {"data": {"projects": {
+            "nodes": [{"id": "p1", "name": "Backend",
+                       "teams": {"nodes": [{"id": "t1"}]}}],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        labels = {"data": {"issueLabels": {
+            "nodes": [{"id": "l1", "name": "plan", "team": None}],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        users = {"data": {"users": {
+            "nodes": [{"id": "u1", "name": "Paul", "email": "p@x.com"}],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[
+                self._mock_response(teams),
+                self._mock_response(projects),
+                self._mock_response(labels),
+                self._mock_response(users),
+            ],
+        ):
+            self.cli.refresh_linear_cache(api_key="k")
+        config = self.cli.load_config("workdir")
+        cache = config["linear"]["cache"]
+        self.assertEqual(len(cache["teams"]), 1)
+        self.assertEqual(cache["teams"][0]["name"], "Engineering")
+        self.assertEqual(len(cache["projects"]), 1)
+        self.assertEqual(len(cache["labels"]), 1)
+        self.assertEqual(len(cache["users"]), 1)
+        # refreshedAt updated to a recent ISO 8601 timestamp.
+        self.assertNotEqual(cache["refreshedAt"], "2020-01-01T00:00:00Z")
+        self.assertRegex(cache["refreshedAt"], r"\d{4}-\d{2}-\d{2}T")
+
+    def test_refresh_warns_when_defaults_id_missing_from_cache(self) -> None:
+        self.cli.save_config("workdir", {"linear": {
+            "apiKey": "k",
+            "defaults": {"teamId": "t-deleted", "teamName": "Gone"},
+        }})
+        teams = {"data": {"teams": {
+            "nodes": [{"id": "t1", "name": "Engineering"}],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        empty_projects = {"data": {"projects": {
+            "nodes": [], "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        labels_empty = {"data": {"issueLabels": {
+            "nodes": [], "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        users_empty = {"data": {"users": {
+            "nodes": [], "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[
+                self._mock_response(teams),
+                self._mock_response(empty_projects),
+                self._mock_response(labels_empty),
+                self._mock_response(users_empty),
+            ],
+        ):
+            warnings = self.cli.refresh_linear_cache(api_key="k")
+        self.assertTrue(any("t-deleted" in w for w in warnings))
+
+
+class TestPushLinearCreate(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.plans_root = self.home / "plans"
+        self.cwd = self.home / "workdir"
+        self.cwd.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=self.cwd, check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin",
+             "https://github.com/herds-social/herds.git"],
+            cwd=self.cwd, check=True,
+        )
+        self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
+        self._home_patch.start()
+        self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
+        self._cwd_patch.start()
+
+    def tearDown(self) -> None:
+        self._home_patch.stop()
+        self._cwd_patch.stop()
+        self._tmp.cleanup()
+
+    def _seed_config(self):
+        self.cli.save_config("herds", {"linear": {
+            "apiKey": "lin_test",
+            "defaults": {
+                "teamId": "t1", "teamName": "Engineering",
+                "projectId": "p1", "projectName": "Backend",
+                "assigneeId": "u1", "assigneeName": "Paul",
+                "labelIds": ["l1"], "labelNames": ["plan"],
+            },
+            "cache": {"refreshedAt": "2026-05-20T00:00:00Z"},
+        }})
+
+    def _seed_plan(self, frontmatter: str = "", h1: str = "# Multi-Event Design"):
+        repo_dir = self.plans_root / "herds"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        path = repo_dir / "2026-05-20-multi-event-design.md"
+        path.write_text(f"{frontmatter}{h1}\n\n## Context\n\nBody text.\n", encoding="utf-8")
+        return path
+
+    def _mock_create_response(self):
+        body = {"data": {"issueCreate": {
+            "success": True,
+            "issue": {
+                "id": "uuid-1",
+                "identifier": "ENG-123",
+                "url": "https://linear.app/herds/issue/ENG-123/multi-event-design",
+                "title": "Multi-Event Design",
+            },
+        }}}
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def test_create_sends_expected_payload(self) -> None:
+        self._seed_config()
+        path = self._seed_plan()
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_create_response(),
+        ) as mock_open:
+            result = self.cli.push_subcommand(name="linear", file_path=str(path), force_new=False)
+        self.assertEqual(result["action"], "create")
+        self.assertEqual(result["id"], "ENG-123")
+        # Inspect the GraphQL request payload.
+        call = mock_open.call_args
+        req = call[0][0]
+        sent = json.loads(req.data.decode("utf-8"))
+        self.assertIn("issueCreate", sent["query"])
+        variables_input = sent["variables"]["input"]
+        self.assertEqual(variables_input["title"], "Multi-Event Design")
+        self.assertEqual(variables_input["teamId"], "t1")
+        self.assertEqual(variables_input["projectId"], "p1")
+        self.assertEqual(variables_input["assigneeId"], "u1")
+        self.assertEqual(variables_input["labelIds"], ["l1"])
+        # Description must start with "Repo: ..." line.
+        self.assertTrue(variables_input["description"].startswith("Repo: herds-social/herds\n"))
+        # And contain the plan body.
+        self.assertIn("## Context", variables_input["description"])
+
+    def test_create_strips_existing_frontmatter_from_description(self) -> None:
+        self._seed_config()
+        path = self._seed_plan(frontmatter="---\nTicket: \nTicket System: \n---\n\n")
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_create_response(),
+        ) as mock_open:
+            self.cli.push_subcommand(name="linear", file_path=str(path), force_new=False)
+        sent = json.loads(mock_open.call_args[0][0].data.decode("utf-8"))
+        # The "---" lines must not appear in the description.
+        self.assertNotIn("---", sent["variables"]["input"]["description"])
+
+    def test_create_aborts_if_description_exceeds_limit(self) -> None:
+        self._seed_config()
+        repo_dir = self.plans_root / "herds"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        big_body = "x" * 70_000
+        path = repo_dir / "2026-05-20-big.md"
+        path.write_text(f"# Big\n\n{big_body}\n", encoding="utf-8")
+        with self.assertRaises(self.cli.PlanKeeperCliError) as ctx:
+            self.cli.push_subcommand(name="linear", file_path=str(path), force_new=False)
+        self.assertEqual(ctx.exception.code, 2)
+        self.assertIn("65000", str(ctx.exception))
+
+
+class TestPushLinearUpdate(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.plans_root = self.home / "plans"
+        self.cwd = self.home / "workdir"
+        self.cwd.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=self.cwd, check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin",
+             "https://github.com/herds-social/herds.git"],
+            cwd=self.cwd, check=True,
+        )
+        self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
+        self._home_patch.start()
+        self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
+        self._cwd_patch.start()
+        self.cli.save_config("herds", {"linear": {
+            "apiKey": "lin_test",
+            "defaults": {"teamId": "t1"},
+            "cache": {"refreshedAt": "now"},
+        }})
+
+    def tearDown(self) -> None:
+        self._home_patch.stop()
+        self._cwd_patch.stop()
+        self._tmp.cleanup()
+
+    def _mock_update_response(self):
+        body = {"data": {"issueUpdate": {
+            "success": True,
+            "issue": {
+                "id": "uuid-1",
+                "identifier": "ENG-123",
+                "url": "https://linear.app/herds/issue/ENG-123/foo",
+                "title": "Updated Title",
+            },
+        }}}
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def test_update_omits_team_project_assignee_labels(self) -> None:
+        repo_dir = self.plans_root / "herds"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        path = repo_dir / "plan.md"
+        path.write_text(
+            "---\nTicket: ENG-123\nTicket System: linear\n---\n\n"
+            "# Updated Title\n\n## Body\n",
+            encoding="utf-8",
+        )
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_update_response(),
+        ) as mock_open:
+            result = self.cli.push_subcommand(name="linear", file_path=str(path), force_new=False)
+        self.assertEqual(result["action"], "update")
+        self.assertEqual(result["id"], "ENG-123")
+        sent = json.loads(mock_open.call_args[0][0].data.decode("utf-8"))
+        self.assertIn("issueUpdate", sent["query"])
+        input_dict = sent["variables"]["input"]
+        self.assertEqual(set(input_dict.keys()), {"title", "description"})  # nothing else
+        self.assertEqual(sent["variables"]["id"], "ENG-123")
+
+    def test_update_uses_force_new_when_set(self) -> None:
+        repo_dir = self.plans_root / "herds"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        path = repo_dir / "plan.md"
+        path.write_text(
+            "---\nTicket: OLD-1\nTicket System: linear\n---\n\n# T\n",
+            encoding="utf-8",
+        )
+        # With force_new=True, this should call create, not update.
+        body = {"data": {"issueCreate": {
+            "success": True, "issue": {
+                "id": "u2", "identifier": "ENG-200",
+                "url": "https://x", "title": "T",
+            },
+        }}}
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        with patch("urllib.request.urlopen", return_value=m) as mock_open:
+            result = self.cli.push_subcommand(name="linear", file_path=str(path), force_new=True)
+        self.assertEqual(result["action"], "create")
+        sent = json.loads(mock_open.call_args[0][0].data.decode("utf-8"))
+        self.assertIn("issueCreate", sent["query"])
+
+
+class TestTicketApiJiraViewer(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+
+    def _mock_response(self, body: dict):
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def test_viewer_calls_myself_and_returns_identity(self) -> None:
+        response = {
+            "accountId": "5e8f", "emailAddress": "p@x.com", "displayName": "Paul",
+        }
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_response(response),
+        ) as mock_open:
+            result = self.cli.jira_viewer(
+                site="herds.atlassian.net", email="p@x.com", api_token="tok",
+            )
+        self.assertEqual(result, response)
+        req = mock_open.call_args[0][0]
+        self.assertEqual(req.full_url, "https://herds.atlassian.net/rest/api/3/myself")
+        # Basic auth header present.
+        self.assertTrue(req.get_header("Authorization").startswith("Basic "))
+        encoded = req.get_header("Authorization")[len("Basic "):]
+        decoded = base64.b64decode(encoded).decode("utf-8")
+        self.assertEqual(decoded, "p@x.com:tok")
+
+
+class TestTicketApiJiraLists(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+        self.site, self.email, self.token = "herds.atlassian.net", "p@x.com", "tok"
+
+    def _mock_response(self, body):
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def test_projects_paginates(self) -> None:
+        page1 = {
+            "values": [{"key": "HERDS", "id": "1", "name": "Herds"}],
+            "isLast": False,
+            "startAt": 0,
+            "maxResults": 1,
+            "total": 2,
+        }
+        page2 = {
+            "values": [{"key": "INT", "id": "2", "name": "Internal"}],
+            "isLast": True,
+            "startAt": 1,
+            "maxResults": 1,
+            "total": 2,
+        }
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[self._mock_response(page1), self._mock_response(page2)],
+        ) as mock_open:
+            result = self.cli.jira_projects(self.site, self.email, self.token)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(mock_open.call_count, 2)
+        # Second call should have startAt=50 (pagination uses page size 50 in helper)
+        url2 = mock_open.call_args_list[1][0][0].full_url
+        self.assertIn("startAt=50", url2)
+
+    def test_components_per_project(self) -> None:
+        response = [{"id": "10001", "name": "Backend"}]
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_response(response),
+        ) as mock_open:
+            result = self.cli.jira_components(self.site, self.email, self.token, "HERDS")
+        self.assertEqual(result, [{"id": "10001", "name": "Backend", "projectKey": "HERDS"}])
+        self.assertIn("/project/HERDS/components", mock_open.call_args[0][0].full_url)
+
+    def test_users_per_project(self) -> None:
+        response = [
+            {"accountId": "5e8f", "displayName": "Paul", "emailAddress": "p@x.com"},
+        ]
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_response(response),
+        ) as mock_open:
+            result = self.cli.jira_users(self.site, self.email, self.token, "HERDS")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["accountId"], "5e8f")
+        self.assertIn(
+            "/user/assignable/multiProjectSearch",
+            mock_open.call_args[0][0].full_url,
+        )
+        self.assertIn("projectKeys=HERDS", mock_open.call_args[0][0].full_url)
+
+    def test_issuetypes_per_project(self) -> None:
+        response = [{"id": "10001", "name": "Task"}]
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_response(response),
+        ) as mock_open:
+            result = self.cli.jira_issuetypes(self.site, self.email, self.token, "1")
+        self.assertEqual(result, [{"id": "10001", "name": "Task", "projectId": "1"}])
+        self.assertIn("projectId=1", mock_open.call_args[0][0].full_url)
+
+
+class TestTicketSystemConfigRefreshJira(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.cwd = self.home / "workdir"
+        self.cwd.mkdir()
+        self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
+        self._home_patch.start()
+        self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
+        self._cwd_patch.start()
+
+    def tearDown(self) -> None:
+        self._home_patch.stop()
+        self._cwd_patch.stop()
+        self._tmp.cleanup()
+
+    def _mock_response(self, body):
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def test_refresh_populates_jira_cache(self) -> None:
+        self.cli.save_config("workdir", {"jira": {
+            "site": "herds.atlassian.net",
+            "email": "p@x.com",
+            "apiToken": "tok",
+            "defaults": {"projectKey": "HERDS"},
+        }})
+        # The refresh fetches: projects, then for each project: components, users, issuetypes.
+        # Assume one project to keep the test tractable.
+        projects = {
+            "values": [{"key": "HERDS", "id": "1", "name": "Herds"}],
+            "isLast": True, "startAt": 0, "maxResults": 1, "total": 1,
+        }
+        components = [{"id": "10001", "name": "Backend"}]
+        users = []  # empty for simplicity
+        issuetypes = [{"id": "20001", "name": "Task"}]
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[
+                self._mock_response(projects),
+                self._mock_response(components),
+                self._mock_response(users),
+                self._mock_response(issuetypes),
+            ],
+        ):
+            self.cli.refresh_jira_cache(site="herds.atlassian.net", email="p@x.com", api_token="tok")
+        config = self.cli.load_config("workdir")
+        cache = config["jira"]["cache"]
+        self.assertEqual(len(cache["projects"]), 1)
+        self.assertEqual(cache["components"][0]["projectKey"], "HERDS")
+        self.assertEqual(cache["issueTypes"][0]["name"], "Task")
+        self.assertRegex(cache["refreshedAt"], r"\d{4}-\d{2}-\d{2}T")
+
+
+class TestPushJira(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.plans_root = self.home / "plans"
+        self.cwd = self.home / "workdir"
+        self.cwd.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=self.cwd, check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin",
+             "https://github.com/herds-social/herds.git"],
+            cwd=self.cwd, check=True,
+        )
+        self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
+        self._home_patch.start()
+        self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
+        self._cwd_patch.start()
+        self.cli.save_config("herds", {"jira": {
+            "site": "herds.atlassian.net",
+            "email": "p@x.com",
+            "apiToken": "tok",
+            "defaults": {
+                "projectKey": "HERDS",
+                "componentIds": ["10001"], "componentNames": ["Backend"],
+                "assigneeAccountId": "5e8f", "assigneeName": "Paul",
+                "issueType": "Task",
+                "labels": ["plan"],
+            },
+        }})
+
+    def tearDown(self) -> None:
+        self._home_patch.stop()
+        self._cwd_patch.stop()
+        self._tmp.cleanup()
+
+    def _mock_create_response(self):
+        body = {"key": "HERDS-100", "id": "9999"}
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def _mock_update_response(self):
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.read = MagicMock(return_value=b"")  # 204 No Content has empty body
+        return m
+
+    def test_create_wraps_body_in_adf_paragraph(self) -> None:
+        repo_dir = self.plans_root / "herds"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        path = repo_dir / "plan.md"
+        path.write_text("# Title\n\n## Body\n\nWords.\n", encoding="utf-8")
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_create_response(),
+        ) as mock_open:
+            result = self.cli.push_subcommand(name="jira", file_path=str(path), force_new=False)
+        self.assertEqual(result["action"], "create")
+        self.assertEqual(result["id"], "HERDS-100")
+        self.assertEqual(result["url"], "https://herds.atlassian.net/browse/HERDS-100")
+        sent = json.loads(mock_open.call_args[0][0].data.decode("utf-8"))
+        # ADF is a JSON object with type=doc, content=[paragraph], text=our composed desc.
+        adf = sent["fields"]["description"]
+        self.assertEqual(adf["type"], "doc")
+        self.assertEqual(adf["content"][0]["type"], "paragraph")
+        adf_text = adf["content"][0]["content"][0]["text"]
+        self.assertTrue(adf_text.startswith("Repo: herds-social/herds\n"))
+        self.assertIn("## Body", adf_text)
+        # Project + components + assignee + issue type + labels all sent.
+        self.assertEqual(sent["fields"]["project"]["key"], "HERDS")
+        self.assertEqual(sent["fields"]["components"], [{"id": "10001"}])
+        self.assertEqual(sent["fields"]["assignee"]["accountId"], "5e8f")
+        self.assertEqual(sent["fields"]["issuetype"]["name"], "Task")
+        self.assertEqual(sent["fields"]["labels"], ["plan"])
+
+    def test_update_omits_components_assignee_labels(self) -> None:
+        repo_dir = self.plans_root / "herds"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        path = repo_dir / "plan.md"
+        path.write_text(
+            "---\nTicket: HERDS-100\nTicket System: jira\n---\n\n# T\n",
+            encoding="utf-8",
+        )
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_update_response(),
+        ) as mock_open:
+            result = self.cli.push_subcommand(name="jira", file_path=str(path), force_new=False)
+        self.assertEqual(result["action"], "update")
+        self.assertEqual(result["id"], "HERDS-100")
+        # Request was a PUT to /rest/api/3/issue/HERDS-100
+        req = mock_open.call_args[0][0]
+        self.assertEqual(req.method, "PUT")
+        self.assertIn("/rest/api/3/issue/HERDS-100", req.full_url)
+        sent = json.loads(req.data.decode("utf-8"))
+        # Only summary + description, nothing else.
+        self.assertEqual(set(sent["fields"].keys()), {"summary", "description"})
 
 
 if __name__ == "__main__":
