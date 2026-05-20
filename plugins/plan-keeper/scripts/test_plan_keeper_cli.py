@@ -960,5 +960,109 @@ class TestTicketApiLinearLists(unittest.TestCase):
         self.assertEqual(result, [{"id": "u1", "name": "Paul", "email": "p@x.com"}])
 
 
+class TestTicketSystemConfigRefreshLinear(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.plans_root = self.home / "plans"
+        self.cwd = self.home / "workdir"
+        self.cwd.mkdir()
+        # Tests in this class patch Path.home directly because they
+        # call into module-level functions, not subprocess.
+        self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
+        self._home_patch.start()
+        self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
+        self._cwd_patch.start()
+
+    def tearDown(self) -> None:
+        self._home_patch.stop()
+        self._cwd_patch.stop()
+        self._tmp.cleanup()
+
+    def _mock_response(self, body: dict):
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.status = 200
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def test_refresh_writes_all_kinds_into_cache(self) -> None:
+        # Seed existing config with credentials and defaults.
+        self.cli.save_config("workdir", {"linear": {
+            "apiKey": "k",
+            "defaults": {"teamId": "t1"},
+            "cache": {"refreshedAt": "2020-01-01T00:00:00Z"},
+        }})
+        teams = {"data": {"teams": {
+            "nodes": [{"id": "t1", "name": "Engineering"}],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        projects = {"data": {"projects": {
+            "nodes": [{"id": "p1", "name": "Backend",
+                       "teams": {"nodes": [{"id": "t1"}]}}],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        labels = {"data": {"issueLabels": {
+            "nodes": [{"id": "l1", "name": "plan", "team": None}],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        users = {"data": {"users": {
+            "nodes": [{"id": "u1", "name": "Paul", "email": "p@x.com"}],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[
+                self._mock_response(teams),
+                self._mock_response(projects),
+                self._mock_response(labels),
+                self._mock_response(users),
+            ],
+        ):
+            self.cli.refresh_linear_cache(api_key="k")
+        config = self.cli.load_config("workdir")
+        cache = config["linear"]["cache"]
+        self.assertEqual(len(cache["teams"]), 1)
+        self.assertEqual(cache["teams"][0]["name"], "Engineering")
+        self.assertEqual(len(cache["projects"]), 1)
+        self.assertEqual(len(cache["labels"]), 1)
+        self.assertEqual(len(cache["users"]), 1)
+        # refreshedAt updated to a recent ISO 8601 timestamp.
+        self.assertNotEqual(cache["refreshedAt"], "2020-01-01T00:00:00Z")
+        self.assertRegex(cache["refreshedAt"], r"\d{4}-\d{2}-\d{2}T")
+
+    def test_refresh_warns_when_defaults_id_missing_from_cache(self) -> None:
+        self.cli.save_config("workdir", {"linear": {
+            "apiKey": "k",
+            "defaults": {"teamId": "t-deleted", "teamName": "Gone"},
+        }})
+        teams = {"data": {"teams": {
+            "nodes": [{"id": "t1", "name": "Engineering"}],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        empty_projects = {"data": {"projects": {
+            "nodes": [], "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        labels_empty = {"data": {"issueLabels": {
+            "nodes": [], "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        users_empty = {"data": {"users": {
+            "nodes": [], "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[
+                self._mock_response(teams),
+                self._mock_response(empty_projects),
+                self._mock_response(labels_empty),
+                self._mock_response(users_empty),
+            ],
+        ):
+            warnings = self.cli.refresh_linear_cache(api_key="k")
+        self.assertTrue(any("t-deleted" in w for w in warnings))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

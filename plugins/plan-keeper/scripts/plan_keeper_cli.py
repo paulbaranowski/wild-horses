@@ -18,7 +18,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -43,6 +43,13 @@ class PlanKeeperCliError(Exception):
     def __init__(self, msg: str, code: int):
         super().__init__(msg)
         self.code = code
+
+
+# --- Helpers ----------------------------------------------------------------
+
+
+def _iso_utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # --- Slugify ----------------------------------------------------------------
@@ -793,6 +800,70 @@ def linear_users(api_key: str) -> list[dict]:
     )
 
 
+def refresh_linear_cache(api_key: str) -> list[str]:
+    """Fetch all Linear metadata and write into config['linear']['cache'].
+
+    Returns a list of warning strings (e.g., when defaults reference IDs
+    that aren't in the new cache). Empty list on clean refresh.
+    """
+    teams = linear_teams(api_key)
+    projects = linear_projects(api_key)
+    labels = linear_labels(api_key)
+    users = linear_users(api_key)
+    repo = derive_repo(None)
+    config = load_config(repo)
+    section = config.setdefault("linear", {})
+    section["cache"] = {
+        "refreshedAt": _iso_utc_now(),
+        "teams": teams,
+        "projects": projects,
+        "labels": labels,
+        "users": users,
+    }
+    save_config(repo, config)
+    # Check defaults for stale IDs.
+    warnings: list[str] = []
+    defaults = section.get("defaults", {})
+    team_ids = {t["id"] for t in teams}
+    if defaults.get("teamId") and defaults["teamId"] not in team_ids:
+        warnings.append(
+            f"defaults.teamId={defaults['teamId']!r} ({defaults.get('teamName', '?')!r}) "
+            "no longer exists in Linear"
+        )
+    project_ids = {p["id"] for p in projects}
+    if defaults.get("projectId") and defaults["projectId"] not in project_ids:
+        warnings.append(
+            f"defaults.projectId={defaults['projectId']!r} ({defaults.get('projectName', '?')!r}) "
+            "no longer exists in Linear"
+        )
+    assignee_id = defaults.get("assigneeId")
+    user_ids = {u["id"] for u in users}
+    if assignee_id and assignee_id not in user_ids:
+        warnings.append(
+            f"defaults.assigneeId={assignee_id!r} ({defaults.get('assigneeName', '?')!r}) "
+            "no longer exists in Linear"
+        )
+    label_ids_cached = {lbl["id"] for lbl in labels}
+    for lbl_id in defaults.get("labelIds", []):
+        if lbl_id not in label_ids_cached:
+            warnings.append(f"defaults.labelIds contains {lbl_id!r} which is no longer in Linear")
+    for w in warnings:
+        print(f"warning: {w}", file=sys.stderr)
+    return warnings
+
+
+def cmd_ticket_system_config_refresh(args) -> int:
+    if args.name == "linear":
+        if not args.api_key:
+            raise PlanKeeperCliError(
+                "linear refresh requires --api-key", code=2,
+            )
+        refresh_linear_cache(args.api_key)
+    elif args.name == "jira":
+        raise PlanKeeperCliError("jira refresh not yet implemented", code=2)
+    return 0
+
+
 def cmd_ticket_api(args) -> int:
     """Dispatch ticket-api subcommands.
 
@@ -935,6 +1006,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     _ = tsc_sub.add_parser("list", help="list configured ticket-system names")
 
+    p_tsc_refresh = tsc_sub.add_parser("refresh", help="re-fetch metadata into cache")
+    p_tsc_refresh.add_argument("--name", required=True, choices=["linear", "jira"])
+    p_tsc_refresh.add_argument("--api-key", help="Linear API key (or Jira token)")
+    p_tsc_refresh.add_argument("--email", help="Jira email")
+    p_tsc_refresh.add_argument("--site", help="Jira site URL")
+
     p_ta = sub.add_parser(
         "ticket-api",
         help="low-level Linear/Jira API calls (used by setup and refresh)",
@@ -968,6 +1045,7 @@ _TICKET_SYSTEM_CONFIG_DISPATCH = {
     "get": cmd_ticket_system_config_get,
     "save": cmd_ticket_system_config_save,
     "list": cmd_ticket_system_config_list,
+    "refresh": cmd_ticket_system_config_refresh,
 }
 
 
