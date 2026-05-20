@@ -976,6 +976,8 @@ def push_subcommand(name: str, file_path: str, force_new: bool = False) -> dict:
         raise PlanKeeperCliError(f"{name} not configured for repo {repo!r}", code=2)
     if name == "linear":
         return _push_linear(section, title, description, meta, force_new)
+    elif name == "jira":
+        return _push_jira(section, title, description, meta, force_new)
     raise PlanKeeperCliError(f"push to {name!r} not yet implemented", code=2)
 
 
@@ -1133,6 +1135,111 @@ def jira_issuetypes(site: str, email: str, api_token: str, project_id: str) -> l
     if not isinstance(raw, list):
         raise PlanKeeperCliError(f"unexpected Jira issuetypes response: {raw!r}", code=5)
     return [{"id": t["id"], "name": t["name"], "projectId": project_id} for t in raw]
+
+
+def _adf_paragraph(text: str) -> dict:
+    return {
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": text}]}
+        ],
+    }
+
+
+def jira_create_issue(
+    site: str, email: str, api_token: str, fields: dict,
+) -> dict:
+    url = f"https://{site}/rest/api/3/issue"
+    req = urllib.request.Request(
+        url,
+        data=json.dumps({"fields": fields}).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": _jira_auth_header(email, api_token),
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise PlanKeeperCliError(f"Jira auth failure ({e.code})", code=3)
+        body = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else ""
+        raise PlanKeeperCliError(f"Jira HTTP {e.code}: {body[:200]}", code=5)
+    except urllib.error.URLError as e:
+        raise PlanKeeperCliError(f"Jira network error: {e.reason}", code=4)
+
+
+def jira_update_issue(
+    site: str, email: str, api_token: str, key: str, fields: dict,
+) -> None:
+    url = f"https://{site}/rest/api/3/issue/{key}"
+    req = urllib.request.Request(
+        url,
+        data=json.dumps({"fields": fields}).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": _jira_auth_header(email, api_token),
+        },
+        method="PUT",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT):
+            return  # 204 No Content on success
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise PlanKeeperCliError(f"Jira auth failure ({e.code})", code=3)
+        if e.code == 404:
+            raise PlanKeeperCliError(f"Jira ticket {key} not found", code=5)
+        body = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else ""
+        raise PlanKeeperCliError(f"Jira HTTP {e.code}: {body[:200]}", code=5)
+    except urllib.error.URLError as e:
+        raise PlanKeeperCliError(f"Jira network error: {e.reason}", code=4)
+
+
+def _push_jira(section: dict, title: str, description: str, meta: dict, force_new: bool) -> dict:
+    site = section["site"]
+    email = section["email"]
+    token = section["apiToken"]
+    defaults = section["defaults"]
+    has_existing = bool(meta.get("Ticket")) and meta.get("Ticket System") == "jira"
+    adf = _adf_paragraph(description)
+    if has_existing and not force_new:
+        key = meta["Ticket"]
+        jira_update_issue(
+            site, email, token, key,
+            {"summary": title, "description": adf},
+        )
+        return {
+            "action": "update",
+            "system": "jira",
+            "id": key,
+            "url": f"https://{site}/browse/{key}",
+            "title": title,
+        }
+    fields = {
+        "project": {"key": defaults["projectKey"]},
+        "summary": title,
+        "description": adf,
+        "issuetype": {"name": defaults.get("issueType", "Task")},
+    }
+    if defaults.get("componentIds"):
+        fields["components"] = [{"id": cid} for cid in defaults["componentIds"]]
+    if defaults.get("assigneeAccountId"):
+        fields["assignee"] = {"accountId": defaults["assigneeAccountId"]}
+    if defaults.get("labels"):
+        fields["labels"] = list(defaults["labels"])
+    created = jira_create_issue(site, email, token, fields)
+    key = created["key"]
+    return {
+        "action": "create",
+        "system": "jira",
+        "id": key,
+        "url": f"https://{site}/browse/{key}",
+        "title": title,
+    }
 
 
 def cmd_push(args) -> int:

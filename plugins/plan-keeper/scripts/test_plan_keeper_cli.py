@@ -1434,5 +1434,108 @@ class TestTicketSystemConfigRefreshJira(unittest.TestCase):
         self.assertRegex(cache["refreshedAt"], r"\d{4}-\d{2}-\d{2}T")
 
 
+class TestPushJira(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.plans_root = self.home / "plans"
+        self.cwd = self.home / "workdir"
+        self.cwd.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=self.cwd, check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin",
+             "https://github.com/herds-social/herds.git"],
+            cwd=self.cwd, check=True,
+        )
+        self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
+        self._home_patch.start()
+        self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
+        self._cwd_patch.start()
+        self.cli.save_config("herds", {"jira": {
+            "site": "herds.atlassian.net",
+            "email": "p@x.com",
+            "apiToken": "tok",
+            "defaults": {
+                "projectKey": "HERDS",
+                "componentIds": ["10001"], "componentNames": ["Backend"],
+                "assigneeAccountId": "5e8f", "assigneeName": "Paul",
+                "issueType": "Task",
+                "labels": ["plan"],
+            },
+        }})
+
+    def tearDown(self) -> None:
+        self._home_patch.stop()
+        self._cwd_patch.stop()
+        self._tmp.cleanup()
+
+    def _mock_create_response(self):
+        body = {"key": "HERDS-100", "id": "9999"}
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def _mock_update_response(self):
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.read = MagicMock(return_value=b"")  # 204 No Content has empty body
+        return m
+
+    def test_create_wraps_body_in_adf_paragraph(self) -> None:
+        repo_dir = self.plans_root / "herds"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        path = repo_dir / "plan.md"
+        path.write_text("# Title\n\n## Body\n\nWords.\n", encoding="utf-8")
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_create_response(),
+        ) as mock_open:
+            result = self.cli.push_subcommand(name="jira", file_path=str(path), force_new=False)
+        self.assertEqual(result["action"], "create")
+        self.assertEqual(result["id"], "HERDS-100")
+        self.assertEqual(result["url"], "https://herds.atlassian.net/browse/HERDS-100")
+        sent = json.loads(mock_open.call_args[0][0].data.decode("utf-8"))
+        # ADF is a JSON object with type=doc, content=[paragraph], text=our composed desc.
+        adf = sent["fields"]["description"]
+        self.assertEqual(adf["type"], "doc")
+        self.assertEqual(adf["content"][0]["type"], "paragraph")
+        adf_text = adf["content"][0]["content"][0]["text"]
+        self.assertTrue(adf_text.startswith("Repo: herds-social/herds\n"))
+        self.assertIn("## Body", adf_text)
+        # Project + components + assignee + issue type + labels all sent.
+        self.assertEqual(sent["fields"]["project"]["key"], "HERDS")
+        self.assertEqual(sent["fields"]["components"], [{"id": "10001"}])
+        self.assertEqual(sent["fields"]["assignee"]["accountId"], "5e8f")
+        self.assertEqual(sent["fields"]["issuetype"]["name"], "Task")
+        self.assertEqual(sent["fields"]["labels"], ["plan"])
+
+    def test_update_omits_components_assignee_labels(self) -> None:
+        repo_dir = self.plans_root / "herds"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        path = repo_dir / "plan.md"
+        path.write_text(
+            "---\nTicket: HERDS-100\nTicket System: jira\n---\n\n# T\n",
+            encoding="utf-8",
+        )
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_update_response(),
+        ) as mock_open:
+            result = self.cli.push_subcommand(name="jira", file_path=str(path), force_new=False)
+        self.assertEqual(result["action"], "update")
+        self.assertEqual(result["id"], "HERDS-100")
+        # Request was a PUT to /rest/api/3/issue/HERDS-100
+        req = mock_open.call_args[0][0]
+        self.assertEqual(req.method, "PUT")
+        self.assertIn("/rest/api/3/issue/HERDS-100", req.full_url)
+        sent = json.loads(req.data.decode("utf-8"))
+        # Only summary + description, nothing else.
+        self.assertEqual(set(sent["fields"].keys()), {"summary", "description"})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
