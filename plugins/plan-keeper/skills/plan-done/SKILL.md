@@ -45,7 +45,7 @@ If exactly one candidate is identifiable, propose it:
 
 **If no clear candidate, or the user rejects the proposed one**, list active plans the same way `plan-do` does:
 
-```
+```bash
 ls -1 ~/plans/<repo>/*.md 2>/dev/null | sort -r
 ```
 
@@ -75,7 +75,7 @@ Do not auto-resolve collisions silently.
 
 Before moving the file, append two lines to its body:
 
-```
+```text
 
 ---
 *Completed: YYYY-MM-DD*
@@ -87,7 +87,7 @@ Implementation: `Read` the file, append the stamp to the content, `Write` the fi
 
 ### 6. Move the file
 
-```
+```bash
 mkdir -p ~/plans/<repo>/done/
 mv ~/plans/<repo>/<file>.md ~/plans/<repo>/done/<file>.md
 ```

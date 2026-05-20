@@ -58,7 +58,7 @@ If the plan has no heading, take the first 4–6 meaningful words (skip articles
 
 ### 4. Build the target path
 
-```
+```bash
 ~/plans/<repo>/$(date +%Y-%m-%d)-<topic>.md
 ```
 

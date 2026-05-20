@@ -9,7 +9,7 @@ Pick up a saved plan from `~/plans/<repo>/` and route it to the right next step 
 
 The skill is the entry point that joins this pipeline at the right stage:
 
-```
+```text
 idea ──► brainstorming ──► spec ──► writing-plans ──► implementation plan ──► executing-plans
                                                                           └──► task-list-builder ──► task-list-runner
 ```
@@ -50,7 +50,7 @@ Run `ls -1 ~/plans/<repo>/*.md 2>/dev/null | sort -r` to list plans newest-first
 
 Example output:
 
-```
+```text
 Plans in ~/plans/wild-horses/:
 
   1. 2026-05-19-plan-do-design.md
