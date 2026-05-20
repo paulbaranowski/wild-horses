@@ -473,5 +473,40 @@ class TestAllowScript(unittest.TestCase):
         )
 
 
+class TestRepoFull(IsolatedHomeTestCase):
+    def _init_git_repo(self, remote_url: str) -> None:
+        """Initialize a minimal git repo in self.cwd with the given origin URL."""
+        subprocess.run(["git", "init", "-q"], cwd=self.cwd, check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin", remote_url],
+            cwd=self.cwd,
+            check=True,
+        )
+
+    def test_full_parses_https_github(self) -> None:
+        self._init_git_repo("https://github.com/herds-social/herds.git")
+        result = run_cli("repo", "--full", home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), "herds-social/herds")
+
+    def test_full_parses_ssh_github(self) -> None:
+        self._init_git_repo("git@github.com:herds-social/herds.git")
+        result = run_cli("repo", "--full", home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), "herds-social/herds")
+
+    def test_full_parses_https_no_dotgit(self) -> None:
+        self._init_git_repo("https://github.com/herds-social/herds")
+        result = run_cli("repo", "--full", home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), "herds-social/herds")
+
+    def test_full_unparsable_returns_unknown_prefix(self) -> None:
+        # No git remote at all — falls back to cwd basename with unknown/ prefix.
+        result = run_cli("repo", "--full", home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), "unknown/workdir")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -11,6 +11,7 @@ See each `plan-*` SKILL.md for invocation patterns.
 """
 import argparse
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -150,6 +151,41 @@ def derive_repo(override: Optional[str], cwd: Optional[str] = None) -> str:
     return validate_repo_name(os.path.basename(os.path.abspath(cwd)))
 
 
+_GITHUB_URL_RE = re.compile(
+    r"^(?:"
+    r"git@github\.com:"
+    r"|https?://github\.com/"
+    r"|ssh://git@github\.com/"
+    r")(?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$"
+)
+
+
+def derive_repo_full(cwd: Optional[str] = None) -> str:
+    """Return 'owner/name' for the current repo, or 'unknown/<basename>' as a fallback.
+
+    Used by the push subcommand's 'Repo:' description line. Distinct from
+    derive_repo() which strips to a single token for use as a folder name.
+    """
+    cwd = cwd or os.getcwd()
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            url = result.stdout.strip()
+            m = _GITHUB_URL_RE.match(url)
+            if m:
+                return f"{m.group('owner')}/{m.group('name')}"
+    except (subprocess.SubprocessError, OSError):
+        pass
+    basename = os.path.basename(os.path.abspath(cwd))
+    return f"unknown/{validate_repo_name(basename)}"
+
+
 # --- Atomic write -----------------------------------------------------------
 
 
@@ -242,7 +278,10 @@ def emit_collision(target: Path) -> None:
 
 
 def cmd_repo(args) -> int:
-    print(derive_repo(args.override, args.cwd))
+    if args.full:
+        print(derive_repo_full(args.cwd))
+    else:
+        print(derive_repo(args.override, args.cwd))
     return 0
 
 
@@ -374,6 +413,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_repo = sub.add_parser("repo", help="print the resolved <repo> folder name")
     p_repo.add_argument("--override", help="explicit override (normalized)")
     p_repo.add_argument("--cwd", help="working dir (defaults to $PWD)")
+    p_repo.add_argument(
+        "--full",
+        action="store_true",
+        help="emit owner/name (e.g., herds-social/herds) by parsing git remote origin URL",
+    )
 
     p_list = sub.add_parser("list", help="list plans for a repo, newest-first")
     p_list.add_argument("--override", help="explicit override for <repo>")

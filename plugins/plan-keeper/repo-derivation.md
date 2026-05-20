@@ -50,3 +50,18 @@ The override in step 1 doubles as an escape hatch. If `git remote get-url origin
 - a name that doesn't correspond to an existing `~/plans/<repo>/` folder,
 
 the user can bypass auto-derivation by naming the destination explicitly in their invocation.
+
+## Extended form: `repo --full`
+
+`plan_keeper_cli.py repo --full` returns `owner/name` (e.g., `herds-social/herds`) by parsing the `origin` remote URL. Used by the `push` subcommand's "Repo: …" description line.
+
+Supported URL forms:
+
+- `git@github.com:owner/name.git`
+- `https://github.com/owner/name.git`
+- `https://github.com/owner/name` (no `.git`)
+- `ssh://git@github.com/owner/name.git`
+
+Fallback when no remote or unparsable URL: `unknown/<cwd-basename>`. The fallback's `unknown/` prefix is intentional — it makes it visible in the ticket description that the derivation failed.
+
+The `--full` mode is read-only and idempotent. It does not affect or interact with the per-repo plans directory (which still uses the basename-only form from `repo` without `--full`).
