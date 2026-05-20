@@ -16,6 +16,7 @@ agent would see them. Isolation: HOME=<tmpdir> per test so the CLI's
 the user's real ~/plans/. Mirrors the precedent at
 plugins/harness/skills/task-list-runner/test_task_list_cli.py.
 """
+import json
 import os
 import subprocess
 import tempfile
@@ -521,7 +522,6 @@ class TestFileMetaGet(IsolatedHomeTestCase):
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 0)
-        import json
         data = json.loads(result.stdout)
         self.assertEqual(data, {"Ticket": "", "Ticket System": "", "Completed on": ""})
 
@@ -539,7 +539,6 @@ class TestFileMetaGet(IsolatedHomeTestCase):
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 0)
-        import json
         data = json.loads(result.stdout)
         self.assertEqual(data, {
             "Ticket": "ENG-123",
@@ -560,7 +559,6 @@ class TestFileMetaGet(IsolatedHomeTestCase):
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 0)
-        import json
         data = json.loads(result.stdout)
         self.assertEqual(data["Ticket"], "ENG-99")
         self.assertEqual(data["Completed on"], "")
