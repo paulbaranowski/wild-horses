@@ -25,6 +25,7 @@ import tempfile
 import unittest
 import urllib.error
 from datetime import date
+from email.message import Message
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -860,7 +861,7 @@ class TestTicketApiLinearViewer(unittest.TestCase):
             "urllib.request.urlopen",
             side_effect=urllib.error.HTTPError(
                 url="https://api.linear.app/graphql",
-                code=401, msg="Unauthorized", hdrs=None, fp=None,
+                code=401, msg="Unauthorized", hdrs=Message(), fp=None,
             ),
         ):
             with self.assertRaises(self.cli.PlanKeeperCliError) as ctx:
