@@ -1272,7 +1272,7 @@ class TestTicketApiJiraViewer(unittest.TestCase):
     def setUp(self) -> None:
         self.cli = _import_cli_module()
 
-    def _mock_response(self, body: dict, status: int = 200):
+    def _mock_response(self, body: dict):
         m = MagicMock()
         m.__enter__ = MagicMock(return_value=m)
         m.__exit__ = MagicMock(return_value=False)
