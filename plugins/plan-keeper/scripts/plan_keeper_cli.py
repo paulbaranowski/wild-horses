@@ -110,10 +110,24 @@ def normalize_override(name: str) -> str:
     return "".join(out).strip("-")
 
 
+def validate_repo_name(name: str) -> str:
+    """Reject repo names that would escape ~/plans/<repo>/ or are empty.
+
+    Defense against path traversal via untrusted `--override`, an
+    odd-shaped git remote URL, or a weird cwd basename. Empty / "." /
+    ".." would resolve `PLAN_ROOT / repo` outside the intended dir;
+    a slash- or backslash-containing name would compose multiple path
+    components and skip past `~/plans/`.
+    """
+    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+        raise PlanKeeperCliError(f"invalid repo name: {name!r}", code=2)
+    return name
+
+
 def derive_repo(override: Optional[str], cwd: Optional[str] = None) -> str:
     """Resolve <repo> per repo-derivation.md."""
     if override:
-        return normalize_override(override)
+        return validate_repo_name(normalize_override(override))
     cwd = cwd or os.getcwd()
     try:
         result = subprocess.run(
@@ -130,10 +144,10 @@ def derive_repo(override: Optional[str], cwd: Optional[str] = None) -> str:
                 if base.endswith(".git"):
                     base = base[:-4]
                 if base:
-                    return base
+                    return validate_repo_name(base)
     except (subprocess.SubprocessError, OSError):
         pass
-    return os.path.basename(os.path.abspath(cwd))
+    return validate_repo_name(os.path.basename(os.path.abspath(cwd)))
 
 
 # --- Atomic write -----------------------------------------------------------
@@ -306,6 +320,11 @@ def cmd_save(args) -> int:
 
 def cmd_archive(args) -> int:
     repo = derive_repo(args.override)
+    if "/" in args.file or "\\" in args.file or args.file in ("", ".", ".."):
+        raise PlanKeeperCliError(
+            f"--file must be a basename only (no path separators), got: {args.file!r}",
+            code=2,
+        )
     source = repo_dir(repo) / args.file
     if not source.exists():
         raise PlanKeeperCliError(f"plan not found: {source}", code=3)
