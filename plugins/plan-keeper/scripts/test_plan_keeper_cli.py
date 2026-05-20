@@ -16,6 +16,7 @@ agent would see them. Isolation: HOME=<tmpdir> per test so the CLI's
 the user's real ~/plans/. Mirrors the precedent at
 plugins/harness/skills/task-list-runner/test_task_list_cli.py.
 """
+import base64
 import importlib.util
 import json
 import os
@@ -1265,6 +1266,38 @@ class TestPushLinearUpdate(unittest.TestCase):
         self.assertEqual(result["action"], "create")
         sent = json.loads(mock_open.call_args[0][0].data.decode("utf-8"))
         self.assertIn("issueCreate", sent["query"])
+
+
+class TestTicketApiJiraViewer(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+
+    def _mock_response(self, body: dict, status: int = 200):
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def test_viewer_calls_myself_and_returns_identity(self) -> None:
+        response = {
+            "accountId": "5e8f", "emailAddress": "p@x.com", "displayName": "Paul",
+        }
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_response(response),
+        ) as mock_open:
+            result = self.cli.jira_viewer(
+                site="herds.atlassian.net", email="p@x.com", api_token="tok",
+            )
+        self.assertEqual(result, response)
+        req = mock_open.call_args[0][0]
+        self.assertEqual(req.full_url, "https://herds.atlassian.net/rest/api/3/myself")
+        # Basic auth header present.
+        self.assertTrue(req.get_header("Authorization").startswith("Basic "))
+        encoded = req.get_header("Authorization")[len("Basic "):]
+        decoded = base64.b64decode(encoded).decode("utf-8")
+        self.assertEqual(decoded, "p@x.com:tok")
 
 
 if __name__ == "__main__":

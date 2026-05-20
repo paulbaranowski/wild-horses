@@ -10,6 +10,7 @@ The algorithm for repo derivation lives in
 See each `plan-*` SKILL.md for invocation patterns.
 """
 import argparse
+import base64
 import json
 import os
 import re
@@ -1000,6 +1001,19 @@ def _push_linear_update(api_key: str, identifier: str, title: str, description: 
     }
 
 
+# --- Jira helpers -----------------------------------------------------------
+
+
+def _jira_auth_header(email: str, api_token: str) -> str:
+    raw = f"{email}:{api_token}".encode("utf-8")
+    return "Basic " + base64.b64encode(raw).decode("ascii")
+
+
+def jira_viewer(site: str, email: str, api_token: str) -> dict:
+    url = f"https://{site}/rest/api/3/myself"
+    return http_get_json(url, {"Authorization": _jira_auth_header(email, api_token)})
+
+
 def cmd_push(args) -> int:
     result = push_subcommand(args.name, args.file, force_new=args.force_new)
     print(json.dumps(result))
@@ -1021,7 +1035,10 @@ def cmd_ticket_api(args) -> int:
             "users": lambda: linear_users(args.api_key),
         }
     else:  # jira
-        impl = {}  # filled in Phase C
+        headers_args = (args.site, args.email, args.api_key)
+        impl = {
+            "viewer": lambda: jira_viewer(*headers_args),
+        }
     fn = impl.get(args.ticket_api_kind)
     if fn is None:
         raise PlanKeeperCliError(
