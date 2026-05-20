@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 from datetime import date
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 
 PLAN_ROOT = Path.home() / "plans"
@@ -689,7 +689,7 @@ def _linear_paginated(
     api_key: str,
     query: str,
     root_key: str,
-    transform_node,
+    transform_node: Callable[[dict], dict],
 ) -> list[dict]:
     """Run a paginated Linear query and concatenate transformed nodes.
 
