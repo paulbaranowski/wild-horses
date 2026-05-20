@@ -563,7 +563,7 @@ class TestFileMetaGet(IsolatedHomeTestCase):
         self.assertEqual(data["Ticket"], "ENG-99")
         self.assertEqual(data["Completed on"], "")
 
-    def test_malformed_frontmatter_exits_5(self) -> None:
+    def test_malformed_frontmatter_missing_colon_exits_5(self) -> None:
         path = self._write_plan("---\nTicket ENG-123\n---\n")  # missing colon
         result = run_cli(
             "file-meta", "get", "--file", str(path),
@@ -571,6 +571,25 @@ class TestFileMetaGet(IsolatedHomeTestCase):
         )
         self.assertEqual(result.returncode, 5)
         self.assertIn("malformed", result.stderr.lower())
+
+    def test_malformed_frontmatter_no_closing_exits_5(self) -> None:
+        # Opening --- but no closing --- before EOF.
+        path = self._write_plan("---\nTicket: ENG-1\n")
+        result = run_cli(
+            "file-meta", "get", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 5)
+        self.assertIn("closing", result.stderr.lower())
+
+    def test_malformed_frontmatter_unknown_field_exits_5(self) -> None:
+        path = self._write_plan("---\nUnknownField: x\n---\n")
+        result = run_cli(
+            "file-meta", "get", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 5)
+        self.assertIn("unknown field", result.stderr.lower())
 
     def test_missing_file_exits_3(self) -> None:
         result = run_cli(

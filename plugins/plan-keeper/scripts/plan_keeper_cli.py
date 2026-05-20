@@ -407,12 +407,12 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
 
     Frontmatter is the optional top block delimited by `---` lines. Each
     inner line is "Key: value" (whitespace around the colon ignored).
-    Missing block ⇒ empty dict + entire text as body.
 
     Returns:
-        (meta, body) where meta has exactly the fields in _FRONTMATTER_FIELDS
-        (empty string for missing ones), and body is the text after the
-        closing `---` (or all of `text` if no frontmatter).
+        (meta, body) where meta ALWAYS has exactly the fields in
+        _FRONTMATTER_FIELDS (empty string when a field is absent or when
+        the file has no frontmatter at all), and body is the text after
+        the closing `---` (or all of `text` if no frontmatter).
 
     Raises:
         PlanKeeperCliError(code=5) on malformed frontmatter (no closing `---`,
@@ -447,8 +447,11 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
         meta[key] = value
     body = "\n".join(lines[closing_idx + 1 :])
     # Drop a single leading blank line if present (cosmetic — frontmatter
-    # is usually followed by a blank line before the H1).
-    if body.startswith("\n"):
+    # is usually followed by a blank line before the H1). Handle both
+    # LF and CRLF forms so a CRLF-flavoured file round-trips cleanly.
+    if body.startswith("\r\n"):
+        body = body[2:]
+    elif body.startswith("\n"):
         body = body[1:]
     return meta, body
 
@@ -551,9 +554,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p_fm_get = file_meta_sub.add_parser("get", help="print frontmatter as JSON")
-    p_fm_get.add_argument("--file", required=True, help="absolute path to a plan .md file")
+    p_fm_get.add_argument("--file", required=True, help="path to a plan .md file")
 
     return parser
+
+
+# Sub-dispatch table for `file-meta <get|set|strip>`. Each entry handles one
+# `file_meta_cmd`. Kept as a module-level constant so tasks adding `set` and
+# `strip` only need to add one line here, not edit a lambda body in main().
+_FILE_META_DISPATCH = {
+    "get": cmd_file_meta_get,
+}
 
 
 def main() -> int:
@@ -565,9 +576,7 @@ def main() -> int:
         "list-repos": cmd_list_repos,
         "save": cmd_save,
         "archive": cmd_archive,
-        "file-meta": lambda a: {
-            "get": cmd_file_meta_get,
-        }[a.file_meta_cmd](a),
+        "file-meta": lambda a: _FILE_META_DISPATCH[a.file_meta_cmd](a),
     }
     try:
         return dispatch[args.cmd](args)
