@@ -726,5 +726,91 @@ class TestFileMetaStrip(IsolatedHomeTestCase):
         self.assertEqual(result.stdout, "# Bare\n\nNo frontmatter here.\n")
 
 
+class TestTicketSystemConfig(IsolatedHomeTestCase):
+    def _init_git_repo(self, remote_url: str) -> None:
+        subprocess.run(["git", "init", "-q"], cwd=self.cwd, check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin", remote_url],
+            cwd=self.cwd, check=True,
+        )
+
+    def test_list_no_config(self) -> None:
+        result = run_cli(
+            "ticket-system-config", "list",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout), [])
+
+    def test_save_then_get(self) -> None:
+        payload = (
+            '{"apiKey": "k", "defaults": {"teamId": "t"}, '
+            '"cache": {"teams": [{"id": "t", "name": "Eng"}]}}'
+        )
+        result = run_cli(
+            "ticket-system-config", "save", "--name", "linear",
+            stdin=payload, home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # Now read back.
+        result = run_cli(
+            "ticket-system-config", "get", "--name", "linear",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["apiKey"], "k")
+        self.assertEqual(data["defaults"]["teamId"], "t")
+
+    def test_get_missing_system_exits_3(self) -> None:
+        result = run_cli(
+            "ticket-system-config", "get", "--name", "linear",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 3)
+
+    def test_list_after_save_returns_configured(self) -> None:
+        run_cli(
+            "ticket-system-config", "save", "--name", "linear",
+            stdin='{"apiKey": "k"}',
+            home=self.home, cwd=self.cwd,
+        )
+        result = run_cli(
+            "ticket-system-config", "list",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout), ["linear"])
+
+    def test_save_then_list_two_systems(self) -> None:
+        run_cli("ticket-system-config", "save", "--name", "linear",
+                stdin='{"apiKey": "k1"}', home=self.home, cwd=self.cwd)
+        run_cli("ticket-system-config", "save", "--name", "jira",
+                stdin='{"apiToken": "t"}', home=self.home, cwd=self.cwd)
+        result = run_cli(
+            "ticket-system-config", "list",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(sorted(json.loads(result.stdout)), ["jira", "linear"])
+
+    def test_save_sets_chmod_600(self) -> None:
+        run_cli("ticket-system-config", "save", "--name", "linear",
+                stdin='{"apiKey": "k"}', home=self.home, cwd=self.cwd)
+        repo_dir = self.plans_root / "workdir"
+        config = repo_dir / ".plankeeper.json"
+        self.assertTrue(config.exists())
+        mode = config.stat().st_mode & 0o777
+        self.assertEqual(mode, 0o600, oct(mode))
+
+    def test_save_rejects_invalid_json(self) -> None:
+        result = run_cli(
+            "ticket-system-config", "save", "--name", "linear",
+            stdin="not json",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

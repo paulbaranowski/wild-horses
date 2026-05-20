@@ -24,6 +24,7 @@ from typing import Optional
 PLAN_ROOT = Path.home() / "plans"
 MAX_SLUG_LEN = 50
 MAX_SUFFIX = 99
+CONFIG_FILE_NAME = ".plankeeper.json"
 
 
 class HelpfulArgumentParser(argparse.ArgumentParser):
@@ -275,6 +276,46 @@ def emit_collision(target: Path) -> None:
     print(f"suggestion: {suggestion}", file=sys.stderr)
 
 
+# --- Config helpers ---------------------------------------------------------
+
+
+def config_path(repo: str) -> Path:
+    return repo_dir(repo) / CONFIG_FILE_NAME
+
+
+def load_config(repo: str) -> dict:
+    """Read the per-repo config JSON. Returns {} if file is missing.
+
+    Raises PlanKeeperCliError(5) on malformed JSON.
+    """
+    path = config_path(repo)
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise PlanKeeperCliError(f"malformed config at {path}: {e}", code=5)
+
+
+def save_config(repo: str, data: dict) -> Path:
+    """Atomically write the per-repo config JSON, then chmod 600.
+
+    The chmod is best-effort — if it fails the write itself still
+    succeeds (just with default permissions). A warning is printed
+    to stderr.
+    """
+    path = config_path(repo)
+    write_atomic(path, json.dumps(data, indent=2) + "\n")
+    try:
+        os.chmod(path, 0o600)
+    except OSError as e:
+        print(
+            f"warning: couldn't chmod 600 {path}: {e}",
+            file=sys.stderr,
+        )
+    return path
+
+
 # --- Subcommands ------------------------------------------------------------
 
 
@@ -393,6 +434,45 @@ def cmd_archive(args) -> int:
     write_atomic(target, stamped)
     source.unlink()
     print(target)
+    return 0
+
+
+def cmd_ticket_system_config_get(args) -> int:
+    repo = derive_repo(None)
+    config = load_config(repo)
+    section = config.get(args.name)
+    if section is None:
+        raise PlanKeeperCliError(
+            f"no config for ticket system {args.name!r} in repo {repo!r}",
+            code=3,
+        )
+    print(json.dumps(section))
+    return 0
+
+
+def cmd_ticket_system_config_save(args) -> int:
+    raw = sys.stdin.read()
+    try:
+        new_section = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise PlanKeeperCliError(f"stdin is not valid JSON: {e}", code=2)
+    if not isinstance(new_section, dict):
+        raise PlanKeeperCliError("stdin must be a JSON object", code=2)
+    repo = derive_repo(None)
+    config = load_config(repo)
+    config[args.name] = new_section
+    path = save_config(repo, config)
+    print(path)
+    return 0
+
+
+def cmd_ticket_system_config_list(args) -> int:
+    del args
+    repo = derive_repo(None)
+    config = load_config(repo)
+    # Only return keys that look like ticket-system sections.
+    systems = [k for k in sorted(config.keys()) if k in ("linear", "jira")]
+    print(json.dumps(systems))
     return 0
 
 
@@ -629,6 +709,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_fm_strip = file_meta_sub.add_parser("strip", help="print body without frontmatter")
     p_fm_strip.add_argument("--file", required=True)
 
+    p_tsc = sub.add_parser(
+        "ticket-system-config",
+        help="CRUD for ticket-system entries in ~/plans/<repo>/.plankeeper.json",
+    )
+    tsc_sub = p_tsc.add_subparsers(
+        dest="tsc_cmd", required=True, metavar="<subcommand>",
+        parser_class=HelpfulArgumentParser,
+    )
+
+    p_tsc_get = tsc_sub.add_parser("get", help="print one ticket-system section as JSON")
+    p_tsc_get.add_argument("--name", required=True, choices=["linear", "jira"])
+
+    p_tsc_save = tsc_sub.add_parser("save", help="write a ticket-system section (JSON on stdin)")
+    p_tsc_save.add_argument("--name", required=True, choices=["linear", "jira"])
+
+    _ = tsc_sub.add_parser("list", help="list configured ticket-system names")
+
     return parser
 
 
@@ -639,6 +736,12 @@ _FILE_META_DISPATCH = {
     "get": cmd_file_meta_get,
     "set": cmd_file_meta_set,
     "strip": cmd_file_meta_strip,
+}
+
+_TICKET_SYSTEM_CONFIG_DISPATCH = {
+    "get": cmd_ticket_system_config_get,
+    "save": cmd_ticket_system_config_save,
+    "list": cmd_ticket_system_config_list,
 }
 
 
@@ -652,6 +755,7 @@ def main() -> int:
         "save": cmd_save,
         "archive": cmd_archive,
         "file-meta": lambda a: _FILE_META_DISPATCH[a.file_meta_cmd](a),
+        "ticket-system-config": lambda a: _TICKET_SYSTEM_CONFIG_DISPATCH[a.tsc_cmd](a),
     }
     try:
         return dispatch[args.cmd](args)
