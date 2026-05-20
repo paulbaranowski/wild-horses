@@ -1376,5 +1376,63 @@ class TestTicketApiJiraLists(unittest.TestCase):
         self.assertIn("projectId=1", mock_open.call_args[0][0].full_url)
 
 
+class TestTicketSystemConfigRefreshJira(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.cwd = self.home / "workdir"
+        self.cwd.mkdir()
+        self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
+        self._home_patch.start()
+        self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
+        self._cwd_patch.start()
+
+    def tearDown(self) -> None:
+        self._home_patch.stop()
+        self._cwd_patch.stop()
+        self._tmp.cleanup()
+
+    def _mock_response(self, body):
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def test_refresh_populates_jira_cache(self) -> None:
+        self.cli.save_config("workdir", {"jira": {
+            "site": "herds.atlassian.net",
+            "email": "p@x.com",
+            "apiToken": "tok",
+            "defaults": {"projectKey": "HERDS"},
+        }})
+        # The refresh fetches: projects, then for each project: components, users, issuetypes.
+        # Assume one project to keep the test tractable.
+        projects = {
+            "values": [{"key": "HERDS", "id": "1", "name": "Herds"}],
+            "isLast": True, "startAt": 0, "maxResults": 1, "total": 1,
+        }
+        components = [{"id": "10001", "name": "Backend"}]
+        users = []  # empty for simplicity
+        issuetypes = [{"id": "20001", "name": "Task"}]
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[
+                self._mock_response(projects),
+                self._mock_response(components),
+                self._mock_response(users),
+                self._mock_response(issuetypes),
+            ],
+        ):
+            self.cli.refresh_jira_cache(site="herds.atlassian.net", email="p@x.com", api_token="tok")
+        config = self.cli.load_config("workdir")
+        cache = config["jira"]["cache"]
+        self.assertEqual(len(cache["projects"]), 1)
+        self.assertEqual(cache["components"][0]["projectKey"], "HERDS")
+        self.assertEqual(cache["issueTypes"][0]["name"], "Task")
+        self.assertRegex(cache["refreshedAt"], r"\d{4}-\d{2}-\d{2}T")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

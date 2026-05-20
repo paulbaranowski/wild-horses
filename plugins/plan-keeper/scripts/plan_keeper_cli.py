@@ -854,6 +854,47 @@ def refresh_linear_cache(api_key: str) -> list[str]:
     return warnings
 
 
+def refresh_jira_cache(site: str, email: str, api_token: str) -> list[str]:
+    """Fetch all Jira metadata and write into config['jira']['cache'].
+
+    Returns a list of warning strings (e.g., when defaults reference keys/IDs
+    that aren't in the new cache). Empty list on clean refresh.
+    """
+    projects = jira_projects(site, email, api_token)
+    all_components: list[dict] = []
+    all_users: list[dict] = []
+    all_issuetypes: list[dict] = []
+    for p in projects:
+        all_components.extend(jira_components(site, email, api_token, p["key"]))
+        all_users.extend(jira_users(site, email, api_token, p["key"]))
+        all_issuetypes.extend(jira_issuetypes(site, email, api_token, p["id"]))
+    repo = derive_repo(None)
+    config = load_config(repo)
+    section = config.setdefault("jira", {})
+    section["cache"] = {
+        "refreshedAt": _iso_utc_now(),
+        "projects": projects,
+        "components": all_components,
+        "users": all_users,
+        "issueTypes": all_issuetypes,
+    }
+    save_config(repo, config)
+    warnings: list[str] = []
+    defaults = section.get("defaults", {})
+    project_keys = {p["key"] for p in projects}
+    if defaults.get("projectKey") and defaults["projectKey"] not in project_keys:
+        warnings.append(
+            f"defaults.projectKey={defaults['projectKey']!r} no longer exists in Jira"
+        )
+    component_ids = {c["id"] for c in all_components}
+    for cid in defaults.get("componentIds", []):
+        if cid not in component_ids:
+            warnings.append(f"defaults.componentIds contains {cid!r} which is no longer in Jira")
+    for w in warnings:
+        print(f"warning: {w}", file=sys.stderr)
+    return warnings
+
+
 def cmd_ticket_system_config_refresh(args) -> int:
     if args.name == "linear":
         if not args.api_key:
@@ -862,7 +903,11 @@ def cmd_ticket_system_config_refresh(args) -> int:
             )
         refresh_linear_cache(args.api_key)
     elif args.name == "jira":
-        raise PlanKeeperCliError("jira refresh not yet implemented", code=2)
+        if not args.site or not args.email or not args.api_key:
+            raise PlanKeeperCliError(
+                "jira refresh requires --site, --email, --api-key", code=2,
+            )
+        refresh_jira_cache(args.site, args.email, args.api_key)
     return 0
 
 
