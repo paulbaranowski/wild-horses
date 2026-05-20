@@ -599,5 +599,102 @@ class TestFileMetaGet(IsolatedHomeTestCase):
         self.assertEqual(result.returncode, 3)
 
 
+class TestFileMetaSet(IsolatedHomeTestCase):
+    def _write_plan(self, content: str) -> Path:
+        path = self.cwd / "plan.md"
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def test_creates_frontmatter_on_bare_file(self) -> None:
+        path = self._write_plan("# Heading\n\nBody.\n")
+        result = run_cli(
+            "file-meta", "set",
+            "--file", str(path),
+            "--ticket", "ENG-123",
+            "--ticket-system", "linear",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        new_text = path.read_text(encoding="utf-8")
+        self.assertEqual(
+            new_text,
+            "---\n"
+            "Ticket: ENG-123\n"
+            "Ticket System: linear\n"
+            "---\n"
+            "\n# Heading\n\nBody.\n"
+        )
+
+    def test_updates_existing_frontmatter_in_place(self) -> None:
+        path = self._write_plan(
+            "---\n"
+            "Ticket: OLD-1\n"
+            "Ticket System: jira\n"
+            "---\n"
+            "\n# H\n"
+        )
+        result = run_cli(
+            "file-meta", "set",
+            "--file", str(path),
+            "--ticket", "ENG-99",
+            "--ticket-system", "linear",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        new_text = path.read_text(encoding="utf-8")
+        self.assertIn("Ticket: ENG-99", new_text)
+        self.assertIn("Ticket System: linear", new_text)
+        self.assertNotIn("OLD-1", new_text)
+        self.assertNotIn("Ticket System: jira", new_text)
+
+    def test_preserves_unmodified_fields(self) -> None:
+        path = self._write_plan(
+            "---\n"
+            "Ticket: KEEP-1\n"
+            "Ticket System: linear\n"
+            "Completed on: 2026-05-19\n"
+            "---\n"
+            "\n# H\n"
+        )
+        # Only setting --completed-on, Ticket fields should stay.
+        result = run_cli(
+            "file-meta", "set",
+            "--file", str(path),
+            "--completed-on", "2026-05-20",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        new_text = path.read_text(encoding="utf-8")
+        self.assertIn("Ticket: KEEP-1", new_text)
+        self.assertIn("Completed on: 2026-05-20", new_text)
+
+    def test_omits_empty_fields(self) -> None:
+        path = self._write_plan("# H\n\nBody.\n")
+        result = run_cli(
+            "file-meta", "set",
+            "--file", str(path),
+            "--ticket", "ENG-1",
+            "--ticket-system", "linear",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        new_text = path.read_text(encoding="utf-8")
+        # Completed on was never set, so the line should be absent.
+        self.assertNotIn("Completed on:", new_text)
+
+    def test_requires_at_least_one_flag(self) -> None:
+        # No --ticket, --ticket-system, or --completed-on should exit 2.
+        path = self._write_plan("# Original\n")
+        original = path.read_text(encoding="utf-8")
+        result = run_cli(
+            "file-meta", "set",
+            "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 2)
+        # Original file content unchanged.
+        self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

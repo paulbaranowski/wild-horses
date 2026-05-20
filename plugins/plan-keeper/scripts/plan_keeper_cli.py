@@ -456,6 +456,29 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     return meta, body
 
 
+def serialize_frontmatter(meta: dict[str, str], body: str) -> str:
+    """Compose a plan-file text with frontmatter on top, then body.
+
+    Fields with empty-string value are omitted (so a "Completed on" that
+    was never set stays out of the file entirely). Field order matches
+    _FRONTMATTER_FIELDS.
+
+    If meta has all-empty values, returns body unchanged (no frontmatter
+    block written). This preserves the "bare plan has no `---`" invariant.
+    """
+    non_empty = [(k, v) for k in _FRONTMATTER_FIELDS for v in [meta.get(k, "")] if v]
+    if not non_empty:
+        return body
+    lines = ["---"]
+    for k, v in non_empty:
+        lines.append(f"{k}: {v}")
+    lines.append("---")
+    # Preserve the convention: one blank line between frontmatter and body.
+    if body and not body.startswith("\n"):
+        return "\n".join(lines) + "\n\n" + body
+    return "\n".join(lines) + "\n" + body
+
+
 def cmd_file_meta_get(args) -> int:
     path = Path(args.file)
     if not path.exists():
@@ -463,6 +486,37 @@ def cmd_file_meta_get(args) -> int:
     text = path.read_text(encoding="utf-8")
     meta, _ = parse_frontmatter(text)
     print(json.dumps(meta))
+    return 0
+
+
+def cmd_file_meta_set(args) -> int:
+    # At least one of the set flags must be provided.
+    if (
+        args.ticket is None
+        and args.ticket_system is None
+        and args.completed_on is None
+    ):
+        raise PlanKeeperCliError(
+            "file-meta set requires at least one of --ticket, --ticket-system, --completed-on",
+            code=2,
+        )
+    path = Path(args.file)
+    if not path.exists():
+        raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
+    text = path.read_text(encoding="utf-8")
+    meta, body = parse_frontmatter(text)  # may raise PlanKeeperCliError(5)
+    if args.ticket is not None:
+        meta["Ticket"] = args.ticket
+    if args.ticket_system is not None:
+        meta["Ticket System"] = args.ticket_system
+    if args.completed_on is not None:
+        # Validate the date format up front to catch typos.
+        meta["Completed on"] = parse_date_arg(args.completed_on)
+    new_text = serialize_frontmatter(meta, body)
+    if not new_text.endswith("\n"):
+        new_text += "\n"
+    write_atomic(path, new_text)
+    print(path)
     return 0
 
 
@@ -556,6 +610,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_fm_get = file_meta_sub.add_parser("get", help="print frontmatter as JSON")
     p_fm_get.add_argument("--file", required=True, help="path to a plan .md file")
 
+    p_fm_set = file_meta_sub.add_parser("set", help="write or update plan frontmatter")
+    p_fm_set.add_argument("--file", required=True)
+    p_fm_set.add_argument("--ticket", help="ticket identifier (e.g., ENG-123)")
+    p_fm_set.add_argument("--ticket-system", choices=["linear", "jira"], help="ticket system")
+    p_fm_set.add_argument("--completed-on", help="completion date YYYY-MM-DD")
+
     return parser
 
 
@@ -564,6 +624,7 @@ def build_parser() -> argparse.ArgumentParser:
 # `strip` only need to add one line here, not edit a lambda body in main().
 _FILE_META_DISPATCH = {
     "get": cmd_file_meta_get,
+    "set": cmd_file_meta_set,
 }
 
 
