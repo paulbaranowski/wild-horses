@@ -1,0 +1,477 @@
+#!/usr/bin/env python3
+"""Smoke tests for plan_keeper_cli.py and plan-keeper-cli-allow.sh.
+
+Stdlib-only — no pytest needed. Run from anywhere:
+
+    python3 plugins/plan-keeper/scripts/test_plan_keeper_cli.py
+
+Or via unittest discovery:
+
+    python3 -m unittest discover -s plugins/plan-keeper/scripts -p 'test_plan_keeper_cli.py'
+
+Tests invoke the CLI as a subprocess so exit codes, argparse behavior,
+and stdout/stderr separation are exercised exactly as a dispatched
+agent would see them. Isolation: HOME=<tmpdir> per test so the CLI's
+`Path.home() / "plans"` resolves under the tempdir, never touching
+the user's real ~/plans/. Mirrors the precedent at
+plugins/harness/skills/task-list-runner/test_task_list_cli.py.
+"""
+import os
+import subprocess
+import tempfile
+import unittest
+from datetime import date
+from pathlib import Path
+
+CLI = Path(__file__).parent / "plan_keeper_cli.py"
+ALLOW_SCRIPT = Path(__file__).parent / "plan-keeper-cli-allow.sh"
+
+
+def run_cli(
+    *args: str,
+    stdin: str = "",
+    home: Path,
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess:
+    """Invoke the CLI with isolated $HOME so it can't touch real ~/plans/."""
+    env = {**os.environ, "HOME": str(home)}
+    return subprocess.run(
+        ["python3", str(CLI), *args],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cwd) if cwd else None,
+        timeout=10,
+    )
+
+
+def run_allow(cmd: str) -> str:
+    """Pipe a fake PreToolUse JSON to the allow-script; return its stdout."""
+    import json
+
+    payload = json.dumps({"tool_input": {"command": cmd}})
+    result = subprocess.run(
+        ["bash", str(ALLOW_SCRIPT)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    return result.stdout
+
+
+class IsolatedHomeTestCase(unittest.TestCase):
+    """Each test gets a fresh $HOME pointing at a tempdir."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.plans_root = self.home / "plans"
+        # Use a non-git cwd so derive_repo's git path is a clean miss.
+        self.cwd = self.home / "workdir"
+        self.cwd.mkdir()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+
+class TestRepoDerivation(IsolatedHomeTestCase):
+    def test_no_override_uses_cwd_basename(self) -> None:
+        r = run_cli("repo", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "workdir")
+
+    def test_override_normalizes_whitespace_and_case(self) -> None:
+        r = run_cli("repo", "--override", "General Folder", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "general-folder")
+
+    def test_override_preserves_underscores(self) -> None:
+        r = run_cli("repo", "--override", "herds_mobile_app", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "herds_mobile_app")
+
+    def test_override_rejects_empty(self) -> None:
+        r = run_cli("repo", "--override", "", home=self.home, cwd=self.cwd)
+        # Empty --override falls back to auto-derive (falsy guard), so it
+        # uses cwd basename. The path-traversal guard only fires for
+        # non-empty traversal strings. This case is documented behavior.
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "workdir")
+
+    def test_override_rejects_dot(self) -> None:
+        r = run_cli("repo", "--override", ".", home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("invalid repo name", r.stderr)
+
+    def test_override_rejects_dotdot(self) -> None:
+        r = run_cli("repo", "--override", "..", home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("invalid repo name", r.stderr)
+
+    def test_override_rejects_path_traversal(self) -> None:
+        r = run_cli("repo", "--override", "../etc", home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("invalid repo name", r.stderr)
+
+    def test_override_rejects_slash(self) -> None:
+        r = run_cli("repo", "--override", "foo/bar", home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("invalid repo name", r.stderr)
+
+    def test_override_rejects_backslash(self) -> None:
+        r = run_cli("repo", "--override", "foo\\bar", home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("invalid repo name", r.stderr)
+
+
+class TestSave(IsolatedHomeTestCase):
+    def test_writes_file_at_expected_path(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "test plan",
+            stdin="# Test plan\nbody\n",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        today = date.today().isoformat()
+        expected = self.plans_root / "scratch" / f"{today}-test-plan.md"
+        self.assertEqual(r.stdout.strip(), str(expected))
+        self.assertTrue(expected.exists())
+        self.assertEqual(expected.read_text(), "# Test plan\nbody\n")
+
+    def test_slugifies_topic_with_punctuation_and_case(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "Hello, World!! (v2)",
+            stdin="x\n",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        today = date.today().isoformat()
+        expected = self.plans_root / "scratch" / f"{today}-hello-world-v2.md"
+        self.assertTrue(expected.exists())
+
+    def test_preserves_underscores_in_topic(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "multi_event parent_title",
+            stdin="x\n",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        today = date.today().isoformat()
+        expected = self.plans_root / "scratch" / f"{today}-multi_event-parent_title.md"
+        self.assertTrue(expected.exists())
+
+    def test_creates_repo_dir_if_missing(self) -> None:
+        new_repo = self.plans_root / "brand-new-repo"
+        self.assertFalse(new_repo.exists())
+        r = run_cli(
+            "save", "--override", "brand-new-repo", "--topic", "a",
+            stdin="x\n",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(new_repo.is_dir())
+
+    def test_collision_default_fail(self) -> None:
+        common = ["save", "--override", "scratch", "--topic", "dup"]
+        r1 = run_cli(*common, stdin="x\n", home=self.home)
+        self.assertEqual(r1.returncode, 0, r1.stderr)
+        r2 = run_cli(*common, stdin="y\n", home=self.home)
+        self.assertEqual(r2.returncode, 2)
+        self.assertIn("existing:", r2.stderr)
+        self.assertIn("suggestion:", r2.stderr)
+        self.assertIn("-2.md", r2.stderr)
+
+    def test_collision_suffix(self) -> None:
+        common = ["save", "--override", "scratch", "--topic", "dup"]
+        run_cli(*common, stdin="x\n", home=self.home)
+        r2 = run_cli(*common, "--on-collision", "suffix", stdin="y\n", home=self.home)
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        self.assertTrue(r2.stdout.strip().endswith("-2.md"))
+
+    def test_collision_overwrite(self) -> None:
+        common = ["save", "--override", "scratch", "--topic", "dup"]
+        run_cli(*common, stdin="first\n", home=self.home)
+        r2 = run_cli(*common, "--on-collision", "overwrite", stdin="second\n", home=self.home)
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        written = Path(r2.stdout.strip())
+        self.assertEqual(written.read_text(), "second\n")
+
+
+class TestArchive(IsolatedHomeTestCase):
+    def _save_one(self, topic: str = "plan to archive") -> Path:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", topic,
+            stdin="# Body\nsome text\n",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return Path(r.stdout.strip())
+
+    def test_happy_path_moves_and_unlinks(self) -> None:
+        source = self._save_one()
+        r = run_cli(
+            "archive", "--override", "scratch", "--file", source.name,
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        target = self.plans_root / "scratch" / "done" / source.name
+        self.assertEqual(r.stdout.strip(), str(target))
+        self.assertTrue(target.exists())
+        self.assertFalse(source.exists(), "source should be unlinked")
+
+    def test_stamp_format(self) -> None:
+        source = self._save_one()
+        run_cli("archive", "--override", "scratch", "--file", source.name, home=self.home)
+        target = self.plans_root / "scratch" / "done" / source.name
+        body = target.read_text()
+        today = date.today().isoformat()
+        # Body should end with: ...content\n\n---\n*Completed: YYYY-MM-DD*\n
+        self.assertTrue(
+            body.endswith(f"\n\n---\n*Completed: {today}*\n"),
+            f"unexpected stamp tail: {body[-80:]!r}",
+        )
+
+    def test_completed_date_override(self) -> None:
+        source = self._save_one()
+        run_cli(
+            "archive", "--override", "scratch", "--file", source.name,
+            "--completed-date", "2020-01-15",
+            home=self.home,
+        )
+        body = (self.plans_root / "scratch" / "done" / source.name).read_text()
+        self.assertIn("*Completed: 2020-01-15*", body)
+
+    def test_missing_source_exits_3(self) -> None:
+        r = run_cli(
+            "archive", "--override", "scratch", "--file", "nonexistent.md",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("plan not found", r.stderr)
+
+    def test_rejects_file_with_slash(self) -> None:
+        r = run_cli(
+            "archive", "--override", "scratch", "--file", "../etc/passwd",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("basename only", r.stderr)
+
+    def test_rejects_file_with_backslash(self) -> None:
+        r = run_cli(
+            "archive", "--override", "scratch", "--file", "foo\\bar.md",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("basename only", r.stderr)
+
+    def test_rejects_file_dot(self) -> None:
+        r = run_cli(
+            "archive", "--override", "scratch", "--file", ".",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("basename only", r.stderr)
+
+    def test_rejects_file_dotdot(self) -> None:
+        r = run_cli(
+            "archive", "--override", "scratch", "--file", "..",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("basename only", r.stderr)
+
+    def test_rejects_file_empty(self) -> None:
+        r = run_cli(
+            "archive", "--override", "scratch", "--file", "",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("basename only", r.stderr)
+
+    def test_collision_fail(self) -> None:
+        # Make a victim plan in done/ first
+        source = self._save_one("collide me")
+        run_cli("archive", "--override", "scratch", "--file", source.name, home=self.home)
+        # Save same-name plan again
+        run_cli(
+            "save", "--override", "scratch", "--topic", "collide me",
+            stdin="x\n",
+            home=self.home,
+        )
+        # Second archive should collide in done/
+        r = run_cli(
+            "archive", "--override", "scratch", "--file", source.name,
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("existing:", r.stderr)
+        self.assertIn("suggestion:", r.stderr)
+
+    def test_collision_suffix(self) -> None:
+        source = self._save_one("collide me")
+        run_cli("archive", "--override", "scratch", "--file", source.name, home=self.home)
+        run_cli(
+            "save", "--override", "scratch", "--topic", "collide me",
+            stdin="x\n",
+            home=self.home,
+        )
+        r = run_cli(
+            "archive", "--override", "scratch", "--file", source.name,
+            "--on-collision", "suffix",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.strip().endswith("-2.md"))
+
+
+class TestList(IsolatedHomeTestCase):
+    def test_empty(self) -> None:
+        r = run_cli("list", "--override", "empty-repo", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "")
+
+    def test_lists_active_newest_first(self) -> None:
+        # Save two plans with different date-prefixed names by varying topic
+        # then manually rename to control the sort order.
+        run_cli(
+            "save", "--override", "scratch", "--topic", "first",
+            stdin="x\n", home=self.home,
+        )
+        run_cli(
+            "save", "--override", "scratch", "--topic", "second",
+            stdin="x\n", home=self.home,
+        )
+        # Rename to force a known sort order (newest YYYY-MM-DD prefix first)
+        d = self.plans_root / "scratch"
+        (d / sorted(p.name for p in d.glob("*.md"))[0]).rename(d / "2026-05-19-first.md")
+        (d / sorted(p.name for p in d.glob("*.md") if p.name != "2026-05-19-first.md")[0]).rename(
+            d / "2026-05-20-second.md"
+        )
+        r = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = r.stdout.strip().split("\n")
+        self.assertEqual(lines, ["2026-05-20-second.md", "2026-05-19-first.md"])
+
+    def test_state_done(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "to be archived",
+            stdin="x\n", home=self.home,
+        )
+        fname = Path(r.stdout.strip()).name
+        run_cli("archive", "--override", "scratch", "--file", fname, home=self.home)
+        active = run_cli("list", "--override", "scratch", home=self.home)
+        done = run_cli("list", "--override", "scratch", "--state", "done", home=self.home)
+        self.assertEqual(active.stdout, "")
+        self.assertIn(fname, done.stdout)
+
+    def test_active_glob_excludes_done_subdir(self) -> None:
+        """`list` of active plans must never enumerate files in done/."""
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "archived plan",
+            stdin="x\n", home=self.home,
+        )
+        fname = Path(r.stdout.strip()).name
+        run_cli("archive", "--override", "scratch", "--file", fname, home=self.home)
+        # Save a fresh active plan
+        run_cli(
+            "save", "--override", "scratch", "--topic", "still active",
+            stdin="x\n", home=self.home,
+        )
+        active = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertNotIn(fname, active.stdout, "archived plan leaked into active list")
+        self.assertIn("still-active", active.stdout)
+
+
+class TestListRepos(IsolatedHomeTestCase):
+    def test_counts_per_state(self) -> None:
+        # Two repos, varied content
+        run_cli("save", "--override", "alpha", "--topic", "a", stdin="x\n", home=self.home)
+        run_cli("save", "--override", "alpha", "--topic", "b", stdin="x\n", home=self.home)
+        r = run_cli("save", "--override", "beta", "--topic", "c", stdin="x\n", home=self.home)
+        run_cli("archive", "--override", "beta", "--file", Path(r.stdout.strip()).name, home=self.home)
+        out = run_cli("list-repos", home=self.home)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        lines = out.stdout.strip().split("\n")
+        self.assertIn("alpha: active=2", lines)
+        self.assertIn("beta: done=1", lines)
+
+    def test_skips_empty_dirs(self) -> None:
+        # Create an empty subdir under ~/plans/ — should not appear
+        (self.plans_root / "ghost").mkdir(parents=True)
+        run_cli("save", "--override", "real", "--topic", "x", stdin="x\n", home=self.home)
+        out = run_cli("list-repos", home=self.home)
+        self.assertIn("real:", out.stdout)
+        self.assertNotIn("ghost", out.stdout)
+
+
+class TestAllowScript(unittest.TestCase):
+    """Black-box tests for the PreToolUse allow-script's regex."""
+
+    def assert_match(self, cmd: str) -> None:
+        out = run_allow(cmd)
+        self.assertIn("permissionDecision", out, f"expected match for: {cmd}")
+
+    def assert_no_match(self, cmd: str) -> None:
+        out = run_allow(cmd)
+        self.assertEqual(out, "", f"unexpected match for: {cmd}")
+
+    # --- Match cases ---
+
+    def test_dev_path_unquoted(self) -> None:
+        self.assert_match(
+            "python3 /repo/plugins/plan-keeper/scripts/plan_keeper_cli.py list"
+        )
+
+    def test_dev_path_double_quoted(self) -> None:
+        self.assert_match(
+            'python3 "/repo/plugins/plan-keeper/scripts/plan_keeper_cli.py" save'
+        )
+
+    def test_dev_path_single_quoted(self) -> None:
+        self.assert_match(
+            "python3 '/repo/plugins/plan-keeper/scripts/plan_keeper_cli.py' archive --file foo.md"
+        )
+
+    def test_installed_cache_path(self) -> None:
+        self.assert_match(
+            "python3 /home/u/.claude/plugins/cache/wh/plan-keeper/1.1.0/scripts/plan_keeper_cli.py list"
+        )
+
+    # --- Non-match cases (the new tighter regex must reject these) ---
+
+    def test_rejects_python_c_exploit(self) -> None:
+        """The original substring check would have approved this — the
+        tightened regex must not."""
+        self.assert_no_match(
+            'python3 -c "import os; os.system(\'evil\')" /any/plan-keeper/scripts/plan_keeper_cli.py'
+        )
+
+    def test_rejects_python_m_unrelated(self) -> None:
+        self.assert_no_match(
+            "python3 -m unrelated_module /any/plan-keeper/scripts/plan_keeper_cli.py"
+        )
+
+    def test_rejects_other_script_with_token_in_args(self) -> None:
+        self.assert_no_match(
+            "python3 /a/b/other_script.py /plan-keeper/scripts/plan_keeper_cli.py"
+        )
+
+    def test_rejects_python3_version(self) -> None:
+        self.assert_no_match("python3 --version")
+
+    def test_rejects_missing_scripts_segment(self) -> None:
+        self.assert_no_match(
+            "python3 /a/b/plan-keeper/plan_keeper_cli.py list"
+        )
+
+    def test_rejects_missing_plan_keeper_segment(self) -> None:
+        self.assert_no_match(
+            "python3 /a/b/scripts/plan_keeper_cli.py list"
+        )
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
