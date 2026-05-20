@@ -1,6 +1,6 @@
 ---
 name: plan-do
-description: Use when the user asks to work on a saved plan, do a plan, implement a plan, execute a plan, or pick up a plan to work on. Lists plans for the current repo from ~/plans/<repo>/, lets the user pick one, classifies the plan as idea / spec / sequential implementation plan / task-list-shaped, and suggests the matching next skill (superpowers:brainstorming, superpowers:writing-plans, superpowers:executing-plans, or harness:task-list-builder).
+description: Use when the user asks to work on a saved plan, do a plan, implement a plan, execute a plan, pick up a plan to work on, or resume a plan from disk.
 ---
 
 # plan-do
@@ -20,21 +20,12 @@ Follow these steps in order. Do not skip steps.
 
 ### 1. Determine `<repo>`
 
-Use the same logic as `plan-save`:
-
-**First, check the user's invocation for an explicit override.** Patterns:
+Follow the algorithm in [../../repo-derivation.md](../../repo-derivation.md). Override phrases to recognize in this skill's invocation:
 
 - "do a plan from `<name>`"
 - "plan-do `<name>`"
 - "pick a plan from `<name>`"
 - "in the `<name>` folder/bucket"
-
-If an override is present, normalize `<name>` lightly: lowercase, replace whitespace with `-`, and otherwise preserve as-is. **Underscores and existing hyphens are preserved** so repo names like `herds_mobile_app` and `temporal_cloak` round-trip exactly.
-
-**Otherwise, auto-derive — use the result verbatim, do NOT slugify:**
-
-1. Run `git remote get-url origin 2>/dev/null`. If it succeeds, take `basename "$URL" .git`. Use the result as-is.
-2. If no git remote, fall back to `basename "$PWD"`, also verbatim.
 
 ### 2. List the plans
 
@@ -126,4 +117,3 @@ If the user wants to steer manually, just stop the skill here. The plan is read 
 
 - This skill is read-only against `~/plans/` — it never modifies, moves, or deletes plans. Sibling skill `plan-done` is responsible for archiving completed plans.
 - The classification distinguishes _sequential_ implementation plans (linear, review-gated) from _task-list-shaped_ plans (parallel, dispatched). Same vocabulary ("phase", "task") can appear in both — the discriminating signal is task **independence**, not the words used.
-- The override in step 1 also serves as an escape hatch: if `git remote get-url origin` returns a name that doesn't have a `~/plans/` folder, the user can name the destination explicitly.

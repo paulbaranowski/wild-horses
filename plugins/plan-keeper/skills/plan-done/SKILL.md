@@ -1,6 +1,6 @@
 ---
 name: plan-done
-description: Use when the user finishes a plan, marks a plan done, archives a plan, says "I'm done with the plan", or asks to clear a completed plan. Moves the chosen plan from ~/plans/<repo>/<file>.md to ~/plans/<repo>/done/<file>.md and appends a one-line completion stamp at the bottom of the file.
+description: Use when the user finishes a plan, marks a plan done, archives a plan, says "I'm done with the plan", or asks to clear a completed plan.
 ---
 
 # plan-done
@@ -13,21 +13,12 @@ Follow these steps in order. Do not skip steps.
 
 ### 1. Determine `<repo>`
 
-Use the same logic as `plan-save` and `plan-do`:
-
-**First, check the user's invocation for an explicit override.** Patterns:
+Follow the algorithm in [../../repo-derivation.md](../../repo-derivation.md). Override phrases to recognize in this skill's invocation:
 
 - "done with the `<name>` plan"
 - "plan-done `<name>`"
 - "archive the plan in `<name>`"
 - "in the `<name>` folder/bucket"
-
-If an override is present, normalize `<name>` lightly: lowercase, replace whitespace with `-`, and otherwise preserve as-is. **Underscores and existing hyphens are preserved** so repo names like `herds_mobile_app` and `temporal_cloak` round-trip exactly.
-
-**Otherwise, auto-derive — use the result verbatim, do NOT slugify:**
-
-1. Run `git remote get-url origin 2>/dev/null`. If it succeeds, take `basename "$URL" .git`. Use the result as-is.
-2. If no git remote, fall back to `basename "$PWD"`, also verbatim.
 
 ### 2. Identify the plan to archive
 
@@ -73,7 +64,7 @@ Do not auto-resolve collisions silently.
 
 ### 5. Append the completion stamp
 
-Before moving the file, append two lines to its body:
+Append a completion stamp to the plan body. The stamp looks like this, separated from the existing content by exactly one blank line:
 
 ```text
 
@@ -81,9 +72,14 @@ Before moving the file, append two lines to its body:
 *Completed: YYYY-MM-DD*
 ```
 
-That is: a blank line, then a horizontal rule (`---`), then the italicized completion stamp. Use `date +%Y-%m-%d` for today's date in the user's local timezone.
+Implementation:
 
-Implementation: `Read` the file, append the stamp to the content, `Write` the file back with the new content. Then proceed to step 6.
+1. `Read` the file.
+2. Strip trailing whitespace and newlines from its content.
+3. Append the literal `\n\n---\n*Completed: YYYY-MM-DD*\n` (use `date +%Y-%m-%d` for today's date in the user's local timezone).
+4. `Write` the result back to the file.
+
+Step 2 is load-bearing — without it, a file that ends mid-line lets Markdown parse the last line as a setext-H2 heading underlined by `---`. Then proceed to step 6.
 
 ### 6. Move the file
 
@@ -112,4 +108,3 @@ Tell the user the new absolute path. One line is enough:
 - This skill is the only `plan-*` skill that mutates the `~/plans/` tree by moving files. `plan-save` creates; `plan-do` reads only.
 - The completion stamp uses a horizontal rule + italic to render cleanly when the archived plan is viewed in any markdown reader, without disturbing the original plan body.
 - Archived plans live in `~/plans/<repo>/done/`. `plan-do`'s listing uses `ls -1 ~/plans/<repo>/*.md`, which only matches direct children of the repo dir — so `done/` files are correctly excluded from the active-plans list without `plan-do` needing to know about archival.
-- The override in step 1 also serves as an escape hatch: if `git remote get-url origin` returns a name that doesn't have a `~/plans/` folder, the user can name the destination explicitly.
