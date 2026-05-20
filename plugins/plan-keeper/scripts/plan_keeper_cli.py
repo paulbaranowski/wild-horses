@@ -685,6 +685,114 @@ def linear_viewer(api_key: str) -> dict:
     return resp["data"]["viewer"]
 
 
+def _linear_paginated(
+    api_key: str,
+    query: str,
+    root_key: str,
+    transform_node,
+) -> list[dict]:
+    """Run a paginated Linear query and concatenate transformed nodes.
+
+    Args:
+        api_key: Linear API key.
+        query: GraphQL query string expecting `$after: String` variable and
+               returning a `<root_key>(first: 100, after: $after) { nodes ...,
+               pageInfo { endCursor hasNextPage } }` shape.
+        root_key: The top-level field name (e.g., "teams", "projects").
+        transform_node: callable(node_dict) -> transformed_dict.
+
+    Returns the concatenated list of transformed nodes across all pages.
+    """
+    all_nodes: list[dict] = []
+    after: Optional[str] = None
+    while True:
+        resp = http_post_json(
+            LINEAR_GRAPHQL_URL,
+            {"query": query, "variables": {"after": after}},
+            {"Authorization": api_key},
+        )
+        if "errors" in resp:
+            raise PlanKeeperCliError(f"Linear API error: {resp['errors']}", code=5)
+        section = resp["data"][root_key]
+        all_nodes.extend(transform_node(n) for n in section["nodes"])
+        page_info = section["pageInfo"]
+        if not page_info["hasNextPage"]:
+            break
+        after = page_info["endCursor"]
+    return all_nodes
+
+
+def linear_teams(api_key: str) -> list[dict]:
+    query = (
+        "query Teams($after: String) {"
+        "  teams(first: 100, after: $after) {"
+        "    nodes { id name }"
+        "    pageInfo { endCursor hasNextPage }"
+        "  }"
+        "}"
+    )
+    return _linear_paginated(api_key, query, "teams", lambda n: {"id": n["id"], "name": n["name"]})
+
+
+def linear_projects(api_key: str) -> list[dict]:
+    query = (
+        "query Projects($after: String) {"
+        "  projects(first: 100, after: $after) {"
+        "    nodes { id name teams(first: 10) { nodes { id } } }"
+        "    pageInfo { endCursor hasNextPage }"
+        "  }"
+        "}"
+    )
+    return _linear_paginated(
+        api_key,
+        query,
+        "projects",
+        lambda n: {
+            "id": n["id"],
+            "name": n["name"],
+            "teamIds": [t["id"] for t in n["teams"]["nodes"]],
+        },
+    )
+
+
+def linear_labels(api_key: str) -> list[dict]:
+    query = (
+        "query Labels($after: String) {"
+        "  issueLabels(first: 100, after: $after) {"
+        "    nodes { id name team { id } }"
+        "    pageInfo { endCursor hasNextPage }"
+        "  }"
+        "}"
+    )
+    return _linear_paginated(
+        api_key,
+        query,
+        "issueLabels",
+        lambda n: {
+            "id": n["id"],
+            "name": n["name"],
+            "teamId": n["team"]["id"] if n.get("team") else None,
+        },
+    )
+
+
+def linear_users(api_key: str) -> list[dict]:
+    query = (
+        "query Users($after: String) {"
+        "  users(first: 100, after: $after) {"
+        "    nodes { id name email }"
+        "    pageInfo { endCursor hasNextPage }"
+        "  }"
+        "}"
+    )
+    return _linear_paginated(
+        api_key,
+        query,
+        "users",
+        lambda n: {"id": n["id"], "name": n["name"], "email": n["email"]},
+    )
+
+
 def cmd_ticket_api(args) -> int:
     """Dispatch ticket-api subcommands.
 
@@ -694,7 +802,10 @@ def cmd_ticket_api(args) -> int:
     if args.name == "linear":
         impl = {
             "viewer": lambda: linear_viewer(args.api_key),
-            # other kinds added in subsequent tasks
+            "teams": lambda: linear_teams(args.api_key),
+            "projects": lambda: linear_projects(args.api_key),
+            "labels": lambda: linear_labels(args.api_key),
+            "users": lambda: linear_users(args.api_key),
         }
     else:  # jira
         impl = {}  # filled in Phase C

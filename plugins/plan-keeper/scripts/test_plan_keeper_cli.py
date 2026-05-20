@@ -878,5 +878,87 @@ class TestTicketApiLinearViewer(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 4)
 
 
+class TestTicketApiLinearLists(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+
+    def _mock_response(self, body: dict):
+        m = MagicMock()
+        m.__enter__ = MagicMock(return_value=m)
+        m.__exit__ = MagicMock(return_value=False)
+        m.status = 200
+        m.read = MagicMock(return_value=json.dumps(body).encode("utf-8"))
+        return m
+
+    def test_teams_returns_node_array(self) -> None:
+        response = {"data": {"teams": {
+            "nodes": [{"id": "t1", "name": "Engineering"}, {"id": "t2", "name": "Design"}],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        with patch("urllib.request.urlopen", return_value=self._mock_response(response)):
+            result = self.cli.linear_teams(api_key="k")
+        self.assertEqual(result, [
+            {"id": "t1", "name": "Engineering"},
+            {"id": "t2", "name": "Design"},
+        ])
+
+    def test_teams_paginates_multiple_pages(self) -> None:
+        page1 = {"data": {"teams": {
+            "nodes": [{"id": "t1", "name": "Engineering"}],
+            "pageInfo": {"endCursor": "cur1", "hasNextPage": True},
+        }}}
+        page2 = {"data": {"teams": {
+            "nodes": [{"id": "t2", "name": "Design"}],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[self._mock_response(page1), self._mock_response(page2)],
+        ) as mock_open:
+            result = self.cli.linear_teams(api_key="k")
+        self.assertEqual(len(result), 2)
+        self.assertEqual(mock_open.call_count, 2)
+        # Second call should pass after=cur1 in its variables.
+        second_call_body = json.loads(mock_open.call_args_list[1][0][0].data)
+        self.assertEqual(second_call_body["variables"]["after"], "cur1")
+
+    def test_projects_includes_team_ids(self) -> None:
+        response = {"data": {"projects": {
+            "nodes": [{
+                "id": "p1",
+                "name": "Backend",
+                "teams": {"nodes": [{"id": "t1"}, {"id": "t2"}]},
+            }],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        with patch("urllib.request.urlopen", return_value=self._mock_response(response)):
+            result = self.cli.linear_projects(api_key="k")
+        self.assertEqual(result, [{"id": "p1", "name": "Backend", "teamIds": ["t1", "t2"]}])
+
+    def test_labels_preserves_optional_team_scope(self) -> None:
+        response = {"data": {"issueLabels": {
+            "nodes": [
+                {"id": "l1", "name": "plan", "team": None},  # workspace-wide
+                {"id": "l2", "name": "bug",  "team": {"id": "t1"}},  # team-scoped
+            ],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        with patch("urllib.request.urlopen", return_value=self._mock_response(response)):
+            result = self.cli.linear_labels(api_key="k")
+        self.assertEqual(result, [
+            {"id": "l1", "name": "plan", "teamId": None},
+            {"id": "l2", "name": "bug", "teamId": "t1"},
+        ])
+
+    def test_users_returns_name_and_email(self) -> None:
+        response = {"data": {"users": {
+            "nodes": [{"id": "u1", "name": "Paul", "email": "p@x.com"}],
+            "pageInfo": {"endCursor": None, "hasNextPage": False},
+        }}}
+        with patch("urllib.request.urlopen", return_value=self._mock_response(response)):
+            result = self.cli.linear_users(api_key="k")
+        self.assertEqual(result, [{"id": "u1", "name": "Paul", "email": "p@x.com"}])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
