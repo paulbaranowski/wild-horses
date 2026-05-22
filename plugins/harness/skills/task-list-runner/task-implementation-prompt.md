@@ -4,9 +4,11 @@ The CLI lives in the harness plugin cache (`${CLAUDE_PLUGIN_ROOT}/skills/task-li
 
 **ABSOLUTE RULE — verification:** Run verification ONLY via `task_list_cli.py verify --id <N>`. **Don't call `bash verify.sh` directly.** **Don't call `make verify` directly.** **Don't run `make test` directly.** **Don't run `pytest` / `npx tsc` / `uv run …` / any `verifySteps` command directly.** The CLI's `verify` subcommand IS the contract; it captures step output to per-step log files and stops on first failure. Project-level wrappers (`verify.sh`, `make verify`, `make test`) are not shortcuts to the CLI — they're _what the CLI calls under the hood_, and bypassing the CLI loses the per-step log capture, the stop-on-first-failure ordering, and the schema-defined `verifySteps` resolution that selects per-task vs top-level steps.
 
+**ABSOLUTE RULE — your task verb is `next`, not `get` or `list`.** Use `next` to claim and read your task. **Don't call `get --id <N>`** to read your own task. **Don't call `list`** to read your own task. `get` and `list` exist for the runner's own bookkeeping, not yours; what `next` returns is what you need.
+
 You are implementing one task from a structured task list. The CLI's read verbs split by _what_ you're reading: `get --id <N>` and `next` return per-task objects; `list` returns the full task array; `status` returns file-level metadata (counts, the precomputed `remaining` integer, `plan`); `remaining` returns the compact non-terminal display array; `verify --id <N>` _executes_ the task's verifications, naming each running step in the `verify[i/n] <slug> ...` lines on stdout. There is no "get any field by name" verb.
 
-**You are responsible for: claim → implement → verify → stage → draft. You are NOT responsible for: validating `agentValidations`, committing the change, or marking the task complete.** The runner orchestrates a separate validation agent (read-only, fresh context) after you return, and resolves the draft via `publish` (success) or `set-status failed` (failure). This split is structural — the runtime forbids depth-2 subagent dispatch, so validation MUST happen at the runner level, not from inside this agent.
+**You are responsible for: claim → implement → verify → stage → draft. You are NOT responsible for: running the validation phase, committing the change, or marking the task complete.** The runner orchestrates a separate validation agent (read-only, fresh context) after you return, and resolves the draft via `publish` (success) or `set-status failed` (failure). This split is structural — the runtime forbids depth-2 subagent dispatch, so validation MUST happen at the runner level, not from inside this agent.
 
 **Step 1 — Claim and read your task:**
 
@@ -15,9 +17,14 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" \
     --file TASK_FILE_PATH next
 ```
 
-The output is the full task object — note the `id` and read `what`, `resolves`, and `agentValidations`. (`next` atomically claims the first pending task and flips it to `in-progress`, or returns an already-in-progress task unchanged if a previous iteration crashed mid-task. If `next` exits 11, a previously drafted task needs to be resolved first — exit cleanly and surface the error; the runner will handle it.) If the command exits with code 14, no work remains — exit cleanly.
+The output is the task object — note the `id` and read `what` and `resolves` to understand the change. `next` atomically claims the first pending task and flips it to `in-progress`, or returns an already-in-progress task unchanged if a previous iteration crashed mid-task. If `next` exits 11, a previously drafted task needs to be resolved first — exit cleanly and surface the error; the runner will handle it. If the command exits with code 14, no work remains — exit cleanly.
 
-Implement the change. Read `agentValidations` so you know what the validation agent will check, but **do not evaluate it yourself** — that's the runner's responsibility via a separate Explore agent after you return.
+Implement the change.
+
+Never do these when writing source comments:
+
+- **Don't include ticket IDs, task numbers, or "Option N" references in source comments** (e.g., `# CAT-66233 / task 33`, `# Option B`, `# Phase 2`). Those identifiers belong in the commit subject (`draft --commit-msg` captures it) and the PR description.
+- **Don't write before/after history narratives in source comments** (e.g., "previously X happened, now we Y", "the original silent-failure mode was Z", "this used to call the legacy helper"). Source comments document the present-tense invariant; history belongs in the commit log, which `git blame` and `git log -p <file>` already make queryable for the reader who actually needs it.
 
 **Step 2 — Run verification:**
 
@@ -39,7 +46,7 @@ EOF
 
 Never do these during verification:
 
-- **Don't run `verifySteps` commands to "double-check" `agentValidations`.** The runner's validation agent works by code inspection, not by re-running commands the schema forbids in `agentValidations`. Running steps by hand splits your verification rhythm, burns budget, and is the exact duplicate-work pattern this prompt structure prevents. (The top-of-prompt ABSOLUTE RULE bans direct `pytest`/`npx tsc`/`uv run`/`make verify`/`bash verify.sh` invocations regardless of motivation; this bullet pre-rebuts the specific motivation of "I'll re-run the tests to confirm `agentValidations` myself.")
+- **Don't run `verifySteps` commands by hand to "double-check" after `verify` already passed.** Running steps by hand splits your verification rhythm, burns budget, and is the exact duplicate-work pattern this prompt structure prevents. The top-of-prompt ABSOLUTE RULE bans direct `pytest`/`npx tsc`/`uv run`/`make verify`/`bash verify.sh` invocations regardless of motivation; this bullet pre-rebuts the specific motivation of "I'll re-run the tests one more time just to be sure."
 - **Don't permute redirection flags** on the same command hoping for clearer output (`| head -50` → `2>&1` → drop `2>&1` → repeat). The CLI's redirection is canonical; the answer is in the log file. If the log is unclear, `Read` more of it — don't re-run.
 - **Don't invent additional verification commands** beyond what `verify` runs. If a step you need is missing, that's a bug in the task file, not something to paper over with shell improvisation.
 

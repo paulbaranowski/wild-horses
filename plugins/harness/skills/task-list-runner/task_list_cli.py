@@ -187,6 +187,21 @@ def find_task(data: dict, task_id: int, file_path: Path) -> dict:
     raise TaskCliError(f"task id {task_id} not found in {file_path}", code=10)
 
 
+def _redact_for_implementer(task: dict) -> dict:
+    """Return a copy of the task with the validator-only fields removed.
+
+    `agentValidations` is the validator's checklist — letting the
+    implementation agent read it invited padding source comments with
+    "context to satisfy the validator" instead of writing present-tense
+    invariants. The runner reads the unredacted task via `get --id <N>`
+    and passes `agentValidations` to the read-only validation agent
+    after the implementer returns; only `next` (the implementer's claim
+    verb) redacts on output. The on-disk file is unchanged — redaction
+    happens at print time, not at write time.
+    """
+    return {k: v for k, v in task.items() if k != "agentValidations"}
+
+
 def _read_log_input(log_arg: str) -> str:
     """Resolve the `--log-file` argument to its UTF-8 string contents.
 
@@ -602,14 +617,14 @@ def cmd_next(args: argparse.Namespace, data: dict, path: Path) -> None:
     # finish what it started.
     for task in tasks:
         if task["status"] == "in-progress":
-            print(json.dumps(task, indent=2, ensure_ascii=False))
+            print(json.dumps(_redact_for_implementer(task), indent=2, ensure_ascii=False))
             return
     # No in-progress: claim the first pending task and flip it.
     for task in tasks:
         if task["status"] == "pending":
             task["status"] = "in-progress"
             write_atomic(path, data)
-            print(json.dumps(task, indent=2, ensure_ascii=False))
+            print(json.dumps(_redact_for_implementer(task), indent=2, ensure_ascii=False))
             return
     raise TaskCliError("no remaining tasks", code=14)
 
@@ -687,7 +702,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser(
         "next",
-        help="atomically claim and print the next task (resume in-progress, else flip first pending → in-progress)",
+        help="atomically claim and print the next task (resume in-progress, else flip first pending → in-progress). "
+        "Output omits `agentValidations` by design — `get` returns the full object for the runner's validator dispatch.",
     )
 
     sub.add_parser(
