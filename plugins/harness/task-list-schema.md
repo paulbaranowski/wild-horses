@@ -74,7 +74,7 @@ A minimal valid file lives at `skills/task-list-builder/example.json`.
 - `what` — specific change: files to modify, structures to create, patterns to fix.
 - `resolves` — array of `file:line` strings linking the task back to the findings it addresses. Repo-relative paths only.
 - `effort` — `"low" | "medium" | "high"`.
-- `createsNewCode` — `true` if the intervention creates new callable code (functions, classes, methods, services, models, protocols), `false` if it only restructures, annotates, or documents existing code. **Determines whether a paired test task is generated** (see "Paired test tasks" below).
+- `createsNewCode` — **this is the flag that controls paired-test-task generation.** Set to `true` whenever the task needs a paired `"Write tests for …"` task: it creates new callable code (functions, classes, methods, services, models, protocols) **OR** modifies the observable behavior of existing code (bug fixes, changed logic, changed return shape, changed error handling, changed side effects — anything a test could catch a regression in). Set to `false` only for pure refactors with no behavior change (extracting a helper the existing tests already cover, rename, reformat), annotation-only, documentation-only, and config-only tasks. When in doubt, set to `true`. See "Paired test tasks" below for the decision table.
 - `agentValidations` — input array for the per-task validation prompt. After the runner executes `verifySteps` (the test / lint / typecheck commands), it dispatches a fresh-context validation subagent and passes this array as the list of statements for the subagent to evaluate by reading code. Each entry is one factual statement about the post-change code state; the subagent confirms it PASS or FAIL with `file:line` evidence. The schema-level rule for what belongs here is structural, not stylistic: **if you can write a shell command that answers the question, it belongs in `verifySteps`, not here**. The validation subagent has no way to evaluate command-answerable conditions except by re-running the commands `verifySteps` already ran (the duplicate-work pattern this design exists to prevent) or by rubber-stamping the result, so entries like `"Tests pass"`, `"No type errors"`, `"No lint errors"`, or `"Compiles"` are forbidden. Use this for facts only inspection can confirm: structural facts (`"validate_session is defined at module scope in src/auth/middleware.py"`), behavioral facts visible in code (``"`AuthMiddleware.__call__` delegates token validation to `validate_session`"``), or documentation facts (`"module docstring lists validate_session under the public API"`). Avoid vague entries like `"looks good"` or `"code is clean"` — the subagent reports `file:line` evidence, so each entry must have an inspectable target.
 - `status` — `"pending" | "in-progress" | "drafted" | "complete" | "failed"`. New tasks always start as `"pending"`. See "State transitions" below.
 - `log` — `null` when pending; a string describing what was done (or what went wrong) when in-progress / drafted / complete / failed.
@@ -142,7 +142,16 @@ For every task with `createsNewCode: true`, the **next** task in the array must 
 - `effort: "low"`.
 - `agentValidations` includes something like `"Test file follows project test conventions"` and `"At least N test cases covering …"` — inspection-verifiable structural facts about the test file the validation subagent confirms by reading the test file. **Don't include "Tests pass"** — the `tests` verifyStep covers that; duplicating it would tempt the validation subagent to run the suite itself, which is the duplicate-work pattern the design prevents.
 
-Tasks with `createsNewCode: false` (annotation-only or restructuring-only) do **not** get a paired test task — they are verified by their own `agentValidations` entries.
+`createsNewCode` is the single flag that drives this rule. The decision table for what to set it to:
+
+| Task shape                                                                                                                     | `createsNewCode` | Why                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------ | ---------------- | ------------------------------------------------------- |
+| Creates new callable code (new function, class, method, service, model, protocol)                                              | `true`           | New code is new behavior; needs a test.                 |
+| Modifies existing code's behavior (bug fix, changed logic, changed return shape, changed error handling, changed side effects) | `true`           | Behavior change a test could catch a regression in.     |
+| Pure refactor with no behavior change (extracting a helper the existing tests already cover, rename, reformat)                 | `false`          | Existing tests are the safety net.                      |
+| Annotation-only / documentation-only / config-only                                                                             | `false`          | The task's own `agentValidations` are the verification. |
+
+When in doubt, set `createsNewCode: true` and pair the test task: the cost of an unnecessary test task is small; the cost of a silent regression is large.
 
 ## Path conventions
 
