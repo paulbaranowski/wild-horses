@@ -724,6 +724,67 @@ class CliTestCase(unittest.TestCase):
         # Task 1 must still be pending — no claim happened
         self.assertEqual(self.read_task_file()["tasks"][0]["status"], "pending")
 
+    def test_next_output_omits_agent_validations(self):
+        # Structural guarantee: the implementer agent never sees
+        # `agentValidations` (the validator's checklist). Both code paths
+        # of `next` — resume an in-progress task and claim a pending one —
+        # must redact. Resume path uses the fixture's already-in-progress
+        # task 2; claim path drops task 2 to pending so task 1 is the
+        # first pending and gets claimed.
+        result = self.run_cli("next")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        resumed = json.loads(result.stdout)
+        self.assertNotIn(
+            "agentValidations",
+            resumed,
+            "`next` (resume path) must redact agentValidations from output",
+        )
+
+        data = fixture_data()
+        data["tasks"][1]["status"] = "pending"
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        result = self.run_cli("next")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        claimed = json.loads(result.stdout)
+        self.assertNotIn(
+            "agentValidations",
+            claimed,
+            "`next` (claim path) must redact agentValidations from output",
+        )
+
+    def test_next_preserves_agent_validations_on_disk(self):
+        # Redaction is at print time, not write time — the on-disk file
+        # keeps `agentValidations` so the runner's later `get --id <N>`
+        # call can pass it to the validation agent.
+        data = fixture_data()
+        data["tasks"][1]["status"] = "pending"
+        self.task_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        result = self.run_cli("next")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        on_disk = self.read_task_file()["tasks"][0]
+        self.assertEqual(on_disk["id"], 1)
+        self.assertEqual(on_disk["status"], "in-progress")
+        self.assertEqual(
+            on_disk["agentValidations"],
+            ["it works"],
+            "the file on disk must still carry agentValidations after `next` claims a task",
+        )
+
+    def test_get_still_returns_agent_validations(self):
+        # The redaction is `next`-only; `get` is the runner's verb for
+        # validator dispatch and must return the full object. Pinned so a
+        # future "let's redact everywhere for safety" change can't silently
+        # break the runner's Phase 4 step 7 read.
+        result = self.run_cli("get", "--id", "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task = json.loads(result.stdout)
+        self.assertIn(
+            "agentValidations",
+            task,
+            "`get` must return the full task object including agentValidations",
+        )
+        self.assertEqual(task["agentValidations"], ["it works"])
+
     def test_next_claims_pending_when_no_in_progress(self):
         # Mutate fixture: drop task 2 to pending so only pending tasks remain
         data = fixture_data()
