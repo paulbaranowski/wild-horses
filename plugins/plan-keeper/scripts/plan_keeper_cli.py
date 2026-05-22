@@ -14,6 +14,7 @@ import base64
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -138,6 +139,28 @@ def validate_repo_name(name: str) -> str:
     return name
 
 
+_EXTENSION_RE = re.compile(r"^[a-z0-9]+$")
+
+
+def validate_extension(ext: str) -> str:
+    """Normalize and validate a file-extension argument.
+
+    Strips a single leading dot, then requires `^[a-z0-9]+$`. Stricter
+    than `validate_repo_name` because file extensions have a narrower
+    convention: a single token of lowercase alphanumerics. Dots inside
+    the value, uppercase, whitespace, slashes, etc., would either let
+    the caller smuggle additional path components or produce surprising
+    filenames like `*.MD.bak`.
+    """
+    if ext.startswith("."):
+        ext = ext[1:]
+    if not _EXTENSION_RE.match(ext):
+        raise PlanKeeperCliError(
+            f"invalid extension {ext!r}: must match [a-z0-9]+", code=2,
+        )
+    return ext
+
+
 def derive_repo(override: Optional[str], cwd: Optional[str] = None) -> str:
     """Resolve <repo> per repo-derivation.md."""
     if override:
@@ -254,7 +277,13 @@ def find_unused_suffix(target: Path) -> Path:
 
 
 def list_plans(repo: str, state: str) -> list[Path]:
-    """Return sorted plans for a repo in a given state, newest-first."""
+    """Return sorted plans for a repo in a given state, newest-first.
+
+    Includes any non-dotfile in the directory regardless of extension —
+    plan-save accepts arbitrary extensions (e.g. paired .json + .md from
+    task-list-builder), so list must surface them. Dotfiles are excluded
+    to keep the per-repo `.plankeeper.json` config out of the listing.
+    """
     base = repo_dir(repo)
     if state == "active":
         d = base
@@ -266,7 +295,7 @@ def list_plans(repo: str, state: str) -> list[Path]:
         raise PlanKeeperCliError(f"unknown state: {state}", code=2)
     if not d.exists():
         return []
-    files = [p for p in d.iterdir() if p.is_file() and p.suffix == ".md"]
+    files = [p for p in d.iterdir() if p.is_file() and not p.name.startswith(".")]
     files.sort(key=lambda p: p.name, reverse=True)
     return files
 
@@ -349,28 +378,19 @@ def cmd_list_repos(args) -> int:
     del args
     if not PLAN_ROOT.exists():
         return 0
+    def _count(d: Path) -> int:
+        if not d.exists():
+            return 0
+        return sum(
+            1 for p in d.iterdir() if p.is_file() and not p.name.startswith(".")
+        )
+
     for entry in sorted(PLAN_ROOT.iterdir()):
         if not entry.is_dir() or entry.name.startswith("."):
             continue
-        active = sum(
-            1 for p in entry.iterdir() if p.is_file() and p.suffix == ".md"
-        )
-        done_dir = entry / "done"
-        done = (
-            sum(1 for p in done_dir.iterdir() if p.is_file() and p.suffix == ".md")
-            if done_dir.exists()
-            else 0
-        )
-        deferred_dir = entry / "deferred"
-        deferred = (
-            sum(
-                1
-                for p in deferred_dir.iterdir()
-                if p.is_file() and p.suffix == ".md"
-            )
-            if deferred_dir.exists()
-            else 0
-        )
+        active = _count(entry)
+        done = _count(entry / "done")
+        deferred = _count(entry / "deferred")
         if active == 0 and done == 0 and deferred == 0:
             continue
         parts = []
@@ -386,26 +406,83 @@ def cmd_list_repos(args) -> int:
 
 def cmd_save(args) -> int:
     repo = derive_repo(args.override)
-    slug = slugify_topic(args.topic)
-    if not slug:
-        raise PlanKeeperCliError(
-            f"topic {args.topic!r} slugified to empty string", code=2
+
+    # Two distinct shapes, picked by whether --from-path is given:
+    #
+    #   1. Heredoc shape (no --from-path): body comes from stdin, name is
+    #      constructed as <date>-<slug>.<ext> from --topic + --extension (+ --date).
+    #      --topic is required; --extension defaults to 'md'.
+    #
+    #   2. Disk shape (--from-path is given): file is moved byte-for-byte and
+    #      keeps its source basename verbatim. --topic / --extension / --date
+    #      have no meaning here and are rejected — the source filename already
+    #      encodes everything the target needs (e.g. task-list-builder's
+    #      <date>-<runid>-<short>.<slug>.{json,md}). Always a move (not a copy):
+    #      the realistic workflow is relocating an already-on-disk artifact,
+    #      and leaving stale duplicates behind is just confusion.
+    if args.from_path:
+        for flag, value in (
+            ("--topic", args.topic),
+            ("--extension", args.extension),
+            ("--date", args.date),
+        ):
+            if value is not None:
+                raise PlanKeeperCliError(
+                    f"{flag} is incompatible with --from-path "
+                    "(--from-path preserves the source basename verbatim); "
+                    f"drop {flag} or drop --from-path",
+                    code=2,
+                )
+        source = Path(args.from_path)
+        if not source.exists():
+            raise PlanKeeperCliError(f"source not found: {source}", code=3)
+        if not source.is_file():
+            raise PlanKeeperCliError(f"source is not a file: {source}", code=3)
+        target = repo_dir(repo) / source.name
+    else:
+        source = None
+        if args.topic is None:
+            raise PlanKeeperCliError(
+                "--topic is required (unless --from-path is given, in which "
+                "case the source basename is used and --topic is rejected)",
+                code=2,
+            )
+        slug = slugify_topic(args.topic)
+        if not slug:
+            raise PlanKeeperCliError(
+                f"topic {args.topic!r} slugified to empty string", code=2
+            )
+        ext = validate_extension(args.extension) if args.extension is not None else "md"
+        date_str = (
+            parse_date_arg(args.date) if args.date else date.today().isoformat()
         )
-    date_str = parse_date_arg(args.date) if args.date else date.today().isoformat()
-    target = repo_dir(repo) / f"{date_str}-{slug}.md"
+        target = repo_dir(repo) / f"{date_str}-{slug}.{ext}"
 
     if target.exists():
         if args.on_collision == "fail":
+            # Critical: emit BEFORE any source mutation, so a `--move-source`
+            # caller can safely retry without losing the source file.
             emit_collision(target)
             return 2
         if args.on_collision == "suffix":
             target = find_unused_suffix(target)
         # "overwrite" → fall through
 
-    content = sys.stdin.read()
-    if not content.endswith("\n"):
-        content += "\n"
-    write_atomic(target, content)
+    if source is not None:
+        # File already exists on disk — relocate it byte-for-byte, preserving
+        # mtime/permissions and avoiding the trailing-newline normalization
+        # that write_atomic applies. shutil.move uses os.rename when src and
+        # dst are on the same filesystem (a single atomic syscall), and falls
+        # back to copy2 + unlink across filesystems.
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(target))
+    else:
+        # Heredoc / piped input — write_atomic normalizes a missing trailing
+        # newline because shell heredocs and pasted text can end mid-line.
+        content = sys.stdin.read()
+        if not content.endswith("\n"):
+            content += "\n"
+        write_atomic(target, content)
     print(target)
     return 0
 
@@ -1474,15 +1551,33 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_save = sub.add_parser(
         "save",
-        help="write plan body (stdin) to ~/plans/<repo>/<date>-<slug>.md",
+        help="write body (stdin) to ~/plans/<repo>/<date>-<slug>.<ext>",
     )
     p_save.add_argument("--override", help="explicit override for <repo>")
     p_save.add_argument(
-        "--topic", required=True, help="topic string (will be slugified)"
+        "--topic",
+        help="topic string (will be slugified). Required for the heredoc shape; "
+        "rejected when --from-path is given (the source basename is used).",
     )
     p_save.add_argument(
         "--date",
-        help="YYYY-MM-DD date prefix (default: today)",
+        help="YYYY-MM-DD date prefix for the heredoc shape (default: today). "
+        "Rejected when --from-path is given.",
+    )
+    p_save.add_argument(
+        "--extension",
+        help="file extension for the heredoc shape (default: 'md'). Accepts "
+        "'json', '.json', 'yaml', etc. Must match [a-z0-9]+ after stripping an "
+        "optional leading dot. Rejected when --from-path is given.",
+    )
+    p_save.add_argument(
+        "--from-path",
+        help="move an existing on-disk file into ~/plans/<repo>/ instead of "
+        "reading the body from stdin. The target keeps the source basename "
+        "verbatim — --topic/--extension/--date are rejected. The source is "
+        "only unlinked if the target write succeeded (collisions leave it in "
+        "place, so retrying is safe). Used for task-list-builder output in "
+        "docs/exec-plans/active/.",
     )
     p_save.add_argument(
         "--on-collision",
