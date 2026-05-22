@@ -49,7 +49,7 @@ flowchart TD
 
     P2["Phase 2 — Discover verifySteps<br/>typecheck + tests, sourced from<br/>CLAUDE.md / package.json /<br/>pyproject.toml"]
     P2 --> P3["Phase 3 — Compute paths<br/>docs/exec-plans/active/<br/>&lt;date&gt;-&lt;run-id&gt;-&lt;desc&gt;.&lt;slug&gt;.{json,md}"]
-    P3 --> P4["Phase 4 — Build tasks<br/>sequential ids · paired test task<br/>after every createsNewCode:true ·<br/>agentValidations · per-task<br/>verifySteps when report supplies them"]
+    P3 --> P4["Phase 4 — Build tasks<br/>sequential ids · paired test task<br/>after every createsNewCode:true<br/>(new code OR behavior change) ·<br/>agentValidations · per-task<br/>verifySteps when report supplies them"]
     P4 --> P5{"Phase 5 — Preview<br/>to user"}
     P5 -->|cancel| Stop([Stop, no files written])
     P5 -->|edit| P4
