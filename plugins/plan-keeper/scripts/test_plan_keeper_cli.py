@@ -220,6 +220,218 @@ class TestSave(IsolatedHomeTestCase):
         written = Path(r2.stdout.strip())
         self.assertEqual(written.read_text(), "second\n")
 
+    def test_extension_json(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "task list",
+            "--extension", "json",
+            stdin='{"tasks": []}\n',
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        today = date.today().isoformat()
+        expected = self.plans_root / "scratch" / f"{today}-task-list.json"
+        self.assertEqual(r.stdout.strip(), str(expected))
+        self.assertEqual(expected.read_text(), '{"tasks": []}\n')
+
+    def test_extension_accepts_leading_dot(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "yaml file",
+            "--extension", ".yaml",
+            stdin="key: value\n",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.strip().endswith(".yaml"))
+
+    def test_extension_defaults_to_md(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "no ext flag",
+            stdin="# Plan\n",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.strip().endswith(".md"))
+
+    def test_extension_rejects_path_separator(self) -> None:
+        for bad in ("md/evil", "..", ".", "", "MD", "md.bak", "json gz"):
+            r = run_cli(
+                "save", "--override", "scratch", "--topic", "x",
+                "--extension", bad,
+                stdin="x\n",
+                home=self.home,
+            )
+            self.assertEqual(r.returncode, 2, f"extension {bad!r} should be rejected")
+            self.assertIn("invalid extension", r.stderr)
+
+    def test_paired_save_matching_base_names(self) -> None:
+        """task-list-builder output: paired json + md with matching base name.
+
+        The skill calls save twice with the same --topic + --date, varying
+        only --extension. Result: two files sharing the same date-slug stem.
+        """
+        common = ["save", "--override", "scratch", "--topic", "bulk edit task list"]
+        r_json = run_cli(
+            *common, "--extension", "json",
+            stdin='{"tasks": []}\n', home=self.home,
+        )
+        r_md = run_cli(
+            *common, "--extension", "md",
+            stdin="# Bulk edit\n", home=self.home,
+        )
+        self.assertEqual(r_json.returncode, 0, r_json.stderr)
+        self.assertEqual(r_md.returncode, 0, r_md.stderr)
+        json_path = Path(r_json.stdout.strip())
+        md_path = Path(r_md.stdout.strip())
+        # Same stem, different suffix.
+        self.assertEqual(json_path.stem, md_path.stem)
+        self.assertEqual(json_path.suffix, ".json")
+        self.assertEqual(md_path.suffix, ".md")
+
+    def test_collision_suffix_preserves_extension(self) -> None:
+        common = [
+            "save", "--override", "scratch", "--topic", "dup",
+            "--extension", "json",
+        ]
+        run_cli(*common, stdin='{"a":1}\n', home=self.home)
+        r2 = run_cli(*common, "--on-collision", "suffix", stdin='{"a":2}\n', home=self.home)
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        self.assertTrue(r2.stdout.strip().endswith("-2.json"))
+
+    def test_from_path_moves_file_to_target(self) -> None:
+        """--from-path is verbatim + always-move: source basename becomes the
+        target name, and the source is unlinked after a successful write."""
+        src = self.cwd / "source.json"
+        src.write_text('{"k": 1}\n')
+        r = run_cli(
+            "save", "--override", "scratch",
+            "--from-path", str(src),
+            stdin="should-be-ignored",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        target = self.plans_root / "scratch" / "source.json"
+        self.assertEqual(r.stdout.strip(), str(target))
+        self.assertEqual(target.read_text(), '{"k": 1}\n')
+        self.assertFalse(src.exists(), "source must be unlinked after successful move")
+
+    def test_from_path_collision_does_not_unlink_source(self) -> None:
+        """Critical invariant: a collision (exit 2) must not destroy the user's
+        source file. Otherwise a retry could lose data."""
+        src = self.cwd / "victim.json"
+        src.write_text('{"k": 3}\n')
+        # Pre-create a target with the same basename to force a collision.
+        (self.plans_root / "scratch").mkdir(parents=True)
+        (self.plans_root / "scratch" / "victim.json").write_text('{"other":1}\n')
+        r = run_cli(
+            "save", "--override", "scratch",
+            "--from-path", str(src),
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertTrue(src.exists(), "source must survive a collision")
+        self.assertEqual(src.read_text(), '{"k": 3}\n')
+
+    def test_from_path_missing_source(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch",
+            "--from-path", str(self.cwd / "does-not-exist.json"),
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("source not found", r.stderr)
+
+    def test_from_path_preserves_bytes_without_trailing_newline(self) -> None:
+        """Heredoc input gets a trailing \\n appended if missing; --from-path
+        must NOT mutate the file. A binary or strictly-formatted file (e.g.,
+        a checksum'd JSON) would be corrupted by a stray newline."""
+        src = self.cwd / "no-trailing-newline.json"
+        src.write_text('{"k":1}')  # deliberately no trailing newline
+        r = run_cli(
+            "save", "--override", "scratch",
+            "--from-path", str(src),
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        written = Path(r.stdout.strip())
+        self.assertEqual(written.read_bytes(), b'{"k":1}')
+
+    def test_from_path_preserves_mtime(self) -> None:
+        """shutil.move preserves mtime so the target reflects when the
+        artifact was originally produced, not when it was relocated."""
+        src = self.cwd / "old.json"
+        src.write_text('{"k":1}\n')
+        old_mtime = 1_600_000_000.0  # 2020-09-13
+        os.utime(src, (old_mtime, old_mtime))
+        r = run_cli(
+            "save", "--override", "scratch",
+            "--from-path", str(src),
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        written = Path(r.stdout.strip())
+        self.assertAlmostEqual(written.stat().st_mtime, old_mtime, places=0)
+
+    def test_from_path_keeps_source_filename_verbatim(self) -> None:
+        """task-list-builder's pre-named artifact (already encoding date,
+        run-id, and slug) lands in ~/plans/<repo>/ with the same basename —
+        the whole point of the disk shape is no rename gymnastics."""
+        src = self.cwd / "2026-05-21-a3f2-bulk-edit.task-list-builder.json"
+        src.write_text('{"tasks":[]}\n')
+        r = run_cli(
+            "save", "--override", "scratch",
+            "--from-path", str(src),
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        target = self.plans_root / "scratch" / src.name
+        self.assertEqual(r.stdout.strip(), str(target))
+        self.assertTrue(target.exists())
+        self.assertFalse(src.exists(), "source should be moved")
+
+    def test_topic_required_without_from_path(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch",
+            stdin="x\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--topic is required", r.stderr)
+
+    def test_from_path_rejects_topic_flag(self) -> None:
+        """--from-path means verbatim basename; --topic implies renaming, so
+        the two are mutually exclusive. Rejecting up-front keeps the LLM from
+        ambiguously combining the shapes."""
+        src = self.cwd / "report.json"
+        src.write_text('{}\n')
+        r = run_cli(
+            "save", "--override", "scratch",
+            "--from-path", str(src), "--topic", "rename me",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--topic is incompatible with --from-path", r.stderr)
+
+    def test_from_path_rejects_extension_flag(self) -> None:
+        src = self.cwd / "report.json"
+        src.write_text('{}\n')
+        r = run_cli(
+            "save", "--override", "scratch",
+            "--from-path", str(src), "--extension", "yaml",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--extension is incompatible with --from-path", r.stderr)
+
+    def test_from_path_rejects_date_flag(self) -> None:
+        src = self.cwd / "report.json"
+        src.write_text('{}\n')
+        r = run_cli(
+            "save", "--override", "scratch",
+            "--from-path", str(src), "--date", "2026-01-01",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--date is incompatible with --from-path", r.stderr)
+
 
 class TestArchive(IsolatedHomeTestCase):
     def _save_one(self, topic: str = "plan to archive") -> Path:
@@ -412,6 +624,36 @@ class TestList(IsolatedHomeTestCase):
         self.assertNotIn(fname, active.stdout, "archived plan leaked into active list")
         self.assertIn("still-active", active.stdout)
 
+    def test_includes_non_md_files(self) -> None:
+        """list must surface files saved with non-.md extensions (e.g. paired
+        task-list-builder .json + .md)."""
+        run_cli(
+            "save", "--override", "scratch", "--topic", "tasks", "--extension", "json",
+            stdin='{"tasks": []}\n', home=self.home,
+        )
+        run_cli(
+            "save", "--override", "scratch", "--topic", "tasks",
+            stdin="# Tasks\n", home=self.home,
+        )
+        r = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        names = r.stdout.strip().split("\n")
+        self.assertTrue(any(n.endswith(".json") for n in names))
+        self.assertTrue(any(n.endswith(".md") for n in names))
+
+    def test_excludes_dotfiles(self) -> None:
+        """A repo's `.plankeeper.json` config sits alongside plans but must
+        not appear in `list`."""
+        run_cli(
+            "save", "--override", "scratch", "--topic", "real plan",
+            stdin="x\n", home=self.home,
+        )
+        # Manually drop a dotfile into the repo dir.
+        (self.plans_root / "scratch" / ".plankeeper.json").write_text("{}\n")
+        r = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertNotIn(".plankeeper.json", r.stdout)
+        self.assertIn("real-plan", r.stdout)
+
 
 class TestListRepos(IsolatedHomeTestCase):
     def test_counts_per_state(self) -> None:
@@ -433,6 +675,18 @@ class TestListRepos(IsolatedHomeTestCase):
         out = run_cli("list-repos", home=self.home)
         self.assertIn("real:", out.stdout)
         self.assertNotIn("ghost", out.stdout)
+
+    def test_counts_include_non_md_files(self) -> None:
+        run_cli(
+            "save", "--override", "alpha", "--topic", "a", "--extension", "json",
+            stdin="{}\n", home=self.home,
+        )
+        run_cli(
+            "save", "--override", "alpha", "--topic", "b",
+            stdin="x\n", home=self.home,
+        )
+        out = run_cli("list-repos", home=self.home)
+        self.assertIn("alpha: active=2", out.stdout)
 
 
 class TestAllowScript(unittest.TestCase):

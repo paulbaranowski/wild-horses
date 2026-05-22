@@ -1,39 +1,44 @@
 ---
 name: plan-save
-description: Use when the user asks to save a plan, save the plan, persist the plan, capture planning notes for future reference, or store a plan for later.
+description: Use when the user asks to save a plan, save the plan, persist the plan, capture planning notes for future reference, store a plan for later, or save a file (any extension — markdown, JSON, YAML, etc.) into the per-repo plans tree. Also handles paired outputs such as task-list-builder's `.json` + `.md` pair.
 ---
 
 # plan-save
 
-Save a plan from the current conversation to `~/plans/<repo>/<YYYY-MM-DD>-<topic>.md`. The bundled `plan_keeper_cli.py` handles the actual I/O (slugify, date, `mkdir -p`, atomic write, collision detection). This skill's job is to identify the plan, extract the topic, and route to the CLI.
+Save one or more files from the current conversation to `~/plans/<repo>/<YYYY-MM-DD>-<topic>.<ext>`. The bundled `plan_keeper_cli.py` handles the actual I/O (slugify, date, `mkdir -p`, atomic write, collision detection). This skill's job is to identify the file(s), extract a topic, pick the right extension, and route to the CLI — calling it once per file when there is more than one.
 
 ## Quick reference
 
-- **Target:** `~/plans/<repo>/<YYYY-MM-DD>-<topic>.md`
+- **Target:** `~/plans/<repo>/<YYYY-MM-DD>-<topic>.<ext>`
 - **`<repo>`:** auto-derived from `git remote`/`pwd`, or override from the user's invocation — see [../../repo-derivation.md](../../repo-derivation.md).
-- **`<topic>`:** first H1/H2 of the plan, used as the CLI's `--topic` (CLI slugifies).
+- **`<topic>`:** first H1/H2 of the plan, used as the CLI's `--topic` (CLI slugifies). For non-markdown content with no heading, use a short phrase from the user's invocation.
+- **`<ext>`:** defaults to `md`. Set via `--extension` when the content is not markdown — see [Choosing the extension](#choosing-the-extension).
 - **Date:** today, in the user's local timezone (CLI handles).
 - **Collision:** ask the user; never overwrite silently.
-- **Content:** plan body verbatim — no preamble, footer, or commentary.
+- **Content:** file body verbatim — no preamble, footer, or commentary.
+- **Multiple files:** when the user has produced a paired/grouped artifact (most commonly task-list-builder's `.json` + `.md`), save each file with one `save` invocation, sharing `--topic` (and `--date` if you set it) so the resulting filenames pair on the base name.
 
 ## Procedure
 
 Follow these steps in order. Do not skip steps.
 
-### 1. Identify the plan to save
+### 1. Identify the file(s) to save
 
-Scan recent conversation messages — from both the user and the assistant — for the plan content. Prefer, in order:
+Scan recent conversation messages — from both the user and the assistant — for the content to save. Prefer, in order:
 
-- A plan the user just pasted and pointed at in the save invocation ("save this", "save what I just sent", "save the plan I pasted")
+- Content the user just pasted and pointed at in the save invocation ("save this", "save what I just sent", "save the json file", "save the plan I pasted")
+- A paired artifact the assistant just produced where both files belong together — most commonly **task-list-builder output**, which writes a `.json` (canonical task list) plus a `.md` (human-readable report) with the same base name. If you see a recent JSON object with `tasks`, `verifySteps`, and `plan` fields next to a markdown report whose H1 matches the JSON's intent, treat them as one paired save. See [Paired-output handling](#paired-output-handling).
 - The most recent `ExitPlanMode` plan
 - The most recent "Design", "Plan", or "Approach" section the assistant produced
 - A substantial numbered or bulleted markdown outline — whoever wrote it
 
-If you cannot confidently identify a single plan, stop and ask the user which one to save. Do not guess between candidates.
+If you cannot confidently identify a single file or paired group, stop and ask the user which one to save. Do not guess between candidates.
 
-### 2. Extract the topic and check for a repo override
+### 2. Extract the topic, choose the extension, and check for a repo override
 
-**Topic:** Take the first H1 or H2 heading in the plan's text. Pass the raw heading (with punctuation, capitalization, whitespace) to `--topic` — the CLI slugifies. If the plan has no heading, use the first 4–6 meaningful words of the opening paragraph instead.
+**Topic:** Take the first H1 or H2 heading in the file's text. Pass the raw heading (with punctuation, capitalization, whitespace) to `--topic` — the CLI slugifies. If the file has no heading (typical for JSON/YAML), use the first 4–6 meaningful words of the user's invocation, or — for paired output — the H1 of the paired markdown report.
+
+**Extension:** see [Choosing the extension](#choosing-the-extension). Pass `--extension <ext>` (no leading dot needed). Omit the flag only when you're confident the content is markdown.
 
 **Repo override:** Check the user's invocation for one of these phrases. If present, extract `<name>` and pass it as `--override`. Otherwise omit `--override` and the CLI auto-derives per [../../repo-derivation.md](../../repo-derivation.md).
 
@@ -45,17 +50,34 @@ If you cannot confidently identify a single plan, stop and ask the user which on
 
 ### 3. Save via the CLI
 
-Invoke the bundled CLI with the plan body on stdin via a quoted heredoc:
+Two delivery shapes — pick the one that fits the source:
+
+**3a. Content lives in the conversation (heredoc).** Stream the body on stdin via a quoted heredoc:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" save \
   --topic "<heading text>" \
+  --extension json \
   <<'EOF'
-<plan body verbatim — no preamble, no footer>
+<file body verbatim — no preamble, no footer>
 EOF
 ```
 
-Add `--override <name>` if step 2 found one.
+**3b. Content already exists on disk (move).** Skip the heredoc and let the CLI relocate the file directly. The target always keeps the source's basename, and the source is unlinked after a successful write — `--from-path` is verbatim + always-move, and `--topic`/`--extension`/`--date` are rejected:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" save \
+  --from-path "<absolute or repo-relative path to existing file>"
+```
+
+Use this whenever the source filename is already a good final name — most notably **task-list-builder** output at `docs/exec-plans/active/<date>-<runid>-<short>.<slug>.{json,md}`. If the source needs renaming, rename it on disk first, then pass that path; the CLI deliberately does not rename, because reconstructing date/topic/extension from a well-named source is what produced the original `-json.md` bug this shape exists to prevent.
+
+`--from-path` reads the body from the named file instead of stdin (no shell-quoting hazards for JSON bodies, preserves bytes exactly — no trailing-newline normalization) and does an atomic same-FS rename. The source is **only** deleted if the target write succeeded — a collision (exit 2) leaves the source untouched, so retrying is safe.
+
+Common to both shapes (3a and 3b):
+
+- Add `--override <name>` if step 2 found one.
+- For a **paired save**, run this step once per file. See [Paired-output handling](#paired-output-handling).
 
 **On exit 0:** the CLI prints the written absolute path on stdout. Use that path verbatim in step 5.
 
@@ -63,8 +85,8 @@ Add `--override <name>` if step 2 found one.
 
 ```text
 ERROR: collision
-existing: /Users/<you>/plans/<repo>/<date>-<slug>.md
-suggestion: /Users/<you>/plans/<repo>/<date>-<slug>-2.md
+existing: /Users/<you>/plans/<repo>/<date>-<slug>.<ext>
+suggestion: /Users/<you>/plans/<repo>/<date>-<slug>-2.<ext>
 ```
 
 Go to step 4.
@@ -81,11 +103,67 @@ Wait for their answer, then re-invoke the CLI with the appropriate flag:
 - **"overwrite":** add `--on-collision overwrite` and re-run step 3.
 - **"new name" / a different topic:** rerun step 3 with the new `--topic`.
 
+For paired saves where one file collides and the other doesn't, apply the chosen resolution to **both** files so they stay paired (e.g., if the `.json` got `-2`, re-save the `.md` with `--on-collision suffix` even if the original `.md` slot was free — preferable to letting the pair drift apart).
+
 ### 5. Confirm
 
-Tell the user the absolute path the CLI returned in step 3 (or the eventual step-3 retry in step 4). One line is enough:
+Tell the user the absolute path(s) the CLI returned. One line per file is enough:
 
 > Saved to `/Users/<you>/plans/<repo>/<YYYY-MM-DD>-<topic>.md`
+
+For paired saves, list both paths on consecutive lines.
+
+## Choosing the extension
+
+The CLI's `--extension` flag accepts `^[a-z0-9]+$` (with optional leading `.`). Decide the value as follows:
+
+1. **Explicit user phrasing wins.** Honor the user's words verbatim if they name an extension. Examples:
+   - "save the json file" → `--extension json`
+   - "save this as a yaml file" → `--extension yaml`
+   - "save it with .toml extension" → `--extension toml`
+2. **Otherwise, sniff the content.** Look at the first non-whitespace character(s) of the file body:
+   - First non-whitespace char is `{` or `[` → `--extension json`
+   - Document starts with `---\n` followed by `key: value` lines (and is _not_ a markdown file whose frontmatter is bracketed by a closing `---` followed by a real markdown body) → `--extension yaml`
+   - First non-whitespace line looks like `<?xml` or `<!DOCTYPE` → `--extension xml` or `html`
+   - Default: `md`
+3. **When in doubt, ask.** If sniffing is ambiguous (e.g. a markdown file that opens with YAML frontmatter), ask the user which extension to use. Don't silently guess against the user's intent.
+
+## Paired-output handling
+
+`task-list-builder` produces a paired `.json` (the canonical task list the harness loop runner consumes) and `.md` (a human-readable report). Both files are written to `docs/exec-plans/active/<date>-<runid>-<short>.<slug>.{json,md}` (default `<slug>` is `task-list-builder`; `/harness:reasoning-gaps` uses `reasoning-gaps`, `/harness:feedback-blockers` uses `feedback-blockers`). The filename already encodes date, run-id, and identity — there is no need to rename it.
+
+When the user invokes plan-save after a task-list-builder run, save **both** files in one go:
+
+1. Locate the paired files on disk. They are usually the most recent matching pair under `docs/exec-plans/active/`.
+2. Call the CLI once per file using the disk shape from step 3b (no `--topic`, no `--extension`, no `--date` — the source's basename is the target's basename):
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" save \
+     --from-path docs/exec-plans/active/<date>-<runid>-<short>.<slug>.json
+
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" save \
+     --from-path docs/exec-plans/active/<date>-<runid>-<short>.<slug>.md
+   ```
+
+3. Both files land at `~/plans/<repo>/<date>-<runid>-<short>.<slug>.{json,md}` — the pair stays together because they share the same source basename — and the originals under `docs/exec-plans/active/` are removed.
+
+If the files exist **only in conversation** (no disk write yet — uncommon for task-list-builder), use the heredoc shape from step 3a instead, passing a shared `--topic` and `--date` to both invocations so the resulting filenames pair on the base name:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" save \
+  --topic "<h1>" --date <date> --extension json <<'EOF'
+{ ... }
+EOF
+
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" save \
+  --topic "<h1>" --date <date> --extension md <<'EOF'
+# ...
+EOF
+```
+
+Handle collisions per step 4 above, keeping the pair in sync. Because `--from-path` only deletes the source on a successful write, a collision is safe to retry.
+
+You may also encounter other paired-file groupings the user describes informally (e.g., "save these three configs together"). Treat each file as its own `save` invocation — verbatim mode for files already on disk with good names, heredoc with shared topic+date otherwise.
 
 ## Content discipline
 
@@ -101,9 +179,14 @@ The CLI writes stdin verbatim (it only appends a trailing newline if missing).
 ## Common mistakes
 
 - **Pre-slugifying the topic before passing to `--topic`.** The CLI slugifies. Pass the raw heading text — e.g., `--topic "Multi-Event parent_title Design"`, not `--topic "multi-event-parent_title-design"`. (Both work, but raw is the canonical input.)
+- **Stuffing the format into the slug instead of the extension.** Writing `--topic "task list json"` (no `--extension`) lands the file at `…-task-list-json.md`. The format goes in `--extension json`, not the topic.
 - **Forgetting `--override` when the user named a destination.** "save this as a general plan" → `--override general`. Without it, the CLI auto-derives from the current repo and the plan lands in the wrong folder.
 - **Reading the CLI's stderr as a fatal error.** Exit 2 is a structured collision signal, not a failure to act on. Parse it and ask the user (step 4) — do not abort.
 - **Guessing between multiple plan candidates.** Step 1 requires asking the user when more than one plausible plan exists. Don't pick the most recent one to seem helpful.
+- **Saving a task-list-builder JSON without its paired MD.** When you see the paired output in conversation, save both. Saving just the JSON loses the human-readable report that explains what the task list is for.
+- **Heredoc-piping a file that already exists on disk.** If the source is already at `docs/exec-plans/active/foo.json`, use `--from-path docs/exec-plans/active/foo.json` rather than `cat` + heredoc. The disk-based shape is leaner, avoids quoting hazards in JSON bodies, and atomically relocates the file rather than re-piping it through the shell.
+- **Passing `--topic`/`--extension`/`--date` alongside `--from-path`.** `--from-path` is the verbatim shape: the source basename is the target basename, end of story. The CLI rejects any of those flags with exit 2 rather than guessing what you meant. If the source is poorly named, rename it on disk first, then pass that path.
+- **Letting the pair drift on a collision.** If the `.json` half collides and the user picks `--on-collision suffix`, the `.md` half must use the same resolution (rerun with `--on-collision suffix`) so both filenames stay matched.
 
 ## Notes
 
