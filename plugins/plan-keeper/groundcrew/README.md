@@ -4,14 +4,25 @@ These scripts let groundcrew dispatch tickets from `~/plans/<repo>/*.md`. They a
 
 ## Install
 
-The scripts run from this plugin directory without copying — but the path changes when the plugin version bumps. For a stable path, copy them once to `~/.config/groundcrew/plan-source/`:
+You have two options:
+
+### Option A — reference the plugin path directly (simplest)
+
+Set `crew.config.ts` to point at the scripts inside the installed plugin tree. The scripts auto-resolve `plan_keeper_cli.py` next door, so no env var is needed. Trade-off: the path embeds the plugin version (e.g., `~/.claude/plugins/cache/wild-horses/plan-keeper/1.4.0/groundcrew/...`) and will need to be updated when the plugin version bumps.
+
+### Option B — copy to a stable location and set `$PLAN_KEEPER_CLI`
+
+Copy the scripts to `~/.config/groundcrew/plan-source/`, then point `$PLAN_KEEPER_CLI` at the bundled CLI. The scripts honor that env var and fall back to a sibling relative path only when it's unset:
 
 ```bash
 mkdir -p ~/.config/groundcrew/plan-source
 cp -p ./fetch.sh ./resolveOne.sh ./markInProgress.sh ~/.config/groundcrew/plan-source/
+
+# Add to ~/.zshrc, ~/.bashrc, or wherever your shell rc lives:
+export PLAN_KEEPER_CLI="$HOME/.claude/plugins/cache/wild-horses/plan-keeper/<version>/scripts/plan_keeper_cli.py"
 ```
 
-The scripts use `$(dirname "$0")/../scripts/plan_keeper_cli.py` to find the CLI — adjust if you copy to a different location.
+Replace `<version>` with the installed plugin version (currently `1.4.0`). When you upgrade the plugin, only `$PLAN_KEEPER_CLI` needs to change — your `crew.config.ts` paths stay stable.
 
 ## crew.config.ts entry
 
