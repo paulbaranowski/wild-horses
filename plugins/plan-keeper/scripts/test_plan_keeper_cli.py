@@ -2194,5 +2194,50 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             self.assertEqual(json.loads(result.stdout), [])
 
 
+class TestGroundcrewResolveOne(IsolatedHomeTestCase):
+    """Tests for the groundcrew-resolve-one subcommand."""
+
+    def test_groundcrew_resolve_one_finds_active_plan(self):
+        d = self.home / "plans" / "r"
+        d.mkdir(parents=True)
+        (d / "2026-01-01-x.md").write_text(
+            "---\nAgent: claude\nStatus: todo\n---\n# Title\n"
+        )
+        result = run_cli("groundcrew-resolve-one", "2026-01-01-x",
+                         home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        issue = json.loads(result.stdout)
+        self.assertEqual(issue["id"], "2026-01-01-x")
+        self.assertEqual(issue["status"], "todo")
+        self.assertEqual(issue["title"], "Title")
+
+    def test_groundcrew_resolve_one_finds_done_plan(self):
+        d = self.home / "plans" / "r" / "done"
+        d.mkdir(parents=True)
+        (d / "2025-12-31-old.md").write_text(
+            "---\nAgent: claude\nStatus: done\n---\n# Old\n"
+        )
+        result = run_cli("groundcrew-resolve-one", "2025-12-31-old",
+                         home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0)
+        issue = json.loads(result.stdout)
+        self.assertEqual(issue["status"], "done")
+
+    def test_groundcrew_resolve_one_missing_returns_exit_3(self):
+        """Spec: 'prints nothing for "not found", or exits 3.' We pick exit 3."""
+        (self.home / "plans" / "r").mkdir(parents=True)
+        result = run_cli("groundcrew-resolve-one", "does-not-exist",
+                         home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 3)
+        self.assertEqual(result.stdout, "")  # nothing on stdout
+
+    def test_groundcrew_resolve_one_rejects_path_separator(self):
+        """ID can't contain '/' — defends against ../../etc/passwd-style inputs."""
+        result = run_cli("groundcrew-resolve-one", "../escape",
+                         home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("invalid id", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

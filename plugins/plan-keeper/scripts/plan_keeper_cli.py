@@ -1694,6 +1694,35 @@ def cmd_groundcrew_fetch(args) -> int:
     return 0
 
 
+_GROUNDCREW_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def cmd_groundcrew_resolve_one(args) -> int:
+    """Print one issue JSON for `${id}`, exit 3 if not found."""
+    if not _GROUNDCREW_ID_RE.match(args.id):
+        raise PlanKeeperCliError(
+            f"invalid id {args.id!r}: must match [A-Za-z0-9._-]+ (no path separators)",
+            code=2,
+        )
+    if not PLAN_ROOT.exists():
+        return 3
+    # Search active plans first, then done/, then deferred/.
+    for repo_entry in PLAN_ROOT.iterdir():
+        if not repo_entry.is_dir() or repo_entry.name.startswith("."):
+            continue
+        for subdir in (repo_entry, repo_entry / "done", repo_entry / "deferred"):
+            if not subdir.exists():
+                continue
+            candidate = subdir / f"{args.id}.md"
+            if candidate.is_file():
+                issue = _plan_to_issue(candidate)
+                if issue is None:
+                    continue
+                print(json.dumps(issue))
+                return 0
+    return 3
+
+
 # --- Parser -----------------------------------------------------------------
 
 
@@ -1891,6 +1920,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit shell-adapter JSON array of active plans (for crew.config.ts fetch)",
     )
 
+    p_gc_one = sub.add_parser(
+        "groundcrew-resolve-one",
+        help="emit one shell-adapter issue JSON for ${id}, or exit 3 if missing",
+    )
+    p_gc_one.add_argument("id", help="plan id (filename stem, no .md)")
+
     return parser
 
 
@@ -1926,6 +1961,7 @@ def main() -> int:
         "ticket-api": cmd_ticket_api,
         "push": cmd_push,
         "groundcrew-fetch": cmd_groundcrew_fetch,
+        "groundcrew-resolve-one": cmd_groundcrew_resolve_one,
     }
     try:
         return dispatch[args.cmd](args)
