@@ -1723,6 +1723,37 @@ def cmd_groundcrew_resolve_one(args) -> int:
     return 3
 
 
+def cmd_groundcrew_mark_in_progress(args) -> int:
+    """Read {'path': ...} from stdin, flip that plan's Status to in-progress."""
+    del args
+    raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise PlanKeeperCliError(f"stdin is not valid JSON: {e}", code=2)
+    if not isinstance(payload, dict) or "path" not in payload:
+        raise PlanKeeperCliError(
+            "stdin JSON must be {'path': <abs-path>}; 'path' field required",
+            code=2,
+        )
+    path = Path(payload["path"])
+    if not path.exists():
+        raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
+    text = path.read_text(encoding="utf-8")
+    if not (text.startswith("---\n") or text.startswith("---\r\n")):
+        raise PlanKeeperCliError(
+            f"{path} has no frontmatter (cannot mark in-progress)", code=2,
+        )
+    meta, body = parse_frontmatter(text)
+    meta["Status"] = "in-progress"
+    new_text = serialize_frontmatter(meta, body)
+    if not new_text.endswith("\n"):
+        new_text += "\n"
+    write_atomic(path, new_text)
+    print(path)
+    return 0
+
+
 # --- Parser -----------------------------------------------------------------
 
 
@@ -1926,6 +1957,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_gc_one.add_argument("id", help="plan id (filename stem, no .md)")
 
+    sub.add_parser(
+        "groundcrew-mark-in-progress",
+        help="flip Status to in-progress on a plan named by stdin sourceRef JSON",
+    )
+
     return parser
 
 
@@ -1962,6 +1998,7 @@ def main() -> int:
         "push": cmd_push,
         "groundcrew-fetch": cmd_groundcrew_fetch,
         "groundcrew-resolve-one": cmd_groundcrew_resolve_one,
+        "groundcrew-mark-in-progress": cmd_groundcrew_mark_in_progress,
     }
     try:
         return dispatch[args.cmd](args)

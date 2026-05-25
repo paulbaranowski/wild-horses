@@ -2239,5 +2239,51 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         self.assertIn("invalid id", result.stderr)
 
 
+class TestGroundcrewMarkInProgress(IsolatedHomeTestCase):
+    """Tests for the groundcrew-mark-in-progress subcommand."""
+
+    def test_groundcrew_mark_in_progress_flips_status(self):
+        d = self.home / "plans" / "r"
+        d.mkdir(parents=True)
+        plan = d / "2026-01-01-x.md"
+        plan.write_text(
+            "---\nAgent: claude\nStatus: todo\n---\n# Title\n"
+        )
+        result = run_cli(
+            "groundcrew-mark-in-progress",
+            home=self.home, cwd=self.cwd,
+            stdin=json.dumps({"path": str(plan)}),
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Status: in-progress", plan.read_text())
+        self.assertNotIn("Status: todo", plan.read_text())
+
+    def test_groundcrew_mark_in_progress_rejects_missing_path(self):
+        result = run_cli(
+            "groundcrew-mark-in-progress",
+            home=self.home, cwd=self.cwd,
+            stdin=json.dumps({"path": "/tmp/does-not-exist-abc.md"}),
+        )
+        self.assertEqual(result.returncode, 3)
+
+    def test_groundcrew_mark_in_progress_rejects_bad_json(self):
+        result = run_cli(
+            "groundcrew-mark-in-progress",
+            home=self.home, cwd=self.cwd,
+            stdin="not json",
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not valid JSON", result.stderr)
+
+    def test_groundcrew_mark_in_progress_rejects_missing_path_key(self):
+        result = run_cli(
+            "groundcrew-mark-in-progress",
+            home=self.home, cwd=self.cwd,
+            stdin=json.dumps({"other": "value"}),
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("'path' field required", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
