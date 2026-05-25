@@ -160,7 +160,11 @@ class TestSave(IsolatedHomeTestCase):
         expected = self.plans_root / "scratch" / f"{today}-test-plan.md"
         self.assertEqual(r.stdout.strip(), str(expected))
         self.assertTrue(expected.exists())
-        self.assertEqual(expected.read_text(), "# Test plan\nbody\n")
+        # MD files now get injected Agent/Status frontmatter
+        text = expected.read_text()
+        self.assertIn("Agent: claude", text)
+        self.assertIn("Status: backlog", text)
+        self.assertIn("# Test plan", text)
 
     def test_slugifies_topic_with_punctuation_and_case(self) -> None:
         r = run_cli(
@@ -218,7 +222,11 @@ class TestSave(IsolatedHomeTestCase):
         r2 = run_cli(*common, "--on-collision", "overwrite", stdin="second\n", home=self.home)
         self.assertEqual(r2.returncode, 0, r2.stderr)
         written = Path(r2.stdout.strip())
-        self.assertEqual(written.read_text(), "second\n")
+        # MD files now get injected Agent/Status frontmatter
+        text = written.read_text()
+        self.assertIn("Agent: claude", text)
+        self.assertIn("Status: backlog", text)
+        self.assertIn("second", text)
 
     def test_extension_json(self) -> None:
         r = run_cli(
@@ -431,6 +439,99 @@ class TestSave(IsolatedHomeTestCase):
         )
         self.assertEqual(r.returncode, 2)
         self.assertIn("--date is incompatible with --from-path", r.stderr)
+
+    def test_save_injects_default_agent_and_backlog_status(self) -> None:
+        """Bare `save --topic foo` produces 'Agent: claude\\nStatus: backlog\\n' frontmatter."""
+        r = run_cli(
+            "save", "--override", "testrepo", "--topic", "Test Plan",
+            stdin="# Body\nSome plan content.\n",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        saved = Path(r.stdout.strip())
+        text = saved.read_text()
+        self.assertTrue(
+            text.startswith("---\n"),
+            f"expected frontmatter at top, got: {text[:200]!r}",
+        )
+        self.assertIn("Agent: claude", text)
+        self.assertIn("Status: backlog", text)
+        self.assertIn("# Body", text)
+
+    def test_save_with_agent_codex(self) -> None:
+        """`--agent codex` injects Agent: codex."""
+        r = run_cli(
+            "save", "--override", "testrepo", "--topic", "Test",
+            "--agent", "codex",
+            stdin="# Body\n",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0)
+        text = Path(r.stdout.strip()).read_text()
+        self.assertIn("Agent: codex", text)
+        self.assertIn("Status: backlog", text)
+
+    def test_save_merges_existing_frontmatter(self) -> None:
+        """Body that already has frontmatter is merged, not duplicated."""
+        body = "---\nTicket: ENG-1\n---\n\n# Body\n"
+        r = run_cli(
+            "save", "--override", "testrepo", "--topic", "Test",
+            stdin=body,
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        # All three fields present, exactly once (frontmatter has opener and closer)
+        self.assertIn("---\n", text)  # has frontmatter markers
+        self.assertEqual(text.count("Ticket: ENG-1"), 1)
+        self.assertEqual(text.count("Agent: claude"), 1)
+        self.assertEqual(text.count("Status: backlog"), 1)
+        # Verify the structure: should have opening ---, then fields, then closing ---
+        self.assertTrue(text.startswith("---\n"))
+
+    def test_save_existing_agent_status_not_overwritten(self) -> None:
+        """If incoming body already declares Agent/Status, the CLI does NOT overwrite."""
+        body = "---\nAgent: codex\nStatus: todo\n---\n\n# Body\n"
+        r = run_cli(
+            "save", "--override", "testrepo", "--topic", "Test",
+            "--agent", "claude",
+            stdin=body,
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        # Body's values win — --agent only fills when absent
+        self.assertIn("Agent: codex", text)
+        self.assertIn("Status: todo", text)
+        self.assertNotIn("Agent: claude", text)
+
+    def test_save_non_md_extension_no_frontmatter_injection(self) -> None:
+        """JSON saves: body byte-for-byte, no frontmatter prepended."""
+        body = '{"tasks": []}\n'
+        r = run_cli(
+            "save", "--override", "testrepo", "--topic", "Test",
+            "--extension", "json",
+            stdin=body,
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0)
+        text = Path(r.stdout.strip()).read_text()
+        self.assertEqual(text, body)  # exact match — no frontmatter
+        self.assertNotIn("Agent:", text)
+
+    def test_save_from_path_no_frontmatter_injection(self) -> None:
+        """--from-path preserves source bytes; never injects."""
+        source = self.cwd / "src.md"
+        source.write_text("# Plain body\nNo frontmatter here.\n")
+        r = run_cli(
+            "save", "--override", "testrepo",
+            "--from-path", str(source),
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        self.assertNotIn("Agent:", text)
+        self.assertNotIn("Status:", text)
 
 
 class TestArchive(IsolatedHomeTestCase):

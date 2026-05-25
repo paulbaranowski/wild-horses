@@ -482,6 +482,11 @@ def cmd_save(args) -> int:
         content = sys.stdin.read()
         if not content.endswith("\n"):
             content += "\n"
+        # Frontmatter injection: only for .md saves (the spec gates on this
+        # so JSON/YAML siblings of paired saves remain byte-exact). Merges
+        # into user-supplied frontmatter rather than duplicating.
+        if ext == "md":
+            content = _inject_default_frontmatter(content, args.agent)
         write_atomic(target, content)
     print(target)
     return 0
@@ -667,6 +672,32 @@ def serialize_frontmatter(meta: dict[str, str], body: str) -> str:
     if body and not body.startswith("\n"):
         return "\n".join(lines) + "\n\n" + body
     return "\n".join(lines) + "\n" + body
+
+
+def _inject_default_frontmatter(body_text: str, agent: str) -> str:
+    """Ensure body_text starts with frontmatter containing Agent and Status.
+
+    Three cases:
+      1. body has no frontmatter → prepend a fresh '---\\nAgent: <agent>\\nStatus: backlog\\n---\\n\\n' block.
+      2. body has frontmatter with Agent and Status already set → return unchanged
+         (user-supplied values win over defaults).
+      3. body has frontmatter missing one or both → fill in the missing fields,
+         re-serialize, return.
+
+    Why agents/status defaults are 'fill if absent' rather than 'overwrite':
+    a user who hand-wrote `Status: todo` in the body shouldn't have it stomped
+    back to backlog by the save invocation. The CLI default is a floor, not
+    an override.
+    """
+    meta, body = parse_frontmatter(body_text)
+    if not meta.get("Agent"):
+        meta["Agent"] = agent
+    if not meta.get("Status"):
+        meta["Status"] = "backlog"
+    out = serialize_frontmatter(meta, body)
+    if not out.endswith("\n"):
+        out += "\n"
+    return out
 
 
 def cmd_file_meta_get(args) -> int:
@@ -1634,6 +1665,13 @@ def build_parser() -> argparse.ArgumentParser:
         "only unlinked if the target write succeeded (collisions leave it in "
         "place, so retrying is safe). Used for task-list-builder output in "
         "docs/exec-plans/active/.",
+    )
+    p_save.add_argument(
+        "--agent",
+        default="claude",
+        help="agent name to inject as 'Agent: <name>' frontmatter on "
+             "markdown saves (default: claude). Heredoc + .md shape only; "
+             "ignored for --extension other than md and for --from-path.",
     )
     p_save.add_argument(
         "--on-collision",
