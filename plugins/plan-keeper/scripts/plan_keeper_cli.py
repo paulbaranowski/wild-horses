@@ -1632,12 +1632,21 @@ def _plan_to_issue(path: Path) -> Optional[dict]:
     raw_status = meta.get("Status", "").strip()
     adapter_status = _GROUNDCREW_STATUS_MAP.get(raw_status, "other")
     title = _extract_h1_safe(body) or path.stem
+    parent = path.parent
+    if parent.name in {"done", "deferred"}:
+        # Plan is archived/paused — the repo dir is the grandparent. Without
+        # this, `groundcrew-resolve-one` would report repository="done" for
+        # any plan it found in ~/plans/<repo>/done/, breaking groundcrew's
+        # `workspace.knownRepositories` lookup.
+        repo_name = parent.parent.name
+    else:
+        repo_name = parent.name
     return {
         "id": path.stem,
         "title": title,
         "description": body.rstrip(),
         "status": adapter_status,
-        "repository": path.parent.name,
+        "repository": repo_name,
         "model": meta.get("Agent", "") or "claude",
         "assignee": "",
         "updatedAt": _iso_mtime(path),
@@ -1724,7 +1733,15 @@ def cmd_groundcrew_resolve_one(args) -> int:
 
 
 def cmd_groundcrew_mark_in_progress(args) -> int:
-    """Read {'path': ...} from stdin, flip that plan's Status to in-progress."""
+    """Read {'path': ...} from stdin, flip that plan's Status to in-progress.
+
+    Validates the path is a string, absolute, points to a .md file, and
+    resolves to a location inside PLAN_ROOT. This is defense-in-depth:
+    groundcrew is the expected caller (and always produces well-formed
+    sourceRef.path values), but the CLI is also auto-approved by a
+    PreToolUse hook, so it should not be willing to mutate arbitrary
+    .md files anywhere on disk.
+    """
     del args
     raw = sys.stdin.read()
     try:
@@ -1736,21 +1753,38 @@ def cmd_groundcrew_mark_in_progress(args) -> int:
             "stdin JSON must be {'path': <abs-path>}; 'path' field required",
             code=2,
         )
-    path = Path(payload["path"])
-    if not path.exists():
-        raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
-    text = path.read_text(encoding="utf-8")
+    raw_path = payload["path"]
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise PlanKeeperCliError(
+            "stdin JSON field 'path' must be a non-empty string", code=2,
+        )
+    path = Path(raw_path)
+    if not path.is_absolute():
+        raise PlanKeeperCliError(f"path must be absolute: {path}", code=2)
+    if path.suffix != ".md":
+        raise PlanKeeperCliError(f"path must point to a .md plan file: {path}", code=2)
+    resolved = path.resolve()
+    plan_root = PLAN_ROOT.resolve()
+    try:
+        resolved.relative_to(plan_root)
+    except ValueError:
+        raise PlanKeeperCliError(
+            f"path is outside PLAN_ROOT ({plan_root}): {path}", code=2,
+        )
+    if not resolved.exists():
+        raise PlanKeeperCliError(f"plan file not found: {resolved}", code=3)
+    text = resolved.read_text(encoding="utf-8")
     if not (text.startswith("---\n") or text.startswith("---\r\n")):
         raise PlanKeeperCliError(
-            f"{path} has no frontmatter (cannot mark in-progress)", code=2,
+            f"{resolved} has no frontmatter (cannot mark in-progress)", code=2,
         )
     meta, body = parse_frontmatter(text)
     meta["Status"] = "in-progress"
     new_text = serialize_frontmatter(meta, body)
     if not new_text.endswith("\n"):
         new_text += "\n"
-    write_atomic(path, new_text)
-    print(path)
+    write_atomic(resolved, new_text)
+    print(resolved)
     return 0
 
 

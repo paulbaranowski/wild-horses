@@ -2238,6 +2238,32 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("invalid id", result.stderr)
 
+    def test_groundcrew_resolve_one_done_plan_has_correct_repository(self):
+        """Regression: archived plans must report their repo name, not 'done'."""
+        d = self.home / "plans" / "myrepo" / "done"
+        d.mkdir(parents=True)
+        (d / "2025-12-31-old.md").write_text(
+            "---\nAgent: claude\nStatus: done\n---\n# Old\n"
+        )
+        result = run_cli("groundcrew-resolve-one", "2025-12-31-old",
+                         home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        issue = json.loads(result.stdout)
+        self.assertEqual(issue["repository"], "myrepo")
+
+    def test_groundcrew_resolve_one_deferred_plan_has_correct_repository(self):
+        """Regression: paused plans must report their repo name, not 'deferred'."""
+        d = self.home / "plans" / "myrepo" / "deferred"
+        d.mkdir(parents=True)
+        (d / "2025-06-15-paused.md").write_text(
+            "---\nAgent: claude\nStatus: backlog\n---\n# Paused\n"
+        )
+        result = run_cli("groundcrew-resolve-one", "2025-06-15-paused",
+                         home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        issue = json.loads(result.stdout)
+        self.assertEqual(issue["repository"], "myrepo")
+
 
 class TestGroundcrewMarkInProgress(IsolatedHomeTestCase):
     """Tests for the groundcrew-mark-in-progress subcommand."""
@@ -2259,12 +2285,63 @@ class TestGroundcrewMarkInProgress(IsolatedHomeTestCase):
         self.assertNotIn("Status: todo", plan.read_text())
 
     def test_groundcrew_mark_in_progress_rejects_missing_path(self):
+        """Path inside PLAN_ROOT but file doesn't exist → exit 3 (not-found)."""
+        (self.home / "plans" / "r").mkdir(parents=True)
+        missing = self.home / "plans" / "r" / "nonexistent.md"
         result = run_cli(
             "groundcrew-mark-in-progress",
             home=self.home, cwd=self.cwd,
-            stdin=json.dumps({"path": "/tmp/does-not-exist-abc.md"}),
+            stdin=json.dumps({"path": str(missing)}),
         )
         self.assertEqual(result.returncode, 3)
+
+    def test_groundcrew_mark_in_progress_rejects_path_outside_plan_root(self):
+        """Path outside PLAN_ROOT → exit 2 (validation), even if file exists."""
+        outside = self.home / "outside.md"
+        outside.write_text("---\nStatus: todo\n---\n# Outside\n")
+        result = run_cli(
+            "groundcrew-mark-in-progress",
+            home=self.home, cwd=self.cwd,
+            stdin=json.dumps({"path": str(outside)}),
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("outside PLAN_ROOT", result.stderr)
+        # File must NOT have been mutated.
+        self.assertIn("Status: todo", outside.read_text())
+
+    def test_groundcrew_mark_in_progress_rejects_non_absolute_path(self):
+        """Relative path → exit 2 (validation) — never resolved against cwd."""
+        result = run_cli(
+            "groundcrew-mark-in-progress",
+            home=self.home, cwd=self.cwd,
+            stdin=json.dumps({"path": "relative/file.md"}),
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("must be absolute", result.stderr)
+
+    def test_groundcrew_mark_in_progress_rejects_non_md_suffix(self):
+        """Path inside PLAN_ROOT but not .md → exit 2."""
+        d = self.home / "plans" / "r"
+        d.mkdir(parents=True)
+        not_md = d / "config.json"
+        not_md.write_text("{}")
+        result = run_cli(
+            "groundcrew-mark-in-progress",
+            home=self.home, cwd=self.cwd,
+            stdin=json.dumps({"path": str(not_md)}),
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(".md plan file", result.stderr)
+
+    def test_groundcrew_mark_in_progress_rejects_non_string_path(self):
+        """path JSON field of wrong type → exit 2."""
+        result = run_cli(
+            "groundcrew-mark-in-progress",
+            home=self.home, cwd=self.cwd,
+            stdin=json.dumps({"path": 42}),
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("non-empty string", result.stderr)
 
     def test_groundcrew_mark_in_progress_rejects_bad_json(self):
         result = run_cli(
