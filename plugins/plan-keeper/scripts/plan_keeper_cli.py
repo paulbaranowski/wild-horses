@@ -31,6 +31,17 @@ MAX_SLUG_LEN = 50
 MAX_SUFFIX = 99
 CONFIG_FILE_NAME = ".plankeeper.json"
 
+# Translates plan-keeper's on-disk Status: vocabulary to the groundcrew shell
+# adapter's enum. `backlog` is visible to `crew doctor` but never dispatched.
+# Anything else (typos, future values) falls through to "other".
+_GROUNDCREW_STATUS_MAP = {
+    "backlog": "other",
+    "todo": "todo",
+    "in-progress": "in-progress",
+    "in-review": "in-review",
+    "done": "done",
+}
+
 
 class HelpfulArgumentParser(argparse.ArgumentParser):
     """Print full help (not just usage) before erroring on bad args."""
@@ -1599,6 +1610,90 @@ def cmd_ticket_api(args) -> int:
     return 0
 
 
+# --- groundcrew shell adapter ----------------------------------------------
+
+
+def _plan_to_issue(path: Path) -> Optional[dict]:
+    """Convert one plan file to a shell-adapter issue dict. None if unparseable.
+
+    Skips files that don't start with frontmatter (they're not plan-keeper
+    plans even if they live under ~/plans/<repo>/ — e.g., a stray README).
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if not (text.startswith("---\n") or text.startswith("---\r\n")):
+        return None
+    try:
+        meta, body = parse_frontmatter(text)
+    except PlanKeeperCliError:
+        return None
+    raw_status = meta.get("Status", "").strip()
+    adapter_status = _GROUNDCREW_STATUS_MAP.get(raw_status, "other")
+    title = _extract_h1_safe(body) or path.stem
+    return {
+        "id": path.stem,
+        "title": title,
+        "description": body.rstrip(),
+        "status": adapter_status,
+        "repository": path.parent.name,
+        "model": meta.get("Agent", "") or "claude",
+        "assignee": "",
+        "updatedAt": _iso_mtime(path),
+        "blockers": [],
+        "hasMoreBlockers": False,
+        "sourceRef": {"path": str(path.resolve())},
+    }
+
+
+def _extract_h1_safe(body: str) -> str:
+    """Like _extract_h1 but returns '' instead of raising on missing heading.
+
+    The push-to-Linear flow requires an H1 (titles are mandatory); the fetch
+    flow is best-effort and falls back to the filename stem.
+    """
+    for line in body.split("\n"):
+        s = line.strip()
+        if s.startswith("# "):
+            return s[2:].strip()
+        if s.startswith("## "):
+            return s[3:].strip()
+    return ""
+
+
+def _iso_mtime(path: Path) -> str:
+    """File mtime as ISO-8601 UTC, used as the issue's updatedAt."""
+    try:
+        ts = path.stat().st_mtime
+    except OSError:
+        return _iso_utc_now()
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def cmd_groundcrew_fetch(args) -> int:
+    """Emit a JSON array of issues for groundcrew's shell adapter to consume.
+
+    Scans ~/plans/*/*.md (one level deep — skips done/ and deferred/).
+    """
+    del args
+    issues: list[dict] = []
+    if not PLAN_ROOT.exists():
+        print("[]")
+        return 0
+    for repo_entry in sorted(PLAN_ROOT.iterdir()):
+        if not repo_entry.is_dir() or repo_entry.name.startswith("."):
+            continue
+        for plan in sorted(repo_entry.iterdir()):
+            if not plan.is_file() or not plan.name.endswith(".md"):
+                continue
+            issue = _plan_to_issue(plan)
+            if issue is not None:
+                issues.append(issue)
+    print(json.dumps(issues))
+    return 0
+
+
 # --- Parser -----------------------------------------------------------------
 
 
@@ -1791,6 +1886,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="ignore existing Ticket frontmatter and create a fresh ticket",
     )
 
+    sub.add_parser(
+        "groundcrew-fetch",
+        help="emit shell-adapter JSON array of active plans (for crew.config.ts fetch)",
+    )
+
     return parser
 
 
@@ -1825,6 +1925,7 @@ def main() -> int:
         "ticket-system-config": lambda a: _TICKET_SYSTEM_CONFIG_DISPATCH[a.tsc_cmd](a),
         "ticket-api": cmd_ticket_api,
         "push": cmd_push,
+        "groundcrew-fetch": cmd_groundcrew_fetch,
     }
     try:
         return dispatch[args.cmd](args)

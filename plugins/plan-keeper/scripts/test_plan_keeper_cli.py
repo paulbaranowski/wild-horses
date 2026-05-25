@@ -2112,5 +2112,91 @@ class TestPushJira(unittest.TestCase):
         self.assertEqual(set(sent["fields"].keys()), {"summary", "description"})
 
 
+class TestGroundcrewFetch(IsolatedHomeTestCase):
+    """Tests for the groundcrew-fetch subcommand."""
+
+    def _run_cli(self, args):
+        """Helper to run CLI with this test's isolated home."""
+        return run_cli(*args, home=self.home, cwd=self.cwd)
+
+    def test_groundcrew_fetch_emits_array_with_translated_status(self):
+        """Each active plan becomes one JSON issue with correct status mapping."""
+        with tempfile.TemporaryDirectory() as home:
+            plans = Path(home) / "plans"
+            for repo, name, status in [
+                ("groundcrew", "2026-01-01-a.md", "todo"),
+                ("groundcrew", "2026-01-02-b.md", "backlog"),
+                ("herds", "2026-01-03-c.md", "in-progress"),
+            ]:
+                d = plans / repo
+                d.mkdir(parents=True, exist_ok=True)
+                (d / name).write_text(
+                    f"---\nAgent: claude\nStatus: {status}\n---\n# {name}\nDesc.\n"
+                )
+            # done/ subdir — must NOT appear in fetch output
+            (plans / "groundcrew" / "done").mkdir()
+            (plans / "groundcrew" / "done" / "2025-12-31-old.md").write_text(
+                "---\nAgent: claude\nStatus: done\n---\n# Done\n"
+            )
+
+            result = run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            issues = json.loads(result.stdout)
+            self.assertEqual(len(issues), 3)  # done/ excluded
+
+            by_id = {i["id"]: i for i in issues}
+            self.assertEqual(by_id["2026-01-01-a"]["status"], "todo")
+            self.assertEqual(by_id["2026-01-02-b"]["status"], "other")  # backlog → other
+            self.assertEqual(by_id["2026-01-03-c"]["status"], "in-progress")
+            self.assertEqual(by_id["2026-01-01-a"]["repository"], "groundcrew")
+            self.assertEqual(by_id["2026-01-03-c"]["repository"], "herds")
+            self.assertEqual(by_id["2026-01-01-a"]["model"], "claude")
+
+    def test_groundcrew_fetch_uses_h1_as_title(self):
+        """Title comes from the first H1 in the body, not the filename."""
+        with tempfile.TemporaryDirectory() as home:
+            d = Path(home) / "plans" / "groundcrew"
+            d.mkdir(parents=True)
+            (d / "2026-01-01-x.md").write_text(
+                "---\nAgent: claude\nStatus: todo\n---\n# The Real Title\nbody\n"
+            )
+            result = run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
+            self.assertEqual(result.returncode, 0)
+            issues = json.loads(result.stdout)
+            self.assertEqual(issues[0]["title"], "The Real Title")
+
+    def test_groundcrew_fetch_sets_source_ref(self):
+        """sourceRef.path is the absolute path to the plan file."""
+        with tempfile.TemporaryDirectory() as home:
+            d = Path(home) / "plans" / "r"
+            d.mkdir(parents=True)
+            plan = d / "2026-01-01-x.md"
+            plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# T\n")
+            result = run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
+            issues = json.loads(result.stdout)
+            self.assertEqual(issues[0]["sourceRef"]["path"], str(plan.resolve()))
+
+    def test_groundcrew_fetch_skips_files_without_frontmatter(self):
+        """A bare .md (no frontmatter) is skipped, not crashed on."""
+        with tempfile.TemporaryDirectory() as home:
+            d = Path(home) / "plans" / "r"
+            d.mkdir(parents=True)
+            (d / "good.md").write_text("---\nAgent: claude\nStatus: todo\n---\n# G\n")
+            (d / "bare.md").write_text("# Just a body\n")
+            result = run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
+            self.assertEqual(result.returncode, 0)
+            issues = json.loads(result.stdout)
+            ids = {i["id"] for i in issues}
+            self.assertIn("good", ids)
+            self.assertNotIn("bare", ids)
+
+    def test_groundcrew_fetch_empty_when_no_plans(self):
+        """`[]` (not error) when ~/plans/ is empty or missing."""
+        with tempfile.TemporaryDirectory() as home:
+            result = run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(json.loads(result.stdout), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
