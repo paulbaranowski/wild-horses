@@ -720,6 +720,62 @@ def cmd_file_meta_set(args) -> int:
     return 0
 
 
+def cmd_file_meta_update(args) -> int:
+    """Generic frontmatter editor. Each --field is 'Key=value'.
+
+    Unlike cmd_file_meta_set (which has per-field flags), this accepts any
+    whitelisted key via a single --field shape. Used by the plan-update
+    skill and by the groundcrew markInProgress wrapper.
+
+    Whitelist semantics: unknown keys are rejected with code 2 before any
+    write. The file must already have frontmatter (no auto-creation) — if
+    it doesn't, the user must re-save via plan-save first so they go
+    through the agent/status defaults path.
+    """
+    if not args.field:
+        raise PlanKeeperCliError(
+            "file-meta update requires at least one --field key=value", code=2,
+        )
+    updates: list[tuple[str, str]] = []
+    for raw in args.field:
+        if "=" not in raw:
+            raise PlanKeeperCliError(
+                f"--field must be key=value (got {raw!r}); add an '=' or quote the value",
+                code=2,
+            )
+        key, _, value = raw.partition("=")
+        key = key.strip()
+        if not key:
+            raise PlanKeeperCliError(
+                f"--field {raw!r}: empty key", code=2,
+            )
+        if key not in _FRONTMATTER_FIELDS:
+            raise PlanKeeperCliError(
+                f"unknown frontmatter field {key!r}: must be one of "
+                + ", ".join(repr(k) for k in _FRONTMATTER_FIELDS),
+                code=2,
+            )
+        updates.append((key, value))
+    path = Path(args.file)
+    if not path.exists():
+        raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
+    text = path.read_text(encoding="utf-8")
+    if not (text.startswith("---\n") or text.startswith("---\r\n")):
+        raise PlanKeeperCliError(
+            f"{path} has no frontmatter — re-save via plan-save to get defaults",
+            code=2,
+        )
+    meta, body = parse_frontmatter(text)  # may raise PlanKeeperCliError(5)
+    for key, value in updates:
+        meta[key] = value
+    new_text = serialize_frontmatter(meta, body)
+    if not new_text.endswith("\n"):
+        new_text += "\n"
+    write_atomic(path, new_text)
+    print(path)
+    return 0
+
+
 # --- HTTP helpers -----------------------------------------------------------
 
 LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
@@ -1628,6 +1684,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_fm_strip = file_meta_sub.add_parser("strip", help="print body without frontmatter")
     p_fm_strip.add_argument("--file", required=True)
 
+    p_fm_update = file_meta_sub.add_parser(
+        "update",
+        help="apply --field Key=value updates to plan frontmatter "
+             "(any whitelisted field)",
+    )
+    p_fm_update.add_argument("--file", required=True, help="path to a plan file")
+    p_fm_update.add_argument(
+        "--field",
+        action="append",
+        metavar="Key=value",
+        help="frontmatter field to set (repeat for multiple fields); "
+             "Key must be one of: " + ", ".join(_FRONTMATTER_FIELDS),
+    )
+
     p_tsc = sub.add_parser(
         "ticket-system-config",
         help="CRUD for ticket-system entries in ~/plans/<repo>/.plankeeper.json",
@@ -1692,6 +1762,7 @@ _FILE_META_DISPATCH = {
     "get": cmd_file_meta_get,
     "set": cmd_file_meta_set,
     "strip": cmd_file_meta_strip,
+    "update": cmd_file_meta_update,
 }
 
 _TICKET_SYSTEM_CONFIG_DISPATCH = {

@@ -1050,6 +1050,87 @@ class TestFileMetaStrip(IsolatedHomeTestCase):
         self.assertEqual(result.stdout, "# Bare\n\nNo frontmatter here.\n")
 
 
+class TestFileMetaUpdate(IsolatedHomeTestCase):
+    def _write_plan(self, content: str) -> Path:
+        path = self.cwd / "plan.md"
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def test_file_meta_update_sets_single_field(self) -> None:
+        """`update --field Status=todo` writes the field back atomically."""
+        plan = self._write_plan(
+            "---\nAgent: claude\nStatus: backlog\n---\n\n# Body\n"
+        )
+        result = run_cli(
+            "file-meta", "update", "--file", str(plan), "--field", "Status=todo",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        text = plan.read_text()
+        self.assertIn("Status: todo", text)
+        self.assertNotIn("Status: backlog", text)
+        self.assertIn("Agent: claude", text)  # untouched
+        self.assertIn("# Body", text)  # body preserved
+
+    def test_file_meta_update_multiple_fields(self) -> None:
+        """Multiple --field flags apply in order."""
+        plan = self._write_plan(
+            "---\nAgent: claude\nStatus: backlog\n---\n\n# Body\n"
+        )
+        result = run_cli(
+            "file-meta", "update", "--file", str(plan),
+            "--field", "Agent=codex",
+            "--field", "Status=in-progress",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        text = plan.read_text()
+        self.assertIn("Agent: codex", text)
+        self.assertIn("Status: in-progress", text)
+
+    def test_file_meta_update_rejects_unknown_key(self) -> None:
+        """Whitelist enforced — Foo is not in _FRONTMATTER_FIELDS."""
+        plan = self._write_plan("---\nAgent: claude\nStatus: backlog\n---\n\n# Body\n")
+        result = run_cli(
+            "file-meta", "update", "--file", str(plan), "--field", "Foo=bar",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unknown frontmatter field", result.stderr)
+
+    def test_file_meta_update_rejects_malformed_field(self) -> None:
+        """--field must be key=value; bare 'Status' is a usage error."""
+        plan = self._write_plan("---\nAgent: claude\nStatus: backlog\n---\n\n# Body\n")
+        result = run_cli(
+            "file-meta", "update", "--file", str(plan), "--field", "Status",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("must be key=value", result.stderr)
+
+    def test_file_meta_update_rejects_file_without_frontmatter(self) -> None:
+        """Spec: 'Reject the call if the file has no frontmatter (force user to re-save first).'"""
+        plan = self._write_plan("# Just a body, no frontmatter\n")
+        result = run_cli(
+            "file-meta", "update", "--file", str(plan), "--field", "Status=todo",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("no frontmatter", result.stderr)
+
+    def test_file_meta_update_value_with_equals(self) -> None:
+        """Value containing '=' is preserved (split on first = only)."""
+        plan = self._write_plan("---\nAgent: claude\nStatus: backlog\n---\n\n# Body\n")
+        # Use Ticket since it's freeform; demonstrates split-on-first-=
+        result = run_cli(
+            "file-meta", "update", "--file", str(plan),
+            "--field", "Ticket=ENG-123=draft",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Ticket: ENG-123=draft", plan.read_text())
+
+
 class TestTicketSystemConfig(IsolatedHomeTestCase):
     def test_list_no_config(self) -> None:
         result = run_cli(
