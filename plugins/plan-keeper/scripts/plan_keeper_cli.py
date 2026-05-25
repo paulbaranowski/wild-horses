@@ -439,6 +439,7 @@ def cmd_save(args) -> int:
         if not source.is_file():
             raise PlanKeeperCliError(f"source is not a file: {source}", code=3)
         target = repo_dir(repo) / source.name
+        ext = None  # --from-path never reaches the frontmatter-injection branch
     else:
         source = None
         if args.topic is None:
