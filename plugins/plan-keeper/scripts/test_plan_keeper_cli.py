@@ -2115,10 +2115,6 @@ class TestPushJira(unittest.TestCase):
 class TestGroundcrewFetch(IsolatedHomeTestCase):
     """Tests for the groundcrew-fetch subcommand."""
 
-    def _run_cli(self, args):
-        """Helper to run CLI with this test's isolated home."""
-        return run_cli(*args, home=self.home, cwd=self.cwd)
-
     def test_groundcrew_fetch_emits_array_with_translated_status(self):
         """Each active plan becomes one JSON issue with correct status mapping."""
         with tempfile.TemporaryDirectory() as home:
