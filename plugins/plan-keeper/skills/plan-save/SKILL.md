@@ -15,7 +15,8 @@ Save one or more files from the current conversation to `~/plans/<repo>/<YYYY-MM
 - **`<ext>`:** defaults to `md`. Set via `--extension` when the content is not markdown — see [Choosing the extension](#choosing-the-extension).
 - **Date:** today, in the user's local timezone (CLI handles).
 - **Collision:** ask the user; never overwrite silently.
-- **Content:** file body verbatim — no preamble, footer, or commentary.
+- **Content:** file body verbatim — no preamble, footer, or commentary. (For `.md` saves, the CLI injects an `Agent: claude\nStatus: backlog\n` frontmatter block if one isn't present, and fills missing Agent/Status fields if a partial block is. `--from-path` and non-`.md` saves are byte-exact.)
+- **`--agent`:** override the default `claude` (e.g., `--agent codex`); only affects `.md` heredoc saves.
 - **Multiple files:** when the user has produced a paired/grouped artifact (most commonly task-list-builder's `.json` + `.md`), save each file with one `save` invocation, sharing `--topic` (and `--date` if you set it) so the resulting filenames pair on the base name.
 
 ## Procedure
@@ -127,6 +128,36 @@ The CLI's `--extension` flag accepts `^[a-z0-9]+$` (with optional leading `.`). 
    - First non-whitespace line looks like `<?xml` or `<!DOCTYPE` → `--extension xml` or `html`
    - Default: `md`
 3. **When in doubt, ask.** If sniffing is ambiguous (e.g. a markdown file that opens with YAML frontmatter), ask the user which extension to use. Don't silently guess against the user's intent.
+
+## Frontmatter injection (markdown saves only)
+
+A bare markdown save:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" save \
+  --topic "My Plan" \
+  <<'EOF'
+# My Plan
+Body.
+EOF
+```
+
+produces a file that starts with:
+
+```markdown
+---
+Agent: claude
+Status: backlog
+---
+
+# My Plan
+
+Body.
+```
+
+The defaults are a floor, not an override: if the user pipes in a body that already declares `Agent:` or `Status:` in its own frontmatter, those values are kept untouched. `Status: backlog` means the plan is visible to `crew doctor` but not dispatched — promote via `/plan-update` (or `file-meta update --field Status=todo`) when the plan is ready for groundcrew to pick up.
+
+The injection only happens for `.md` saves (the default extension and explicit `--extension md`). JSON and other extensions are written byte-for-byte. `--from-path` always preserves source bytes, even for `.md`.
 
 ## Paired-output handling
 
