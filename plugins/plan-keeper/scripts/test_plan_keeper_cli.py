@@ -804,7 +804,7 @@ class TestFileMetaGet(IsolatedHomeTestCase):
         )
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
-        self.assertEqual(data, {"Ticket": "", "Ticket System": "", "Completed on": ""})
+        self.assertEqual(data, {"Ticket": "", "Ticket System": "", "Completed on": "", "Agent": "", "Status": ""})
 
     def test_full_frontmatter_parses(self) -> None:
         path = self._write_plan(
@@ -825,6 +825,8 @@ class TestFileMetaGet(IsolatedHomeTestCase):
             "Ticket": "ENG-123",
             "Ticket System": "linear",
             "Completed on": "2026-05-20",
+            "Agent": "",
+            "Status": "",
         })
 
     def test_partial_frontmatter_returns_present_fields(self) -> None:
@@ -865,6 +867,47 @@ class TestFileMetaGet(IsolatedHomeTestCase):
 
     def test_malformed_frontmatter_unknown_field_exits_5(self) -> None:
         path = self._write_plan("---\nUnknownField: x\n---\n")
+        result = run_cli(
+            "file-meta", "get", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 5)
+        self.assertIn("unknown field", result.stderr.lower())
+
+    def test_frontmatter_parses_agent_and_status(self) -> None:
+        """Agent and Status are recognized frontmatter fields."""
+        path = self._write_plan(
+            "---\n"
+            "Agent: codex\n"
+            "Status: todo\n"
+            "---\n"
+            "\n"
+            "# Body\n"
+        )
+        result = run_cli(
+            "file-meta", "get", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        meta = json.loads(result.stdout)
+        self.assertEqual(meta["Agent"], "codex")
+        self.assertEqual(meta["Status"], "todo")
+
+    def test_frontmatter_get_returns_empty_agent_status_when_absent(self) -> None:
+        """Files without Agent/Status frontmatter still return empty strings (no KeyError)."""
+        path = self._write_plan("# Just a body\n")
+        result = run_cli(
+            "file-meta", "get", "--file", str(path),
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0)
+        meta = json.loads(result.stdout)
+        self.assertEqual(meta["Agent"], "")
+        self.assertEqual(meta["Status"], "")
+
+    def test_frontmatter_rejects_unknown_key_still(self) -> None:
+        """Whitelist enforcement is preserved after adding Agent/Status."""
+        path = self._write_plan("---\nFakeKey: nope\n---\n# Body\n")
         result = run_cli(
             "file-meta", "get", "--file", str(path),
             home=self.home, cwd=self.cwd,

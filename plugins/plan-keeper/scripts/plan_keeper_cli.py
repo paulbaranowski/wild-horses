@@ -589,7 +589,7 @@ def cmd_ticket_system_config_list(args) -> int:
 # --- Frontmatter ------------------------------------------------------------
 
 # Order matters in the output — keep this canonical so callers see a stable shape.
-_FRONTMATTER_FIELDS = ("Ticket", "Ticket System", "Completed on")
+_FRONTMATTER_FIELDS = ("Ticket", "Ticket System", "Completed on", "Agent", "Status")
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
