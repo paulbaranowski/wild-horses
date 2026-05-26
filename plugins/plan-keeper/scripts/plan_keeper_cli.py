@@ -31,6 +31,17 @@ MAX_SLUG_LEN = 50
 MAX_SUFFIX = 99
 CONFIG_FILE_NAME = ".plankeeper.json"
 
+# Translates plan-keeper's on-disk Status: vocabulary to the groundcrew shell
+# adapter's enum. `backlog` is visible to `crew doctor` but never dispatched.
+# Anything else (typos, future values) falls through to "other".
+_GROUNDCREW_STATUS_MAP = {
+    "backlog": "other",
+    "todo": "todo",
+    "in-progress": "in-progress",
+    "in-review": "in-review",
+    "done": "done",
+}
+
 
 class HelpfulArgumentParser(argparse.ArgumentParser):
     """Print full help (not just usage) before erroring on bad args."""
@@ -439,6 +450,7 @@ def cmd_save(args) -> int:
         if not source.is_file():
             raise PlanKeeperCliError(f"source is not a file: {source}", code=3)
         target = repo_dir(repo) / source.name
+        ext = None  # --from-path never reaches the frontmatter-injection branch
     else:
         source = None
         if args.topic is None:
@@ -482,6 +494,11 @@ def cmd_save(args) -> int:
         content = sys.stdin.read()
         if not content.endswith("\n"):
             content += "\n"
+        # Frontmatter injection: only for .md saves (the spec gates on this
+        # so JSON/YAML siblings of paired saves remain byte-exact). Merges
+        # into user-supplied frontmatter rather than duplicating.
+        if ext == "md":
+            content = _inject_default_frontmatter(content, args.agent)
         write_atomic(target, content)
     print(target)
     return 0
@@ -589,7 +606,7 @@ def cmd_ticket_system_config_list(args) -> int:
 # --- Frontmatter ------------------------------------------------------------
 
 # Order matters in the output — keep this canonical so callers see a stable shape.
-_FRONTMATTER_FIELDS = ("Ticket", "Ticket System", "Completed on")
+_FRONTMATTER_FIELDS = ("Ticket", "Ticket System", "Completed on", "Agent", "Status")
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -669,6 +686,32 @@ def serialize_frontmatter(meta: dict[str, str], body: str) -> str:
     return "\n".join(lines) + "\n" + body
 
 
+def _inject_default_frontmatter(body_text: str, agent: str) -> str:
+    """Ensure body_text starts with frontmatter containing Agent and Status.
+
+    Three cases:
+      1. body has no frontmatter → prepend a fresh '---\\nAgent: <agent>\\nStatus: backlog\\n---\\n\\n' block.
+      2. body has frontmatter with Agent and Status already set → return unchanged
+         (user-supplied values win over defaults).
+      3. body has frontmatter missing one or both → fill in the missing fields,
+         re-serialize, return.
+
+    Why agents/status defaults are 'fill if absent' rather than 'overwrite':
+    a user who hand-wrote `Status: todo` in the body shouldn't have it stomped
+    back to backlog by the save invocation. The CLI default is a floor, not
+    an override.
+    """
+    meta, body = parse_frontmatter(body_text)
+    if not meta.get("Agent"):
+        meta["Agent"] = agent
+    if not meta.get("Status"):
+        meta["Status"] = "backlog"
+    out = serialize_frontmatter(meta, body)
+    if not out.endswith("\n"):
+        out += "\n"
+    return out
+
+
 def cmd_file_meta_get(args) -> int:
     path = Path(args.file)
     if not path.exists():
@@ -712,6 +755,62 @@ def cmd_file_meta_set(args) -> int:
     if args.completed_on is not None:
         # Validate the date format up front to catch typos.
         meta["Completed on"] = parse_date_arg(args.completed_on)
+    new_text = serialize_frontmatter(meta, body)
+    if not new_text.endswith("\n"):
+        new_text += "\n"
+    write_atomic(path, new_text)
+    print(path)
+    return 0
+
+
+def cmd_file_meta_update(args) -> int:
+    """Generic frontmatter editor. Each --field is 'Key=value'.
+
+    Unlike cmd_file_meta_set (which has per-field flags), this accepts any
+    whitelisted key via a single --field shape. Used by the plan-update
+    skill and by the groundcrew markInProgress wrapper.
+
+    Whitelist semantics: unknown keys are rejected with code 2 before any
+    write. The file must already have frontmatter (no auto-creation) — if
+    it doesn't, the user must re-save via plan-save first so they go
+    through the agent/status defaults path.
+    """
+    if not args.field:
+        raise PlanKeeperCliError(
+            "file-meta update requires at least one --field key=value", code=2,
+        )
+    updates: list[tuple[str, str]] = []
+    for raw in args.field:
+        if "=" not in raw:
+            raise PlanKeeperCliError(
+                f"--field must be key=value (got {raw!r}); add an '=' or quote the value",
+                code=2,
+            )
+        key, _, value = raw.partition("=")
+        key = key.strip()
+        if not key:
+            raise PlanKeeperCliError(
+                f"--field {raw!r}: empty key", code=2,
+            )
+        if key not in _FRONTMATTER_FIELDS:
+            raise PlanKeeperCliError(
+                f"unknown frontmatter field {key!r}: must be one of "
+                + ", ".join(repr(k) for k in _FRONTMATTER_FIELDS),
+                code=2,
+            )
+        updates.append((key, value))
+    path = Path(args.file)
+    if not path.exists():
+        raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
+    text = path.read_text(encoding="utf-8")
+    if not (text.startswith("---\n") or text.startswith("---\r\n")):
+        raise PlanKeeperCliError(
+            f"{path} has no frontmatter — re-save via plan-save to get defaults",
+            code=2,
+        )
+    meta, body = parse_frontmatter(text)  # may raise PlanKeeperCliError(5)
+    for key, value in updates:
+        meta[key] = value
     new_text = serialize_frontmatter(meta, body)
     if not new_text.endswith("\n"):
         new_text += "\n"
@@ -1511,6 +1610,184 @@ def cmd_ticket_api(args) -> int:
     return 0
 
 
+# --- groundcrew shell adapter ----------------------------------------------
+
+
+def _plan_to_issue(path: Path) -> Optional[dict]:
+    """Convert one plan file to a shell-adapter issue dict. None if unparseable.
+
+    Skips files that don't start with frontmatter (they're not plan-keeper
+    plans even if they live under ~/plans/<repo>/ — e.g., a stray README).
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if not (text.startswith("---\n") or text.startswith("---\r\n")):
+        return None
+    try:
+        meta, body = parse_frontmatter(text)
+    except PlanKeeperCliError:
+        return None
+    raw_status = meta.get("Status", "").strip()
+    adapter_status = _GROUNDCREW_STATUS_MAP.get(raw_status, "other")
+    title = _extract_h1_safe(body) or path.stem
+    parent = path.parent
+    if parent.name in {"done", "deferred"}:
+        # Plan is archived/paused — the repo dir is the grandparent. Without
+        # this, `groundcrew-resolve-one` would report repository="done" for
+        # any plan it found in ~/plans/<repo>/done/, breaking groundcrew's
+        # `workspace.knownRepositories` lookup.
+        repo_name = parent.parent.name
+    else:
+        repo_name = parent.name
+    return {
+        "id": path.stem,
+        "title": title,
+        "description": body.rstrip(),
+        "status": adapter_status,
+        "repository": repo_name,
+        "model": meta.get("Agent", "") or "claude",
+        "assignee": "",
+        "updatedAt": _iso_mtime(path),
+        "blockers": [],
+        "hasMoreBlockers": False,
+        "sourceRef": {"path": str(path.resolve())},
+    }
+
+
+def _extract_h1_safe(body: str) -> str:
+    """Like _extract_h1 but returns '' instead of raising on missing heading.
+
+    The push-to-Linear flow requires an H1 (titles are mandatory); the fetch
+    flow is best-effort and falls back to the filename stem.
+    """
+    for line in body.split("\n"):
+        s = line.strip()
+        if s.startswith("# "):
+            return s[2:].strip()
+        if s.startswith("## "):
+            return s[3:].strip()
+    return ""
+
+
+def _iso_mtime(path: Path) -> str:
+    """File mtime as ISO-8601 UTC, used as the issue's updatedAt."""
+    try:
+        ts = path.stat().st_mtime
+    except OSError:
+        return _iso_utc_now()
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def cmd_groundcrew_fetch(args) -> int:
+    """Emit a JSON array of issues for groundcrew's shell adapter to consume.
+
+    Scans ~/plans/*/*.md (one level deep — skips done/ and deferred/).
+    """
+    del args
+    issues: list[dict] = []
+    if not PLAN_ROOT.exists():
+        print("[]")
+        return 0
+    for repo_entry in sorted(PLAN_ROOT.iterdir()):
+        if not repo_entry.is_dir() or repo_entry.name.startswith("."):
+            continue
+        for plan in sorted(repo_entry.iterdir()):
+            if not plan.is_file() or not plan.name.endswith(".md"):
+                continue
+            issue = _plan_to_issue(plan)
+            if issue is not None:
+                issues.append(issue)
+    print(json.dumps(issues))
+    return 0
+
+
+_GROUNDCREW_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def cmd_groundcrew_resolve_one(args) -> int:
+    """Print one issue JSON for `${id}`, exit 3 if not found."""
+    if not _GROUNDCREW_ID_RE.match(args.id):
+        raise PlanKeeperCliError(
+            f"invalid id {args.id!r}: must match [A-Za-z0-9._-]+ (no path separators)",
+            code=2,
+        )
+    if not PLAN_ROOT.exists():
+        return 3
+    # Search active plans first, then done/, then deferred/.
+    for repo_entry in PLAN_ROOT.iterdir():
+        if not repo_entry.is_dir() or repo_entry.name.startswith("."):
+            continue
+        for subdir in (repo_entry, repo_entry / "done", repo_entry / "deferred"):
+            if not subdir.exists():
+                continue
+            candidate = subdir / f"{args.id}.md"
+            if candidate.is_file():
+                issue = _plan_to_issue(candidate)
+                if issue is None:
+                    continue
+                print(json.dumps(issue))
+                return 0
+    return 3
+
+
+def cmd_groundcrew_mark_in_progress(args) -> int:
+    """Read {'path': ...} from stdin, flip that plan's Status to in-progress.
+
+    Validates the path is a string, absolute, points to a .md file, and
+    resolves to a location inside PLAN_ROOT. This is defense-in-depth:
+    groundcrew is the expected caller (and always produces well-formed
+    sourceRef.path values), but the CLI is also auto-approved by a
+    PreToolUse hook, so it should not be willing to mutate arbitrary
+    .md files anywhere on disk.
+    """
+    del args
+    raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise PlanKeeperCliError(f"stdin is not valid JSON: {e}", code=2)
+    if not isinstance(payload, dict) or "path" not in payload:
+        raise PlanKeeperCliError(
+            "stdin JSON must be {'path': <abs-path>}; 'path' field required",
+            code=2,
+        )
+    raw_path = payload["path"]
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise PlanKeeperCliError(
+            "stdin JSON field 'path' must be a non-empty string", code=2,
+        )
+    path = Path(raw_path)
+    if not path.is_absolute():
+        raise PlanKeeperCliError(f"path must be absolute: {path}", code=2)
+    if path.suffix != ".md":
+        raise PlanKeeperCliError(f"path must point to a .md plan file: {path}", code=2)
+    resolved = path.resolve()
+    plan_root = PLAN_ROOT.resolve()
+    try:
+        resolved.relative_to(plan_root)
+    except ValueError:
+        raise PlanKeeperCliError(
+            f"path is outside PLAN_ROOT ({plan_root}): {path}", code=2,
+        )
+    if not resolved.exists():
+        raise PlanKeeperCliError(f"plan file not found: {resolved}", code=3)
+    text = resolved.read_text(encoding="utf-8")
+    if not (text.startswith("---\n") or text.startswith("---\r\n")):
+        raise PlanKeeperCliError(
+            f"{resolved} has no frontmatter (cannot mark in-progress)", code=2,
+        )
+    meta, body = parse_frontmatter(text)
+    meta["Status"] = "in-progress"
+    new_text = serialize_frontmatter(meta, body)
+    if not new_text.endswith("\n"):
+        new_text += "\n"
+    write_atomic(resolved, new_text)
+    print(resolved)
+    return 0
+
+
 # --- Parser -----------------------------------------------------------------
 
 
@@ -1580,6 +1857,13 @@ def build_parser() -> argparse.ArgumentParser:
         "docs/exec-plans/active/.",
     )
     p_save.add_argument(
+        "--agent",
+        default="claude",
+        help="agent name to inject as 'Agent: <name>' frontmatter on "
+             "markdown saves (default: claude). Heredoc + .md shape only; "
+             "ignored for --extension other than md and for --from-path.",
+    )
+    p_save.add_argument(
         "--on-collision",
         choices=["fail", "suffix", "overwrite"],
         default="fail",
@@ -1627,6 +1911,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_fm_strip = file_meta_sub.add_parser("strip", help="print body without frontmatter")
     p_fm_strip.add_argument("--file", required=True)
+
+    p_fm_update = file_meta_sub.add_parser(
+        "update",
+        help="apply --field Key=value updates to plan frontmatter "
+             "(any whitelisted field)",
+    )
+    p_fm_update.add_argument("--file", required=True, help="path to a plan file")
+    p_fm_update.add_argument(
+        "--field",
+        action="append",
+        metavar="Key=value",
+        help="frontmatter field to set (repeat for multiple fields); "
+             "Key must be one of: " + ", ".join(_FRONTMATTER_FIELDS),
+    )
 
     p_tsc = sub.add_parser(
         "ticket-system-config",
@@ -1682,6 +1980,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="ignore existing Ticket frontmatter and create a fresh ticket",
     )
 
+    sub.add_parser(
+        "groundcrew-fetch",
+        help="emit shell-adapter JSON array of active plans (for crew.config.ts fetch)",
+    )
+
+    p_gc_one = sub.add_parser(
+        "groundcrew-resolve-one",
+        help="emit one shell-adapter issue JSON for ${id}, or exit 3 if missing",
+    )
+    p_gc_one.add_argument("id", help="plan id (filename stem, no .md)")
+
+    sub.add_parser(
+        "groundcrew-mark-in-progress",
+        help="flip Status to in-progress on a plan named by stdin sourceRef JSON",
+    )
+
     return parser
 
 
@@ -1692,6 +2006,7 @@ _FILE_META_DISPATCH = {
     "get": cmd_file_meta_get,
     "set": cmd_file_meta_set,
     "strip": cmd_file_meta_strip,
+    "update": cmd_file_meta_update,
 }
 
 _TICKET_SYSTEM_CONFIG_DISPATCH = {
@@ -1715,6 +2030,9 @@ def main() -> int:
         "ticket-system-config": lambda a: _TICKET_SYSTEM_CONFIG_DISPATCH[a.tsc_cmd](a),
         "ticket-api": cmd_ticket_api,
         "push": cmd_push,
+        "groundcrew-fetch": cmd_groundcrew_fetch,
+        "groundcrew-resolve-one": cmd_groundcrew_resolve_one,
+        "groundcrew-mark-in-progress": cmd_groundcrew_mark_in_progress,
     }
     try:
         return dispatch[args.cmd](args)
