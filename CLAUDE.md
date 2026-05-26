@@ -83,6 +83,20 @@ Conventions for Python CLIs (like `plugins/harness/skills/task-list-runner/task_
 
 - **PreToolUse hook allow-list matches must anchor on plugin-specific path structure, not bare script name.** `plugins/harness/scripts/task-list-cli-allow.sh` matches `python3 .../skills/task-list-runner/task_list_cli.py` rather than the filename alone, so a stray `task_list_cli.py` elsewhere in the workspace doesn't get auto-approved. Both the dev-checkout path (`plugins/harness/...`) and the installed plugin-cache path (with version directory) need to match.
 
+## Agent skills
+
+### Issue tracker
+
+Linear (workspace HRD, project Wild-Horses) via the `linear` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical triage roles mapped to `triage:`-prefixed Linear labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context (`CONTEXT.md` and `docs/adr/` at the repo root). See `docs/agents/domain.md`.
+
 ## Reference Marketplaces
 
 - Official (canonical, 119 plugins): <https://github.com/anthropics/claude-plugins-official>
