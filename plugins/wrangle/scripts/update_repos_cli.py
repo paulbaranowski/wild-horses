@@ -30,7 +30,7 @@ def load_config() -> dict:
     except json.JSONDecodeError as e:
         sys.stderr.write(f"ERROR: corrupt config at {CONFIG_PATH}: {e}\n")
         sys.exit(3)
-    if "repos" not in data or not isinstance(data["repos"], list):
+    if not isinstance(data, dict) or "repos" not in data or not isinstance(data["repos"], list):
         sys.stderr.write(f"ERROR: config missing 'repos' list at {CONFIG_PATH}\n")
         sys.exit(3)
     for i, repo in enumerate(data["repos"]):

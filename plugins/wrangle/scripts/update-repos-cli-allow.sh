@@ -36,16 +36,22 @@ cmd=$(jq -r '.tool_input.command // empty')
 #
 # Defense in depth: reject any shell control operators (`;`, `&&`, `||`, `|`,
 # redirects, command substitution, backticks) up front, before allow-matching.
-# The regex below only constrains the *prefix*, so without this guard a command
-# like `python3 .../update_repos_cli.py ; uname -a` would still match and
-# auto-approve, letting an attacker chain arbitrary shell off our allow-list.
+# `\n`/`\r` are listed first because the allow regex's `.` does not match
+# newlines — without an explicit reject, a payload like
+# `python3 .../update_repos_cli.py\nuname -a` would bypass the metachar checks
+# (newline isn't `;` or `&&`) and the regex's `.*$` clause can't see past
+# the newline either, leaving the chained command silently approved.
 case "$cmd" in
-    *";"* | *"&&"* | *"||"* | *"|"* | *">"* | *"<"* | *'$('* | *'`'*)
+    *$'\n'* | *$'\r'* | *";"* | *"&&"* | *"||"* | *"|"* | *">"* | *"<"* | *'$('* | *'`'*)
         exit 0
         ;;
 esac
 
-if [[ "$cmd" =~ ^python3[[:space:]]+[\"\']?([^\"\'[:space:]]+/scripts/update_repos_cli\.py)[\"\']?([[:space:]]|$) ]] \
+# Anchor on both ends: `.*$` (instead of `[[:space:]]|$`) forces the regex to
+# consume the entire command string, so trailing exotic content (a stray
+# newline that somehow slipped past the case prefilter, etc.) can't ride
+# along after a matching prefix.
+if [[ "$cmd" =~ ^python3[[:space:]]+[\"\']?([^\"\'[:space:]]+/scripts/update_repos_cli\.py)[\"\']?([[:space:]].*)?$ ]] \
    && [[ "${BASH_REMATCH[1]}" == *"/wrangle/"* ]]; then
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"wrangle CLI is plugin-approved"}}'
 fi

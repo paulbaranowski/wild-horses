@@ -170,6 +170,21 @@ class TestConfigValidation(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 3)
         self.assertIn("corrupt config", r.stderr)
 
+    def test_json_root_is_list_exits_3(self) -> None:
+        # `json.loads` accepts any valid JSON value, not just objects. A
+        # list/string/number at the root would TypeError on `"repos" not in
+        # data` without the top-level dict guard.
+        self.write_raw_config('[{"path": "/tmp/r", "branch": "main"}]')
+        r = run_cli("list", home=self.home)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("missing 'repos' list", r.stderr)
+
+    def test_json_root_is_scalar_exits_3(self) -> None:
+        self.write_raw_config("42")
+        r = run_cli("list", home=self.home)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("missing 'repos' list", r.stderr)
+
     def test_entry_not_a_dict_exits_3(self) -> None:
         self.write_config(["not-a-dict"])
         r = run_cli("list", home=self.home)
@@ -467,6 +482,15 @@ class TestAllowListShellInjection(IsolatedHomeTestCase):
     def test_backtick_substitution_blocked(self) -> None:
         cmd = "python3 /opt/plugins/wrangle/scripts/update_repos_cli.py add `pwd`"
         self.assertEqual(run_allow(cmd), "")
+
+    def test_newline_chain_blocked(self) -> None:
+        # `\n` isn't covered by the metacharacter list and POSIX `.` doesn't
+        # match it either, so the allow regex would happily ignore everything
+        # after the newline. The case-prefilter must explicitly reject it.
+        self.assertEqual(run_allow(f"{self.LEGIT}\nuname -a"), "")
+
+    def test_carriage_return_chain_blocked(self) -> None:
+        self.assertEqual(run_allow(f"{self.LEGIT}\runame -a"), "")
 
     def test_path_outside_plugin_dir_not_allowed(self) -> None:
         # Anchoring on /wrangle/ in the path prevents a stray
