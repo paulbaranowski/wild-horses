@@ -33,6 +33,18 @@ cmd=$(jq -r '.tool_input.command // empty')
 #
 # Handles Claude Code's defensive path-quoting (paths may be wrapped in `"` or
 # `'`) via the optional `[\"\']?` tokens flanking the script path.
+#
+# Defense in depth: reject any shell control operators (`;`, `&&`, `||`, `|`,
+# redirects, command substitution, backticks) up front, before allow-matching.
+# The regex below only constrains the *prefix*, so without this guard a command
+# like `python3 .../update_repos_cli.py ; uname -a` would still match and
+# auto-approve, letting an attacker chain arbitrary shell off our allow-list.
+case "$cmd" in
+    *";"* | *"&&"* | *"||"* | *"|"* | *">"* | *"<"* | *'$('* | *'`'*)
+        exit 0
+        ;;
+esac
+
 if [[ "$cmd" =~ ^python3[[:space:]]+[\"\']?([^\"\'[:space:]]+/scripts/update_repos_cli\.py)[\"\']?([[:space:]]|$) ]] \
    && [[ "${BASH_REMATCH[1]}" == *"/update-git-repos/"* ]]; then
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"update-git-repos CLI is plugin-approved"}}'

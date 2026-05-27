@@ -24,7 +24,7 @@ For each repo, the skill:
 
 ## How it works
 
-A bundled `scripts/update_repos_cli.py` does all I/O and git calls. Each subcommand prints JSON so the skill can sequence prompts without screen-scraping. A PreToolUse hook (`hooks/hooks.json` + `scripts/update-repos-cli-allow.sh`) auto-approves the CLI so the per-turn flow isn't repeatedly gated by the auto-mode classifier. The CLI's surface is bounded to that one script under `~/.config/wild-horses/update-git-repos/` and `git` calls against the configured repo paths.
+A bundled `scripts/update_repos_cli.py` does all I/O and git calls. Each subcommand prints JSON so the skill can sequence prompts without screen-scraping. A PreToolUse hook (`hooks/hooks.json` + `scripts/update-repos-cli-allow.sh`) auto-approves the CLI so the per-turn flow isn't repeatedly gated by the auto-mode classifier. The CLI writes config under `~/.config/wild-horses/update-git-repos/` and runs `git` calls against configured repo paths.
 
 ### Subcommands
 

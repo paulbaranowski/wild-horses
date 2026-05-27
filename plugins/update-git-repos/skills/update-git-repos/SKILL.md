@@ -85,7 +85,7 @@ The result `status` is one of:
 
 Print one line per repo, grouped by outcome when there are many. Use simple ASCII prefixes (no emoji unless the user opted in):
 
-```
+```text
 Pulled:
   + /Users/paul/dev/foo (main): 3 files changed
   + /Users/paul/dev/bar (master): 1 file changed

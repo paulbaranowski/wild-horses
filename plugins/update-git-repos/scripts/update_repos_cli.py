@@ -33,6 +33,17 @@ def load_config() -> dict:
     if "repos" not in data or not isinstance(data["repos"], list):
         sys.stderr.write(f"ERROR: config missing 'repos' list at {CONFIG_PATH}\n")
         sys.exit(3)
+    for i, repo in enumerate(data["repos"]):
+        if (
+            not isinstance(repo, dict)
+            or not isinstance(repo.get("path"), str) or not repo["path"]
+            or not isinstance(repo.get("branch"), str) or not repo["branch"]
+        ):
+            sys.stderr.write(
+                f"ERROR: invalid repo entry at index {i} in {CONFIG_PATH}; "
+                "expected {'path': non-empty str, 'branch': non-empty str}\n"
+            )
+            sys.exit(3)
     return data
 
 
@@ -264,6 +275,13 @@ def cmd_pull_one(args: argparse.Namespace) -> None:
     if not entry:
         sys.stderr.write(f"ERROR: not in config: {p}\n")
         sys.exit(2)
+    status = repo_status(entry["path"], entry["branch"])
+    # Mirror pull-all's safety gate: only pull when ready. The single exception
+    # is dirty + explicit --stash, which is exactly what the dirty-repo prompt
+    # in the skill flow asks for.
+    if status["status"] != "ready" and not (status["status"] == "dirty" and args.stash):
+        print(json.dumps(status, indent=2))
+        return
     print(json.dumps(pull_repo(entry["path"], entry["branch"], stash=args.stash), indent=2))
 
 

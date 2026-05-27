@@ -1,7 +1,7 @@
 {
   "name": "update-git-repos",
   "description": "Pull every configured git repo from origin/<branch> in one shot. Maintains a repo list at ~/.config/wild-horses/update-git-repos/repos.json. Supports bootstrap auto-discovery under a root dir, manual add/remove, and prompts per repo when working trees are dirty (skip vs stash-pull-pop). Backed by a bundled update_repos_cli.py that does atomic config writes, status checks (current branch, dirty state, divergence), and `git pull --ff-only` per repo. Includes a PreToolUse hook that auto-approves invocations of the bundled CLI.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": {
     "name": "Paul Baranowski"
   }
