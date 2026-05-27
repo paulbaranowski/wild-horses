@@ -3,11 +3,11 @@
 
 Stdlib-only — no pytest needed. Run from anywhere:
 
-    python3 plugins/update-git-repos/scripts/test_update_repos_cli.py
+    python3 plugins/wrangle/scripts/test_update_repos_cli.py
 
 Or via unittest discovery:
 
-    python3 -m unittest discover -s plugins/update-git-repos/scripts -p 'test_update_repos_cli.py'
+    python3 -m unittest discover -s plugins/wrangle/scripts -p 'test_update_repos_cli.py'
 
 Tests invoke the CLI as a subprocess so exit codes, argparse behavior,
 and stdout/stderr separation are exercised exactly as a dispatched
@@ -433,13 +433,13 @@ class TestAllowListShellInjection(IsolatedHomeTestCase):
     would still auto-approve. A pre-filter for shell metacharacters now
     rejects any chained command before the regex even runs."""
 
-    LEGIT = "python3 /opt/plugins/update-git-repos/scripts/update_repos_cli.py pull-all"
+    LEGIT = "python3 /opt/plugins/wrangle/scripts/update_repos_cli.py pull-all"
 
     def test_legitimate_invocation_is_allowed(self) -> None:
         self.assertIn("permissionDecision", run_allow(self.LEGIT))
 
     def test_legitimate_with_args_is_allowed(self) -> None:
-        cmd = "python3 /opt/plugins/update-git-repos/scripts/update_repos_cli.py pull-one /tmp/r --stash"
+        cmd = "python3 /opt/plugins/wrangle/scripts/update_repos_cli.py pull-one /tmp/r --stash"
         self.assertIn("permissionDecision", run_allow(cmd))
 
     def test_semicolon_chain_blocked(self) -> None:
@@ -461,15 +461,15 @@ class TestAllowListShellInjection(IsolatedHomeTestCase):
         self.assertEqual(run_allow(f"{self.LEGIT} < /tmp/x"), "")
 
     def test_command_substitution_blocked(self) -> None:
-        cmd = 'python3 /opt/plugins/update-git-repos/scripts/update_repos_cli.py add "$(echo /tmp)"'
+        cmd = 'python3 /opt/plugins/wrangle/scripts/update_repos_cli.py add "$(echo /tmp)"'
         self.assertEqual(run_allow(cmd), "")
 
     def test_backtick_substitution_blocked(self) -> None:
-        cmd = "python3 /opt/plugins/update-git-repos/scripts/update_repos_cli.py add `pwd`"
+        cmd = "python3 /opt/plugins/wrangle/scripts/update_repos_cli.py add `pwd`"
         self.assertEqual(run_allow(cmd), "")
 
     def test_path_outside_plugin_dir_not_allowed(self) -> None:
-        # Anchoring on /update-git-repos/ in the path prevents a stray
+        # Anchoring on /wrangle/ in the path prevents a stray
         # `update_repos_cli.py` elsewhere in the workspace from being approved.
         cmd = "python3 /tmp/random/scripts/update_repos_cli.py pull-all"
         self.assertEqual(run_allow(cmd), "")
@@ -477,11 +477,11 @@ class TestAllowListShellInjection(IsolatedHomeTestCase):
     def test_dash_c_payload_not_allowed(self) -> None:
         # The first positional arg must BE the script — not a `-c` payload
         # that merely mentions a matching path string.
-        cmd = 'python3 -c "import os; os.system(\'evil\')" /opt/plugins/update-git-repos/scripts/update_repos_cli.py'
+        cmd = 'python3 -c "import os; os.system(\'evil\')" /opt/plugins/wrangle/scripts/update_repos_cli.py'
         self.assertEqual(run_allow(cmd), "")
 
     def test_non_python_invocation_not_allowed(self) -> None:
-        cmd = "bash /opt/plugins/update-git-repos/scripts/update_repos_cli.py"
+        cmd = "bash /opt/plugins/wrangle/scripts/update_repos_cli.py"
         self.assertEqual(run_allow(cmd), "")
 
 
