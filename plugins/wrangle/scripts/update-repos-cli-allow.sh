@@ -2,7 +2,7 @@
 # PreToolUse hook: pre-approve `python3 .../update_repos_cli.py ...` invocations
 # so the update-git-repos skill flow doesn't gate on the auto-mode classifier
 # multiple times per turn. The CLI's surface is bounded: it reads/writes a
-# config file under ~/.config/wild-horses/update-git-repos/ and runs git
+# config file under ~/.config/wild-horses/wrangle/ and runs git
 # commands (status, branch, fetch, pull, stash) against configured repo paths.
 # No subprocess execution of file-supplied content.
 #

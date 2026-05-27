@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """update-git-repos CLI.
 
-Maintains ~/.config/wild-horses/update-git-repos/repos.json and runs
+Maintains ~/.config/wild-horses/wrangle/repos.json and runs
 `git pull --ff-only` against each configured repo. All subcommands print
 JSON on stdout; non-zero exit means the command itself failed to run
 (not a per-repo error — those are reported inside the JSON).
@@ -16,7 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / ".config" / "wild-horses" / "update-git-repos"
+CONFIG_DIR = Path.home() / ".config" / "wild-horses" / "wrangle"
 CONFIG_PATH = CONFIG_DIR / "repos.json"
 
 NOISE_DIRS = {"node_modules", ".venv", "venv", "__pycache__", ".tox", ".cache", "target", "dist", "build", ".next"}

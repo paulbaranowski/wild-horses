@@ -1,6 +1,6 @@
 ---
 name: update-git-repos
-description: Use when the user asks to update all their git repos, pull main on all repos, sync repos from origin, refresh local clones, or run `git pull` across a known set of repos. Pulls every repo listed in ~/.config/wild-horses/update-git-repos/repos.json from origin/<branch> via the bundled CLI. Also handles bootstrapping that config (auto-discovery under a root directory, plus manual add/remove).
+description: Use when the user asks to update all their git repos, pull main on all repos, sync repos from origin, refresh local clones, or run `git pull` across a known set of repos. Pulls every repo listed in ~/.config/wild-horses/wrangle/repos.json from origin/<branch> via the bundled CLI. Also handles bootstrapping that config (auto-discovery under a root directory, plus manual add/remove).
 ---
 
 # update-git-repos
@@ -9,7 +9,7 @@ Pull every repo in the config from `origin/<branch>` in one shot. Prompts the us
 
 ## Quick reference
 
-- **Config:** `~/.config/wild-horses/update-git-repos/repos.json` — `{"repos": [{"path": "...", "branch": "main"}, ...]}`
+- **Config:** `~/.config/wild-horses/wrangle/repos.json` — `{"repos": [{"path": "...", "branch": "main"}, ...]}`
 - **CLI:** `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" <subcommand>`
 - **Subcommands:** `bootstrap-discover --root DIR`, `add PATH [--branch B]`, `remove PATH`, `list`, `pull-all`, `pull-one PATH [--stash]`
 - **Every subcommand prints JSON on stdout.** Parse it; do not screen-scrape.

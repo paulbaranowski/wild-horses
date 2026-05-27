@@ -12,7 +12,7 @@ Or via unittest discovery:
 Tests invoke the CLI as a subprocess so exit codes, argparse behavior,
 and stdout/stderr separation are exercised exactly as a dispatched
 agent would see them. Isolation: HOME=<tmpdir> per test so the CLI's
-config path (~/.config/wild-horses/update-git-repos/repos.json) resolves
+config path (~/.config/wild-horses/wrangle/repos.json) resolves
 under the tempdir, never touching the user's real config.
 
 Mirrors the precedent at plugins/plan-keeper/scripts/test_plan_keeper_cli.py.
@@ -120,7 +120,7 @@ class IsolatedHomeTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.home = Path(self._tmp.name)
-        self.config_path = self.home / ".config" / "wild-horses" / "update-git-repos" / "repos.json"
+        self.config_path = self.home / ".config" / "wild-horses" / "wrangle" / "repos.json"
         # `work` is the discoverable surface (bootstrap-discover walks it);
         # `scratch` holds bare remotes and seed clones so they don't pollute
         # discovery results.
