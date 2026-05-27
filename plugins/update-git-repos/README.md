@@ -44,3 +44,13 @@ A bundled `scripts/update_repos_cli.py` does all I/O and git calls. Each subcomm
 - `stash pop` conflicts are reported explicitly so you know the conflict markers are in the working tree.
 - `wrong-branch` repos are reported, never silently checked out.
 - Config writes are atomic (`tmp + fsync + os.replace`).
+
+## Tests
+
+Stdlib `unittest`, no extra dependencies. Run from the repo root:
+
+```bash
+python3 plugins/update-git-repos/scripts/test_update_repos_cli.py
+```
+
+Covers config validation, allow-list shell-injection bypass, the `pull-one` preflight gate, and the `pull-all` / `pull-one` happy paths (using local bare-repo fixtures so the real `git pull --ff-only` semantics are exercised).
