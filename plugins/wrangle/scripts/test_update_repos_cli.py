@@ -363,6 +363,10 @@ class TestPullAll(IsolatedHomeTestCase):
         # pull-all suppresses the verbose `output` field — that's the
         # asymmetric design between pull-all and pull-one.
         self.assertNotIn("output", result)
+        # But it DOES carry the one-line diffstat, so the summary can show
+        # what actually landed. commit_to_bare adds one file.
+        self.assertIn("stat", result)
+        self.assertIn("changed", result["stat"])
         # And the new commit actually landed.
         self.assertTrue((repo / "extra.txt").exists())
 
@@ -372,6 +376,8 @@ class TestPullAll(IsolatedHomeTestCase):
         r = run_cli("pull-all", home=self.home)
         result = json.loads(r.stdout)["results"][0]
         self.assertEqual(result["status"], "up-to-date")
+        # Nothing was pulled, so there is no diffstat to report.
+        self.assertNotIn("stat", result)
 
 
 class TestPullOnePreflight(IsolatedHomeTestCase):
@@ -440,6 +446,9 @@ class TestPullOnePreflight(IsolatedHomeTestCase):
         data = json.loads(r.stdout)
         self.assertEqual(data["status"], "pulled")
         self.assertIn("output", data)
+        # The diffstat rides along with the verbose output too.
+        self.assertIn("stat", data)
+        self.assertIn("changed", data["stat"])
 
 
 class TestAllowListShellInjection(IsolatedHomeTestCase):

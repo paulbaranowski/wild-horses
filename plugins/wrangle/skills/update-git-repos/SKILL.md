@@ -55,15 +55,15 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" pull-all
 
 The CLI inspects every repo, pulls the clean+on-branch ones with `git pull --ff-only`, and reports the rest without mutating them. Parse the `results` JSON array. Each entry has a `status` field:
 
-| `status`       | meaning                                                                         | next action                                                              |
-| -------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `pulled`       | fast-forward succeeded                                                          | report in step 5                                                         |
-| `up-to-date`   | already current                                                                 | report in step 5                                                         |
-| `dirty`        | working tree has tracked-file changes; not pulled                               | step 4                                                                   |
-| `wrong-branch` | current branch ≠ configured branch; not pulled                                  | report and skip (don't touch — user may be mid-work on a feature branch) |
-| `missing`      | path doesn't exist anymore                                                      | report; offer to `remove`                                                |
-| `not-a-repo`   | path exists but isn't a git repo                                                | report; offer to `remove`                                                |
-| `pull-failed`  | `git pull --ff-only` failed (diverged history, no `origin`, network error, etc) | report with the `error` field                                            |
+| `status`       | meaning                                                                                 | next action                                                              |
+| -------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `pulled`       | fast-forward succeeded; carries a `stat` (git `--shortstat`) when the diff is non-empty | report in step 5 — show the `stat`                                       |
+| `up-to-date`   | already current                                                                         | report in step 5                                                         |
+| `dirty`        | working tree has tracked-file changes; not pulled                                       | step 4                                                                   |
+| `wrong-branch` | current branch ≠ configured branch; not pulled                                          | report and skip (don't touch — user may be mid-work on a feature branch) |
+| `missing`      | path doesn't exist anymore                                                              | report; offer to `remove`                                                |
+| `not-a-repo`   | path exists but isn't a git repo                                                        | report; offer to `remove`                                                |
+| `pull-failed`  | `git pull --ff-only` failed (diverged history, no `origin`, network error, etc)         | report with the `error` field                                            |
 
 ### 4. Handle dirty repos (only those with `status: dirty`)
 
@@ -83,12 +83,12 @@ The result `status` is one of:
 
 ### 5. Summary
 
-Print one line per repo, grouped by outcome when there are many. Use simple ASCII prefixes (no emoji unless the user opted in):
+Print one line per repo, grouped by outcome when there are many. Use simple ASCII prefixes (no emoji unless the user opted in). For each `pulled` repo, append its `stat` field verbatim after the path so the user sees what actually changed; if a `pulled` entry has no `stat` (a commit with no textual diff), just show the path.
 
 ```text
 Pulled:
-  + /Users/paul/dev/foo (main): 3 files changed
-  + /Users/paul/dev/bar (master): 1 file changed
+  + /Users/paul/dev/foo (main): 5 files changed, 120 insertions(+), 30 deletions(-)
+  + /Users/paul/dev/bar (master): 2 files changed, 8 insertions(+), 1 deletion(-)
 
 Up to date:
   . /Users/paul/dev/baz (main)

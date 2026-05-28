@@ -131,10 +131,12 @@ def repo_status(repo_path: str, branch: str) -> dict:
 def pull_repo(repo_path: str, branch: str, *, stash: bool = False, verbose: bool = True) -> dict:
     """Pull one repo. Always runs `git pull --ff-only origin <branch>`.
 
-    `verbose=True` (the default, used by pull-one) includes the full `git pull`
-    stdout as `output`. `verbose=False` (used by pull-all) omits it — batch
-    callers only consume `status`, and including a diff stat for every repo
-    overflows tool-output buffers on real-world configs.
+    A `pulled` result always carries a one-line `stat` (git's `--shortstat`) so
+    callers can report what landed. `verbose=True` (the default, used by
+    pull-one) additionally includes the full `git pull` stdout — the per-file
+    listing — as `output`. `verbose=False` (used by pull-all) omits `output`:
+    one diffstat line per repo is fine, but a full per-file listing for every
+    repo overflows tool-output buffers on real-world configs.
     """
     p = Path(repo_path).expanduser()
     out: dict = {"path": str(p), "branch": branch}
@@ -149,6 +151,11 @@ def pull_repo(repo_path: str, branch: str, *, stash: bool = False, verbose: bool
             return out
         stashed = "No local changes to save" not in sout
 
+    # HEAD before the pull, so we can diff it against the new tip to report
+    # exactly what landed. Captured even when the rev-parse fails (unborn
+    # HEAD) — the stat is then simply omitted below.
+    rc_before, before_sha, _ = git(p, "rev-parse", "HEAD")
+
     rc, pout, perr = git(p, "pull", "--ff-only", "origin", branch)
     if rc != 0:
         out["status"] = "pull-failed"
@@ -162,6 +169,14 @@ def pull_repo(repo_path: str, branch: str, *, stash: bool = False, verbose: bool
         out["status"] = "up-to-date"
     else:
         out["status"] = "pulled"
+        # Compact one-line diffstat of what the fast-forward brought in. Unlike
+        # the full `output` (per-file listing, verbose-only), this is bounded to
+        # a single line, so pull-all includes it too — it's the whole point of
+        # showing "what actually pulled something".
+        if rc_before == 0 and before_sha:
+            rc_stat, stat, _ = git(p, "diff", "--shortstat", before_sha, "HEAD")
+            if rc_stat == 0 and stat:
+                out["stat"] = stat
         if verbose:
             out["output"] = pout
 
