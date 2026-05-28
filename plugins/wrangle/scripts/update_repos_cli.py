@@ -372,16 +372,41 @@ def cmd_list(args: argparse.Namespace) -> None:
     print(json.dumps(cfg, indent=2))
 
 
-def _status_then_pull(entry: dict) -> dict:
-    """One repo's pull-all unit of work: status-check, then pull only if ready.
+def resolve_dirty_action(cfg: dict, entry: dict) -> str:
+    """Effective dirty action for one repo: per-repo override -> global default -> 'ask'.
 
-    Self-contained (reads/writes only its own repo) so pull-all can run many
-    of these concurrently without shared state. Never auto-stashes — dirty
-    repos are reported and handled interactively via pull-one.
+    A per-repo `dirty_action` always wins (including an explicit "ask"). Otherwise
+    the top-level `default_dirty_action` applies; absent/invalid falls back to "ask".
     """
+    a = entry.get("dirty_action")
+    if a in VALID_DIRTY_ACTIONS:
+        return a
+    d = cfg.get("default_dirty_action")
+    return d if d in VALID_DIRTY_ACTIONS else "ask"
+
+
+def _status_then_pull(work: tuple[dict, str]) -> dict:
+    """One repo's pull-all unit of work: status-check, then act per resolved action.
+
+    Self-contained (reads/writes only its own repo) so pull-all can run many of
+    these concurrently without shared state. For a dirty repo the pre-resolved
+    `action` decides: `skip` -> report a `skipped` status untouched; `stash` ->
+    inline stash-pull-pop (same path as `pull-one --stash`); `ask` -> report
+    `dirty` so the skill can prompt (unchanged behavior).
+    """
+    entry, action = work
     s = repo_status(entry["path"], entry["branch"])
     if s["status"] == "ready":
-        s = pull_repo(entry["path"], entry["branch"], stash=False, verbose=False)
+        return pull_repo(entry["path"], entry["branch"], stash=False, verbose=False)
+    if s["status"] == "dirty":
+        if action == "skip":
+            s["status"] = "skipped"
+            s["reason"] = "dirty"
+            return s
+        if action == "stash":
+            return pull_repo(entry["path"], entry["branch"], stash=True, verbose=False)
+        s["effective_action"] = "ask"
+        return s
     return s
 
 
@@ -397,11 +422,13 @@ def cmd_pull_all(args: argparse.Namespace) -> None:
         }, indent=2))
         return
 
-    # `executor.map` yields results in submission order, so the output stays in
-    # config order regardless of which repo's pull finishes first — the step-5
-    # summary relies on that ordering.
+    # Resolve each repo's dirty action up front (cmd_pull_all holds cfg), then
+    # fan out. `executor.map` yields results in submission order, so output
+    # stays in config order regardless of which pull finishes first — the
+    # step-5 summary relies on that ordering.
+    work = [(r, resolve_dirty_action(cfg, r)) for r in repos]
     with ThreadPoolExecutor(max_workers=min(MAX_PULL_WORKERS, len(repos))) as ex:
-        results = list(ex.map(_status_then_pull, repos))
+        results = list(ex.map(_status_then_pull, work))
 
     print(json.dumps({"results": results}, indent=2))
 

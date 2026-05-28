@@ -362,6 +362,57 @@ class TestBootstrapDiscover(IsolatedHomeTestCase):
 
 
 class TestPullAll(IsolatedHomeTestCase):
+    def test_dirty_skip_default_reports_skipped(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        (repo / "README.md").write_text("dirty\n")
+        self.write_raw_config(json.dumps({
+            "default_dirty_action": "skip",
+            "repos": [{"path": str(repo), "branch": "main"}],
+        }))
+        r = run_cli("pull-all", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        result = json.loads(r.stdout)["results"][0]
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["reason"], "dirty")
+
+    def test_dirty_stash_default_pulls_and_pops(self) -> None:
+        bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        commit_to_bare(bare, self.scratch, "main")
+        (repo / "README.md").write_text("dirty\n")
+        self.write_raw_config(json.dumps({
+            "default_dirty_action": "stash",
+            "repos": [{"path": str(repo), "branch": "main"}],
+        }))
+        r = run_cli("pull-all", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        result = json.loads(r.stdout)["results"][0]
+        self.assertEqual(result["status"], "pulled")
+        self.assertTrue((repo / "extra.txt").exists())          # remote commit landed
+        self.assertEqual((repo / "README.md").read_text(), "dirty\n")  # local edit popped back
+
+    def test_dirty_ask_default_reports_dirty(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        (repo / "README.md").write_text("dirty\n")
+        # No default_dirty_action set -> resolves to ask -> unchanged behavior.
+        self.write_config([{"path": str(repo), "branch": "main"}])
+        r = run_cli("pull-all", home=self.home)
+        result = json.loads(r.stdout)["results"][0]
+        self.assertEqual(result["status"], "dirty")
+
+    def test_per_repo_override_beats_global(self) -> None:
+        bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        commit_to_bare(bare, self.scratch, "main")
+        (repo / "README.md").write_text("dirty\n")
+        # Global skip, but this repo is overridden to stash -> it must pull.
+        self.write_raw_config(json.dumps({
+            "default_dirty_action": "skip",
+            "repos": [{"path": str(repo), "branch": "main", "dirty_action": "stash"}],
+        }))
+        r = run_cli("pull-all", home=self.home)
+        result = json.loads(r.stdout)["results"][0]
+        self.assertEqual(result["status"], "pulled")
+        self.assertTrue((repo / "extra.txt").exists())
+
     def test_empty_config_returns_empty_marker(self) -> None:
         r = run_cli("pull-all", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
