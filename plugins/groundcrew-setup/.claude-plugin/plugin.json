@@ -1,0 +1,8 @@
+{
+  "name": "groundcrew-setup",
+  "description": "Interactive first-run wizard for groundcrew. Walks the user through scaffolding ~/.config/groundcrew/config.ts conversationally, with auto-discovery of GitHub repos (via gh) and local clones (via directory scan), best-effort seeding of defaults from any existing config (via loadConfig()), and a sensible Claude bypassPermissions default for unattended runs. Replaces the 'copy crew.config.example.ts and edit by hand' first-run friction. Ships one skill: config.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Paul Baranowski"
+  }
+}

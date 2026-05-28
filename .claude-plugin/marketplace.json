@@ -76,6 +76,16 @@
       },
       "category": "development",
       "license": "MIT"
+    },
+    {
+      "name": "groundcrew-setup",
+      "source": "./plugins/groundcrew-setup",
+      "description": "Interactive first-run wizard for groundcrew. Walks first-run users through scaffolding `~/.config/groundcrew/config.ts` conversationally, with GitHub repo discovery, best-effort seeding from any existing config, and an optional `@clipboard-health/clearance` egress-allowlist setup step. Ships one skill: `config`.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
     }
   ]
 }
