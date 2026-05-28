@@ -245,6 +245,36 @@ class TestConfigValidation(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 3)
         self.assertIn("index 1", r.stderr)
 
+    def test_invalid_default_dirty_action_exits_3(self) -> None:
+        self.write_raw_config('{"repos": [], "default_dirty_action": "nope"}')
+        r = run_cli("list", home=self.home)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("invalid default_dirty_action", r.stderr)
+
+    def test_valid_default_dirty_action_ok(self) -> None:
+        self.write_raw_config('{"repos": [], "default_dirty_action": "skip"}')
+        r = run_cli("list", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["default_dirty_action"], "skip")
+
+    def test_invalid_per_repo_dirty_action_exits_3(self) -> None:
+        self.write_config([{"path": "/tmp/r", "branch": "main", "dirty_action": "bogus"}])
+        r = run_cli("list", home=self.home)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("invalid dirty_action", r.stderr)
+        self.assertIn("index 0", r.stderr)
+
+    def test_valid_per_repo_dirty_action_ok(self) -> None:
+        self.write_config([{"path": "/tmp/r", "branch": "main", "dirty_action": "stash"}])
+        r = run_cli("list", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["repos"][0]["dirty_action"], "stash")
+
+    def test_list_defaults_dirty_action_to_ask(self) -> None:
+        r = run_cli("list", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["default_dirty_action"], "ask")
+
 
 class TestAddRemoveList(IsolatedHomeTestCase):
     def test_add_records_repo_with_detected_branch(self) -> None:
@@ -332,6 +362,59 @@ class TestBootstrapDiscover(IsolatedHomeTestCase):
 
 
 class TestPullAll(IsolatedHomeTestCase):
+    def test_dirty_skip_default_reports_skipped(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        (repo / "README.md").write_text("dirty\n")
+        self.write_raw_config(json.dumps({
+            "default_dirty_action": "skip",
+            "repos": [{"path": str(repo), "branch": "main"}],
+        }))
+        r = run_cli("pull-all", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        result = json.loads(r.stdout)["results"][0]
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["reason"], "dirty")
+
+    def test_dirty_stash_default_pulls_and_pops(self) -> None:
+        bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        commit_to_bare(bare, self.scratch, "main")
+        (repo / "README.md").write_text("dirty\n")
+        self.write_raw_config(json.dumps({
+            "default_dirty_action": "stash",
+            "repos": [{"path": str(repo), "branch": "main"}],
+        }))
+        r = run_cli("pull-all", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        result = json.loads(r.stdout)["results"][0]
+        self.assertEqual(result["status"], "pulled")
+        self.assertTrue((repo / "extra.txt").exists())          # remote commit landed
+        self.assertEqual((repo / "README.md").read_text(), "dirty\n")  # local edit popped back
+
+    def test_dirty_ask_default_reports_dirty(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        (repo / "README.md").write_text("dirty\n")
+        # No default_dirty_action set -> resolves to ask -> unchanged behavior.
+        self.write_config([{"path": str(repo), "branch": "main"}])
+        r = run_cli("pull-all", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        result = json.loads(r.stdout)["results"][0]
+        self.assertEqual(result["status"], "dirty")
+        self.assertEqual(result["effective_action"], "ask")
+
+    def test_per_repo_override_beats_global(self) -> None:
+        bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        commit_to_bare(bare, self.scratch, "main")
+        (repo / "README.md").write_text("dirty\n")
+        # Global skip, but this repo is overridden to stash -> it must pull.
+        self.write_raw_config(json.dumps({
+            "default_dirty_action": "skip",
+            "repos": [{"path": str(repo), "branch": "main", "dirty_action": "stash"}],
+        }))
+        r = run_cli("pull-all", home=self.home)
+        result = json.loads(r.stdout)["results"][0]
+        self.assertEqual(result["status"], "pulled")
+        self.assertTrue((repo / "extra.txt").exists())
+
     def test_empty_config_returns_empty_marker(self) -> None:
         r = run_cli("pull-all", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -599,6 +682,56 @@ class TestAllowListShellInjection(IsolatedHomeTestCase):
     def test_non_python_invocation_not_allowed(self) -> None:
         cmd = "bash /opt/plugins/wrangle/scripts/update_repos_cli.py"
         self.assertEqual(run_allow(cmd), "")
+
+
+class TestSetAction(IsolatedHomeTestCase):
+    def test_set_global_default(self) -> None:
+        r = run_cli("set-action", "skip", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["default_dirty_action"], "skip")
+        listed = json.loads(run_cli("list", home=self.home).stdout)
+        self.assertEqual(listed["default_dirty_action"], "skip")
+
+    def test_set_global_rejects_bad_value(self) -> None:
+        r = run_cli("set-action", "bogus", home=self.home)
+        # argparse `choices` rejects it before our code runs.
+        self.assertEqual(r.returncode, 2)
+
+    def test_global_inherit_rejected(self) -> None:
+        r = run_cli("set-action", "inherit", home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("only valid with --repo", r.stderr)
+
+    def test_set_per_repo_override(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        run_cli("add", str(repo), home=self.home)
+        r = run_cli("set-action", "stash", "--repo", str(repo), home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["dirty_action"], "stash")
+        listed = json.loads(run_cli("list", home=self.home).stdout)
+        self.assertEqual(listed["repos"][0]["dirty_action"], "stash")
+
+    def test_set_per_repo_explicit_ask(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        run_cli("add", str(repo), home=self.home)
+        run_cli("set-action", "ask", "--repo", str(repo), home=self.home)
+        listed = json.loads(run_cli("list", home=self.home).stdout)
+        self.assertEqual(listed["repos"][0]["dirty_action"], "ask")
+
+    def test_inherit_clears_per_repo(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        run_cli("add", str(repo), home=self.home)
+        run_cli("set-action", "skip", "--repo", str(repo), home=self.home)
+        r = run_cli("set-action", "inherit", "--repo", str(repo), home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIsNone(json.loads(r.stdout)["dirty_action"])
+        listed = json.loads(run_cli("list", home=self.home).stdout)
+        self.assertNotIn("dirty_action", listed["repos"][0])
+
+    def test_set_unknown_repo_exits_2(self) -> None:
+        r = run_cli("set-action", "skip", "--repo", "/nope", home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not in config", r.stderr)
 
 
 if __name__ == "__main__":

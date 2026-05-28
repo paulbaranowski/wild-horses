@@ -5,13 +5,13 @@ description: Use when the user asks to update all their git repos, pull main on 
 
 # update-git-repos
 
-Pull every repo in the config from `origin/<branch>` in one shot. Prompts the user per repo when a working tree is dirty so they pick stash-pull-pop or skip.
+Pull every repo in the config from `origin/<branch>` in one shot. When a working tree is dirty, `pull-all` applies the configured default action — `ask` (the default), `skip`, or `stash` — resolved per-repo then globally; with `ask` it prompts you per repo to pick stash-pull or skip.
 
 ## Quick reference
 
-- **Config:** `~/.config/wild-horses/wrangle/repos.json` — `{"repos": [{"path": "...", "branch": "main"}, ...]}`
+- **Config:** `~/.config/wild-horses/wrangle/repos.json` — `{"default_dirty_action": "ask|skip|stash", "repos": [{"path": "...", "branch": "main", "dirty_action": "ask|skip|stash"}, ...]}`. Both action keys are optional; `default_dirty_action` defaults to `ask`, and a per-repo `dirty_action` overrides it. **Resolution:** per-repo `dirty_action` → top-level `default_dirty_action` → `ask`.
 - **CLI:** `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" <subcommand>`
-- **Subcommands:** `bootstrap-discover --root DIR`, `add PATH [--branch B]`, `remove PATH`, `list`, `pull-all`, `pull-one PATH [--stash]`
+- **Subcommands:** `bootstrap-discover --root DIR`, `add PATH [--branch B]`, `remove PATH`, `set-action <ask|skip|stash|inherit> [--repo PATH]`, `list`, `pull-all`, `pull-one PATH [--stash]`
 - **Every subcommand prints JSON on stdout.** Parse it; do not screen-scrape.
 - **Exit codes:** 0 means the command itself succeeded (per-repo errors live inside the JSON's `status` field); non-zero means the command itself failed (bad path, corrupt config, etc).
 
@@ -53,22 +53,42 @@ Run:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" pull-all
 ```
 
-The CLI inspects every repo, pulls the clean+on-branch ones with `git pull --ff-only`, and reports the rest without mutating them. Parse the `results` JSON array. Each entry has a `status` field:
+The CLI inspects every repo, pulls the clean+on-branch ones with `git pull --ff-only`, and applies each dirty repo's configured action inline (`stash` does a stash-pull-pop, `skip` leaves it untouched, `ask` defers to step 4); the remaining repos are reported without mutation. Parse the `results` JSON array. Each entry has a `status` field:
 
-| `status`       | meaning                                                                                                                                                                       | next action                                                                                        |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `pulled`       | fast-forward succeeded; carries a `stat` (git `--shortstat`) when the diff is non-empty                                                                                       | report in step 5 — show the `stat`                                                                 |
-| `up-to-date`   | already current                                                                                                                                                               | report in step 5                                                                                   |
-| `dirty`        | working tree has tracked-file changes; not pulled                                                                                                                             | step 4                                                                                             |
-| `wrong-branch` | current branch ≠ configured branch; not pulled                                                                                                                                | report and skip (don't touch — user may be mid-work on a feature branch)                           |
-| `missing`      | path doesn't exist anymore                                                                                                                                                    | report; offer to `remove`                                                                          |
-| `not-a-repo`   | path exists but isn't a git repo                                                                                                                                              | report; offer to `remove`                                                                          |
-| `pull-failed`  | `git pull --ff-only` failed (diverged history, no `origin`, network error, or a remote that needed credentials — prompts are disabled, so auth fails fast instead of hanging) | report with the `error` field                                                                      |
-| `timed-out`    | `git pull` exceeded the timeout (slow/unreachable remote); the pull was killed, repo left untouched                                                                           | report with the `error` field; suggest checking the remote/network, or raise `WRANGLE_GIT_TIMEOUT` |
+| `status`                   | meaning                                                                                                                                                                        | next action                                                                                        |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| `pulled`                   | fast-forward succeeded; carries a `stat` (git `--shortstat`) when the diff is non-empty                                                                                        | report in step 5 — show the `stat`                                                                 |
+| `up-to-date`               | already current                                                                                                                                                                | report in step 5                                                                                   |
+| `dirty`                    | working tree has tracked-file changes; effective action is `ask`, so not pulled                                                                                                | step 4 (prompt)                                                                                    |
+| `skipped`                  | working tree was dirty and the effective action is `skip`; carries `reason: "dirty"`, repo untouched, no prompt                                                                | report under "Skipped:" in step 5                                                                  |
+| `wrong-branch`             | current branch ≠ configured branch; not pulled                                                                                                                                 | report and skip (don't touch — user may be mid-work on a feature branch)                           |
+| `missing`                  | path doesn't exist anymore                                                                                                                                                     | report; offer to `remove`                                                                          |
+| `not-a-repo`               | path exists but isn't a git repo                                                                                                                                               | report; offer to `remove`                                                                          |
+| `pull-failed`              | `git pull --ff-only` failed (diverged history, no `origin`, network error, or a remote that needed credentials — prompts are disabled, so auth fails fast instead of hanging)  | report with the `error` field                                                                      |
+| `stash-failed`             | the configured `stash` action's `git stash push` failed before any pull; repo left untouched; carries `error`                                                                  | report with the `error` field                                                                      |
+| `pulled-with-pop-conflict` | the configured `stash` action fast-forwarded but `git stash pop` hit a merge conflict; conflict markers are now in the working tree and the stash is gone; carries `pop_error` | tell the user clearly and surface `pop_error` so they know what to resolve                         |
+| `timed-out`                | `git pull` exceeded the timeout (slow/unreachable remote); the pull was killed, repo left untouched                                                                            | report with the `error` field; suggest checking the remote/network, or raise `WRANGLE_GIT_TIMEOUT` |
 
 ### 4. Handle dirty repos (only those with `status: dirty`)
 
-For each dirty repo, ask the user via AskUserQuestion: **"Stash & pull"** or **"Skip"**. (The user picked "ask me each time" — never auto-stash and never skip silently.)
+A repo only comes back `dirty` when its effective action is `ask` — `skip` repos already came back `skipped`, and `stash` repos were already pulled inline. So for each `dirty` repo, ask the user via AskUserQuestion: **"Stash & pull"** or **"Skip"**.
+
+To stop being asked, the user can store a default with `set-action`:
+
+```bash
+# Always skip dirty repos from now on:
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" set-action skip
+# Always stash-pull-pop dirty repos from now on:
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" set-action stash
+# Per-repo override (wins over the global default):
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" set-action stash --repo /Users/paul/dev/foo
+# Clear a per-repo override (fall back to the global default):
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" set-action inherit --repo /Users/paul/dev/foo
+# Go back to being asked each time:
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" set-action ask
+```
+
+When the user says things like "always skip dirty repos", "stash repo X by default", or "go back to asking", call `set-action` accordingly before (or after) the pull.
 
 For "Stash & pull":
 
@@ -106,7 +126,7 @@ Errors:
 ## Common mistakes
 
 - **Don't run raw `git pull` in a loop.** The CLI sequences status-check → conditional pull with `--ff-only` per repo and reports a structured outcome. Hand-rolled loops bypass dirty-tree safety and lose the JSON contract step 4 depends on.
-- **Don't auto-stash without asking.** The user picked "ask me each time" deliberately. Always prompt per dirty repo.
+- **Don't override the configured dirty action with a prompt.** Honor the resolved action: `skip` repos come back `skipped` (just report them), `stash` repos are already pulled, and you only prompt for repos that come back `dirty` (effective action `ask`). Never auto-stash a repo whose effective action is `ask`, and never re-prompt for one whose stored action is `skip`/`stash`.
 - **Don't try to "fix" `wrong-branch` repos by checking out the configured branch.** The user may be intentionally on a feature branch. Report it and move on.
 - **Don't skip the empty-config case.** `pull-all` returns `{"empty": true, ...}` (exit 0) when the config has no repos — handle that by routing into step 2, not by treating it as an error.
 - **Don't include `node_modules` or build dirs in `bootstrap-discover` results manually.** The CLI already skips them; if you see surprising paths, report them so we can extend the skip list, don't filter on the agent side.
