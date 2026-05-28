@@ -11,7 +11,7 @@ Pull every repo in the config from `origin/<branch>` in one shot. When a working
 
 - **Config:** `~/.config/wild-horses/wrangle/repos.json` — `{"default_dirty_action": "ask|skip|stash", "repos": [{"path": "...", "branch": "main", "dirty_action": "ask|skip|stash"}, ...]}`. Both action keys are optional; `default_dirty_action` defaults to `ask`, and a per-repo `dirty_action` overrides it. **Resolution:** per-repo `dirty_action` → top-level `default_dirty_action` → `ask`.
 - **CLI:** `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" <subcommand>`
-- **Subcommands:** `bootstrap-discover --root DIR`, `add PATH [--branch B]`, `remove PATH`, `set-action <ask|skip|stash> [--repo PATH]`, `list`, `pull-all`, `pull-one PATH [--stash]`
+- **Subcommands:** `bootstrap-discover --root DIR`, `add PATH [--branch B]`, `remove PATH`, `set-action <ask|skip|stash|inherit> [--repo PATH]`, `list`, `pull-all`, `pull-one PATH [--stash]`
 - **Every subcommand prints JSON on stdout.** Parse it; do not screen-scrape.
 - **Exit codes:** 0 means the command itself succeeded (per-repo errors live inside the JSON's `status` field); non-zero means the command itself failed (bad path, corrupt config, etc).
 
@@ -53,7 +53,7 @@ Run:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" pull-all
 ```
 
-The CLI inspects every repo, pulls the clean+on-branch ones with `git pull --ff-only`, and reports the rest without mutating them. Parse the `results` JSON array. Each entry has a `status` field:
+The CLI inspects every repo, pulls the clean+on-branch ones with `git pull --ff-only`, and applies each dirty repo's configured action inline (`stash` does a stash-pull-pop, `skip` leaves it untouched, `ask` defers to step 4); the remaining repos are reported without mutation. Parse the `results` JSON array. Each entry has a `status` field:
 
 | `status`       | meaning                                                                                                                                                                       | next action                                                                                        |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
