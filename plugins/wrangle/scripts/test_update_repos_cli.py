@@ -396,8 +396,10 @@ class TestPullAll(IsolatedHomeTestCase):
         # No default_dirty_action set -> resolves to ask -> unchanged behavior.
         self.write_config([{"path": str(repo), "branch": "main"}])
         r = run_cli("pull-all", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
         result = json.loads(r.stdout)["results"][0]
         self.assertEqual(result["status"], "dirty")
+        self.assertEqual(result["effective_action"], "ask")
 
     def test_per_repo_override_beats_global(self) -> None:
         bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
