@@ -14,12 +14,28 @@ import json
 import os
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 CONFIG_DIR = Path.home() / ".config" / "wild-horses" / "wrangle"
 CONFIG_PATH = CONFIG_DIR / "repos.json"
 
 NOISE_DIRS = {"node_modules", ".venv", "venv", "__pycache__", ".tox", ".cache", "target", "dist", "build", ".next"}
+
+# pull-all fans repos out across threads (the work is network/subprocess-bound,
+# so the GIL isn't the bottleneck). Capped so a large config doesn't spawn
+# dozens of simultaneous `git` processes.
+MAX_PULL_WORKERS = 8
+
+# Every git call is bounded by this, so one slow or unreachable remote can't
+# hang the (parallel) batch forever. Generous enough for a large first fetch;
+# override with WRANGLE_GIT_TIMEOUT (seconds) for unusually large repos.
+GIT_TIMEOUT_SECONDS = 120.0
+
+# Synthetic return code for a git call we killed on timeout. Matches the
+# convention of timeout(1) / coreutils so it reads the same as babysit-pr's
+# `timeout 600 ...` handling.
+GIT_TIMEOUT_RC = 124
 
 
 def load_config() -> dict:
@@ -61,12 +77,50 @@ def save_config(cfg: dict) -> None:
     write_atomic(CONFIG_PATH, json.dumps(cfg, indent=2) + "\n")
 
 
+def git_timeout() -> float:
+    """Per-call git timeout, overridable via WRANGLE_GIT_TIMEOUT (seconds)."""
+    raw = os.environ.get("WRANGLE_GIT_TIMEOUT")
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return GIT_TIMEOUT_SECONDS
+
+
+def git_env() -> dict[str, str]:
+    """Env that makes git fail fast instead of blocking on a prompt.
+
+    A repo whose remote needs credentials, or an SSH host with an unknown key,
+    would otherwise hang `subprocess.run` waiting on stdin that never arrives —
+    and in the parallel pull-all a single such repo wedges the whole pool. We
+    only *setdefault* GIT_SSH_COMMAND so we never clobber a user's existing one
+    (identity files, ports, etc.); GIT_TERMINAL_PROMPT is the main lever for
+    https remotes and is always forced off.
+    """
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env.setdefault("GIT_SSH_COMMAND", "ssh -oBatchMode=yes")
+    return env
+
+
 def git(cwd: Path, *args: str) -> tuple[int, str, str]:
-    """Run a git command. Returns (rc, stdout, stderr) with both trimmed."""
-    r = subprocess.run(
-        ["git", "-C", str(cwd), *args],
-        capture_output=True, text=True,
-    )
+    """Run a git command. Returns (rc, stdout, stderr) with both trimmed.
+
+    Bounded by git_timeout() and run with prompts disabled (git_env), so one
+    slow/unreachable/auth-needing remote can't hang the batch. A timeout
+    surfaces as rc=GIT_TIMEOUT_RC with a marker on stderr; callers map that to
+    a `timed-out` status.
+    """
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(cwd), *args],
+            capture_output=True, text=True,
+            env=git_env(),
+            timeout=git_timeout(),
+        )
+    except subprocess.TimeoutExpired:
+        return GIT_TIMEOUT_RC, "", "timed out"
     return r.returncode, r.stdout.strip(), r.stderr.strip()
 
 
@@ -131,10 +185,12 @@ def repo_status(repo_path: str, branch: str) -> dict:
 def pull_repo(repo_path: str, branch: str, *, stash: bool = False, verbose: bool = True) -> dict:
     """Pull one repo. Always runs `git pull --ff-only origin <branch>`.
 
-    `verbose=True` (the default, used by pull-one) includes the full `git pull`
-    stdout as `output`. `verbose=False` (used by pull-all) omits it — batch
-    callers only consume `status`, and including a diff stat for every repo
-    overflows tool-output buffers on real-world configs.
+    A `pulled` result always carries a one-line `stat` (git's `--shortstat`) so
+    callers can report what landed. `verbose=True` (the default, used by
+    pull-one) additionally includes the full `git pull` stdout — the per-file
+    listing — as `output`. `verbose=False` (used by pull-all) omits `output`:
+    one diffstat line per repo is fine, but a full per-file listing for every
+    repo overflows tool-output buffers on real-world configs.
     """
     p = Path(repo_path).expanduser()
     out: dict = {"path": str(p), "branch": branch}
@@ -149,10 +205,19 @@ def pull_repo(repo_path: str, branch: str, *, stash: bool = False, verbose: bool
             return out
         stashed = "No local changes to save" not in sout
 
+    # HEAD before the pull, so we can diff it against the new tip to report
+    # exactly what landed. Captured even when the rev-parse fails (unborn
+    # HEAD) — the stat is then simply omitted below.
+    rc_before, before_sha, _ = git(p, "rev-parse", "HEAD")
+
     rc, pout, perr = git(p, "pull", "--ff-only", "origin", branch)
     if rc != 0:
-        out["status"] = "pull-failed"
-        out["error"] = (perr or pout).strip()
+        if rc == GIT_TIMEOUT_RC:
+            out["status"] = "timed-out"
+            out["error"] = f"git pull exceeded the {git_timeout():.0f}s timeout"
+        else:
+            out["status"] = "pull-failed"
+            out["error"] = (perr or pout).strip()
         if stashed:
             # Try to restore their work so we don't strand it.
             git(p, "stash", "pop")
@@ -162,6 +227,14 @@ def pull_repo(repo_path: str, branch: str, *, stash: bool = False, verbose: bool
         out["status"] = "up-to-date"
     else:
         out["status"] = "pulled"
+        # Compact one-line diffstat of what the fast-forward brought in. Unlike
+        # the full `output` (per-file listing, verbose-only), this is bounded to
+        # a single line, so pull-all includes it too — it's the whole point of
+        # showing "what actually pulled something".
+        if rc_before == 0 and before_sha:
+            rc_stat, stat, _ = git(p, "diff", "--shortstat", before_sha, "HEAD")
+            if rc_stat == 0 and stat:
+                out["stat"] = stat
         if verbose:
             out["output"] = pout
 
@@ -247,10 +320,24 @@ def cmd_list(args: argparse.Namespace) -> None:
     print(json.dumps(cfg, indent=2))
 
 
+def _status_then_pull(entry: dict) -> dict:
+    """One repo's pull-all unit of work: status-check, then pull only if ready.
+
+    Self-contained (reads/writes only its own repo) so pull-all can run many
+    of these concurrently without shared state. Never auto-stashes — dirty
+    repos are reported and handled interactively via pull-one.
+    """
+    s = repo_status(entry["path"], entry["branch"])
+    if s["status"] == "ready":
+        s = pull_repo(entry["path"], entry["branch"], stash=False, verbose=False)
+    return s
+
+
 def cmd_pull_all(args: argparse.Namespace) -> None:
     del args
     cfg = load_config()
-    if not cfg["repos"]:
+    repos = cfg["repos"]
+    if not repos:
         print(json.dumps({
             "empty": True,
             "config_path": str(CONFIG_PATH),
@@ -258,12 +345,11 @@ def cmd_pull_all(args: argparse.Namespace) -> None:
         }, indent=2))
         return
 
-    results: list[dict] = []
-    for r in cfg["repos"]:
-        s = repo_status(r["path"], r["branch"])
-        if s["status"] == "ready":
-            s = pull_repo(r["path"], r["branch"], stash=False, verbose=False)
-        results.append(s)
+    # `executor.map` yields results in submission order, so the output stays in
+    # config order regardless of which repo's pull finishes first — the step-5
+    # summary relies on that ordering.
+    with ThreadPoolExecutor(max_workers=min(MAX_PULL_WORKERS, len(repos))) as ex:
+        results = list(ex.map(_status_then_pull, repos))
 
     print(json.dumps({"results": results}, indent=2))
 
