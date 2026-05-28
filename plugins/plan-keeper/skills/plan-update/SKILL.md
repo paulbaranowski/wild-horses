@@ -11,7 +11,7 @@ Edit the frontmatter of an existing plan in `~/plans/<repo>/`. The bundled `plan
 
 - **Target:** `~/plans/<repo>/<filename>` (active state — not `done/` or `deferred/`).
 - **Whitelisted fields:** `Agent`, `Status`, `Ticket`, `Ticket System`, `Completed on`.
-- **Status vocabulary:** `backlog` (default; visible to `crew doctor`, not dispatched), `todo` (eligible for dispatch), `in-progress` (set by groundcrew's markInProgress hook), `in-review` (manual), `done` (set by plan-done when archiving). The middle values (`in-progress`, `done`) are normally written by the system — set them by hand only if you know why.
+- **Status vocabulary:** `backlog` (default; fetched but not dispatched — confirm via `crew status <id>`), `todo` (eligible for dispatch), `in-progress` (set by groundcrew's markInProgress hook), `in-review` (manual), `done` (set by plan-done when archiving). The middle values (`in-progress`, `done`) are normally written by the system — set them by hand only if you know why.
 - **Common edits:**
   - Promote: `--field Status=todo` (makes the plan eligible for groundcrew dispatch).
   - Change model: `--field Agent=codex`.

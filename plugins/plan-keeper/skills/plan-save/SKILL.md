@@ -155,7 +155,7 @@ Status: backlog
 Body.
 ```
 
-The defaults are a floor, not an override: if the user pipes in a body that already declares `Agent:` or `Status:` in its own frontmatter, those values are kept untouched. `Status: backlog` means the plan is visible to `crew doctor` but not dispatched — promote via `/plan-update` (or `file-meta update --field Status=todo`) when the plan is ready for groundcrew to pick up.
+The defaults are a floor, not an override: if the user pipes in a body that already declares `Agent:` or `Status:` in its own frontmatter, those values are kept untouched. `Status: backlog` means the plan is fetched but not dispatched (confirm via `crew status <id>`) — promote via `/plan-update` (or `file-meta update --field Status=todo`) when the plan is ready for groundcrew to pick up.
 
 The injection only happens for `.md` saves (the default extension and explicit `--extension md`). JSON and other extensions are written byte-for-byte. `--from-path` always preserves source bytes, even for `.md`.
 
