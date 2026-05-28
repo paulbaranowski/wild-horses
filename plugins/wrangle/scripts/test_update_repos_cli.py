@@ -649,6 +649,37 @@ class TestSetAction(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("only valid with --repo", r.stderr)
 
+    def test_set_per_repo_override(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        run_cli("add", str(repo), home=self.home)
+        r = run_cli("set-action", "stash", "--repo", str(repo), home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["dirty_action"], "stash")
+        listed = json.loads(run_cli("list", home=self.home).stdout)
+        self.assertEqual(listed["repos"][0]["dirty_action"], "stash")
+
+    def test_set_per_repo_explicit_ask(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        run_cli("add", str(repo), home=self.home)
+        run_cli("set-action", "ask", "--repo", str(repo), home=self.home)
+        listed = json.loads(run_cli("list", home=self.home).stdout)
+        self.assertEqual(listed["repos"][0]["dirty_action"], "ask")
+
+    def test_inherit_clears_per_repo(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        run_cli("add", str(repo), home=self.home)
+        run_cli("set-action", "skip", "--repo", str(repo), home=self.home)
+        r = run_cli("set-action", "inherit", "--repo", str(repo), home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIsNone(json.loads(r.stdout)["dirty_action"])
+        listed = json.loads(run_cli("list", home=self.home).stdout)
+        self.assertNotIn("dirty_action", listed["repos"][0])
+
+    def test_set_unknown_repo_exits_2(self) -> None:
+        r = run_cli("set-action", "skip", "--repo", "/nope", home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not in config", r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
