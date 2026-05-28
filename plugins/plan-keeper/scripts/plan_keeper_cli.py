@@ -32,7 +32,8 @@ MAX_SUFFIX = 99
 CONFIG_FILE_NAME = ".plankeeper.json"
 
 # Translates plan-keeper's on-disk Status: vocabulary to the groundcrew shell
-# adapter's enum. `backlog` is visible to `crew doctor` but never dispatched.
+# adapter's enum. `backlog` is fetched but never dispatched (confirm one via
+# `crew status <id>`; the aggregate `crew status` Queue lists only `todo`).
 # Anything else (typos, future values) falls through to "other".
 _GROUNDCREW_STATUS_MAP = {
     "backlog": "other",

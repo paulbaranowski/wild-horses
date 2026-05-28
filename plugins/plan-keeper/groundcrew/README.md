@@ -8,7 +8,7 @@ You have two options:
 
 ### Option A — reference the plugin path directly (simplest)
 
-Set `crew.config.ts` to point at the scripts inside the installed plugin tree. The scripts auto-resolve `plan_keeper_cli.py` next door, so no env var is needed. Trade-off: the path embeds the plugin version (e.g., `~/.claude/plugins/cache/wild-horses/plan-keeper/1.4.0/groundcrew/...`) and will need to be updated when the plugin version bumps.
+Set `crew.config.ts` to point at the scripts inside the installed plugin tree. The scripts auto-resolve `plan_keeper_cli.py` next door, so no env var is needed. Trade-off: the path embeds the plugin version (e.g., `~/.claude/plugins/cache/wild-horses/plan-keeper/1.4.1/groundcrew/...`) and will need to be updated when the plugin version bumps.
 
 ### Option B — copy to a stable location and set `$PLAN_KEEPER_CLI`
 
@@ -22,7 +22,7 @@ cp -p ./fetch.sh ./resolveOne.sh ./markInProgress.sh ~/.config/groundcrew/plan-s
 export PLAN_KEEPER_CLI="$HOME/.claude/plugins/cache/wild-horses/plan-keeper/<version>/scripts/plan_keeper_cli.py"
 ```
 
-Replace `<version>` with the installed plugin version (currently `1.4.0`). When you upgrade the plugin, only `$PLAN_KEEPER_CLI` needs to change — your `crew.config.ts` paths stay stable.
+Replace `<version>` with the installed plugin version (currently `1.4.1`). When you upgrade the plugin, only `$PLAN_KEEPER_CLI` needs to change — your `crew.config.ts` paths stay stable.
 
 ## crew.config.ts entry
 
@@ -42,7 +42,7 @@ sources: [
 
 ## How it works
 
-- **fetch.sh** — globs `~/plans/*/*.md` (one level deep, skipping `done/` and `deferred/`). Each plan with valid frontmatter becomes one issue. `Status: backlog` translates to adapter status `other` (visible to `crew doctor`, never dispatched). `Status: todo` translates to `todo` (dispatchable).
+- **fetch.sh** — globs `~/plans/*/*.md` (one level deep, skipping `done/` and `deferred/`). Each plan with valid frontmatter becomes one issue. `Status: backlog` translates to adapter status `other` (fetched but never dispatched — `crew status` hides non-`todo` plans from its Queue, so confirm a specific one with `crew status <id>`). `Status: todo` translates to `todo` (dispatchable).
 - **resolveOne.sh** — given an `${id}` (filename stem), searches active, then `done/`, then `deferred/`. Exits 3 if the file doesn't exist.
 - **markInProgress.sh** — reads `{"path": "..."}` from stdin, atomic-write flips that plan's `Status` to `in-progress` so the next `fetch` tick sees it as out of the dispatch pool.
 
@@ -56,4 +56,4 @@ python3 /path/to/plan_keeper_cli.py file-meta update \
   --field Status=todo
 ```
 
-After promotion, the next `crew run` (or `crew doctor`) will see the plan as eligible.
+After promotion, the next `crew run` will dispatch the plan, and it shows up in the `crew status` Queue. (`crew doctor` only checks host prerequisites — it doesn't list plans.)
