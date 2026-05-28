@@ -329,10 +329,45 @@ def cmd_remove(args: argparse.Namespace) -> None:
     print(json.dumps({"removed": str(p)}, indent=2))
 
 
+def cmd_set_action(args: argparse.Namespace) -> None:
+    """Set the default dirty-repo action — global (no --repo) or per-repo.
+
+    Global: writes top-level default_dirty_action. Per-repo: writes the entry's
+    dirty_action, or removes it when the action is the `inherit` sentinel.
+    """
+    cfg = load_config()
+
+    if args.repo is None:
+        if args.action == "inherit":
+            sys.stderr.write("ERROR: 'inherit' is only valid with --repo\n")
+            sys.exit(2)
+        cfg["default_dirty_action"] = args.action
+        save_config(cfg)
+        print(json.dumps({"default_dirty_action": args.action}, indent=2))
+        return
+
+    p = resolve_path(args.repo)
+    entry = next((r for r in cfg["repos"] if resolve_path(r["path"]) == p), None)
+    if not entry:
+        sys.stderr.write(f"ERROR: not in config: {p}\n")
+        sys.exit(2)
+
+    if args.action == "inherit":
+        entry.pop("dirty_action", None)
+        save_config(cfg)
+        print(json.dumps({"repo": entry["path"], "dirty_action": None}, indent=2))
+        return
+
+    entry["dirty_action"] = args.action
+    save_config(cfg)
+    print(json.dumps({"repo": entry["path"], "dirty_action": args.action}, indent=2))
+
+
 def cmd_list(args: argparse.Namespace) -> None:
     del args
     cfg = load_config()
     cfg["config_path"] = str(CONFIG_PATH)
+    cfg.setdefault("default_dirty_action", "ask")
     print(json.dumps(cfg, indent=2))
 
 
@@ -403,6 +438,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_rm = sp.add_parser("remove", help="Remove one repo from the config.")
     p_rm.add_argument("path")
     p_rm.set_defaults(func=cmd_remove)
+
+    p_sa = sp.add_parser("set-action", help="Set the default dirty-repo action (global, or per-repo with --repo).")
+    p_sa.add_argument(
+        "action",
+        choices=["ask", "skip", "stash", "inherit"],
+        help="ask|skip|stash. 'inherit' (only valid with --repo) clears a per-repo override.",
+    )
+    p_sa.add_argument("--repo", help="Set this repo's override instead of the global default.")
+    p_sa.set_defaults(func=cmd_set_action)
 
     p_ls = sp.add_parser("list", help="Print the current config as JSON.")
     p_ls.set_defaults(func=cmd_list)

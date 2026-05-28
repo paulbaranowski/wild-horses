@@ -631,5 +631,24 @@ class TestAllowListShellInjection(IsolatedHomeTestCase):
         self.assertEqual(run_allow(cmd), "")
 
 
+class TestSetAction(IsolatedHomeTestCase):
+    def test_set_global_default(self) -> None:
+        r = run_cli("set-action", "skip", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["default_dirty_action"], "skip")
+        listed = json.loads(run_cli("list", home=self.home).stdout)
+        self.assertEqual(listed["default_dirty_action"], "skip")
+
+    def test_set_global_rejects_bad_value(self) -> None:
+        r = run_cli("set-action", "bogus", home=self.home)
+        # argparse `choices` rejects it before our code runs.
+        self.assertEqual(r.returncode, 2)
+
+    def test_global_inherit_rejected(self) -> None:
+        r = run_cli("set-action", "inherit", home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("only valid with --repo", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
