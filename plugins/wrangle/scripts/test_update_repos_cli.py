@@ -19,8 +19,10 @@ Mirrors the precedent at plugins/plan-keeper/scripts/test_plan_keeper_cli.py.
 """
 import json
 import os
+import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -28,9 +30,20 @@ CLI = Path(__file__).parent / "update_repos_cli.py"
 ALLOW_SCRIPT = Path(__file__).parent / "update-repos-cli-allow.sh"
 
 
-def run_cli(*args: str, home: Path, cwd: Path | None = None) -> subprocess.CompletedProcess:
-    """Invoke the CLI with isolated $HOME so it can't touch real ~/.config/."""
+def run_cli(
+    *args: str,
+    home: Path,
+    cwd: Path | None = None,
+    env_extra: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    """Invoke the CLI with isolated $HOME so it can't touch real ~/.config/.
+
+    `env_extra` overlays extra env vars (e.g. a shimmed PATH or
+    WRANGLE_GIT_TIMEOUT) for tests that exercise git's timeout/prompt handling.
+    """
     env = {**os.environ, "HOME": str(home)}
+    if env_extra:
+        env.update(env_extra)
     return subprocess.run(
         ["python3", str(CLI), *args],
         capture_output=True,
@@ -402,6 +415,52 @@ class TestPullAll(IsolatedHomeTestCase):
 
         self.assertEqual([x["path"] for x in results], [str(gamma), str(alpha), str(beta)])
         self.assertEqual([x["status"] for x in results], ["pulled", "up-to-date", "wrong-branch"])
+
+
+class TestPullTimeout(IsolatedHomeTestCase):
+    """The parallel pull-all must never let one hung remote wedge the batch.
+    git() bounds every call with a timeout; a killed pull surfaces as
+    `timed-out` instead of blocking forever."""
+
+    def _install_git_shim_that_hangs_on_pull(self) -> dict[str, str]:
+        """Put a `git` shim first on PATH that hangs on `pull` but defers to
+        real git for everything else, so status checks still classify the repo
+        as ready and only the network pull stalls. Returns env overlay."""
+        real_git = shutil.which("git")
+        assert real_git, "git must be on PATH for this test"
+        shim_dir = self.home / "bin"
+        shim_dir.mkdir()
+        shim = shim_dir / "git"
+        # `exec sleep` replaces the shim process, so killing the timed-out child
+        # kills the sleep directly (no orphan lingering past the test).
+        shim.write_text(
+            "#!/bin/sh\n"
+            'for a in "$@"; do\n'
+            '  if [ "$a" = "pull" ]; then exec sleep 30; fi\n'
+            "done\n"
+            f'exec "{real_git}" "$@"\n'
+        )
+        shim.chmod(0o755)
+        return {"PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}", "WRANGLE_GIT_TIMEOUT": "1"}
+
+    def test_hanging_pull_is_bounded_and_reported(self) -> None:
+        bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        commit_to_bare(bare, self.scratch, "main")  # a real pull would fast-forward
+        self.write_config([{"path": str(repo), "branch": "main"}])
+
+        env_extra = self._install_git_shim_that_hangs_on_pull()
+        start = time.monotonic()
+        r = run_cli("pull-all", home=self.home, env_extra=env_extra)
+        elapsed = time.monotonic() - start
+
+        self.assertEqual(r.returncode, 0, r.stderr)
+        result = json.loads(r.stdout)["results"][0]
+        self.assertEqual(result["status"], "timed-out")
+        self.assertIn("error", result)
+        # Bounded well below the shim's 30s sleep — the timeout actually fired.
+        self.assertLess(elapsed, 20)
+        # The pull was killed, so the new commit must NOT have landed.
+        self.assertFalse((repo / "extra.txt").exists())
 
 
 class TestPullOnePreflight(IsolatedHomeTestCase):

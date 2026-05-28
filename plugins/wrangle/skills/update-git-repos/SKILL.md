@@ -55,15 +55,16 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" pull-all
 
 The CLI inspects every repo, pulls the clean+on-branch ones with `git pull --ff-only`, and reports the rest without mutating them. Parse the `results` JSON array. Each entry has a `status` field:
 
-| `status`       | meaning                                                                                 | next action                                                              |
-| -------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `pulled`       | fast-forward succeeded; carries a `stat` (git `--shortstat`) when the diff is non-empty | report in step 5 — show the `stat`                                       |
-| `up-to-date`   | already current                                                                         | report in step 5                                                         |
-| `dirty`        | working tree has tracked-file changes; not pulled                                       | step 4                                                                   |
-| `wrong-branch` | current branch ≠ configured branch; not pulled                                          | report and skip (don't touch — user may be mid-work on a feature branch) |
-| `missing`      | path doesn't exist anymore                                                              | report; offer to `remove`                                                |
-| `not-a-repo`   | path exists but isn't a git repo                                                        | report; offer to `remove`                                                |
-| `pull-failed`  | `git pull --ff-only` failed (diverged history, no `origin`, network error, etc)         | report with the `error` field                                            |
+| `status`       | meaning                                                                                                                                                                       | next action                                                                                        |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `pulled`       | fast-forward succeeded; carries a `stat` (git `--shortstat`) when the diff is non-empty                                                                                       | report in step 5 — show the `stat`                                                                 |
+| `up-to-date`   | already current                                                                                                                                                               | report in step 5                                                                                   |
+| `dirty`        | working tree has tracked-file changes; not pulled                                                                                                                             | step 4                                                                                             |
+| `wrong-branch` | current branch ≠ configured branch; not pulled                                                                                                                                | report and skip (don't touch — user may be mid-work on a feature branch)                           |
+| `missing`      | path doesn't exist anymore                                                                                                                                                    | report; offer to `remove`                                                                          |
+| `not-a-repo`   | path exists but isn't a git repo                                                                                                                                              | report; offer to `remove`                                                                          |
+| `pull-failed`  | `git pull --ff-only` failed (diverged history, no `origin`, network error, or a remote that needed credentials — prompts are disabled, so auth fails fast instead of hanging) | report with the `error` field                                                                      |
+| `timed-out`    | `git pull` exceeded the timeout (slow/unreachable remote); the pull was killed, repo left untouched                                                                           | report with the `error` field; suggest checking the remote/network, or raise `WRANGLE_GIT_TIMEOUT` |
 
 ### 4. Handle dirty repos (only those with `status: dirty`)
 
@@ -99,6 +100,7 @@ Skipped:
 
 Errors:
   x /Users/paul/dev/old (missing) — suggest `remove`
+  x /Users/paul/dev/slow (timed-out) — check the remote/network
 ```
 
 ## Common mistakes

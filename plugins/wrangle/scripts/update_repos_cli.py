@@ -27,6 +27,16 @@ NOISE_DIRS = {"node_modules", ".venv", "venv", "__pycache__", ".tox", ".cache", 
 # dozens of simultaneous `git` processes.
 MAX_PULL_WORKERS = 8
 
+# Every git call is bounded by this, so one slow or unreachable remote can't
+# hang the (parallel) batch forever. Generous enough for a large first fetch;
+# override with WRANGLE_GIT_TIMEOUT (seconds) for unusually large repos.
+GIT_TIMEOUT_SECONDS = 120.0
+
+# Synthetic return code for a git call we killed on timeout. Matches the
+# convention of timeout(1) / coreutils so it reads the same as babysit-pr's
+# `timeout 600 ...` handling.
+GIT_TIMEOUT_RC = 124
+
 
 def load_config() -> dict:
     if not CONFIG_PATH.exists():
@@ -67,12 +77,50 @@ def save_config(cfg: dict) -> None:
     write_atomic(CONFIG_PATH, json.dumps(cfg, indent=2) + "\n")
 
 
+def git_timeout() -> float:
+    """Per-call git timeout, overridable via WRANGLE_GIT_TIMEOUT (seconds)."""
+    raw = os.environ.get("WRANGLE_GIT_TIMEOUT")
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return GIT_TIMEOUT_SECONDS
+
+
+def git_env() -> dict[str, str]:
+    """Env that makes git fail fast instead of blocking on a prompt.
+
+    A repo whose remote needs credentials, or an SSH host with an unknown key,
+    would otherwise hang `subprocess.run` waiting on stdin that never arrives —
+    and in the parallel pull-all a single such repo wedges the whole pool. We
+    only *setdefault* GIT_SSH_COMMAND so we never clobber a user's existing one
+    (identity files, ports, etc.); GIT_TERMINAL_PROMPT is the main lever for
+    https remotes and is always forced off.
+    """
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env.setdefault("GIT_SSH_COMMAND", "ssh -oBatchMode=yes")
+    return env
+
+
 def git(cwd: Path, *args: str) -> tuple[int, str, str]:
-    """Run a git command. Returns (rc, stdout, stderr) with both trimmed."""
-    r = subprocess.run(
-        ["git", "-C", str(cwd), *args],
-        capture_output=True, text=True,
-    )
+    """Run a git command. Returns (rc, stdout, stderr) with both trimmed.
+
+    Bounded by git_timeout() and run with prompts disabled (git_env), so one
+    slow/unreachable/auth-needing remote can't hang the batch. A timeout
+    surfaces as rc=GIT_TIMEOUT_RC with a marker on stderr; callers map that to
+    a `timed-out` status.
+    """
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(cwd), *args],
+            capture_output=True, text=True,
+            env=git_env(),
+            timeout=git_timeout(),
+        )
+    except subprocess.TimeoutExpired:
+        return GIT_TIMEOUT_RC, "", "timed out"
     return r.returncode, r.stdout.strip(), r.stderr.strip()
 
 
@@ -164,8 +212,12 @@ def pull_repo(repo_path: str, branch: str, *, stash: bool = False, verbose: bool
 
     rc, pout, perr = git(p, "pull", "--ff-only", "origin", branch)
     if rc != 0:
-        out["status"] = "pull-failed"
-        out["error"] = (perr or pout).strip()
+        if rc == GIT_TIMEOUT_RC:
+            out["status"] = "timed-out"
+            out["error"] = f"git pull exceeded the {git_timeout():.0f}s timeout"
+        else:
+            out["status"] = "pull-failed"
+            out["error"] = (perr or pout).strip()
         if stashed:
             # Try to restore their work so we don't strand it.
             git(p, "stash", "pop")
