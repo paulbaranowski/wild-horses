@@ -245,6 +245,36 @@ class TestConfigValidation(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 3)
         self.assertIn("index 1", r.stderr)
 
+    def test_invalid_default_dirty_action_exits_3(self) -> None:
+        self.write_raw_config('{"repos": [], "default_dirty_action": "nope"}')
+        r = run_cli("list", home=self.home)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("invalid default_dirty_action", r.stderr)
+
+    def test_valid_default_dirty_action_ok(self) -> None:
+        self.write_raw_config('{"repos": [], "default_dirty_action": "skip"}')
+        r = run_cli("list", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["default_dirty_action"], "skip")
+
+    def test_invalid_per_repo_dirty_action_exits_3(self) -> None:
+        self.write_config([{"path": "/tmp/r", "branch": "main", "dirty_action": "bogus"}])
+        r = run_cli("list", home=self.home)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("invalid dirty_action", r.stderr)
+        self.assertIn("index 0", r.stderr)
+
+    def test_valid_per_repo_dirty_action_ok(self) -> None:
+        self.write_config([{"path": "/tmp/r", "branch": "main", "dirty_action": "stash"}])
+        r = run_cli("list", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["repos"][0]["dirty_action"], "stash")
+
+    def test_list_defaults_dirty_action_to_ask(self) -> None:
+        r = run_cli("list", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["default_dirty_action"], "ask")
+
 
 class TestAddRemoveList(IsolatedHomeTestCase):
     def test_add_records_repo_with_detected_branch(self) -> None:

@@ -22,6 +22,8 @@ CONFIG_PATH = CONFIG_DIR / "repos.json"
 
 NOISE_DIRS = {"node_modules", ".venv", "venv", "__pycache__", ".tox", ".cache", "target", "dist", "build", ".next"}
 
+VALID_DIRTY_ACTIONS = ("ask", "skip", "stash")
+
 # pull-all fans repos out across threads (the work is network/subprocess-bound,
 # so the GIL isn't the bottleneck). Capped so a large config doesn't spawn
 # dozens of simultaneous `git` processes.
@@ -49,6 +51,13 @@ def load_config() -> dict:
     if not isinstance(data, dict) or "repos" not in data or not isinstance(data["repos"], list):
         sys.stderr.write(f"ERROR: config missing 'repos' list at {CONFIG_PATH}\n")
         sys.exit(3)
+    da = data.get("default_dirty_action")
+    if da is not None and da not in VALID_DIRTY_ACTIONS:
+        sys.stderr.write(
+            f"ERROR: invalid default_dirty_action {da!r} in {CONFIG_PATH}; "
+            f"expected one of {', '.join(VALID_DIRTY_ACTIONS)}\n"
+        )
+        sys.exit(3)
     for i, repo in enumerate(data["repos"]):
         if (
             not isinstance(repo, dict)
@@ -58,6 +67,13 @@ def load_config() -> dict:
             sys.stderr.write(
                 f"ERROR: invalid repo entry at index {i} in {CONFIG_PATH}; "
                 "expected {'path': non-empty str, 'branch': non-empty str}\n"
+            )
+            sys.exit(3)
+        rda = repo.get("dirty_action")
+        if rda is not None and rda not in VALID_DIRTY_ACTIONS:
+            sys.stderr.write(
+                f"ERROR: invalid dirty_action {rda!r} at index {i} in {CONFIG_PATH}; "
+                f"expected one of {', '.join(VALID_DIRTY_ACTIONS)}\n"
             )
             sys.exit(3)
     return data
