@@ -367,6 +367,7 @@ def cmd_list(args: argparse.Namespace) -> None:
     del args
     cfg = load_config()
     cfg["config_path"] = str(CONFIG_PATH)
+    # Display-only: cmd_list never saves, so this injected default must not persist.
     cfg.setdefault("default_dirty_action", "ask")
     print(json.dumps(cfg, indent=2))
 
@@ -442,7 +443,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sa = sp.add_parser("set-action", help="Set the default dirty-repo action (global, or per-repo with --repo).")
     p_sa.add_argument(
         "action",
-        choices=["ask", "skip", "stash", "inherit"],
+        choices=[*VALID_DIRTY_ACTIONS, "inherit"],
         help="ask|skip|stash. 'inherit' (only valid with --repo) clears a per-repo override.",
     )
     p_sa.add_argument("--repo", help="Set this repo's override instead of the global default.")
