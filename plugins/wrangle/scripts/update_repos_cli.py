@@ -14,12 +14,18 @@ import json
 import os
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 CONFIG_DIR = Path.home() / ".config" / "wild-horses" / "wrangle"
 CONFIG_PATH = CONFIG_DIR / "repos.json"
 
 NOISE_DIRS = {"node_modules", ".venv", "venv", "__pycache__", ".tox", ".cache", "target", "dist", "build", ".next"}
+
+# pull-all fans repos out across threads (the work is network/subprocess-bound,
+# so the GIL isn't the bottleneck). Capped so a large config doesn't spawn
+# dozens of simultaneous `git` processes.
+MAX_PULL_WORKERS = 8
 
 
 def load_config() -> dict:
@@ -262,10 +268,24 @@ def cmd_list(args: argparse.Namespace) -> None:
     print(json.dumps(cfg, indent=2))
 
 
+def _status_then_pull(entry: dict) -> dict:
+    """One repo's pull-all unit of work: status-check, then pull only if ready.
+
+    Self-contained (reads/writes only its own repo) so pull-all can run many
+    of these concurrently without shared state. Never auto-stashes — dirty
+    repos are reported and handled interactively via pull-one.
+    """
+    s = repo_status(entry["path"], entry["branch"])
+    if s["status"] == "ready":
+        s = pull_repo(entry["path"], entry["branch"], stash=False, verbose=False)
+    return s
+
+
 def cmd_pull_all(args: argparse.Namespace) -> None:
     del args
     cfg = load_config()
-    if not cfg["repos"]:
+    repos = cfg["repos"]
+    if not repos:
         print(json.dumps({
             "empty": True,
             "config_path": str(CONFIG_PATH),
@@ -273,12 +293,11 @@ def cmd_pull_all(args: argparse.Namespace) -> None:
         }, indent=2))
         return
 
-    results: list[dict] = []
-    for r in cfg["repos"]:
-        s = repo_status(r["path"], r["branch"])
-        if s["status"] == "ready":
-            s = pull_repo(r["path"], r["branch"], stash=False, verbose=False)
-        results.append(s)
+    # `executor.map` yields results in submission order, so the output stays in
+    # config order regardless of which repo's pull finishes first — the step-5
+    # summary relies on that ordering.
+    with ThreadPoolExecutor(max_workers=min(MAX_PULL_WORKERS, len(repos))) as ex:
+        results = list(ex.map(_status_then_pull, repos))
 
     print(json.dumps({"results": results}, indent=2))
 

@@ -379,6 +379,30 @@ class TestPullAll(IsolatedHomeTestCase):
         # Nothing was pulled, so there is no diffstat to report.
         self.assertNotIn("stat", result)
 
+    def test_results_follow_config_order_across_mixed_outcomes(self) -> None:
+        # pull-all fans repos out across threads, so a slow pull must not let
+        # its result jump ahead of a fast one. The output has to mirror config
+        # order exactly — the step-5 summary depends on it. Config order here is
+        # deliberately NOT alphabetical, to prove ordering isn't an accident of
+        # sorting somewhere.
+        bare_g, gamma = make_remote_and_clone(self.work, self.scratch, "gamma")
+        commit_to_bare(bare_g, self.scratch, "main")  # gamma will fast-forward
+        _, alpha = make_remote_and_clone(self.work, self.scratch, "alpha")  # up-to-date
+        _, beta = make_remote_and_clone(self.work, self.scratch, "beta")
+        git(beta, "checkout", "-b", "feature")  # config says main -> wrong-branch
+
+        self.write_config([
+            {"path": str(gamma), "branch": "main"},
+            {"path": str(alpha), "branch": "main"},
+            {"path": str(beta), "branch": "main"},
+        ])
+        r = run_cli("pull-all", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        results = json.loads(r.stdout)["results"]
+
+        self.assertEqual([x["path"] for x in results], [str(gamma), str(alpha), str(beta)])
+        self.assertEqual([x["status"] for x in results], ["pulled", "up-to-date", "wrong-branch"])
+
 
 class TestPullOnePreflight(IsolatedHomeTestCase):
     """Regression coverage for the CodeRabbit Thread 3 finding: `pull-one`
