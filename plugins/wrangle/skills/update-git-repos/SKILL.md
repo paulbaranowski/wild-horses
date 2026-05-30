@@ -55,19 +55,19 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" pull-all
 
 The CLI inspects every repo, pulls the clean+on-branch ones with `git pull --ff-only`, and applies each dirty repo's configured action inline (`stash` does a stash-pull-pop, `skip` leaves it untouched, `ask` defers to step 4); the remaining repos are reported without mutation. Parse the `results` JSON array. Each entry has a `status` field:
 
-| `status`                   | meaning                                                                                                                                                                        | next action                                                                                        |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `pulled`                   | fast-forward succeeded; carries a `stat` (git `--shortstat`) when the diff is non-empty                                                                                        | report in step 5 — show the `stat`                                                                 |
-| `up-to-date`               | already current                                                                                                                                                                | report in step 5                                                                                   |
-| `dirty`                    | working tree has tracked-file changes; effective action is `ask`, so not pulled                                                                                                | step 4 (prompt)                                                                                    |
-| `skipped`                  | working tree was dirty and the effective action is `skip`; carries `reason: "dirty"`, repo untouched, no prompt                                                                | report under "Skipped:" in step 5                                                                  |
-| `wrong-branch`             | current branch ≠ configured branch; not pulled                                                                                                                                 | report and skip (don't touch — user may be mid-work on a feature branch)                           |
-| `missing`                  | path doesn't exist anymore                                                                                                                                                     | report; offer to `remove`                                                                          |
-| `not-a-repo`               | path exists but isn't a git repo                                                                                                                                               | report; offer to `remove`                                                                          |
-| `pull-failed`              | `git pull --ff-only` failed (diverged history, no `origin`, network error, or a remote that needed credentials — prompts are disabled, so auth fails fast instead of hanging)  | report with the `error` field                                                                      |
-| `stash-failed`             | the configured `stash` action's `git stash push` failed before any pull; repo left untouched; carries `error`                                                                  | report with the `error` field                                                                      |
-| `pulled-with-pop-conflict` | the configured `stash` action fast-forwarded but `git stash pop` hit a merge conflict; conflict markers are now in the working tree and the stash is gone; carries `pop_error` | tell the user clearly and surface `pop_error` so they know what to resolve                         |
-| `timed-out`                | `git pull` exceeded the timeout (slow/unreachable remote); the pull was killed, repo left untouched                                                                            | report with the `error` field; suggest checking the remote/network, or raise `WRANGLE_GIT_TIMEOUT` |
+| `status`                   | meaning                                                                                                                                                                        | next action                                                                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `pulled`                   | fast-forward succeeded; carries a `stat` (git `--shortstat`) when the diff is non-empty                                                                                        | report in step 5 — show the `stat`                                                                            |
+| `up-to-date`               | already current                                                                                                                                                                | count only — collapse into the one-line `Up to date (no change): N repos` summary in step 5, don't list paths |
+| `dirty`                    | working tree has tracked-file changes; effective action is `ask`, so not pulled                                                                                                | step 4 (prompt)                                                                                               |
+| `skipped`                  | working tree was dirty and the effective action is `skip`; carries `reason: "dirty"`, repo untouched, no prompt                                                                | report under "Skipped:" in step 5                                                                             |
+| `wrong-branch`             | current branch ≠ configured branch; not pulled                                                                                                                                 | report and skip (don't touch — user may be mid-work on a feature branch)                                      |
+| `missing`                  | path doesn't exist anymore                                                                                                                                                     | report; offer to `remove`                                                                                     |
+| `not-a-repo`               | path exists but isn't a git repo                                                                                                                                               | report; offer to `remove`                                                                                     |
+| `pull-failed`              | `git pull --ff-only` failed (diverged history, no `origin`, network error, or a remote that needed credentials — prompts are disabled, so auth fails fast instead of hanging)  | report with the `error` field                                                                                 |
+| `stash-failed`             | the configured `stash` action's `git stash push` failed before any pull; repo left untouched; carries `error`                                                                  | report with the `error` field                                                                                 |
+| `pulled-with-pop-conflict` | the configured `stash` action fast-forwarded but `git stash pop` hit a merge conflict; conflict markers are now in the working tree and the stash is gone; carries `pop_error` | tell the user clearly and surface `pop_error` so they know what to resolve                                    |
+| `timed-out`                | `git pull` exceeded the timeout (slow/unreachable remote); the pull was killed, repo left untouched                                                                            | report with the `error` field; suggest checking the remote/network, or raise `WRANGLE_GIT_TIMEOUT`            |
 
 ### 4. Handle dirty repos (only those with `status: dirty`)
 
@@ -104,15 +104,16 @@ The result `status` is one of:
 
 ### 5. Summary
 
-Print one line per repo, grouped by outcome when there are many. Use simple ASCII prefixes (no emoji unless the user opted in). For each `pulled` repo, append its `stat` field verbatim after the path so the user sees what actually changed; if a `pulled` entry has no `stat` (a commit with no textual diff), just show the path.
+Keep it terse — fewer tokens is better. **Only list repos that need the user's attention**: those that were `pulled` (so they see what changed) and those with a problem (`skipped`, `wrong-branch`, `dirty`, errors). **Collapse every `up-to-date` repo into a single count line** — never enumerate their paths. If a whole group is empty, omit its header entirely.
+
+For each `pulled` repo, append its `stat` field verbatim after the path; if a `pulled` entry has no `stat` (a commit with no textual diff), just show the path. Use simple ASCII prefixes (no emoji unless the user opted in).
 
 ```text
 Pulled:
   + /Users/paul/dev/foo (main): 5 files changed, 120 insertions(+), 30 deletions(-)
   + /Users/paul/dev/bar (master): 2 files changed, 8 insertions(+), 1 deletion(-)
 
-Up to date:
-  . /Users/paul/dev/baz (main)
+Up to date (no change): 18 repos
 
 Skipped:
   ! /Users/paul/dev/qux (dirty)
@@ -122,6 +123,8 @@ Errors:
   x /Users/paul/dev/old (missing) — suggest `remove`
   x /Users/paul/dev/slow (timed-out) — check the remote/network
 ```
+
+When everything was already current and nothing else happened, the entire summary is just `Up to date (no change): N repos` — nothing more.
 
 ## Common mistakes
 
