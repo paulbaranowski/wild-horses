@@ -466,14 +466,16 @@ class TestPullAll(IsolatedHomeTestCase):
         # And the new commit actually landed.
         self.assertTrue((repo / "extra.txt").exists())
 
-    def test_up_to_date_when_no_new_commits(self) -> None:
+    def test_up_to_date_collapsed_into_count(self) -> None:
+        # Already-current repos are deliberately excluded from `results` to save
+        # the reading agent's tokens; they survive only as the `up_to_date`
+        # count. So an all-current batch yields an empty results array.
         _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
         self.write_config([{"path": str(repo), "branch": "main"}])
         r = run_cli("pull-all", home=self.home)
-        result = json.loads(r.stdout)["results"][0]
-        self.assertEqual(result["status"], "up-to-date")
-        # Nothing was pulled, so there is no diffstat to report.
-        self.assertNotIn("stat", result)
+        payload = json.loads(r.stdout)
+        self.assertEqual(payload["results"], [])
+        self.assertEqual(payload["up_to_date"], 1)
 
     def test_results_follow_config_order_across_mixed_outcomes(self) -> None:
         # pull-all fans repos out across threads, so a slow pull must not let
@@ -494,10 +496,14 @@ class TestPullAll(IsolatedHomeTestCase):
         ])
         r = run_cli("pull-all", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
-        results = json.loads(r.stdout)["results"]
+        payload = json.loads(r.stdout)
+        results = payload["results"]
 
-        self.assertEqual([x["path"] for x in results], [str(gamma), str(alpha), str(beta)])
-        self.assertEqual([x["status"] for x in results], ["pulled", "up-to-date", "wrong-branch"])
+        # alpha (up-to-date) is collapsed into the count and drops out of
+        # `results`; the surviving entries keep their relative config order.
+        self.assertEqual([x["path"] for x in results], [str(gamma), str(beta)])
+        self.assertEqual([x["status"] for x in results], ["pulled", "wrong-branch"])
+        self.assertEqual(payload["up_to_date"], 1)
 
 
 class TestPullTimeout(IsolatedHomeTestCase):
