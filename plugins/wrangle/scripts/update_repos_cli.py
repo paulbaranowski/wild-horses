@@ -430,7 +430,15 @@ def cmd_pull_all(args: argparse.Namespace) -> None:
     with ThreadPoolExecutor(max_workers=min(MAX_PULL_WORKERS, len(repos))) as ex:
         results = list(ex.map(_status_then_pull, work))
 
-    print(json.dumps({"results": results}, indent=2))
+    # Collapse already-current repos into a bare count rather than a full entry
+    # each. They need no per-repo action in the skill flow, so emitting one
+    # object apiece just burns the reading agent's context — 18 up-to-date repos
+    # would be ~90 lines of indented JSON the agent reads only to render a single
+    # summary line. `results` keeps only repos that need attention or changed.
+    up_to_date = sum(1 for r in results if r["status"] == "up-to-date")
+    results = [r for r in results if r["status"] != "up-to-date"]
+
+    print(json.dumps({"results": results, "up_to_date": up_to_date}, indent=2))
 
 
 def cmd_pull_one(args: argparse.Namespace) -> None:
