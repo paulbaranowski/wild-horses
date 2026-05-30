@@ -1789,6 +1789,69 @@ def cmd_groundcrew_mark_in_progress(args) -> int:
     return 0
 
 
+def cmd_queue_set(args) -> int:
+    """Bulk-set Status on plans named by newline-delimited stdin paths.
+
+    Reads absolute plan paths (one per line) from stdin and writes each
+    plan's frontmatter Status to --status (todo|backlog), atomically. When
+    --status is todo and --default-agent is given, a plan whose Agent is
+    missing/empty also gets Agent: <name> in the same update; a plan that
+    already names an Agent keeps it. Dequeue (--status backlog) never
+    touches Agent.
+
+    Path validation mirrors groundcrew-mark-in-progress: every path must be
+    absolute, end in .md, resolve inside PLAN_ROOT, exist, and have
+    frontmatter. The whole batch is validated FIRST — if any path is
+    invalid, nothing is written (all-or-nothing), so a typo can't leave the
+    queue half-mutated.
+    """
+    raw = sys.stdin.read()
+    paths = [line.strip() for line in raw.splitlines() if line.strip()]
+    if not paths:
+        raise PlanKeeperCliError("queue set: no plan paths on stdin", code=2)
+    plan_root = PLAN_ROOT.resolve()
+    resolved_paths: list[Path] = []
+    for raw_path in paths:
+        path = Path(raw_path)
+        if not path.is_absolute():
+            raise PlanKeeperCliError(f"path must be absolute: {path}", code=2)
+        if path.suffix != ".md":
+            raise PlanKeeperCliError(
+                f"path must point to a .md plan file: {path}", code=2
+            )
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(plan_root)
+        except ValueError:
+            raise PlanKeeperCliError(
+                f"path is outside PLAN_ROOT ({plan_root}): {path}", code=2
+            )
+        if not resolved.exists():
+            raise PlanKeeperCliError(f"plan file not found: {resolved}", code=3)
+        text = resolved.read_text(encoding="utf-8")
+        if not (text.startswith("---\n") or text.startswith("---\r\n")):
+            raise PlanKeeperCliError(
+                f"{resolved} has no frontmatter (cannot set Status)", code=2
+            )
+        resolved_paths.append(resolved)
+    for resolved in resolved_paths:
+        text = resolved.read_text(encoding="utf-8")
+        meta, body = parse_frontmatter(text)
+        meta["Status"] = args.status
+        if (
+            args.status == "todo"
+            and args.default_agent
+            and not meta.get("Agent", "").strip()
+        ):
+            meta["Agent"] = args.default_agent
+        new_text = serialize_frontmatter(meta, body)
+        if not new_text.endswith("\n"):
+            new_text += "\n"
+        write_atomic(resolved, new_text)
+        print(resolved)
+    return 0
+
+
 def cmd_queue_list(args) -> int:
     """Emit a JSON array of active plans across all repos, for plan-queue.
 
@@ -2052,6 +2115,20 @@ def build_parser() -> argparse.ArgumentParser:
              "(repo/file/status/agent)",
     )
 
+    p_queue_set = queue_sub.add_parser(
+        "set",
+        help="set Status on plans named by newline-delimited stdin paths",
+    )
+    p_queue_set.add_argument(
+        "--status", required=True, choices=["todo", "backlog"],
+        help="Status to write on every listed plan",
+    )
+    p_queue_set.add_argument(
+        "--default-agent",
+        help="when --status todo, fill Agent: <name> on plans with no Agent "
+             "set (ignored for --status backlog)",
+    )
+
     return parser
 
 
@@ -2074,6 +2151,7 @@ _TICKET_SYSTEM_CONFIG_DISPATCH = {
 
 _QUEUE_DISPATCH = {
     "list": cmd_queue_list,
+    "set": cmd_queue_set,
 }
 
 

@@ -2424,6 +2424,122 @@ class TestQueue(IsolatedHomeTestCase):
         files = sorted(row["file"] for row in json.loads(r.stdout))
         self.assertEqual(files, ["2026-05-01-active.md"])
 
+    def test_queue_list_surfaces_in_progress_and_in_review(self) -> None:
+        self._make_plan("alpha", "2026-05-01-a.md", status="in-progress", agent="claude")
+        self._make_plan("alpha", "2026-05-02-b.md", status="in-review")
+        r = run_cli("queue", "list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        by_file = {row["file"]: row["status"] for row in json.loads(r.stdout)}
+        self.assertEqual(by_file["2026-05-01-a.md"], "in-progress")
+        self.assertEqual(by_file["2026-05-02-b.md"], "in-review")
+
+    def test_queue_list_empty_status_plan(self) -> None:
+        self._make_plan("alpha", "2026-05-01-a.md", agent="codex")  # no Status line
+        r = run_cli("queue", "list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = json.loads(r.stdout)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["status"], "")
+        self.assertEqual(rows[0]["agent"], "codex")
+
+    def test_queue_set_promotes_backlog_to_todo(self) -> None:
+        p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog", agent="codex")
+        r = run_cli(
+            "queue", "set", "--status", "todo",
+            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = p.read_text()
+        self.assertIn("Status: todo", text)
+        self.assertNotIn("Status: backlog", text)
+        self.assertIn("Agent: codex", text)  # existing Agent untouched
+
+    def test_queue_set_promote_fills_missing_agent_with_default(self) -> None:
+        p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")  # no Agent
+        r = run_cli(
+            "queue", "set", "--status", "todo", "--default-agent", "claude",
+            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = p.read_text()
+        self.assertIn("Status: todo", text)
+        self.assertIn("Agent: claude", text)
+
+    def test_queue_set_promote_keeps_existing_agent_over_default(self) -> None:
+        p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog", agent="codex")
+        r = run_cli(
+            "queue", "set", "--status", "todo", "--default-agent", "claude",
+            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = p.read_text()
+        self.assertIn("Agent: codex", text)
+        self.assertNotIn("Agent: claude", text)
+
+    def test_queue_set_dequeues_todo_to_backlog_without_touching_agent(self) -> None:
+        p = self._make_plan("alpha", "2026-05-01-a.md", status="todo")  # no Agent
+        r = run_cli(
+            "queue", "set", "--status", "backlog", "--default-agent", "claude",
+            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = p.read_text()
+        self.assertIn("Status: backlog", text)
+        self.assertNotIn("Agent:", text)  # dequeue never writes a default Agent
+
+    def test_queue_set_promotes_multiple_plans_in_one_call(self) -> None:
+        p1 = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")
+        p2 = self._make_plan("beta", "2026-05-02-b.md", status="backlog")
+        r = run_cli(
+            "queue", "set", "--status", "todo", "--default-agent", "claude",
+            stdin=f"{p1}\n{p2}\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Status: todo", p1.read_text())
+        self.assertIn("Status: todo", p2.read_text())
+
+    def test_queue_set_rejects_path_outside_plan_root(self) -> None:
+        outside = self.home / "evil.md"
+        outside.write_text("---\nStatus: backlog\n---\n\n# evil\n", encoding="utf-8")
+        r = run_cli(
+            "queue", "set", "--status", "todo",
+            stdin=str(outside) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("outside PLAN_ROOT", r.stderr)
+        self.assertIn("Status: backlog", outside.read_text())  # untouched
+
+    def test_queue_set_rejects_plan_without_frontmatter(self) -> None:
+        d = self.plans_root / "alpha"
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / "2026-05-01-a.md"
+        p.write_text("# no frontmatter\n", encoding="utf-8")
+        r = run_cli(
+            "queue", "set", "--status", "todo",
+            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no frontmatter", r.stderr)
+
+    def test_queue_set_errors_on_empty_stdin(self) -> None:
+        r = run_cli(
+            "queue", "set", "--status", "todo",
+            stdin="\n  \n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no plan paths", r.stderr)
+
+    def test_queue_set_is_all_or_nothing_on_bad_path(self) -> None:
+        good = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")
+        bad = self.plans_root / "alpha" / "missing.md"  # does not exist
+        r = run_cli(
+            "queue", "set", "--status", "todo",
+            stdin=f"{good}\n{bad}\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertNotEqual(r.returncode, 0)
+        # good plan must be untouched because validation fails before any write
+        self.assertIn("Status: backlog", good.read_text())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
