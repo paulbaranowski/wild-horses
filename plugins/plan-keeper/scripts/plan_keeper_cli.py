@@ -1789,6 +1789,46 @@ def cmd_groundcrew_mark_in_progress(args) -> int:
     return 0
 
 
+def cmd_queue_list(args) -> int:
+    """Emit a JSON array of active plans across all repos, for plan-queue.
+
+    Each element is {repo, file, status, agent} where status/agent are the
+    raw frontmatter values ("" when unset). Scans ~/plans/<repo>/*.md one
+    level deep — skips done/ and deferred/ (those are not dispatchable) and
+    skips files without frontmatter (not plan-keeper plans). This is the
+    read side of the groundcrew queue the plan-queue skill renders.
+    """
+    del args
+    rows: list[dict] = []
+    if not PLAN_ROOT.exists():
+        print("[]")
+        return 0
+    for repo_entry in sorted(PLAN_ROOT.iterdir()):
+        if not repo_entry.is_dir() or repo_entry.name.startswith("."):
+            continue
+        for plan in sorted(repo_entry.iterdir()):
+            if not plan.is_file() or not plan.name.endswith(".md"):
+                continue
+            try:
+                text = plan.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if not (text.startswith("---\n") or text.startswith("---\r\n")):
+                continue
+            try:
+                meta, _ = parse_frontmatter(text)
+            except PlanKeeperCliError:
+                continue
+            rows.append({
+                "repo": repo_entry.name,
+                "file": plan.name,
+                "status": meta.get("Status", "").strip(),
+                "agent": meta.get("Agent", "").strip(),
+            })
+    print(json.dumps(rows))
+    return 0
+
+
 # --- Parser -----------------------------------------------------------------
 
 
@@ -1997,6 +2037,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="flip Status to in-progress on a plan named by stdin sourceRef JSON",
     )
 
+    p_queue = sub.add_parser(
+        "queue",
+        help="cross-repo groundcrew queue: list active plans / set Status in bulk",
+    )
+    queue_sub = p_queue.add_subparsers(
+        dest="queue_cmd", required=True, metavar="<subcommand>",
+        parser_class=HelpfulArgumentParser,
+    )
+
+    _ = queue_sub.add_parser(
+        "list",
+        help="emit JSON array of active plans across all repos "
+             "(repo/file/status/agent)",
+    )
+
     return parser
 
 
@@ -2017,6 +2072,10 @@ _TICKET_SYSTEM_CONFIG_DISPATCH = {
     "refresh": cmd_ticket_system_config_refresh,
 }
 
+_QUEUE_DISPATCH = {
+    "list": cmd_queue_list,
+}
+
 
 def main() -> int:
     parser = build_parser()
@@ -2034,6 +2093,7 @@ def main() -> int:
         "groundcrew-fetch": cmd_groundcrew_fetch,
         "groundcrew-resolve-one": cmd_groundcrew_resolve_one,
         "groundcrew-mark-in-progress": cmd_groundcrew_mark_in_progress,
+        "queue": lambda a: _QUEUE_DISPATCH[a.queue_cmd](a),
     }
     try:
         return dispatch[args.cmd](args)

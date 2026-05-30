@@ -2362,5 +2362,68 @@ class TestGroundcrewMarkInProgress(IsolatedHomeTestCase):
         self.assertIn("'path' field required", result.stderr)
 
 
+class TestQueue(IsolatedHomeTestCase):
+    """Cross-repo `queue list` / `queue set` for the plan-queue skill."""
+
+    def _make_plan(
+        self, repo: str, name: str, status: str = "", agent: str = ""
+    ) -> Path:
+        """Create ~/<home>/plans/<repo>/<name> with optional Status/Agent."""
+        d = self.plans_root / repo
+        d.mkdir(parents=True, exist_ok=True)
+        fm = ["---"]
+        if agent:
+            fm.append(f"Agent: {agent}")
+        if status:
+            fm.append(f"Status: {status}")
+        fm.append("---")
+        p = d / name
+        p.write_text("\n".join(fm) + f"\n\n# {name}\n", encoding="utf-8")
+        return p
+
+    def test_queue_list_empty_when_no_plans(self) -> None:
+        r = run_cli("queue", "list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout), [])
+
+    def test_queue_list_reports_status_and_agent_across_repos(self) -> None:
+        self._make_plan("alpha", "2026-05-01-a.md", status="todo", agent="codex")
+        self._make_plan("beta", "2026-05-02-b.md", status="backlog")
+        r = run_cli("queue", "list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = json.loads(r.stdout)
+        by_file = {row["file"]: row for row in rows}
+        self.assertEqual(
+            by_file["2026-05-01-a.md"],
+            {"repo": "alpha", "file": "2026-05-01-a.md", "status": "todo", "agent": "codex"},
+        )
+        self.assertEqual(
+            by_file["2026-05-02-b.md"],
+            {"repo": "beta", "file": "2026-05-02-b.md", "status": "backlog", "agent": ""},
+        )
+
+    def test_queue_list_skips_done_and_deferred_and_no_frontmatter(self) -> None:
+        self._make_plan("alpha", "2026-05-01-active.md", status="backlog")
+        # archived/paused subdirs must be ignored
+        done = self.plans_root / "alpha" / "done"
+        done.mkdir(parents=True, exist_ok=True)
+        (done / "2026-04-01-old.md").write_text(
+            "---\nStatus: done\n---\n\n# old\n", encoding="utf-8"
+        )
+        deferred = self.plans_root / "alpha" / "deferred"
+        deferred.mkdir(parents=True, exist_ok=True)
+        (deferred / "2026-04-02-paused.md").write_text(
+            "---\nStatus: backlog\n---\n\n# paused\n", encoding="utf-8"
+        )
+        # a non-plan .md with no frontmatter must be skipped
+        (self.plans_root / "alpha" / "README.md").write_text(
+            "# not a plan\n", encoding="utf-8"
+        )
+        r = run_cli("queue", "list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        files = sorted(row["file"] for row in json.loads(r.stdout))
+        self.assertEqual(files, ["2026-05-01-active.md"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
