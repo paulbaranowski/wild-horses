@@ -1,7 +1,7 @@
 {
   "name": "plan-keeper",
-  "description": "Five skills for organizing markdown plans in ~/plans/<repo>/. plan-save captures plans from conversation; plan-do routes a plan to the right next skill; plan-done archives a completed plan into ~/plans/<repo>/done/ with a frontmatter completion stamp; plan-update edits frontmatter (Agent, Status, Ticket); plan-push files the plan as a Linear or Jira ticket. Backed by a bundled plan_keeper_cli.py that handles I/O, frontmatter, atomic-write mutation, per-repo config (~/plans/<repo>/.plankeeper.json) for Linear/Jira credentials and defaults, and the network calls to Linear GraphQL / Jira REST. Also ships shell-adapter wrappers (plan-keeper/groundcrew/) so groundcrew can dispatch tickets directly from ~/plans/<repo>/*.md. Includes a PreToolUse hook that auto-approves invocations of the bundled CLI.",
-  "version": "1.4.1",
+  "description": "Six skills for organizing markdown plans in ~/plans/<repo>/. plan-save captures plans from conversation; plan-do routes a plan to the right next skill; plan-done archives a completed plan into ~/plans/<repo>/done/ with a frontmatter completion stamp; plan-update edits frontmatter (Agent, Status, Ticket); plan-queue shows the groundcrew queue across all repos and bulk-promotes/dequeues plans (Status todo/backlog); plan-push files the plan as a Linear or Jira ticket. Backed by a bundled plan_keeper_cli.py that handles I/O, frontmatter, atomic-write mutation, per-repo config (~/plans/<repo>/.plankeeper.json) for Linear/Jira credentials and defaults, and the network calls to Linear GraphQL / Jira REST. Also ships shell-adapter wrappers (plan-keeper/groundcrew/) so groundcrew can dispatch tickets directly from ~/plans/<repo>/*.md. Includes a PreToolUse hook that auto-approves invocations of the bundled CLI.",
+  "version": "1.5.0",
   "author": {
     "name": "Paul Baranowski"
   }
