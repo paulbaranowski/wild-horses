@@ -10,14 +10,14 @@ Install:
 
 ## Skills
 
-| Skill                                    | Role     | What it does                                                                                                                                                                             |
-| ---------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **[`plan-save`](skills/plan-save/)**     | Captures | Writes the latest plan from the current conversation to `~/plans/<repo>/<YYYY-MM-DD>-<topic>.md`.                                                                                        |
-| **[`plan-do`](skills/plan-do/)**         | Routes   | Lists active plans for the current repo, classifies the picked one (idea / spec / sequential impl / task-list-shaped), and invokes the matching next skill.                              |
-| **[`plan-done`](skills/plan-done/)**     | Archives | Moves a completed plan to `~/plans/<repo>/done/` and appends a `*Completed: YYYY-MM-DD*` stamp.                                                                                          |
-| **[`plan-update`](skills/plan-update/)** | Edits    | Mutates frontmatter fields (`Agent`, `Status`, `Ticket`) for a single plan in the current repo.                                                                                          |
-| **[`plan-queue`](skills/plan-queue/)**   | Queues   | Shows the groundcrew dispatch queue across all repos and bulk-promotes/dequeues plans (`Status todo/backlog`). Cross-repo, multi-select. The bulk/cross-repo counterpart to plan-update. |
-| **[`plan-push`](skills/plan-push/)**     | Files    | Files the plan as a Linear or Jira ticket and stamps `Ticket:` in frontmatter.                                                                                                           |
+| Skill                                    | Role     | What it does                                                                                                                                                                                                                                                                              |
+| ---------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **[`plan-save`](skills/plan-save/)**     | Captures | Writes the latest plan from the current conversation to `~/plans/<repo>/<YYYY-MM-DD>-<topic>.md`.                                                                                                                                                                                         |
+| **[`plan-do`](skills/plan-do/)**         | Routes   | Lists not-yet-started plans for the current repo, classifies readiness (idea / spec / execution-ready), and routes to the matching next skill. Execution-ready plans get all three execution engines (autonomous / task-list-builder / executing-plans), recommended-first by plan shape. |
+| **[`plan-done`](skills/plan-done/)**     | Archives | Moves a completed plan to `~/plans/<repo>/done/` and appends a `*Completed: YYYY-MM-DD*` stamp.                                                                                                                                                                                           |
+| **[`plan-update`](skills/plan-update/)** | Edits    | Mutates frontmatter fields (`Agent`, `Status`, `Ticket`) for a single plan in the current repo.                                                                                                                                                                                           |
+| **[`plan-queue`](skills/plan-queue/)**   | Queues   | Shows the groundcrew dispatch queue across all repos and bulk-promotes/dequeues plans (`Status todo/backlog`). Cross-repo, multi-select. The bulk/cross-repo counterpart to plan-update.                                                                                                  |
+| **[`plan-push`](skills/plan-push/)**     | Files    | Files the plan as a Linear or Jira ticket and stamps `Ticket:` in frontmatter.                                                                                                                                                                                                            |
 
 All skills are model-invoked by description — no slash command is required. Trigger phrases like "save this plan", "do a plan from `<name>`", or "I'm done with the plan" route Claude into the right skill.
 
@@ -25,15 +25,17 @@ All skills are model-invoked by description — no slash command is required. Tr
 
 ```text
 conversation ──► plan-save ──► ~/plans/<repo>/*.md ──► plan-do ──► (next skill)
-                                                                   ├─► superpowers:brainstorming      (idea)
-                                                                   ├─► superpowers:writing-plans      (spec)
-                                                                   ├─► superpowers:executing-plans    (sequential impl)
-                                                                   └─► harness:task-list-builder      (task-list-shaped)
+                          idea            ─► superpowers:brainstorming
+                          spec            ─► superpowers:writing-plans
+                          execution-ready ─► menu (recommended first):
+                                ├─► harness:autonomous                              (AFK ──► PR)
+                                ├─► harness:task-list-builder ──► task-list-runner  (dispatched tasks)
+                                └─► superpowers:executing-plans                     (sequential, review-gated)
 
                                                        plan-done ──► ~/plans/<repo>/done/<file>.md
 ```
 
-`plan-do` is the entry point that joins the [superpowers](https://github.com/obra/superpowers) brainstorming → writing-plans → executing-plans pipeline (or the [harness task-list-builder](../harness/skills/task-list-builder/)) at the right stage based on the plan's shape — independence of work units is the discriminator between sequential and task-list-shaped plans, not vocabulary.
+`plan-do` is the entry point that joins the [superpowers](https://github.com/obra/superpowers) brainstorming → writing-plans → executing-plans pipeline (plus the [harness autonomous](../harness/skills/autonomous/) and [task-list-builder](../harness/skills/task-list-builder/) engines) at the right stage. It classifies in two tiers: **readiness** (idea / spec / execution-ready) picks the path; for execution-ready plans, **shape** (single-ticket vs. independent task list vs. sequential phases) picks which execution engine is recommended first — though all three are always offered.
 
 ## Repo derivation
 
