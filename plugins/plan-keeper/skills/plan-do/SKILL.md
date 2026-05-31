@@ -10,16 +10,20 @@ Pick up a saved plan from `~/plans/<repo>/` and route it to the right next step 
 The skill is the entry point that joins this pipeline at the right stage:
 
 ```text
-idea ──► brainstorming ──► spec ──► writing-plans ──► implementation plan ──► executing-plans
-                                                                          └──► task-list-builder ──► task-list-runner
+idea ──► brainstorming ──► spec ──► writing-plans ──► implementation plan ──┬──► executing-plans   (sequential, review-gated)
+                                                                            ├──► task-list-builder ──► task-list-runner   (dispatched tasks)
+                                                                            └──► autonomous   (AFK, no human, ──► PR)
 ```
+
+For plans that aren't execution-ready yet (idea, spec), the skill suggests the single next pipeline stage. For execution-ready plans, it offers **all three execution engines at once** — recommended first — and the user picks how hands-off they want to be.
 
 ## Quick reference
 
 - **Reads:** `~/plans/<repo>/*.md` (newest first by filename); never writes.
 - **`<repo>`:** auto-derived or override — see [../../repo-derivation.md](../../repo-derivation.md).
-- **Classification:** idea / spec / sequential impl plan / task-list-shaped.
-- **Routing:** `superpowers:brainstorming` (idea), `superpowers:writing-plans` (spec), `superpowers:executing-plans` (sequential), `harness:task-list-builder` (task-list).
+- **Classification (tier 1, readiness):** idea / spec / execution-ready.
+- **Classification (tier 2, shape — only for execution-ready):** picks which of the three execution engines to recommend first; all three are always offered.
+- **Routing:** `superpowers:brainstorming` (idea), `superpowers:writing-plans` (spec). Execution-ready → menu of `harness:autonomous`, `harness:task-list-builder`→`task-list-runner`, `superpowers:executing-plans`.
 - **Confirmation:** required before reading any plan file and before invoking any next skill.
 
 ## Procedure
@@ -74,68 +78,102 @@ The user replies with a number or a filename fragment. Resolve to a single filen
 
 Use the `Read` tool on `~/plans/<repo>/<filename>` (the full path is the repo dir from step 1 plus the picked filename). The content stays in conversation context for the rest of this skill and for whatever skill is invoked next.
 
-### 4. Classify the plan
+### 4. Classify the plan (tier 1: readiness)
 
-Classify the plan as one of four types using the signals below. The model should make a judgment call from reading the file — these are heuristics, not exact-match rules.
+First decide whether the plan is _execution-ready_. The model should make a judgment call from reading the file — these are heuristics, not exact-match rules.
 
-| Type                               | Signals                                                                                                                                                                                                                                                   |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **idea**                           | Short (~< 50 lines), exploratory tone, no clear structure, no numbered execution steps. Language like "what if", "thinking about", "could we", "maybe". No `## Design` / `## Architecture` sections.                                                      |
-| **spec**                           | Has sections like `## Design`, `## Architecture`, `## Requirements`, `## Components`, `## Goals/Non-goals`, `## Trade-offs`, `## Data model`. Describes WHAT, not step-by-step HOW. Reads like a design doc.                                              |
-| **sequential implementation plan** | Numbered phases or steps with explicit review/checkpoint language. Linear flow ("first do X, then do Y"). Mentions TDD cycles, review gates, or "after each phase". Single-thread feel.                                                                   |
-| **task-list-shaped plan**          | Explicit independent tasks (Task A / Task B / ... or numbered task IDs). Per-task acceptance criteria. Dependency notation between tasks. Language about "dispatch", "subagents", "in parallel", "independent". Explicit mention of harness or task-list. |
+| Readiness           | Signals                                                                                                                                                                                                               |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **idea**            | Short (~< 50 lines), exploratory tone, no clear structure, no numbered execution steps. Language like "what if", "thinking about", "could we", "maybe". No `## Design` / `## Architecture` sections.                  |
+| **spec**            | Has sections like `## Design`, `## Architecture`, `## Requirements`, `## Components`, `## Goals/Non-goals`, `## Trade-offs`, `## Data model`. Describes WHAT, not step-by-step HOW. Reads like a design doc.          |
+| **execution-ready** | Describes HOW: concrete steps, phases, or tasks with enough detail to start building. Includes both linear "do X then Y" plans and task-list-shaped plans with independent work units. This is the executable bucket. |
 
-**If the plan is ambiguous between types** (e.g., signals for both sequential and task-list-shaped), present the call to the user rather than guessing silently.
+**If the plan is an idea** → go to step 5a. **If it's a spec** → go to step 5b. **If it's execution-ready** → go to step 5c (the execution menu).
 
-**If the plan doesn't fit any of the four types** (e.g., it's a research note, a meeting log, a list of TODOs), say so and offer to let the user steer manually.
+**If the plan is ambiguous between spec and execution-ready** (it describes WHAT but also sketches HOW), present the call to the user rather than guessing silently — offer both the writing-plans path and the execution menu.
 
-### 5. Suggest the matching next skill
+**If the plan doesn't fit any bucket** (e.g., it's a research note, a meeting log, a bare list of TODOs), say so and offer to let the user steer manually.
 
-Map type → suggested skill:
+### 5a. Idea → suggest brainstorming
 
-| Plan type                      | Suggested skill               | One-line purpose                                                                                      |
-| ------------------------------ | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
-| idea                           | `superpowers:brainstorming`   | Turn the idea into a reviewed spec                                                                    |
-| spec                           | `superpowers:writing-plans`   | Turn the spec into a phased implementation plan                                                       |
-| sequential implementation plan | `superpowers:executing-plans` | Execute the plan with human review at each phase                                                      |
-| task-list-shaped plan          | `harness:task-list-builder`   | Convert the plan into a structured JSON task-list, then dispatch tasks via `harness:task-list-runner` |
+> I read `<filename>` as an **idea**. Suggested next: `superpowers:brainstorming` to turn it into a reviewed spec. Proceed? (Or steer manually.)
 
-### 6. Confirm before invoking
+Wait for confirmation, then jump to step 6.
 
-Tell the user what you read, what you'll do, and give them a chance to redirect:
+### 5b. Spec → suggest writing-plans
 
-> I read `<filename>` as a **<type>**. Suggested next: `<plugin:skill>` to <one-line purpose>. Proceed? (Or pick a different skill / steer manually.)
+> I read `<filename>` as a **spec**. Suggested next: `superpowers:writing-plans` to turn it into a phased implementation plan. Proceed? (Or steer manually.)
 
-For implementation plans where signals are mixed, mention the alternative:
+Wait for confirmation, then jump to step 6.
 
-> I read this as an implementation plan. Suggesting `superpowers:executing-plans` (sequential, human review at each phase). If you'd rather dispatch tasks in parallel, say so and I'll route to `harness:task-list-builder` instead.
+### 5c. Execution-ready → offer all three engines (tier 2: shape)
 
-Wait for the user's response. Do not auto-invoke without confirmation.
+The plan can run now. There are three execution engines; **offer all three**, recommended first. The recommendation comes from the plan's _shape_ — but it is only a best guess, because the deciding factor (how much the user wants to supervise) is theirs to make. List every option so they can override.
 
-### 7. Invoke the chosen skill
+Pick the **recommended** engine with this classification (apply in order; first match wins the recommended slot):
 
-On confirmation, use the `Skill` tool to invoke the chosen skill. The plan content is already in conversation context from step 3, so the invoked skill has full access — no explicit handoff payload is needed.
+| Recommend                                            | Signals in the plan                                                                                                                                                                                                             |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`harness:autonomous`**                             | Self-contained and well-specified; bounded scope; clear acceptance criteria; reads like a single ticket/feature that naturally ends in a PR; no mid-flight human judgment calls implied. _"Could hand this to an AFK agent."_   |
+| **`harness:task-list-builder` → `task-list-runner`** | Multiple independent tasks; per-task acceptance criteria; dependency notation between tasks; "dispatch" / "subagents" / "in parallel" / "independent" language; large scope where structured tracking and resumability pay off. |
+| **`superpowers:executing-plans`**                    | Sequential phases with explicit review/checkpoint language; dependent linear flow ("first do X, then do Y"); risky or high-uncertainty work the user would want to review phase-by-phase; TDD-with-review-gates.                |
 
-If the user picked a different skill than the suggestion, invoke that one instead.
+The tiebreaker axis is **autonomy-readiness first** (is it specified enough to need no supervision?), then **independence** (parallel task-list vs. sequential review-gated).
+
+Present the menu — recommended option first with a one-line reason, the others as alternatives, plus a manual escape hatch:
+
+```text
+`<filename>` is ready to execute. Here's how I can run it (recommended first):
+
+  1. harness:autonomous — [recommended] AFK, no human in the loop: implements,
+     tests, runs an independent sub-agent review to convergence, opens a PR.
+  2. harness:task-list-builder → task-list-runner — convert to a structured JSON
+     task list, then dispatch each task to a sub-agent; resumable, best for many
+     independent tasks.
+  3. superpowers:executing-plans — sequential execution with your review at each
+     phase gate.
+  4. Steer manually — I just keep the plan in context and you drive.
+
+Which one? (1 is recommended because <shape-based reason>.)
+```
+
+Reorder 1–3 so the recommended engine is first; keep its `[recommended]` tag and adjust the closing rationale to match. Wait for the user's pick, then go to step 6.
+
+### 6. Invoke the chosen skill
+
+On confirmation (or the user's menu pick), use the `Skill` tool to invoke the chosen skill. The plan content is already in conversation context from step 3, so the invoked skill has full access — no explicit handoff payload is needed.
+
+**Handoff specifics per engine:**
+
+- **`harness:autonomous`** — the plan read in step 3 _is_ the Task. autonomous accepts an in-context plan as a task source (its input-resolution step 3), so no issue URL is needed — the plan content is the authoritative spec. You may also hand it the plan's file path (`~/plans/<repo>/<filename>`) explicitly. Do not look up or pass any `Ticket:` frontmatter field — the plan is the source of truth.
+- **`harness:task-list-builder`** — invoke it to convert the plan into the structured JSON task list; it hands off to `harness:task-list-runner` to execute the tasks.
+- **`superpowers:executing-plans`** — invoke directly; the plan in context is the implementation plan it executes.
+- **`superpowers:brainstorming` / `superpowers:writing-plans`** — invoke directly (the idea / spec paths).
+
+If the user picked a different skill than the suggestion or the recommended engine, invoke that one instead.
 
 If the user wants to steer manually, just stop the skill here. The plan is read into context and they can drive freely.
 
 ## Common mistakes
 
 - **Reading and classifying multiple plans before the user picks.** Step 1 lists filenames only. Reading multiple plans wastes context and biases classification toward whatever was read last.
-- **Auto-invoking the next skill without confirmation.** Step 6 requires a check-in even when the classification feels obvious. The skill's job is to _suggest_ the next stage, not jump to it.
-- **Conflating sequential vs task-list-shaped plans.** Both use "phases" and "tasks" in their vocabulary. The discriminator is **independence** of work units, not the words used.
+- **Auto-invoking the next skill without confirmation.** Steps 5a/5b/5c require a check-in even when the classification feels obvious. The skill's job is to _offer_ the next stage, not jump to it.
+- **Collapsing the execution menu to a single suggestion.** For execution-ready plans, all three engines are always offered (step 5c). The shape classification only sets which one is _recommended first_ — it does not hide the others.
+- **Treating the recommendation as a decision.** The recommended engine is a best guess from plan shape; how hands-off to be is the user's call. Lead with the recommendation, but let them pick any engine.
+- **Passing a `Ticket:` URL to `harness:autonomous`.** The in-context plan is the Task — do not resolve or hand autonomous a frontmatter ticket URL.
 - **Silently falling back when the current repo has no plans.** Step 1 says: tell the user, run `list-repos`, wait for direction. Don't auto-route to another folder.
 
 ## Edge cases
 
 - **No plans for the current repo** — show `list-repos` output to the user and let them pick another repo. Do not silently fall back.
 - **`~/plans/` doesn't exist at all** — `list-repos` returns empty. Tell the user `plan-save` hasn't been used yet on this machine.
-- **Plan is none of the four types** — say so explicitly; offer to read into context and let the user steer.
+- **Plan fits no readiness bucket** — say so explicitly; offer to read into context and let the user steer.
+- **Plan is ambiguous between spec and execution-ready** — offer both the `superpowers:writing-plans` path and the execution menu; let the user choose.
 - **Filename fragment matches multiple plans** — ask the user to disambiguate; do not pick one arbitrarily.
 
 ## Notes
 
 - This skill is read-only against `~/plans/` — it never modifies, moves, or deletes plans. Sibling skill `plan-done` is responsible for archiving completed plans.
-- The classification distinguishes _sequential_ implementation plans (linear, review-gated) from _task-list-shaped_ plans (parallel, dispatched). Same vocabulary ("phase", "task") can appear in both — the discriminating signal is task **independence**, not the words used.
+- Classification is two-tier. Tier 1 (readiness: idea / spec / execution-ready) gates _which path_ the plan takes. Tier 2 (shape) runs only for execution-ready plans and only sets _which engine is recommended first_ in the menu — all three are always offered.
+- The tier-2 discriminator between recommending `task-list-builder/runner` and `executing-plans` is task **independence** (parallel, dispatched vs. sequential, review-gated), not the words used — both use "phase" and "task" vocabulary. `harness:autonomous` sits above both on the autonomy axis: recommend it when the plan is specified enough to run with no human in the loop.
 - Sibling skills in the `plan-` family (`plan-save`, `plan-done`) share the same CLI and the same `~/plans/<repo>/` tree.

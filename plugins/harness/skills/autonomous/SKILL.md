@@ -1,18 +1,19 @@
 ---
 name: autonomous
-description: Autonomously take an issue/ticket from a link to an opened pull request, with no human in the loop. Hand it a Linear/GitHub/other issue URL (as the argument or in the conversation) and it decides everything itself: implements, tests, runs an independent sub-agent review to convergence, and opens a PR following the target repo's own conventions. Use when the user says "work this issue autonomously", "take this ticket end-to-end", "do this AFK", or pastes an issue link and asks you to just build it. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.
+description: Autonomously take an issue/ticket or a plan file from a link (or path) to an opened pull request, with no human in the loop. Hand it a Linear/GitHub/other issue URL, a path to a plan/spec file (e.g. ~/plans/<repo>/foo.md), or a plan already read into the conversation, and it decides everything itself: implements, tests, runs an independent sub-agent review to convergence, and opens a PR following the target repo's own conventions. Use when the user says "work this issue autonomously", "take this ticket end-to-end", "do this AFK", pastes an issue link, or points it at a plan file and asks you to just build it. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "<issue or ticket URL>"
+argument-hint: "<issue/ticket URL or path to a plan file>"
 ---
 
 # autonomous
 
-Take an issue/ticket from a single **link** all the way to an opened pull request,
-with no human in the loop. Resolve the issue from the link, then run an
-implement → test → review → PR → tend loop entirely on your own judgment.
+Take a task — an issue/ticket **link** or a **plan/spec file** — all the way to an
+opened pull request, with no human in the loop. Resolve the task from the link or
+file, then run an implement → test → review → PR → tend loop entirely on your own
+judgment.
 
-## Input resolution (the link)
+## Input resolution (the task source)
 
 Resolve the task target in this priority order:
 
@@ -20,13 +21,21 @@ Resolve the task target in this priority order:
    - GitHub issue/PR → `gh issue view <url>` / `gh pr view <url>`
    - Linear → the `linear` CLI if present, otherwise WebFetch
    - anything else → WebFetch
-2. **No URL in the arguments, but an issue ref or link in the conversation** — use that.
-3. **Nothing resolvable** — this is the one allowed stop. It is a _precondition_
+2. **File path in the arguments** — a path to a plan, spec, or issue file (e.g.
+   `~/plans/<repo>/foo.md` or any local `.md`). Read it with the `Read` tool; its
+   full content is the Task. There is no separate "title" to fetch — the file _is_
+   the spec.
+3. **A task already in the conversation** — an issue ref/link, or a plan/spec
+   already read into context (for example, handed off by `plan-keeper:plan-do`,
+   which reads the plan file and then invokes this skill). Use that content as the
+   Task; do not re-fetch or re-read it.
+4. **Nothing resolvable** — this is the one allowed stop. It is a _precondition_
    failure, not a mid-task clarification: state plainly that the skill needs an
-   issue link, and stop. Once a task is resolved and work begins, the "never ask"
-   contract below governs everything.
+   issue link or a plan file, and stop. Once a task is resolved and work begins,
+   the "never ask" contract below governs everything.
 
-The fetched title + body become the **Task** you work from (see the **Task** section below).
+The fetched issue (title + body) or the plan/spec file's content becomes the
+**Task** you work from (see the **Task** section below).
 
 ## Autonomy
 
@@ -49,9 +58,10 @@ When the issue is ambiguous:
 3. Record the choice (and the alternatives you considered) in the PR description under a "Decisions" section, so the reviewer can push back if you guessed wrong.
 
 The single exception is a **precondition, not a clarification**: if you were
-invoked with no resolvable task target — no issue link in the arguments or the
-conversation, and no clear in-progress work on the current branch — stop and say
-so. That is the only question you may ask, and only before work begins.
+invoked with no resolvable task target — no issue link or plan-file path in the
+arguments, no plan/issue in the conversation, and no clear in-progress work on the
+current branch — stop and say so. That is the only question you may ask, and only
+before work begins.
 
 ## Code style
 
@@ -109,7 +119,16 @@ discipline that gets you there.
 
 ## Task
 
-The task is the issue you resolved in **Input resolution** above. Work from its
-title and body: treat the fetched title + body as the authoritative spec for what
-to build. The title alone is enough to proceed when the body is thin or empty —
-do not stop to ask for more detail (see **Autonomy**).
+The task is whatever you resolved in **Input resolution** above — an issue/ticket
+or a plan/spec file. Treat that content as the authoritative spec for what to
+build:
+
+- **From an issue/ticket:** work from its title and body. The title alone is
+  enough to proceed when the body is thin or empty.
+- **From a plan/spec file (or an in-context plan):** the file's full content is
+  the spec — phases, tasks, acceptance criteria, and any design notes it carries.
+  A plan is usually richer than an issue body; follow it, but you still own every
+  decision it leaves open.
+
+Either way, do not stop to ask for more detail (see **Autonomy**). Record any
+ambiguous calls in the PR's "Decisions" section.
