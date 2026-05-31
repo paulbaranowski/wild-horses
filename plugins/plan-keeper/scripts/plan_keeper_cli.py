@@ -312,6 +312,22 @@ def list_plans(repo: str, state: str) -> list[Path]:
     return files
 
 
+def plan_status(path: Path) -> str:
+    """Return a plan's `Status:` frontmatter, lowercased; 'backlog' if absent.
+
+    Blank/missing Status maps to 'backlog' to match plan-save's default, so a
+    file with no frontmatter never silently vanishes from a status-filtered
+    listing. A file that fails to parse (malformed frontmatter, unreadable
+    bytes) is also treated as 'backlog' — one bad file must not break the whole
+    listing, and 'backlog' keeps it visible in plan-do where it would be noticed.
+    """
+    try:
+        meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+    except (PlanKeeperCliError, OSError, UnicodeDecodeError):
+        return "backlog"
+    return (meta.get("Status") or "").strip().lower() or "backlog"
+
+
 def parse_date_arg(s: str) -> str:
     """Validate a YYYY-MM-DD argument and return it as an ISO string."""
     try:
@@ -381,8 +397,40 @@ def cmd_repo(args) -> int:
 
 def cmd_list(args) -> int:
     repo = derive_repo(args.override)
-    for p in list_plans(repo, args.state):
-        print(p.name)
+    plans = list_plans(repo, args.state)
+
+    raw_filter = getattr(args, "status", None)
+    if not raw_filter:
+        for p in plans:
+            print(p.name)
+        return 0
+
+    # Status-filtered listing. The filter doubles as the tier order: plans are
+    # grouped by the requested statuses in the order given (e.g. "in-progress,
+    # todo" => in-progress group first), newest-first within each group. Output
+    # is `status<TAB>filename` so callers can render "[status] filename".
+    tiers = [s.strip().lower() for s in raw_filter.split(",") if s.strip()]
+    tier_rank = {s: i for i, s in enumerate(tiers)}
+    annotated = [(p, plan_status(p)) for p in plans]
+
+    shown = [(p, s) for (p, s) in annotated if s in tier_rank]
+    # list_plans is already newest-first; a stable sort by tier preserves that
+    # within each group.
+    shown.sort(key=lambda ps: tier_rank[ps[1]])
+    for p, s in shown:
+        print(f"{s}\t{p.name}")
+
+    # Transparency: never silently drop active plans the filter excluded.
+    hidden = [s for (_, s) in annotated if s not in tier_rank]
+    if hidden:
+        counts: dict[str, int] = {}
+        for s in hidden:
+            counts[s] = counts.get(s, 0) + 1
+        summary = ", ".join(f"{st}×{n}" for st, n in sorted(counts.items()))
+        print(
+            f"note: {len(hidden)} other active plan(s) hidden ({summary})",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -432,17 +480,21 @@ def cmd_save(args) -> int:
     #      <date>-<runid>-<short>.<slug>.{json,md}). Always a move (not a copy):
     #      the realistic workflow is relocating an already-on-disk artifact,
     #      and leaving stale duplicates behind is just confusion.
+    kind = validate_kind(args.kind) if args.kind is not None else None
+
     if args.from_path:
         for flag, value in (
             ("--topic", args.topic),
             ("--extension", args.extension),
             ("--date", args.date),
+            ("--kind", args.kind),
         ):
             if value is not None:
                 raise PlanKeeperCliError(
                     f"{flag} is incompatible with --from-path "
-                    "(--from-path preserves the source basename verbatim); "
-                    f"drop {flag} or drop --from-path",
+                    "(--from-path preserves the source bytes verbatim); "
+                    f"drop {flag} or drop --from-path "
+                    "(set Kind afterward via `file-meta update --field Kind=...`)",
                     code=2,
                 )
         source = Path(args.from_path)
@@ -466,6 +518,12 @@ def cmd_save(args) -> int:
                 f"topic {args.topic!r} slugified to empty string", code=2
             )
         ext = validate_extension(args.extension) if args.extension is not None else "md"
+        if kind and ext != "md":
+            raise PlanKeeperCliError(
+                f"--kind only applies to .md saves (frontmatter lives in markdown); "
+                f"got --extension {ext}. Drop --kind, or save the paired .md with it.",
+                code=2,
+            )
         date_str = (
             parse_date_arg(args.date) if args.date else date.today().isoformat()
         )
@@ -499,7 +557,7 @@ def cmd_save(args) -> int:
         # so JSON/YAML siblings of paired saves remain byte-exact). Merges
         # into user-supplied frontmatter rather than duplicating.
         if ext == "md":
-            content = _inject_default_frontmatter(content, args.agent)
+            content = _inject_default_frontmatter(content, args.agent, kind)
         write_atomic(target, content)
     print(target)
     return 0
@@ -607,7 +665,25 @@ def cmd_ticket_system_config_list(args) -> int:
 # --- Frontmatter ------------------------------------------------------------
 
 # Order matters in the output — keep this canonical so callers see a stable shape.
-_FRONTMATTER_FIELDS = ("Ticket", "Ticket System", "Completed on", "Agent", "Status")
+_FRONTMATTER_FIELDS = ("Ticket", "Ticket System", "Completed on", "Agent", "Status", "Kind")
+
+# `Kind` classifies the *document type* (orthogonal to Status, which is the
+# lifecycle). The values are ordered by pipeline position, idea → ready-to-build.
+# plan-save infers and writes it; plan-do reads it as its primary routing signal.
+# Canonical definitions + the plan-do routing map live in plan-kinds.md.
+VALID_KINDS = ("idea", "prd", "design", "spec", "exec-plan")
+
+
+def validate_kind(value: str) -> str:
+    """Return a normalized (lowercased) Kind, or raise if not in VALID_KINDS."""
+    normalized = value.strip().lower()
+    if normalized not in VALID_KINDS:
+        raise PlanKeeperCliError(
+            f"invalid Kind {value!r}: must be one of "
+            + ", ".join(VALID_KINDS),
+            code=2,
+        )
+    return normalized
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -687,26 +763,31 @@ def serialize_frontmatter(meta: dict[str, str], body: str) -> str:
     return "\n".join(lines) + "\n" + body
 
 
-def _inject_default_frontmatter(body_text: str, agent: str) -> str:
-    """Ensure body_text starts with frontmatter containing Agent and Status.
+def _inject_default_frontmatter(body_text: str, agent: str, kind: Optional[str] = None) -> str:
+    """Ensure body_text starts with frontmatter containing Agent and Status
+    (and Kind, when a kind is supplied).
 
     Three cases:
       1. body has no frontmatter → prepend a fresh '---\\nAgent: <agent>\\nStatus: backlog\\n---\\n\\n' block.
-      2. body has frontmatter with Agent and Status already set → return unchanged
+      2. body has frontmatter with the fields already set → return unchanged
          (user-supplied values win over defaults).
-      3. body has frontmatter missing one or both → fill in the missing fields,
+      3. body has frontmatter missing some → fill in the missing fields,
          re-serialize, return.
 
-    Why agents/status defaults are 'fill if absent' rather than 'overwrite':
-    a user who hand-wrote `Status: todo` in the body shouldn't have it stomped
-    back to backlog by the save invocation. The CLI default is a floor, not
-    an override.
+    Why agent/status/kind are 'fill if absent' rather than 'overwrite':
+    a user who hand-wrote `Status: todo` (or `Kind: prd`) in the body shouldn't
+    have it stomped by the save invocation. The CLI default is a floor, not an
+    override. `kind` is only written when the caller passed one — there is no
+    default Kind, because an absent Kind is a valid state (plan-do then infers
+    it from the content instead).
     """
     meta, body = parse_frontmatter(body_text)
     if not meta.get("Agent"):
         meta["Agent"] = agent
     if not meta.get("Status"):
         meta["Status"] = "backlog"
+    if kind and not meta.get("Kind"):
+        meta["Kind"] = kind
     out = serialize_frontmatter(meta, body)
     if not out.endswith("\n"):
         out += "\n"
@@ -799,6 +880,8 @@ def cmd_file_meta_update(args) -> int:
                 + ", ".join(repr(k) for k in _FRONTMATTER_FIELDS),
                 code=2,
             )
+        if key == "Kind" and value.strip():
+            value = validate_kind(value)
         updates.append((key, value))
     path = Path(args.file)
     if not path.exists():
@@ -1924,6 +2007,16 @@ def build_parser() -> argparse.ArgumentParser:
         default="active",
         help="which subset to list (default: active)",
     )
+    p_list.add_argument(
+        "--status",
+        help=(
+            "comma-separated Status values to keep (e.g. 'in-progress,todo'). "
+            "Doubles as tier order: groups appear in the order given, newest-"
+            "first within each. Output becomes 'status<TAB>filename'. "
+            "Missing/blank Status counts as 'backlog'. Excluded active plans "
+            "are summarized on stderr. Omit to list bare filenames as before."
+        ),
+    )
 
     sub.add_parser(
         "list-repos",
@@ -1966,6 +2059,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="agent name to inject as 'Agent: <name>' frontmatter on "
              "markdown saves (default: claude). Heredoc + .md shape only; "
              "ignored for --extension other than md and for --from-path.",
+    )
+    p_save.add_argument(
+        "--kind",
+        help="document kind to inject as 'Kind: <value>' frontmatter on "
+             "markdown saves. One of: " + ", ".join(VALID_KINDS) + ". "
+             "Heredoc + .md shape only — rejected for non-md extensions and "
+             "for --from-path (set Kind afterward via `file-meta update`). "
+             "Fill-if-absent: a Kind already in the body is preserved.",
     )
     p_save.add_argument(
         "--on-collision",

@@ -42,13 +42,32 @@ If exactly one candidate is identifiable, propose it:
 
 > Mark `<filename>` done? (Y/n, or name a different one.)
 
-**If no clear candidate, or the user rejects the proposed one**, list active plans via the CLI:
+**If no clear candidate, or the user rejects the proposed one**, list the plans worth finishing via the CLI — the ones you're actively working (`in-progress`) or have queued (`todo`):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --status in-progress,todo
 ```
 
-(Add `--override <name>` if found.) Display the output as a numbered list, newest-first, and ask the user to pick. If the output is empty, tell the user there are no active plans for this repo and stop. Do not silently fall back to another folder.
+(Add `--override <name>` if found.) With `--status in-progress,todo` the CLI keeps only those two statuses, lists **in-progress first** (the plan you most likely just finished), then `todo`, newest-first within each, and prints one `status<TAB>filename` line per plan. Any other active plans (backlog, in-review, …) are summarized on **stderr** as a `note: N other active plan(s) hidden (...)` line.
+
+Display the output as a numbered list with each plan's status tag, and ask the user to pick (the filename is the part after the tab). If stderr carried a hidden-plans note, mention it below the list so the user can ask to see the rest.
+
+**If stdout is empty:**
+
+- **stderr has a hidden-plans note** → nothing is in-progress or todo, but other active plans exist (e.g. all backlog). Tell the user, and offer `list` with no `--status` to pick from everything.
+- **stderr is also empty** → there are no active plans for this repo. Say so and stop. Do not silently fall back to another folder.
+
+Example output to the user:
+
+```text
+Plans to finish in ~/plans/wild-horses/:
+
+  1. [in-progress] 2026-05-29-plan-do-design.md
+  2. [in-progress] 2026-05-27-task-list-runner-refactor.md
+  3. [todo]        2026-05-19-plan-save-design.md
+
+Which one did you finish?
+```
 
 ### 2. Confirm before mutating
 
@@ -105,7 +124,7 @@ Tell the user the archived path that the CLI returned in step 3. One line is eno
 
 ## Notes
 
-- This skill is the only `plan-*` skill that mutates the `~/plans/` tree by moving files. `plan-save` creates; `plan-do` reads only.
+- This skill is the only `plan-*` skill that mutates the `~/plans/` tree by **moving files**. `plan-save` creates; `plan-do` only flips a started plan's `Status` to `in-progress` (no move). The status field is what makes this skill's `--status in-progress,todo` list surface the plan you were just working on first.
 - The completion date is stored as `Completed on: YYYY-MM-DD` in the YAML frontmatter, keeping the plan body intact and making the date machine-readable without disturbing markdown rendering.
 - Archived plans live in `~/plans/<repo>/done/`. `plan-do`'s `list` only enumerates direct children of the repo dir — `done/` files are excluded from the active-plans list automatically.
 - Sibling skills in the `plan-` family (`plan-save`, `plan-do`) share the same CLI and the same `~/plans/<repo>/` tree.

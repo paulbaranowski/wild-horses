@@ -534,6 +534,77 @@ class TestSave(IsolatedHomeTestCase):
         self.assertNotIn("Status:", text)
 
 
+class TestSaveKind(IsolatedHomeTestCase):
+    """`save --kind` injects a `Kind:` frontmatter line on .md saves, validates
+    the value, and is fill-if-absent."""
+
+    def test_kind_written_on_md_save(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "checkout", "--kind", "prd",
+            stdin="# Checkout\n\nProblem.\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        self.assertIn("Kind: prd", text)
+        self.assertIn("Status: backlog", text)
+
+    def test_no_kind_means_no_kind_line(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "no kind",
+            stdin="# X\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        self.assertNotIn("Kind:", text)
+
+    def test_invalid_kind_rejected(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "bad", "--kind", "blueprint",
+            stdin="# X\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("invalid Kind", r.stderr)
+
+    def test_kind_normalized_lowercase(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "caps", "--kind", "Spec",
+            stdin="# X\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Kind: spec", Path(r.stdout.strip()).read_text())
+
+    def test_kind_rejected_for_non_md_extension(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "tasks",
+            "--kind", "exec-plan", "--extension", "json",
+            stdin="{}\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--kind only applies to .md saves", r.stderr)
+
+    def test_kind_rejected_with_from_path(self) -> None:
+        source = self.cwd / "src.md"
+        source.write_text("# Body\n")
+        r = run_cli(
+            "save", "--override", "scratch",
+            "--from-path", str(source), "--kind", "spec",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--kind is incompatible with --from-path", r.stderr)
+
+    def test_kind_is_fill_if_absent(self) -> None:
+        # Body already declares Kind: design — --kind prd must not stomp it.
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "has kind", "--kind", "prd",
+            stdin="---\nKind: design\n---\n\n# Body\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        self.assertIn("Kind: design", text)
+        self.assertNotIn("Kind: prd", text)
+
+
 class TestArchive(IsolatedHomeTestCase):
     def _save_one(self, topic: str = "plan to archive") -> Path:
         r = run_cli(
@@ -756,6 +827,102 @@ class TestList(IsolatedHomeTestCase):
         self.assertIn("real-plan", r.stdout)
 
 
+class TestListByStatus(IsolatedHomeTestCase):
+    """`list --status <set>` filters active plans by Status frontmatter,
+    orders by the given tier sequence (newest-first within each), annotates
+    each line as `status<TAB>filename`, and reports excluded actives on stderr.
+    """
+
+    def _write(self, name: str, status: str | None) -> None:
+        d = self.plans_root / "scratch"
+        d.mkdir(parents=True, exist_ok=True)
+        if status is None:
+            (d / name).write_text("# no frontmatter\n", encoding="utf-8")
+        else:
+            (d / name).write_text(
+                f"---\nStatus: {status}\n---\n\n# {name}\n", encoding="utf-8"
+            )
+
+    def test_filters_and_orders_by_tier_then_newest(self) -> None:
+        self._write("2026-05-28-a.md", "todo")
+        self._write("2026-05-29-b.md", "in-progress")
+        self._write("2026-05-27-d.md", "in-progress")
+        self._write("2026-05-26-e.md", "in-review")
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "in-progress,todo",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = r.stdout.strip().split("\n")
+        # in-progress group first (newest-first within), then todo group.
+        self.assertEqual(
+            lines,
+            [
+                "in-progress\t2026-05-29-b.md",
+                "in-progress\t2026-05-27-d.md",
+                "todo\t2026-05-28-a.md",
+            ],
+        )
+
+    def test_missing_frontmatter_counts_as_backlog(self) -> None:
+        self._write("2026-05-25-f.md", None)
+        self._write("2026-05-30-c.md", "backlog")
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "todo,backlog",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = r.stdout.strip().split("\n")
+        self.assertIn("backlog\t2026-05-30-c.md", lines)
+        self.assertIn("backlog\t2026-05-25-f.md", lines)
+
+    def test_excluded_actives_summarized_on_stderr(self) -> None:
+        self._write("2026-05-28-a.md", "todo")
+        self._write("2026-05-29-b.md", "in-progress")
+        self._write("2026-05-26-e.md", "in-review")
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "todo,backlog",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # Only the todo plan shows; in-progress + in-review are hidden.
+        self.assertEqual(r.stdout.strip(), "todo\t2026-05-28-a.md")
+        self.assertIn("2 other active plan(s) hidden", r.stderr)
+        self.assertIn("in-progress×1", r.stderr)
+        self.assertIn("in-review×1", r.stderr)
+
+    def test_empty_match_with_hidden_actives(self) -> None:
+        self._write("2026-05-29-b.md", "in-progress")
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "todo,backlog",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "")
+        self.assertIn("1 other active plan(s) hidden", r.stderr)
+
+    def test_malformed_frontmatter_falls_back_to_backlog(self) -> None:
+        # Unknown frontmatter field makes parse_frontmatter raise; the listing
+        # must survive and treat the file as backlog (visible, not crashed).
+        (self.plans_root / "scratch").mkdir(parents=True, exist_ok=True)
+        (self.plans_root / "scratch" / "2026-05-24-g.md").write_text(
+            "---\nBogusKey: x\nStatus: todo\n---\n\n# g\n", encoding="utf-8"
+        )
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "todo,backlog",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "backlog\t2026-05-24-g.md")
+
+    def test_no_status_flag_keeps_bare_filename_output(self) -> None:
+        self._write("2026-05-28-a.md", "todo")
+        r = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "2026-05-28-a.md")
+        self.assertNotIn("\t", r.stdout)
+
+
 class TestListRepos(IsolatedHomeTestCase):
     def test_counts_per_state(self) -> None:
         # Two repos, varied content
@@ -905,7 +1072,7 @@ class TestFileMetaGet(IsolatedHomeTestCase):
         )
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
-        self.assertEqual(data, {"Ticket": "", "Ticket System": "", "Completed on": "", "Agent": "", "Status": ""})
+        self.assertEqual(data, {"Ticket": "", "Ticket System": "", "Completed on": "", "Agent": "", "Status": "", "Kind": ""})
 
     def test_full_frontmatter_parses(self) -> None:
         path = self._write_plan(
@@ -928,6 +1095,7 @@ class TestFileMetaGet(IsolatedHomeTestCase):
             "Completed on": "2026-05-20",
             "Agent": "",
             "Status": "",
+            "Kind": "",
         })
 
     def test_partial_frontmatter_returns_present_fields(self) -> None:
@@ -1230,6 +1398,28 @@ class TestFileMetaUpdate(IsolatedHomeTestCase):
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("Ticket: ENG-123=draft", plan.read_text())
+
+    def test_file_meta_update_sets_valid_kind(self) -> None:
+        """Kind is whitelisted; a valid value writes back (normalized lowercase)."""
+        plan = self._write_plan("---\nAgent: claude\nStatus: backlog\n---\n\n# Body\n")
+        result = run_cli(
+            "file-meta", "update", "--file", str(plan), "--field", "Kind=Exec-Plan",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Kind: exec-plan", plan.read_text())
+
+    def test_file_meta_update_rejects_invalid_kind(self) -> None:
+        """An out-of-enum Kind is rejected before any write."""
+        plan = self._write_plan("---\nAgent: claude\nStatus: backlog\n---\n\n# Body\n")
+        result = run_cli(
+            "file-meta", "update", "--file", str(plan), "--field", "Kind=blueprint",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("invalid Kind", result.stderr)
+        # File untouched — no Kind line leaked in.
+        self.assertNotIn("Kind:", plan.read_text())
 
 
 class TestTicketSystemConfig(IsolatedHomeTestCase):

@@ -28,14 +28,15 @@ Pairs with [`plan-do`](../plan-do/) (which reads what `plan-save` wrote) and [`p
 1. **Identifies the file(s).** Scans recent messages for a user-pasted file, paired output (e.g. task-list-builder's `.json` + `.md`), the latest `ExitPlanMode` plan, a recent "Design"/"Plan"/"Approach" section, or a substantial markdown outline. Asks if multiple plausible candidates exist.
 2. **Extracts the topic.** Uses the first H1/H2 heading as the `--topic` (the CLI slugifies). For non-markdown content (JSON/YAML), uses a phrase from the user's invocation or the paired markdown's H1.
 3. **Chooses the extension.** Honors explicit user phrasing ("save the json file" → `--extension json`), otherwise sniffs the content (starts with `{` or `[` → `.json`, etc.), and defaults to `.md`.
-4. **Saves via CLI.** Two shapes, chosen by where the content lives:
+4. **Classifies the Kind** (`.md` saves). Infers the document type — `idea` / `prd` / `design` / `spec` / `exec-plan` (see [`../../plan-kinds.md`](../../plan-kinds.md)) — and passes it as `--kind`, surfacing it in the confirmation for one-step correction. This is the field `plan-do` later reads to route the plan, so it's recorded once here with full conversation context rather than re-inferred on every pickup.
+5. **Saves via CLI.** Two shapes, chosen by where the content lives:
    - **Heredoc** — `save --topic "<heading>" --extension <ext>` with the body on stdin via a quoted heredoc, for content that lives only in conversation. The CLI constructs `<date>-<slug>.<ext>` for the target name.
    - **`--from-path`** — for files already on disk (e.g., task-list-builder's `<date>-<runid>-<short>.<slug>.{json,md}`). The target keeps the source's basename verbatim and the source is unlinked after a successful write (atomic same-FS rename). `--topic`/`--extension`/`--date` are rejected.
 
    For paired output, calls the CLI once per file. The disk shape keeps pairs together automatically because both sources share a base name.
 
-5. **Handles collisions.** On exit 2 (file already exists), asks: overwrite / suffix `-2` / pick a new name. Re-invokes with `--on-collision <choice>`. Keeps paired files in sync.
-6. **Confirms.** Returns the absolute path(s) the CLI wrote.
+6. **Handles collisions.** On exit 2 (file already exists), asks: overwrite / suffix `-2` / pick a new name. Re-invokes with `--on-collision <choice>`. Keeps paired files in sync.
+7. **Confirms.** Returns the absolute path(s) the CLI wrote.
 
 The CLI owns slugify, dating, `mkdir -p`, atomic write, and collision detection. The skill owns choosing _what_ to save, _which extension_, and _how_ to handle conflicts.
 
