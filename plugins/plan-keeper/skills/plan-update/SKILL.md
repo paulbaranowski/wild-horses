@@ -10,12 +10,14 @@ Edit the frontmatter of an existing plan in `~/plans/<repo>/`. The bundled `plan
 ## Quick reference
 
 - **Target:** `~/plans/<repo>/<filename>` (active state — not `done/` or `deferred/`).
-- **Whitelisted fields:** `Agent`, `Status`, `Ticket`, `Ticket System`, `Completed on`.
+- **Whitelisted fields:** `Agent`, `Status`, `Ticket`, `Ticket System`, `Completed on`, `Kind`.
 - **Status vocabulary:** `backlog` (default; fetched but not dispatched — confirm via `crew status <id>`), `todo` (eligible for dispatch), `in-progress` (set by groundcrew's markInProgress hook), `in-review` (manual), `done` (set by plan-done when archiving). The middle values (`in-progress`, `done`) are normally written by the system — set them by hand only if you know why.
+- **Kind vocabulary:** `idea` / `prd` / `design` / `spec` / `exec-plan` — the document type, validated against this closed set (see [../../plan-kinds.md](../../plan-kinds.md)). Set by `plan-save`; correct it here if it was inferred wrong.
 - **Common edits:**
   - Promote: `--field Status=todo` (makes the plan eligible for groundcrew dispatch).
   - Change model: `--field Agent=codex`.
   - Reset: `--field Status=backlog`.
+  - Reclassify: `--field Kind=design` (changes how `plan-do` routes the plan).
 - **Confirmation:** required before any mutation.
 
 ## Procedure
@@ -39,6 +41,7 @@ Match the user's invocation:
 - "promote to todo" / "mark ready" / "set status to todo" → `--field Status=todo`
 - "change agent to codex" / "use codex" → `--field Agent=codex`
 - "back to backlog" / "reset" → `--field Status=backlog`
+- "it's actually a spec/design/prd/idea/exec-plan" / "reclassify" → `--field Kind=<value>`
 - Anything else: ask which field, which value.
 
 Multiple fields → repeat `--field` flag.

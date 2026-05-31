@@ -22,7 +22,7 @@ For plans that aren't execution-ready yet (idea, spec), the skill suggests the s
 - **Lists:** the **not-yet-started** plans only — `Status: todo` and `Status: backlog` (`list --status todo,backlog`). In-progress / in-review / done plans are excluded (you're picking something to _start_).
 - **Writes:** exactly one thing — flips the picked plan's `Status` to `in-progress` when it starts one (step 6). It never moves, deletes, or rewrites the body.
 - **`<repo>`:** auto-derived or override — see [../../repo-derivation.md](../../repo-derivation.md).
-- **Classification (tier 1, readiness):** idea / spec / execution-ready.
+- **Classification (tier 1, readiness):** idea / spec / execution-ready. Read the plan's `Kind:` frontmatter first (authoritative — see [../../plan-kinds.md](../../plan-kinds.md)); infer from content only when `Kind` is absent.
 - **Classification (tier 2, shape — only for execution-ready):** picks which of the three execution engines to recommend first; all three are always offered.
 - **Routing:** `superpowers:brainstorming` (idea), `superpowers:writing-plans` (spec). Execution-ready → menu of `harness:autonomous`, `harness:task-list-builder`→`task-list-runner`, `superpowers:executing-plans`.
 - **Confirmation:** required before reading any plan file and before invoking any next skill.
@@ -85,7 +85,19 @@ Use the `Read` tool on `~/plans/<repo>/<filename>` (the full path is the repo di
 
 ### 4. Classify the plan (tier 1: readiness)
 
-First decide whether the plan is _execution-ready_. The model should make a judgment call from reading the file — these are heuristics, not exact-match rules.
+Decide whether the plan is an idea, a spec, or _execution-ready_. There are two ways to land this, in priority order:
+
+**4a. Trust the `Kind` frontmatter if present.** `plan-save` records a `Kind:` field (set with full conversation context at save time) — when it's there, it is the authoritative signal. Map it directly (see [../../plan-kinds.md](../../plan-kinds.md)):
+
+| `Kind` (from frontmatter) | Readiness       | Next                |
+| ------------------------- | --------------- | ------------------- |
+| `idea`                    | idea            | step 5a             |
+| `prd` / `design` / `spec` | spec            | step 5b             |
+| `exec-plan`               | execution-ready | step 5c (exec menu) |
+
+The user can still override at the confirmation gate — `Kind` is a strong prior, not a lock. If the file's content flatly contradicts its `Kind` (e.g. `Kind: idea` on a detailed task list), note the mismatch to the user instead of blindly following the tag.
+
+**4b. Infer from content when `Kind` is absent or unrecognized** (old plans, hand-made files, `--from-path` saves). Make a judgment call from reading the file — these are heuristics, not exact-match rules:
 
 | Readiness           | Signals                                                                                                                                                                                                               |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -192,6 +204,7 @@ If the user wants to steer manually, just stop the skill here. The plan is read 
 
 - This skill's only write to `~/plans/` is flipping the picked plan's `Status` to `in-progress` when it starts one (step 6). It never moves, deletes, or rewrites a plan's body. Sibling skill `plan-done` archives completed plans (moving files into `done/`).
 - Status is the link between the `plan-*` skills: `plan-save` writes `backlog`, `plan-do` lists `todo`/`backlog` and flips the started plan to `in-progress`, and `plan-done` lists `in-progress`/`todo` (in-progress first). A plan therefore flows `backlog → todo → in-progress → done` across the family.
-- Classification is two-tier. Tier 1 (readiness: idea / spec / execution-ready) gates _which path_ the plan takes. Tier 2 (shape) runs only for execution-ready plans and only sets _which engine is recommended first_ in the menu — all three are always offered.
+- Classification is two-tier. Tier 1 (readiness: idea / spec / execution-ready) gates _which path_ the plan takes — driven by the `Kind:` frontmatter when present (set by `plan-save`), falling back to content inference otherwise. Tier 2 (shape) runs only for execution-ready plans and only sets _which engine is recommended first_ in the menu — all three are always offered.
+- `Kind` is the persisted form of the tier-1 readiness call: `plan-save` records it once with full context, so `plan-do` reads it instead of re-inferring on every pickup. The mapping (idea→idea, prd/design/spec→spec, exec-plan→execution-ready) lives in [../../plan-kinds.md](../../plan-kinds.md).
 - The tier-2 discriminator between recommending `task-list-builder/runner` and `executing-plans` is task **independence** (parallel, dispatched vs. sequential, review-gated), not the words used — both use "phase" and "task" vocabulary. `harness:autonomous` sits above both on the autonomy axis: recommend it when the plan is specified enough to run with no human in the loop.
 - Sibling skills in the `plan-` family (`plan-save`, `plan-done`) share the same CLI and the same `~/plans/<repo>/` tree.

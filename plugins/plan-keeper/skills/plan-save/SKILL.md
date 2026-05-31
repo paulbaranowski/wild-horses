@@ -15,8 +15,9 @@ Save one or more files from the current conversation to `~/plans/<repo>/<YYYY-MM
 - **`<ext>`:** defaults to `md`. Set via `--extension` when the content is not markdown — see [Choosing the extension](#choosing-the-extension).
 - **Date:** today, in the user's local timezone (CLI handles).
 - **Collision:** ask the user; never overwrite silently.
-- **Content:** file body verbatim — no preamble, footer, or commentary. (For `.md` saves, the CLI injects an `Agent: claude\nStatus: backlog\n` frontmatter block if one isn't present, and fills missing Agent/Status fields if a partial block is. `--from-path` and non-`.md` saves are byte-exact.)
+- **Content:** file body verbatim — no preamble, footer, or commentary. (For `.md` saves, the CLI injects an `Agent: claude\nStatus: backlog\n` frontmatter block if one isn't present, and fills missing Agent/Status/Kind fields if a partial block is. `--from-path` and non-`.md` saves are byte-exact.)
 - **`--agent`:** override the default `claude` (e.g., `--agent codex`); only affects `.md` heredoc saves.
+- **`--kind`:** the document type — one of `idea` / `prd` / `design` / `spec` / `exec-plan` (see [../../plan-kinds.md](../../plan-kinds.md)). Infer it from the content and pass it on `.md` heredoc saves; `plan-do` later reads it to route the plan. Fill-if-absent, `.md`-only. See [Classifying the Kind](#classifying-the-kind).
 - **Multiple files:** when the user has produced a paired/grouped artifact (most commonly task-list-builder's `.json` + `.md`), save each file with one `save` invocation, sharing `--topic` (and `--date` if you set it) so the resulting filenames pair on the base name.
 
 ## Procedure
@@ -35,11 +36,13 @@ Scan recent conversation messages — from both the user and the assistant — f
 
 If you cannot confidently identify a single file or paired group, stop and ask the user which one to save. Do not guess between candidates.
 
-### 2. Extract the topic, choose the extension, and check for a repo override
+### 2. Extract the topic, choose the extension, classify the Kind, and check for a repo override
 
 **Topic:** Take the first H1 or H2 heading in the file's text. Pass the raw heading (with punctuation, capitalization, whitespace) to `--topic` — the CLI slugifies. If the file has no heading (typical for JSON/YAML), use the first 4–6 meaningful words of the user's invocation, or — for paired output — the H1 of the paired markdown report.
 
 **Extension:** see [Choosing the extension](#choosing-the-extension). Pass `--extension <ext>` (no leading dot needed). Omit the flag only when you're confident the content is markdown.
+
+**Kind:** for `.md` saves, classify the document type and pass it as `--kind`. See [Classifying the Kind](#classifying-the-kind).
 
 **Repo override:** Check the user's invocation for one of these phrases. If present, extract `<name>` and pass it as `--override`. Otherwise omit `--override` and the CLI auto-derives per [../../repo-derivation.md](../../repo-derivation.md).
 
@@ -58,11 +61,13 @@ Two delivery shapes — pick the one that fits the source:
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" save \
   --topic "<heading text>" \
-  --extension json \
+  --kind <idea|prd|design|spec|exec-plan> \
   <<'EOF'
 <file body verbatim — no preamble, no footer>
 EOF
 ```
+
+(Add `--kind` only for `.md` saves — it's rejected for `--extension json` and other non-md extensions. For a paired `.json` + `.md`, put `--kind` on the `.md` half only.)
 
 **3b. Content already exists on disk (move).** Skip the heredoc and let the CLI relocate the file directly. The target always keeps the source's basename, and the source is unlinked after a successful write — `--from-path` is verbatim + always-move, and `--topic`/`--extension`/`--date` are rejected:
 
@@ -108,9 +113,16 @@ For paired saves where one file collides and the other doesn't, apply the chosen
 
 ### 5. Confirm
 
-Tell the user the absolute path(s) the CLI returned. One line per file is enough:
+Tell the user the absolute path(s) the CLI returned, and — for `.md` saves — the `Kind` you assigned, so they can correct it in one reply:
 
-> Saved to `/Users/<you>/plans/<repo>/<YYYY-MM-DD>-<topic>.md`
+> Saved to `/Users/<you>/plans/<repo>/<YYYY-MM-DD>-<topic>.md` as **Kind: prd**. (Say so if it's really an idea / design / spec / exec-plan and I'll fix it.)
+
+If the user corrects the Kind, apply it without re-saving the body:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta update \
+  --file "<path the CLI returned>" --field Kind=<corrected value>
+```
 
 For paired saves, list both paths on consecutive lines.
 
@@ -129,13 +141,32 @@ The CLI's `--extension` flag accepts `^[a-z0-9]+$` (with optional leading `.`). 
    - Default: `md`
 3. **When in doubt, ask.** If sniffing is ambiguous (e.g. a markdown file that opens with YAML frontmatter), ask the user which extension to use. Don't silently guess against the user's intent.
 
+## Classifying the Kind
+
+For `.md` saves, infer the **document type** from the content and conversation and pass it as `--kind`. The closed value set and its full definitions live in [../../plan-kinds.md](../../plan-kinds.md); the short form:
+
+| `--kind`    | Use when the file is…                                                           |
+| ----------- | ------------------------------------------------------------------------------- |
+| `idea`      | an exploratory thought / sketch — no committed requirements or design           |
+| `prd`       | product requirements: the problem, the why, user-facing reqs, scope / non-goals |
+| `design`    | an architecture / technical design: components, data model, trade-offs          |
+| `spec`      | an implementation spec: the concrete, detailed how, ready to plan against       |
+| `exec-plan` | an executable plan / task list: phased steps or independent tasks, ready to run |
+
+This is the same axis `plan-do` uses to route a plan, recorded once at save time so `plan-do` doesn't have to re-infer it. Classify, pass `--kind`, and **surface the value in your step-5 confirmation** so the user can correct it in one reply (infer-and-confirm).
+
+- **If the inference is genuinely ambiguous** between two kinds (e.g. a doc that's half-PRD, half-design), ask the user which before saving rather than guessing.
+- **Don't pass `--kind` for non-`.md` saves** — the CLI rejects it (frontmatter only lives in markdown). For a paired `.json` + `.md`, the `.md` carries the Kind.
+- **`--kind` is fill-if-absent:** if the body already declares `Kind:` in its own frontmatter, that value is kept and `--kind` is ignored.
+
 ## Frontmatter injection (markdown saves only)
 
-A bare markdown save:
+A markdown save with `--kind`:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" save \
   --topic "My Plan" \
+  --kind spec \
   <<'EOF'
 # My Plan
 Body.
@@ -148,6 +179,7 @@ produces a file that starts with:
 ---
 Agent: claude
 Status: backlog
+Kind: spec
 ---
 
 # My Plan
@@ -155,7 +187,7 @@ Status: backlog
 Body.
 ```
 
-The defaults are a floor, not an override: if the user pipes in a body that already declares `Agent:` or `Status:` in its own frontmatter, those values are kept untouched. `Status: backlog` means the plan is fetched but not dispatched (confirm via `crew status <id>`) — promote via `/plan-update` (or `file-meta update --field Status=todo`) when the plan is ready for groundcrew to pick up.
+The defaults are a floor, not an override: if the user pipes in a body that already declares `Agent:`, `Status:`, or `Kind:` in its own frontmatter, those values are kept untouched. `Status: backlog` means the plan is fetched but not dispatched (confirm via `crew status <id>`) — promote via `/plan-update` (or `file-meta update --field Status=todo`) when the plan is ready for groundcrew to pick up. `Kind` (omitted entirely if you don't pass `--kind`) records the document type — see [Classifying the Kind](#classifying-the-kind) and [../../plan-kinds.md](../../plan-kinds.md).
 
 The injection only happens for `.md` saves (the default extension and explicit `--extension md`). JSON and other extensions are written byte-for-byte. `--from-path` always preserves source bytes, even for `.md`.
 
@@ -222,4 +254,6 @@ The CLI writes stdin verbatim (it only appends a trailing newline if missing).
 ## Notes
 
 - The `~/plans/` tree is local to the user's machine. This skill never commits anything to any repo.
+- The `Kind` this skill assigns is what `plan-do` reads to route the plan (idea → brainstorming, prd/design/spec → writing-plans, exec-plan → execution menu). Classifying it here, with full conversation context, saves `plan-do` from re-inferring it later — see [../../plan-kinds.md](../../plan-kinds.md).
+- `--from-path` saves (e.g. task-list-builder's `.json` + `.md` pair) are byte-exact and therefore carry **no** `Kind`. If you want one on the relocated `.md`, add it afterward with `file-meta update --field Kind=exec-plan`.
 - Sibling skills in the `plan-` family (`plan-do`, `plan-done`) share the same CLI and the same `~/plans/<repo>/` tree.
