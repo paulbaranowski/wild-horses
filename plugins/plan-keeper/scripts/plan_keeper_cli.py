@@ -32,6 +32,12 @@ MAX_SLUG_LEN = 50
 MAX_SUFFIX = 99
 CONFIG_FILE_NAME = ".plankeeper.json"
 
+# Program name shown in --help/usage and error prefixes. Derived from the
+# invoked binary so the tool brands correctly in both of its homes: it reads
+# `plan_keeper_cli` when run in-plugin as `python3 .../plan_keeper_cli.py`, and
+# `plan-keeper` when installed as the standalone Homebrew console script.
+PROG = Path(sys.argv[0]).stem or "plan_keeper_cli"
+
 # Translates plan-keeper's on-disk Status: vocabulary to the groundcrew shell
 # adapter's enum. `backlog` is fetched but never dispatched (confirm one via
 # `crew status <id>`; the aggregate `crew status` Queue lists only `todo`).
@@ -2090,7 +2096,7 @@ def cmd_queue_list(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = HelpfulArgumentParser(
-        prog="plan_keeper_cli",
+        prog=PROG,
         description="I/O backend for the plan-keeper skills.",
     )
     sub = parser.add_subparsers(
@@ -2387,7 +2393,7 @@ def main() -> int:
     try:
         return dispatch[args.cmd](args)
     except PlanKeeperCliError as e:
-        print(f"plan_keeper_cli: {e}", file=sys.stderr)
+        print(f"{PROG}: {e}", file=sys.stderr)
         return e.code
 
 

@@ -97,6 +97,23 @@ Three skills for organizing markdown plans in `~/plans/<repo>/`. `plan-save` cap
 
 See **[plugins/plan-keeper/README.md](plugins/plan-keeper/README.md)** for the three-skill pipeline, the shared `~/plans/<repo>/` tree, and the bundled CLI.
 
+## Standalone CLI: `plan-keeper`
+
+The I/O backend behind the plan-keeper skills — `plan_keeper_cli.py`, a zero-dependency stdlib tool that manages the `~/plans/<repo>/` tree (save, list, archive, frontmatter, and Linear/Jira push) — is also distributed as a standalone command-line tool via Homebrew, for working with your plans outside an agent session:
+
+```text
+brew install paulbaranowski/tap/plan-keeper
+
+plan-keeper list                     # active plans for the current repo
+plan-keeper list-repos               # every repo under ~/plans/ with counts
+plan-keeper save --topic "spike notes" <<'EOF'
+...plan body...
+EOF
+plan-keeper --help                   # all subcommands
+```
+
+It is the same source file the plan-keeper plugin invokes in-place — packaged from `plugins/plan-keeper/scripts/` with no second copy to drift. Both the plugin's skills and this CLI read and write the same `~/plans/<repo>/` tree, so they interoperate directly.
+
 ## Install
 
 1. Run `/plugin` in Claude Code
