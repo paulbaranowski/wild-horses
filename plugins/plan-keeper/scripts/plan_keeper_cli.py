@@ -1822,10 +1822,10 @@ def cmd_queue_set(args) -> int:
         resolved = path.resolve()
         try:
             resolved.relative_to(plan_root)
-        except ValueError:
+        except ValueError as err:
             raise PlanKeeperCliError(
                 f"path is outside PLAN_ROOT ({plan_root}): {path}", code=2
-            )
+            ) from err
         if not resolved.exists():
             raise PlanKeeperCliError(f"plan file not found: {resolved}", code=3)
         text = resolved.read_text(encoding="utf-8")
