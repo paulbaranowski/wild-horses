@@ -84,3 +84,4 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta get \
 - This skill never moves files between active/done/deferred — that's plan-done's job.
 - This skill never creates files — that's plan-save's job.
 - The mutation is atomic (tmp file + fsync + os.replace) so a crash mid-update can't corrupt the plan.
+- For promoting many plans at once, or browsing the queue across all repos, use the `plan-queue` skill — it's the cross-repo, multi-select counterpart. plan-update stays the targeted single-plan / current-repo editor (and the way to set `Agent`, `Ticket`, etc.).
