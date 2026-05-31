@@ -19,7 +19,8 @@ For plans that aren't execution-ready yet (idea, spec), the skill suggests the s
 
 ## Quick reference
 
-- **Reads:** `~/plans/<repo>/*.md` (newest first by filename); never writes.
+- **Lists:** the **not-yet-started** plans only — `Status: todo` and `Status: backlog` (`list --status todo,backlog`). In-progress / in-review / done plans are excluded (you're picking something to _start_).
+- **Writes:** exactly one thing — flips the picked plan's `Status` to `in-progress` when it starts one (step 6). It never moves, deletes, or rewrites the body.
 - **`<repo>`:** auto-derived or override — see [../../repo-derivation.md](../../repo-derivation.md).
 - **Classification (tier 1, readiness):** idea / spec / execution-ready.
 - **Classification (tier 2, shape — only for execution-ready):** picks which of the three execution engines to recommend first; all three are always offered.
@@ -39,40 +40,44 @@ First, check the user's invocation for a repo override. Recognize:
 - "pick a plan from `<name>`"
 - "in the `<name>` folder/bucket"
 
-Then invoke the CLI:
+Then invoke the CLI, filtered to the plans that haven't been started yet:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --status todo,backlog
 ```
 
-Add `--override <name>` if you found one. The CLI handles repo derivation, the `*.md` glob, and newest-first sort. Output is one filename per line (no leading numbering).
+Add `--override <name>` if you found one. The CLI handles repo derivation. With `--status todo,backlog` it keeps only not-yet-started plans (a missing/blank `Status` counts as `backlog`), groups them `todo` then `backlog`, newest-first within each, and prints one `status<TAB>filename` line per plan. Any active plans it excluded (in-progress, in-review, …) are summarized on **stderr** as a `note: N other active plan(s) hidden (...)` line.
 
-**If the output is empty**, the current repo has no active plans. Tell the user and list alternatives by running:
+**If stdout is empty:**
 
-```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list-repos
-```
+- **stderr has a hidden-plans note** → there are active plans, but none are startable (they're already in-progress / in-review / etc.). Tell the user that — surface the note's counts — and offer to list everything (`list` with no `--status`) or steer manually. Do not say "no plans".
+- **stderr is also empty** → the current repo has no active plans at all. List alternatives:
 
-Output is one repo per line with state counts (e.g., `herds: active=15 done=22 deferred=2`). Wait for the user to pick a different repo (re-run step 1 with `--override`) or steer manually.
+  ```bash
+  python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list-repos
+  ```
 
-**If the output has lines**, display them as a numbered list to the user and ask which one. Do not read or classify any files yet — classification only happens on the picked plan.
+  Output is one repo per line with state counts (e.g., `herds: active=15 done=22 deferred=2`). Wait for the user to pick a different repo (re-run step 1 with `--override`) or steer manually.
+
+**If stdout has lines**, display them as a numbered list — show each plan's status tag so the user sees what's queued vs. untriaged — and ask which one. If stderr carried a hidden-plans note, mention it below the list. Do not read or classify any files yet — classification only happens on the picked plan.
 
 Example output to the user:
 
 ```text
-Plans in ~/plans/wild-horses/:
+Not-yet-started plans in ~/plans/wild-horses/:
 
-  1. 2026-05-19-plan-do-design.md
-  2. 2026-05-19-plan-save-design.md
-  3. 2026-05-17-task-list-runner-refactor.md
-  4. 2026-05-15-harness-namespace-cleanup.md
+  1. [todo]    2026-05-19-plan-do-design.md
+  2. [todo]    2026-05-17-task-list-runner-refactor.md
+  3. [backlog] 2026-05-15-harness-namespace-cleanup.md
+
+(2 other plans are in progress — say "show all" to see them.)
 
 Which one?
 ```
 
 ### 2. User picks a plan
 
-The user replies with a number or a filename fragment. Resolve to a single filename from the CLI's output. If ambiguous (a fragment matches multiple), ask the user to disambiguate.
+The user replies with a number or a filename fragment. Resolve to a single filename from the CLI's output — the filename is the part **after the tab** on each line (the leading token is the status tag). If ambiguous (a fragment matches multiple), ask the user to disambiguate.
 
 ### 3. Read the picked plan
 
@@ -139,9 +144,18 @@ Which one? (1 is recommended because <shape-based reason>.)
 
 Reorder 1–3 so the recommended engine is first; keep its `[recommended]` tag and adjust the closing rationale to match. Wait for the user's pick, then go to step 6.
 
-### 6. Invoke the chosen skill
+### 6. Mark the plan in-progress, then invoke the chosen skill
 
-On confirmation (or the user's menu pick), use the `Skill` tool to invoke the chosen skill. The plan content is already in conversation context from step 3, so the invoked skill has full access — no explicit handoff payload is needed.
+Once the user has confirmed a route (any next skill — `brainstorming`, `writing-plans`, or an execution engine), **first** flip the plan's status so it stops showing up as "to start" and starts showing up in `plan-done`'s finish list:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta update \
+  --file ~/plans/<repo>/<filename> --field Status=in-progress
+```
+
+`--file` takes the **full path** (no `--override` here — `file-meta` resolves the path directly). Do this only when you are about to hand off to a skill. **Do not** mark in-progress on the manual-steer path (the user hasn't committed to working it through a skill yet) or before the user has confirmed.
+
+**Then** use the `Skill` tool to invoke the chosen skill. The plan content is already in conversation context from step 3, so the invoked skill has full access — no explicit handoff payload is needed.
 
 **Handoff specifics per engine:**
 
@@ -156,7 +170,9 @@ If the user wants to steer manually, just stop the skill here. The plan is read 
 
 ## Common mistakes
 
-- **Reading and classifying multiple plans before the user picks.** Step 1 lists filenames only. Reading multiple plans wastes context and biases classification toward whatever was read last.
+- **Reading and classifying multiple plans before the user picks.** Step 1 lists `status<TAB>filename` lines only. Reading multiple plans wastes context and biases classification toward whatever was read last.
+- **Marking in-progress too early (or on manual-steer).** Step 6 flips `Status` to `in-progress` only _after_ the user confirms a skill handoff. Don't mark it on the manual-steer path, and don't mark it before confirmation — a plan the user hasn't committed to should stay in plan-do's not-yet-started list.
+- **Saying "no plans" when stdout is empty but stderr has a hidden-plans note.** Empty stdout with a `note: N other active plan(s) hidden` line means everything is already in-progress/in-review — surface that, don't claim the repo is empty.
 - **Auto-invoking the next skill without confirmation.** Steps 5a/5b/5c require a check-in even when the classification feels obvious. The skill's job is to _offer_ the next stage, not jump to it.
 - **Collapsing the execution menu to a single suggestion.** For execution-ready plans, all three engines are always offered (step 5c). The shape classification only sets which one is _recommended first_ — it does not hide the others.
 - **Treating the recommendation as a decision.** The recommended engine is a best guess from plan shape; how hands-off to be is the user's call. Lead with the recommendation, but let them pick any engine.
@@ -165,7 +181,8 @@ If the user wants to steer manually, just stop the skill here. The plan is read 
 
 ## Edge cases
 
-- **No plans for the current repo** — show `list-repos` output to the user and let them pick another repo. Do not silently fall back.
+- **No _startable_ plans, but active plans exist** — `list --status todo,backlog` prints nothing on stdout but emits a hidden-plans note on stderr. Tell the user everything is already in progress (or in review), and offer `list` with no `--status` to see all of them.
+- **No plans for the current repo at all** — both stdout and stderr empty. Show `list-repos` output and let the user pick another repo. Do not silently fall back.
 - **`~/plans/` doesn't exist at all** — `list-repos` returns empty. Tell the user `plan-save` hasn't been used yet on this machine.
 - **Plan fits no readiness bucket** — say so explicitly; offer to read into context and let the user steer.
 - **Plan is ambiguous between spec and execution-ready** — offer both the `superpowers:writing-plans` path and the execution menu; let the user choose.
@@ -173,7 +190,8 @@ If the user wants to steer manually, just stop the skill here. The plan is read 
 
 ## Notes
 
-- This skill is read-only against `~/plans/` — it never modifies, moves, or deletes plans. Sibling skill `plan-done` is responsible for archiving completed plans.
+- This skill's only write to `~/plans/` is flipping the picked plan's `Status` to `in-progress` when it starts one (step 6). It never moves, deletes, or rewrites a plan's body. Sibling skill `plan-done` archives completed plans (moving files into `done/`).
+- Status is the link between the `plan-*` skills: `plan-save` writes `backlog`, `plan-do` lists `todo`/`backlog` and flips the started plan to `in-progress`, and `plan-done` lists `in-progress`/`todo` (in-progress first). A plan therefore flows `backlog → todo → in-progress → done` across the family.
 - Classification is two-tier. Tier 1 (readiness: idea / spec / execution-ready) gates _which path_ the plan takes. Tier 2 (shape) runs only for execution-ready plans and only sets _which engine is recommended first_ in the menu — all three are always offered.
 - The tier-2 discriminator between recommending `task-list-builder/runner` and `executing-plans` is task **independence** (parallel, dispatched vs. sequential, review-gated), not the words used — both use "phase" and "task" vocabulary. `harness:autonomous` sits above both on the autonomy axis: recommend it when the plan is specified enough to run with no human in the loop.
 - Sibling skills in the `plan-` family (`plan-save`, `plan-done`) share the same CLI and the same `~/plans/<repo>/` tree.

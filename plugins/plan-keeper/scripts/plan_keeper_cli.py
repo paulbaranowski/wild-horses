@@ -312,6 +312,22 @@ def list_plans(repo: str, state: str) -> list[Path]:
     return files
 
 
+def plan_status(path: Path) -> str:
+    """Return a plan's `Status:` frontmatter, lowercased; 'backlog' if absent.
+
+    Blank/missing Status maps to 'backlog' to match plan-save's default, so a
+    file with no frontmatter never silently vanishes from a status-filtered
+    listing. A file that fails to parse (malformed frontmatter, unreadable
+    bytes) is also treated as 'backlog' — one bad file must not break the whole
+    listing, and 'backlog' keeps it visible in plan-do where it would be noticed.
+    """
+    try:
+        meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+    except (PlanKeeperCliError, OSError, UnicodeDecodeError):
+        return "backlog"
+    return (meta.get("Status") or "").strip().lower() or "backlog"
+
+
 def parse_date_arg(s: str) -> str:
     """Validate a YYYY-MM-DD argument and return it as an ISO string."""
     try:
@@ -381,8 +397,40 @@ def cmd_repo(args) -> int:
 
 def cmd_list(args) -> int:
     repo = derive_repo(args.override)
-    for p in list_plans(repo, args.state):
-        print(p.name)
+    plans = list_plans(repo, args.state)
+
+    raw_filter = getattr(args, "status", None)
+    if not raw_filter:
+        for p in plans:
+            print(p.name)
+        return 0
+
+    # Status-filtered listing. The filter doubles as the tier order: plans are
+    # grouped by the requested statuses in the order given (e.g. "in-progress,
+    # todo" => in-progress group first), newest-first within each group. Output
+    # is `status<TAB>filename` so callers can render "[status] filename".
+    tiers = [s.strip().lower() for s in raw_filter.split(",") if s.strip()]
+    tier_rank = {s: i for i, s in enumerate(tiers)}
+    annotated = [(p, plan_status(p)) for p in plans]
+
+    shown = [(p, s) for (p, s) in annotated if s in tier_rank]
+    # list_plans is already newest-first; a stable sort by tier preserves that
+    # within each group.
+    shown.sort(key=lambda ps: tier_rank[ps[1]])
+    for p, s in shown:
+        print(f"{s}\t{p.name}")
+
+    # Transparency: never silently drop active plans the filter excluded.
+    hidden = [s for (_, s) in annotated if s not in tier_rank]
+    if hidden:
+        counts: dict[str, int] = {}
+        for s in hidden:
+            counts[s] = counts.get(s, 0) + 1
+        summary = ", ".join(f"{st}×{n}" for st, n in sorted(counts.items()))
+        print(
+            f"note: {len(hidden)} other active plan(s) hidden ({summary})",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -1820,6 +1868,16 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["active", "done", "deferred"],
         default="active",
         help="which subset to list (default: active)",
+    )
+    p_list.add_argument(
+        "--status",
+        help=(
+            "comma-separated Status values to keep (e.g. 'in-progress,todo'). "
+            "Doubles as tier order: groups appear in the order given, newest-"
+            "first within each. Output becomes 'status<TAB>filename'. "
+            "Missing/blank Status counts as 'backlog'. Excluded active plans "
+            "are summarized on stderr. Omit to list bare filenames as before."
+        ),
     )
 
     sub.add_parser(

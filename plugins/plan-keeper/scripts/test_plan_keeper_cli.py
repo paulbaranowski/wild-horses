@@ -756,6 +756,102 @@ class TestList(IsolatedHomeTestCase):
         self.assertIn("real-plan", r.stdout)
 
 
+class TestListByStatus(IsolatedHomeTestCase):
+    """`list --status <set>` filters active plans by Status frontmatter,
+    orders by the given tier sequence (newest-first within each), annotates
+    each line as `status<TAB>filename`, and reports excluded actives on stderr.
+    """
+
+    def _write(self, name: str, status: str | None) -> None:
+        d = self.plans_root / "scratch"
+        d.mkdir(parents=True, exist_ok=True)
+        if status is None:
+            (d / name).write_text("# no frontmatter\n", encoding="utf-8")
+        else:
+            (d / name).write_text(
+                f"---\nStatus: {status}\n---\n\n# {name}\n", encoding="utf-8"
+            )
+
+    def test_filters_and_orders_by_tier_then_newest(self) -> None:
+        self._write("2026-05-28-a.md", "todo")
+        self._write("2026-05-29-b.md", "in-progress")
+        self._write("2026-05-27-d.md", "in-progress")
+        self._write("2026-05-26-e.md", "in-review")
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "in-progress,todo",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = r.stdout.strip().split("\n")
+        # in-progress group first (newest-first within), then todo group.
+        self.assertEqual(
+            lines,
+            [
+                "in-progress\t2026-05-29-b.md",
+                "in-progress\t2026-05-27-d.md",
+                "todo\t2026-05-28-a.md",
+            ],
+        )
+
+    def test_missing_frontmatter_counts_as_backlog(self) -> None:
+        self._write("2026-05-25-f.md", None)
+        self._write("2026-05-30-c.md", "backlog")
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "todo,backlog",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = r.stdout.strip().split("\n")
+        self.assertIn("backlog\t2026-05-30-c.md", lines)
+        self.assertIn("backlog\t2026-05-25-f.md", lines)
+
+    def test_excluded_actives_summarized_on_stderr(self) -> None:
+        self._write("2026-05-28-a.md", "todo")
+        self._write("2026-05-29-b.md", "in-progress")
+        self._write("2026-05-26-e.md", "in-review")
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "todo,backlog",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # Only the todo plan shows; in-progress + in-review are hidden.
+        self.assertEqual(r.stdout.strip(), "todo\t2026-05-28-a.md")
+        self.assertIn("2 other active plan(s) hidden", r.stderr)
+        self.assertIn("in-progress×1", r.stderr)
+        self.assertIn("in-review×1", r.stderr)
+
+    def test_empty_match_with_hidden_actives(self) -> None:
+        self._write("2026-05-29-b.md", "in-progress")
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "todo,backlog",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "")
+        self.assertIn("1 other active plan(s) hidden", r.stderr)
+
+    def test_malformed_frontmatter_falls_back_to_backlog(self) -> None:
+        # Unknown frontmatter field makes parse_frontmatter raise; the listing
+        # must survive and treat the file as backlog (visible, not crashed).
+        (self.plans_root / "scratch").mkdir(parents=True, exist_ok=True)
+        (self.plans_root / "scratch" / "2026-05-24-g.md").write_text(
+            "---\nBogusKey: x\nStatus: todo\n---\n\n# g\n", encoding="utf-8"
+        )
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "todo,backlog",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "backlog\t2026-05-24-g.md")
+
+    def test_no_status_flag_keeps_bare_filename_output(self) -> None:
+        self._write("2026-05-28-a.md", "todo")
+        r = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "2026-05-28-a.md")
+        self.assertNotIn("\t", r.stdout)
+
+
 class TestListRepos(IsolatedHomeTestCase):
     def test_counts_per_state(self) -> None:
         # Two repos, varied content
