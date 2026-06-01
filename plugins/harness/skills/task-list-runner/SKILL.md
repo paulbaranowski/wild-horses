@@ -18,7 +18,11 @@ The schema this skill consumes is defined in `${CLAUDE_PLUGIN_ROOT}/task-list-sc
 
 ## CLI reference — `task_list_cli.py`
 
-The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py` is the canonical interface to the task file. **Subcommands:** `next`, `start`, `set-status`, `draft`, `publish`, `get`, `list`, `status`, `remaining`, `verify`. All take `--file <task-file-path>`. **Don't invent verbs** like `show`, `inspect`, `info`, or `view` — argparse rejects anything outside the list above and prints the full subcommand help on rejection, so a wrong guess costs one wasted call but the right verb is always one of the ten names just enumerated.
+The bundled CLI at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py` is the canonical interface to the task file.
+
+**Invocation form (always):** `python3 "${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/task_list_cli.py" <subcommand> --file <path>`. **Never run the bare script path** (`.../task_list_cli.py <subcommand>`): the file ships without an executable bit, so a bare-path invocation dies with `exit 126` (`permission denied`) and forces a wasted retry. It also won't be auto-approved — the PreToolUse allow-list hook only matches commands that start with `python3`, so the bare path additionally eats a permission prompt. Every bare `task_list_cli.py ...` reference below is shorthand for this full `python3 "<path>" ...` form — expand it when you build the actual Bash call.
+
+**Subcommands:** `next`, `start`, `set-status`, `draft`, `publish`, `get`, `list`, `status`, `remaining`, `verify`. All take `--file <task-file-path>`. **Don't invent verbs** like `show`, `inspect`, `info`, or `view` — argparse rejects anything outside the list above and prints the full subcommand help on rejection, so a wrong guess costs one wasted call but the right verb is always one of the ten names just enumerated.
 
 - **`next`** — atomically claim and print the next task. Resumes in-progress, else flips first pending → in-progress. Exits 14 if no tasks remain. Exits 11 if any task is currently `drafted` — resolve via `publish` or `set-status failed` first. **Output omits `agentValidations`** by design: the implementation agent calls `next` to claim its task and must not pre-read the validator's checklist (`get` and `list` return the full object — they're for the runner's validator-dispatch and status-display callers). Redaction is at print time only; the on-disk file is unchanged.
 - **`start --id <N>`** — flip task N from pending → in-progress.
