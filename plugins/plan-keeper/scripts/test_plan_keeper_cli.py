@@ -2780,7 +2780,7 @@ class TestGroundcrewMarkInProgress(IsolatedHomeTestCase):
 
 
 class TestQueue(IsolatedHomeTestCase):
-    """Cross-repo `queue list` / `queue set` for the plan-queue skill."""
+    """Cross-repo `queue list` / `queue set` for the plan-crew skill."""
 
     def _make_plan(
         self, repo: str, name: str, status: str = "", agent: str = ""
@@ -2870,6 +2870,47 @@ class TestQueue(IsolatedHomeTestCase):
         self.assertIn("Status: todo", text)
         self.assertNotIn("Status: backlog", text)
         self.assertIn("Agent: codex", text)  # existing Agent untouched
+
+    def test_queue_set_promote_stamps_groundcrew_ticket(self) -> None:
+        # Promoting a plan claims the groundcrew Ticket pair so the id is
+        # visible the moment it's queued.
+        p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")
+        r = run_cli(
+            "queue", "set", "--status", "todo",
+            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = p.read_text()
+        self.assertRegex(text, r"Ticket: plan-\d+")
+        self.assertIn("Ticket System: groundcrew", text)
+
+    def test_queue_set_promote_does_not_clobber_external_ticket(self) -> None:
+        # A plan already filed in Linear keeps its tracker reference on promote.
+        d = self.plans_root / "alpha"
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / "2026-05-01-a.md"
+        p.write_text(
+            "---\nTicket: ENG-1\nTicket System: linear\nStatus: backlog\n---\n\n# a\n",
+            encoding="utf-8",
+        )
+        r = run_cli(
+            "queue", "set", "--status", "todo",
+            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = p.read_text()
+        self.assertIn("Ticket: ENG-1", text)
+        self.assertIn("Ticket System: linear", text)
+        self.assertNotIn("groundcrew", text)
+
+    def test_queue_set_dequeue_does_not_stamp_groundcrew(self) -> None:
+        p = self._make_plan("alpha", "2026-05-01-a.md", status="todo")
+        r = run_cli(
+            "queue", "set", "--status", "backlog",
+            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("groundcrew", p.read_text())
 
     def test_queue_set_promote_fills_missing_agent_with_default(self) -> None:
         p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")  # no Agent

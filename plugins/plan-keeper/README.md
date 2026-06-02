@@ -1,6 +1,6 @@
 # plan-keeper
 
-Organize markdown plans on disk across repos. Six skills cover the lifecycle: capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), archive with a completion stamp (`plan-done`), edit frontmatter (`plan-update`), manage the cross-repo dispatch queue (`plan-queue`), and file plans as tickets (`plan-push`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine — nothing is committed to any repo.
+Organize markdown plans on disk across repos. Six skills cover the lifecycle: capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), archive with a completion stamp (`plan-done`), edit frontmatter (`plan-update`), manage the cross-repo dispatch queue (`plan-crew`), and file plans as tickets (`plan-push`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine — nothing is committed to any repo.
 
 Install:
 
@@ -16,7 +16,7 @@ Install:
 | **[`plan-do`](skills/plan-do/)**         | Routes   | Lists not-yet-started plans for the current repo, classifies readiness (idea / spec / execution-ready), and routes to the matching next skill. Execution-ready plans get all three execution engines (autonomous / task-list-builder / executing-plans), recommended-first by plan shape. |
 | **[`plan-done`](skills/plan-done/)**     | Archives | Moves a completed plan to `~/plans/<repo>/done/` and appends a `*Completed: YYYY-MM-DD*` stamp.                                                                                                                                                                                           |
 | **[`plan-update`](skills/plan-update/)** | Edits    | Mutates frontmatter fields (`Agent`, `Status`, `Ticket`) for a single plan in the current repo.                                                                                                                                                                                           |
-| **[`plan-queue`](skills/plan-queue/)**   | Queues   | Shows the groundcrew dispatch queue across all repos and bulk-promotes/dequeues plans (`Status todo/backlog`). Cross-repo, multi-select. The bulk/cross-repo counterpart to plan-update.                                                                                                  |
+| **[`plan-crew`](skills/plan-crew/)**     | Queues   | Shows the groundcrew dispatch queue across all repos and bulk-promotes/dequeues plans (`Status todo/backlog`). Cross-repo, multi-select. The bulk/cross-repo counterpart to plan-update.                                                                                                  |
 | **[`plan-push`](skills/plan-push/)**     | Files    | Files the plan as a Linear or Jira ticket and stamps `Ticket:` in frontmatter.                                                                                                                                                                                                            |
 
 All skills are model-invoked by description — no slash command is required. Trigger phrases like "save this plan", "do a plan from `<name>`", or "I'm done with the plan" route Claude into the right skill.

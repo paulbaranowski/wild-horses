@@ -1755,17 +1755,44 @@ def _assert_no_groundcrew_id_collisions(issues: list[dict]) -> None:
 GROUNDCREW_TICKET_SYSTEM = "groundcrew"
 
 
+def _repo_for_plan(path: Path) -> str:
+    """The repo a plan belongs to: its parent dir name, or the grandparent
+    when the plan lives under `done/` or `deferred/`. Single source of truth
+    so the synthesized id is stable across a plan's move into those subdirs."""
+    parent = path.parent
+    if parent.name in {"done", "deferred"}:
+        return parent.parent.name
+    return parent.name
+
+
+def _apply_groundcrew_ticket(meta: dict[str, str], ticket: str) -> bool:
+    """Claim the `Ticket` / `Ticket System` pair for groundcrew on an in-hand
+    meta dict, returning True iff it changed.
+
+    Claims the pair only when it's empty or already ``groundcrew``; a
+    ``linear``/``jira`` reference (written by plan-push) — or an orphan
+    ``Ticket`` under no system — is left untouched, so a tracked plan keeps
+    its real reference and still dispatches via the recomputed id.
+    """
+    system = (meta.get("Ticket System") or "").strip().lower()
+    if system == GROUNDCREW_TICKET_SYSTEM:
+        if meta.get("Ticket") == ticket:
+            return False  # already current
+    elif system or meta.get("Ticket"):
+        return False  # another tracker (or an orphan Ticket) owns these fields
+    meta["Ticket"] = ticket
+    meta["Ticket System"] = GROUNDCREW_TICKET_SYSTEM
+    return True
+
+
 def _stamp_groundcrew_ticket(path: Path, ticket: str) -> None:
     """Mirror the synthesized id into the plan's `Ticket` / `Ticket System`
     frontmatter (the same pair plan-push uses), so a human can see which plan
     a ``plan-<n>`` id maps to.
 
     Display-only and self-healing: ``groundcrew_id()`` stays the canonical id,
-    so ``resolve-one`` never trusts these fields — it recomputes the hash. The
-    stamp only *claims* the pair when it's empty or already ``groundcrew``;
-    a ``linear``/``jira`` reference (written by plan-push) is left untouched,
-    so a pushed plan keeps showing its real tracker ticket and still
-    dispatches via the recomputed id. Rewrites only when absent or stale, so
+    so ``resolve-one`` never trusts these fields — it recomputes the hash.
+    Rewrites only when absent or stale (see _apply_groundcrew_ticket), so
     steady-state fetches don't churn the file. Best-effort: a read/parse error
     is swallowed so one unwritable file can't abort the whole fetch.
     """
@@ -1773,15 +1800,8 @@ def _stamp_groundcrew_ticket(path: Path, ticket: str) -> None:
         meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
     except (OSError, PlanKeeperCliError):
         return
-    system = (meta.get("Ticket System") or "").strip().lower()
-    if system == GROUNDCREW_TICKET_SYSTEM:
-        if meta.get("Ticket") == ticket:
-            return  # already current
-    elif system or meta.get("Ticket"):
-        return  # another tracker (or an orphan Ticket) owns these fields
-    meta["Ticket"] = ticket
-    meta["Ticket System"] = GROUNDCREW_TICKET_SYSTEM
-    write_atomic(path, serialize_frontmatter(meta, body))
+    if _apply_groundcrew_ticket(meta, ticket):
+        write_atomic(path, serialize_frontmatter(meta, body))
 
 
 def _plan_to_issue(path: Path) -> Optional[dict]:
@@ -1803,15 +1823,9 @@ def _plan_to_issue(path: Path) -> Optional[dict]:
     raw_status = meta.get("Status", "").strip()
     adapter_status = _GROUNDCREW_STATUS_MAP.get(raw_status, "other")
     title = _extract_h1_safe(body) or path.stem
-    parent = path.parent
-    if parent.name in {"done", "deferred"}:
-        # Plan is archived/paused — the repo dir is the grandparent. Without
-        # this, `groundcrew-resolve-one` would report repository="done" for
-        # any plan it found in ~/plans/<repo>/done/, breaking groundcrew's
-        # `workspace.knownRepositories` lookup.
-        repo_name = parent.parent.name
-    else:
-        repo_name = parent.name
+    # repo is the grandparent for archived/paused plans (done/, deferred/), so
+    # groundcrew-resolve-one reports the real repo, not "done"/"deferred".
+    repo_name = _repo_for_plan(path)
     return {
         "id": groundcrew_id(repo_name, path.stem),
         "title": title,
@@ -2014,12 +2028,15 @@ def cmd_queue_set(args) -> int:
         text = resolved.read_text(encoding="utf-8")
         meta, body = parse_frontmatter(text)
         meta["Status"] = args.status
-        if (
-            args.status == "todo"
-            and args.default_agent
-            and not meta.get("Agent", "").strip()
-        ):
-            meta["Agent"] = args.default_agent
+        if args.status == "todo":
+            # Promote = "ready for groundcrew", so claim the groundcrew Ticket
+            # now (same id fetch would synthesize) — the mapping is visible the
+            # moment a plan is queued, not only after the first dispatch tick.
+            if args.default_agent and not meta.get("Agent", "").strip():
+                meta["Agent"] = args.default_agent
+            _apply_groundcrew_ticket(
+                meta, groundcrew_id(_repo_for_plan(resolved), resolved.stem)
+            )
         new_text = serialize_frontmatter(meta, body)
         if not new_text.endswith("\n"):
             new_text += "\n"
@@ -2029,13 +2046,13 @@ def cmd_queue_set(args) -> int:
 
 
 def cmd_queue_list(args) -> int:
-    """Emit a JSON array of active plans across all repos, for plan-queue.
+    """Emit a JSON array of active plans across all repos, for plan-crew.
 
     Each element is {repo, file, status, agent} where status/agent are the
     raw frontmatter values ("" when unset). Scans ~/plans/<repo>/*.md one
     level deep — skips done/ and deferred/ (those are not dispatchable) and
     skips files without frontmatter (not plan-keeper plans). This is the
-    read side of the groundcrew queue the plan-queue skill renders.
+    read side of the groundcrew queue the plan-crew skill renders.
     """
     del args
     rows: list[dict] = []
