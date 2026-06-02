@@ -1,9 +1,9 @@
 ---
-name: plan-queue
+name: plan-crew
 description: Use when the user asks to see or manage the groundcrew queue across repos, queue a plan for groundcrew, promote plans to todo (in bulk or cross-repo), dequeue plans, or move any plan in any repo into todo state to be picked up by groundcrew.
 ---
 
-# plan-queue
+# plan-crew
 
 Show the groundcrew dispatch queue across **all** repos under `~/plans/`, and manage it both
 directions in bulk: promote `backlog → todo` (add to the queue) and dequeue `todo → backlog`
@@ -13,14 +13,15 @@ directions in bulk: promote `backlog → todo` (add to the queue) and dequeue `t
 ## Quick reference
 
 - **Reads:** every `~/plans/<repo>/*.md` with frontmatter (one level deep; `done/`, `deferred/` excluded).
-- **Writes:** frontmatter `Status` (and, on promote, `Agent` when missing) — atomic per file.
+- **Writes:** frontmatter `Status` (and, on promote, `Agent` when missing, plus the groundcrew `Ticket` / `Ticket System` stamp) — atomic per file.
+- **Groundcrew ticket stamp:** on promote, the plan's synthesized groundcrew id (`plan-<digits>`) is written to `Ticket` with `Ticket System: groundcrew`, so the dispatch id is visible the moment a plan is queued. A plan already tracked in `linear`/`jira` keeps that reference untouched.
 - **Promote default agent:** a `backlog` plan with no `Agent` gets `Agent: claude` on promote, so it
   dispatches as the `claude` agent explicitly (groundcrew would already default to claude, but this
   makes it visible in the frontmatter and the queue view).
 - **Confirmation:** required before any mutation.
-- **Sibling:** `plan-update` is the targeted single-plan / current-repo frontmatter editor; plan-queue
+- **Sibling:** `plan-update` is the targeted single-plan / current-repo frontmatter editor; plan-crew
   is its cross-repo, multi-select counterpart. Both can promote a single plan — use plan-update when
-  you already have one specific plan in hand, plan-queue when browsing the queue across repos.
+  you already have one specific plan in hand, plan-crew when browsing the queue across repos.
 
 ## Procedure
 
@@ -133,6 +134,6 @@ Re-run step 1 and show the updated queue so the user sees the result.
 
 ## Notes
 
-- plan-queue only ever sets `Status` to `todo` or `backlog` (and fills a default `Agent` on promote). The system-managed states (`in-progress`, `in-review`, `done`) are written by groundcrew / plan-done, never here.
+- plan-crew only ever sets `Status` to `todo` or `backlog` (and, on promote, fills a default `Agent` when missing and stamps the groundcrew `Ticket` / `Ticket System`). The system-managed states (`in-progress`, `in-review`, `done`) are written by groundcrew / plan-done, never here.
 - The mutation is atomic (tmp file + fsync + os.replace), so an interrupted run can't corrupt a plan.
 - This skill is cross-repo by design; there is no repo override — it always shows the whole `~/plans/` tree.

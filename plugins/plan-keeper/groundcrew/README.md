@@ -42,8 +42,8 @@ sources: [
 
 ## How it works
 
-- **fetch.sh** — globs `~/plans/*/*.md` (one level deep, skipping `done/` and `deferred/`). Each plan with valid frontmatter becomes one issue. `Status: backlog` translates to adapter status `other` (fetched but never dispatched — `crew status` hides non-`todo` plans from its Queue, so confirm a specific one with `crew status <id>`). `Status: todo` translates to `todo` (dispatchable).
-- **resolveOne.sh** — given an `${id}` (filename stem), searches active, then `done/`, then `deferred/`. Exits 3 if the file doesn't exist.
+- **fetch.sh** — globs `~/plans/*/*.md` (one level deep, skipping `done/` and `deferred/`). Each plan with valid frontmatter becomes one issue. `Status: backlog` translates to adapter status `other` (fetched but never dispatched — `crew status` hides non-`todo` plans from its Queue, so confirm a specific one with `crew status <id>`). `Status: todo` translates to `todo` (dispatchable). Each issue's `id` is a synthesized `plan-<digits>` (a stable hash of repo + filename, so it satisfies groundcrew's ticket-id shape — plan filenames don't). fetch also mirrors that id into the plan's `Ticket` / `Ticket System` frontmatter (`Ticket System: groundcrew`) so a human can see the mapping. It's display-only and self-healing — the hash stays canonical — and it never overwrites a `linear`/`jira` reference left by plan-push, so a pushed plan keeps its real tracker ticket and still dispatches via the recomputed id.
+- **resolveOne.sh** — given a synthesized `${id}` (`plan-<digits>`), recomputes each plan's id across active, then `done/`, then `deferred/`, and returns the match. Exits 3 if no plan maps to that id.
 - **markInProgress.sh** — reads `{"path": "..."}` from stdin, atomic-write flips that plan's `Status` to `in-progress` so the next `fetch` tick sees it as out of the dispatch pool.
 
 ## Promoting a plan
@@ -56,6 +56,6 @@ python3 /path/to/plan_keeper_cli.py file-meta update \
   --field Status=todo
 ```
 
-Or, to promote (and dequeue) plans across all repos interactively, use the `plan-queue` skill, which wraps the `queue list` / `queue set` CLI subcommands.
+Or, to promote (and dequeue) plans across all repos interactively, use the `plan-crew` skill, which wraps the `queue list` / `queue set` CLI subcommands.
 
 After promotion, the next `crew run` will dispatch the plan, and it shows up in the `crew status` Queue. (`crew doctor` only checks host prerequisites — it doesn't list plans.)
