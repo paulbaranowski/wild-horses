@@ -666,9 +666,7 @@ def cmd_ticket_system_config_list(args) -> int:
 # --- Frontmatter ------------------------------------------------------------
 
 # Order matters in the output — keep this canonical so callers see a stable shape.
-_FRONTMATTER_FIELDS = (
-    "Ticket", "Ticket System", "Groundcrew Id", "Completed on", "Agent", "Status", "Kind",
-)
+_FRONTMATTER_FIELDS = ("Ticket", "Ticket System", "Completed on", "Agent", "Status", "Kind")
 
 # `Kind` classifies the *document type* (orthogonal to Status, which is the
 # lifecycle). The values are ordered by pipeline position, idea → ready-to-build.
@@ -1754,23 +1752,35 @@ def _assert_no_groundcrew_id_collisions(issues: list[dict]) -> None:
         seen[ticket] = path
 
 
-def _stamp_groundcrew_id(path: Path, ticket: str) -> None:
-    """Mirror the synthesized id into the plan's `Groundcrew Id` frontmatter.
+GROUNDCREW_TICKET_SYSTEM = "groundcrew"
+
+
+def _stamp_groundcrew_ticket(path: Path, ticket: str) -> None:
+    """Mirror the synthesized id into the plan's `Ticket` / `Ticket System`
+    frontmatter (the same pair plan-push uses), so a human can see which plan
+    a ``plan-<n>`` id maps to.
 
     Display-only and self-healing: ``groundcrew_id()`` stays the canonical id,
-    so ``resolve-one`` never trusts this value — it just lets a human see
-    which plan a ``plan-<n>`` id maps to. Rewrites only when the field is
-    absent or stale, so steady-state fetches don't touch the file (no
-    mtime/``updatedAt`` churn). Best-effort: a read/parse error is swallowed
-    so one unwritable file can't abort the whole fetch.
+    so ``resolve-one`` never trusts these fields — it recomputes the hash. The
+    stamp only *claims* the pair when it's empty or already ``groundcrew``;
+    a ``linear``/``jira`` reference (written by plan-push) is left untouched,
+    so a pushed plan keeps showing its real tracker ticket and still
+    dispatches via the recomputed id. Rewrites only when absent or stale, so
+    steady-state fetches don't churn the file. Best-effort: a read/parse error
+    is swallowed so one unwritable file can't abort the whole fetch.
     """
     try:
         meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
     except (OSError, PlanKeeperCliError):
         return
-    if meta.get("Groundcrew Id") == ticket:
-        return
-    meta["Groundcrew Id"] = ticket
+    system = (meta.get("Ticket System") or "").strip().lower()
+    if system == GROUNDCREW_TICKET_SYSTEM:
+        if meta.get("Ticket") == ticket:
+            return  # already current
+    elif system or meta.get("Ticket"):
+        return  # another tracker (or an orphan Ticket) owns these fields
+    meta["Ticket"] = ticket
+    meta["Ticket System"] = GROUNDCREW_TICKET_SYSTEM
     write_atomic(path, serialize_frontmatter(meta, body))
 
 
@@ -1862,7 +1872,7 @@ def cmd_groundcrew_fetch(args) -> int:
                 issues.append(issue)
     _assert_no_groundcrew_id_collisions(issues)
     for issue in issues:
-        _stamp_groundcrew_id(Path(issue["sourceRef"]["path"]), issue["id"])
+        _stamp_groundcrew_ticket(Path(issue["sourceRef"]["path"]), issue["id"])
     print(json.dumps(issues))
     return 0
 

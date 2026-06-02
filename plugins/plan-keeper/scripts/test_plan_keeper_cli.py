@@ -1086,7 +1086,7 @@ class TestFileMetaGet(IsolatedHomeTestCase):
         )
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
-        self.assertEqual(data, {"Ticket": "", "Ticket System": "", "Groundcrew Id": "", "Completed on": "", "Agent": "", "Status": "", "Kind": ""})
+        self.assertEqual(data, {"Ticket": "", "Ticket System": "", "Completed on": "", "Agent": "", "Status": "", "Kind": ""})
 
     def test_full_frontmatter_parses(self) -> None:
         path = self._write_plan(
@@ -1106,7 +1106,6 @@ class TestFileMetaGet(IsolatedHomeTestCase):
         self.assertEqual(data, {
             "Ticket": "ENG-123",
             "Ticket System": "linear",
-            "Groundcrew Id": "",
             "Completed on": "2026-05-20",
             "Agent": "",
             "Status": "",
@@ -2409,8 +2408,8 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             self.assertEqual(issues[0]["sourceRef"]["path"], str(plan.resolve()))
 
     def test_groundcrew_fetch_stamps_id_into_frontmatter(self):
-        """fetch mirrors the synthesized id into a `Groundcrew Id` field so a
-        human can see which plan a `plan-<n>` id maps to."""
+        """fetch mirrors the synthesized id into the Ticket / Ticket System
+        pair (Ticket System: groundcrew) so a human can see the mapping."""
         with tempfile.TemporaryDirectory() as home:
             d = Path(home) / "plans" / "herds"
             d.mkdir(parents=True)
@@ -2419,7 +2418,9 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             issues = json.loads(
                 run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd).stdout
             )
-            self.assertIn(f"Groundcrew Id: {issues[0]['id']}", plan.read_text())
+            text = plan.read_text()
+            self.assertIn(f"Ticket: {issues[0]['id']}", text)
+            self.assertIn("Ticket System: groundcrew", text)
 
     def test_groundcrew_fetch_stamp_is_idempotent(self):
         """Once stamped, repeated fetches don't rewrite the file."""
@@ -2447,24 +2448,48 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             )
             text = plan.read_text()
             self.assertIn("tags: [infra]", text)
-            self.assertIn(f"Groundcrew Id: {issues[0]['id']}", text)
+            self.assertIn(f"Ticket: {issues[0]['id']}", text)
 
     def test_groundcrew_fetch_heals_stale_stamp(self):
-        """A hand-edited/stale `Groundcrew Id` is corrected to the canonical
-        (hash) id — the frontmatter is a mirror, never the source of truth."""
+        """A stale groundcrew Ticket is corrected to the canonical (hash) id —
+        the frontmatter is a mirror, never the source of truth."""
         with tempfile.TemporaryDirectory() as home:
             d = Path(home) / "plans" / "r"
             d.mkdir(parents=True)
             plan = d / "2026-01-01-x.md"
             plan.write_text(
-                "---\nGroundcrew Id: plan-999999\nAgent: claude\nStatus: todo\n---\n# T\n"
+                "---\nTicket: plan-999999\nTicket System: groundcrew\n"
+                "Agent: claude\nStatus: todo\n---\n# T\n"
             )
             issues = json.loads(
                 run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd).stdout
             )
             self.assertNotEqual(issues[0]["id"], "plan-999999")
-            self.assertIn(f"Groundcrew Id: {issues[0]['id']}", plan.read_text())
+            self.assertIn(f"Ticket: {issues[0]['id']}", plan.read_text())
             self.assertNotIn("plan-999999", plan.read_text())
+
+    def test_groundcrew_fetch_does_not_clobber_external_ticket(self):
+        """A plan already filed in Linear/Jira keeps its tracker reference;
+        groundcrew dispatches via the recomputed id without touching it."""
+        with tempfile.TemporaryDirectory() as home:
+            d = Path(home) / "plans" / "r"
+            d.mkdir(parents=True)
+            plan = d / "2026-01-01-x.md"
+            plan.write_text(
+                "---\nTicket: ENG-1\nTicket System: linear\n"
+                "Agent: claude\nStatus: todo\n---\n# T\n"
+            )
+            issues = json.loads(
+                run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd).stdout
+            )
+            text = plan.read_text()
+            self.assertIn("Ticket: ENG-1", text)
+            self.assertIn("Ticket System: linear", text)
+            self.assertRegex(issues[0]["id"], r"^plan-\d+$")
+            # The recomputed id still resolves the plan.
+            r = run_cli("groundcrew-resolve-one", issues[0]["id"],
+                        home=Path(home), cwd=self.cwd)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
 
     def test_groundcrew_fetch_skips_files_without_frontmatter(self):
         """A bare .md (no frontmatter) is skipped, not crashed on."""
