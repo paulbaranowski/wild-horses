@@ -701,7 +701,13 @@ def cmd_save(args) -> int:
                 created=_iso_from_stat(source.stat()),
             )
             write_atomic(target, injected)
-            source.unlink()
+            # Skip the unlink when --from-path already points AT the target
+            # (e.g. `--on-collision overwrite` on a file already in the plans
+            # dir): write_atomic has just replaced target in place, so unlinking
+            # the (same) path would delete the freshly stamped plan. Different
+            # paths → this is a real move, so remove the source.
+            if source.resolve() != target.resolve():
+                source.unlink()
         else:
             # Non-.md: relocate byte-for-byte — no stat, no rewrite, no
             # trailing-newline normalization. shutil.move uses os.rename on the

@@ -25,7 +25,7 @@ import sys as _sys
 import tempfile
 import unittest
 import urllib.error
-from datetime import date
+from datetime import date, datetime, timezone
 from email.message import Message
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -525,10 +525,14 @@ class TestSave(IsolatedHomeTestCase):
         file's birthtime — NOT the move time."""
         source = self.cwd / "src.md"
         source.write_text("# Plain body\nNo frontmatter here.\n")
-        old = 1_600_000_000.0  # 2020-09-13 — distinct from "now"
+        old = 1_600_000_000.0  # 2020-09-13T12:26:40Z — distinct from "now"
         os.utime(source, (old, old))
-        cli = _import_cli_module()
-        expected_created = cli._iso_from_stat(source.stat())
+        # Assert the exact ISO literal the controlled epoch yields, computed
+        # independently of the CLI's _iso_from_stat — so a regression in that
+        # helper's format/timezone can't pass by deriving expected from itself.
+        # Deterministic cross-platform: Linux has no birthtime (uses mtime=old);
+        # macOS clamps birthtime down to the older mtime, so it also reports old.
+        expected_created = datetime.fromtimestamp(old, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         r = run_cli(
             "save", "--override", "testrepo",
             "--from-path", str(source),
@@ -549,8 +553,9 @@ class TestSave(IsolatedHomeTestCase):
         source.write_text("---\nAgent: codex\nStatus: todo\n---\n\n# Body\n")
         old = 1_600_000_000.0
         os.utime(source, (old, old))
-        cli = _import_cli_module()
-        expected_created = cli._iso_from_stat(source.stat())
+        # Exact literal, computed independently of _iso_from_stat (see the
+        # no-frontmatter test above for why this is deterministic cross-platform).
+        expected_created = datetime.fromtimestamp(old, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         r = run_cli(
             "save", "--override", "testrepo",
             "--from-path", str(source),
@@ -614,6 +619,31 @@ class TestSave(IsolatedHomeTestCase):
             (self.plans_root / "testrepo" / "broken.md").exists(),
             "no file should be stranded in the target dir on failure",
         )
+
+    def test_save_from_path_md_same_path_overwrite_preserves_file(self) -> None:
+        """`--from-path` pointing AT an existing target `.md` with
+        `--on-collision overwrite` must NOT delete the file: write_atomic
+        replaces it in place and the unlink is skipped because source and target
+        resolve to the same path. Without the guard, source.unlink() would
+        delete the freshly stamped plan."""
+        repo_dir = self.plans_root / "testrepo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        target = repo_dir / "2026-06-02-inplace.md"
+        target.write_text("# In place\n")
+        r = run_cli(
+            "save", "--override", "testrepo",
+            "--from-path", str(target), "--on-collision", "overwrite",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertTrue(
+            target.exists(),
+            "the in-place file must survive a same-path overwrite — not be unlinked",
+        )
+        text = target.read_text()
+        self.assertIn("# In place", text)
+        self.assertIn("Status: backlog", text)
+        self.assertIn("Created:", text)
 
     def test_save_from_path_json_byte_verbatim(self) -> None:
         """A non-.md (.json) move stays byte-for-byte — no frontmatter, no
