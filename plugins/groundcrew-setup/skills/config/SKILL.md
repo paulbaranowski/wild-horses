@@ -13,18 +13,18 @@ The whole flow is Phases 0–7 below. Run them in order. Phase 0 runs silently u
 
 All scripts live at `${CLAUDE_PLUGIN_ROOT}/scripts/`. Reference them via that env var — never hardcode `~/.claude/plugins/cache/...`.
 
-- **`discover_existing_config.sh`** (no args) → prints the absolute path of the first existing config: `groundcrew.config.{ts,js,json,yaml,yml}` in CWD, or `config.{ts,js,json,yaml,yml}` in `$XDG_CONFIG_HOME/groundcrew/` (default `~/.config/groundcrew/`), first match wins. Empty if none. Always exit 0.
-- **`load_existing.sh <config-path>`** → on success prints the loaded config as JSON on stdout (exit 0); on any failure prints a reason to stderr and exits non-zero. Non-zero = "no seeding available — use static defaults."
-- **`discover_repos.sh [--workspace-dir <path>]`** → prints a JSON array `[{"owner","repo","sources":["gh"|"local",...]}, ...]`, sorted by `owner/repo`. Always exit 0.
-- **`detect_installed_skills.sh`** (no args) → prints `{"superpowers": <bool>, "babysitPr": <bool>}`. Always exit 0.
-- **`discover_clearance_setup.sh`** (no args) → prints `{"personalFileExists","personalFileHasClaudeHosts","envExported","daemonPid":<int>|null,"daemonAgeSeconds":<int>|null}`. Always exit 0.
+- **`discover_existing_config.py`** (no args) → prints the absolute path of the first existing config: `groundcrew.config.{ts,js,json,yaml,yml}` in CWD, or `config.{ts,js,json,yaml,yml}` in `$XDG_CONFIG_HOME/groundcrew/` (default `~/.config/groundcrew/`), first match wins. Empty if none. Always exit 0.
+- **`load_existing.py <config-path>`** → on success prints the loaded config as JSON on stdout (exit 0); on any failure prints a reason to stderr and exits non-zero. Non-zero = "no seeding available — use static defaults."
+- **`discover_repos.py [--workspace-dir <path>]`** → prints a JSON array `[{"owner","repo","sources":["gh"|"local",...]}, ...]`, sorted by `owner/repo`. Always exit 0.
+- **`detect_installed_skills.py`** (no args) → prints `{"superpowers": <bool>, "babysitPr": <bool>}`. Always exit 0.
+- **`discover_clearance_setup.py`** (no args) → prints `{"personalFileExists","personalFileHasClaudeHosts","envExported","daemonPid":<int>|null,"daemonAgeSeconds":<int>|null}`. Always exit 0.
 - **`compose_initial_prompt.py --features <csv>`** → prints the composed prompt body on stdout. Valid keys: `superpowers`, `babysitPr`, `codeStylePointer`. Empty/absent → baseline only. Unknown key → exit 2.
 - **`render_clearance_hosts.py [--target <path>] [--append]`** → writes `~/.config/clearance/personal-allow-hosts`. Default: create, or exit 1 if the file exists (refuse overwrite). `--append`: add the two Claude hosts if missing, idempotent.
 - **`render_config.py --target <path>`** ← reads `Answers` JSON on STDIN → writes the rendered `config.ts` to `--target`, prints the written path. Exit 2 on validation errors.
 
 **Config target:** Define `targetPath` once and use it everywhere:
 
-- `targetPath` = the verbatim `existingConfigPath` returned by `discover_existing_config.sh` IF the user chose to overwrite in Phase 1; else `$HOME/.config/groundcrew/config.ts` (fresh-install default).
+- `targetPath` = the verbatim `existingConfigPath` returned by `discover_existing_config.py` IF the user chose to overwrite in Phase 1; else `$HOME/.config/groundcrew/config.ts` (fresh-install default).
 - `configDir` = `$(dirname "$targetPath")` — this is where `initial-prompt.md` lands (as a sibling of the config file).
 
 ## Procedure
@@ -34,20 +34,20 @@ All scripts live at `${CLAUDE_PLUGIN_ROOT}/scripts/`. Reference them via that en
 Run these four discovery scripts via Bash (in parallel where possible) and capture their output. Do not narrate this to the user — just gather the facts.
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/scripts/discover_existing_config.sh"
-"${CLAUDE_PLUGIN_ROOT}/scripts/discover_repos.sh"
-"${CLAUDE_PLUGIN_ROOT}/scripts/detect_installed_skills.sh"
-"${CLAUDE_PLUGIN_ROOT}/scripts/discover_clearance_setup.sh"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover_existing_config.py"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover_repos.py"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/detect_installed_skills.py"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover_clearance_setup.py"
 ```
 
-Capture: `existingConfigPath` (stdout of `discover_existing_config.sh`, possibly empty), the repo JSON array, the installed-skills JSON, and the clearance JSON. Defer `load_existing.sh` to Phase 1 — only run it if a config was found AND the user opts to overwrite. Defer re-running `discover_repos.sh --workspace-dir` to Phase 2, once you know the project dir.
+Capture: `existingConfigPath` (stdout of `discover_existing_config.py`, possibly empty), the repo JSON array, the installed-skills JSON, and the clearance JSON. Defer `load_existing.py` to Phase 1 — only run it if a config was found AND the user opts to overwrite. Defer re-running `discover_repos.py --workspace-dir` to Phase 2, once you know the project dir.
 
 ### Phase 1 — Existing-config confirm (conditional)
 
 Only if `existingConfigPath` is non-empty. Use **AskUserQuestion**: "Found an existing config at `<path>`. Overwrite it?" with options **Yes** / **No**.
 
 - **No** → tell the user where their existing config is and stop. This is a chat session; there's no exit code.
-- **Yes** → run `load_existing.sh "<existingConfigPath>"`. If it exits 0, parse the JSON into `existingConfigJson` and use its values as the defaults you offer in later phases. If it exits non-zero, print one line: "Couldn't load the existing config for seeding (this is expected if you only have a groundcrew source clone, not a global npm install) — falling back to static defaults." Then proceed with static defaults.
+- **Yes** → run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/load_existing.py" "<existingConfigPath>"`. If it exits 0, parse the JSON into `existingConfigJson` and use its values as the defaults you offer in later phases. If it exits non-zero, print one line: "Couldn't load the existing config for seeding (this is expected if you only have a groundcrew source clone, not a global npm install) — falling back to static defaults." Then proceed with static defaults.
 
 If `existingConfigPath` was empty, skip this phase entirely and use static defaults throughout.
 
@@ -55,7 +55,7 @@ If `existingConfigPath` was empty, skip this phase entirely and use static defau
 
 1. **Workspace kind** — **AskUserQuestion** "Workspace kind?" with three options: **auto** (Recommended) / **cmux** / **tmux**. Default = `existingConfigJson.workspace?.kind` if seeded, else `auto`. Record as `workspaceKind`. (`auto` will be omitted from the rendered config — that's intentional.)
 2. **Project directory** — ask in chat (free-form, not AskUserQuestion): "Workspace project directory? [default: `~/work`]" (or the seeded value). Empty reply = keep the default. Record as `workspaceProjectDir`. This is **required and non-empty** for the renderer.
-3. **Repo picker** — now that you know the project dir, re-run `discover_repos.sh --workspace-dir "<workspaceProjectDir>"` to fold any clones under it into the list. Render the merged array as a **numbered chat list**, one repo per line, with source annotations. Pre-mark any already in `existingConfigJson.workspace?.knownRepositories`.
+3. **Repo picker** — now that you know the project dir, re-run `discover_repos.py --workspace-dir "<workspaceProjectDir>"` to fold any clones under it into the list. Render the merged array as a **numbered chat list**, one repo per line, with source annotations. Pre-mark any already in `existingConfigJson.workspace?.knownRepositories`.
 
    ```text
    1. foo/bar              (gh + local)
@@ -78,7 +78,7 @@ If the user keeps the bypass default and customizes nothing, leave `modelClaude`
 
 ### Phase 4 — Initial-prompt features (additive)
 
-The built-in default already ships an always-on baseline (placeholders + autonomy guidance + workflow). This phase only offers additive snippets on top. Render a **numbered chat list**, pre-selecting the rows that `detect_installed_skills.sh` found:
+The built-in default already ships an always-on baseline (placeholders + autonomy guidance + workflow). This phase only offers additive snippets on top. Render a **numbered chat list**, pre-selecting the rows that `detect_installed_skills.py` found:
 
 ```text
 The built-in default ships placeholders + autonomy guidance + workflow (always-on; not editable here).
@@ -197,7 +197,7 @@ Track what happened (file written/appended, rc lines printed, daemon killed) for
 - **Don't hardcode `~/.claude/plugins/cache/...` paths to the scripts.** Always invoke them through `${CLAUDE_PLUGIN_ROOT}/scripts/<name>` — that env var resolves to the installed plugin dir at runtime and survives version bumps.
 - **Don't edit the user's shell rc files in Phase 5.** Print the `export` lines for the user to paste. Auto-appending to `~/.zshrc` / `~/.bash_profile` breaks dotfile managers (chezmoi, yadm, stow) that would clobber or duplicate the entry.
 - **Don't offer to kill the clearance daemon unless `daemonAgeSeconds > 3600`.** A fresh daemon already has current config; killing it is pointless churn.
-- **Don't treat a non-zero `load_existing.sh` exit as fatal.** It means "no seeding available" — print the one-line fallback note and continue with static defaults. The user can always re-enter values.
+- **Don't treat a non-zero `load_existing.py` exit as fatal.** It means "no seeding available" — print the one-line fallback note and continue with static defaults. The user can always re-enter values.
 - **Don't run `render_clearance_hosts.py` without `--append` against a file that already exists.** Create mode exits 1 (refuses overwrite). When `personalFileExists: true`, only the `--append` path is safe.
 - **Don't send `null` for unset optional keys in the `Answers` object.** Omit them entirely — the renderer treats absent keys as "use the shipped default," but a `null` value can trip type validation and exit 2.
 - **Don't forget that `workspaceProjectDir` and `knownRepositories` are required.** The renderer exits 2 without them. `knownRepositories` may be an empty array, but it must be present.
@@ -206,7 +206,7 @@ Track what happened (file written/appended, rc lines printed, daemon killed) for
 
 ## Notes
 
-- **Seeding fallback is expected on source-only installs.** `load_existing.sh` shells out to groundcrew's `loadConfig()`, which needs `@clipboard-health/groundcrew` installed via npm. Users who only have a source clone (no global install) hit the fallback — that's normal, not a bug. Say so in the warning text so they don't think the wizard is broken.
+- **Seeding fallback is expected on source-only installs.** `load_existing.py` shells out to groundcrew's `loadConfig()`, which needs `@clipboard-health/groundcrew` installed via npm. Users who only have a source clone (no global install) hit the fallback — that's normal, not a bug. Say so in the warning text so they don't think the wizard is broken.
 - **`workspaceKind: "auto"` is not emitted.** The renderer drops it (the runtime default is `auto`), so an `auto` answer produces a config with no `workspaceKind` key. Only `cmux` / `tmux` get written.
 - **Phase 5 never touches `config.ts`.** Clearance setup is a separate, network-egress concern. It only affects the Phase 7 summary text, not the rendered config.
 - **The `clearanceSetup` key in `Answers` is ignored by the renderer.** If you include it for your own bookkeeping, that's harmless — `render_config.py` ignores any key it doesn't recognize, so it never reaches `config.ts`.

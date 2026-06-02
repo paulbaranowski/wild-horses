@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stdlib unittest suite for load_existing.sh.
+"""Stdlib unittest suite for load_existing.py.
 
 Tests invoke the script as a subprocess so exit codes, stdout/stderr
 separation, and argument-handling are exercised exactly as a dispatched
@@ -32,22 +32,22 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).parent / "load_existing.sh"
+SCRIPT = Path(__file__).parent / "load_existing.py"
 RENDER_CONFIG = Path(__file__).parent / "render_config.py"
 
-
-_BASH = subprocess.run(
-    ["which", "bash"], capture_output=True, text=True
-).stdout.strip() or "/bin/bash"
+# Use sys.executable so we can call the script even when the test's
+# subprocess env strips PATH (e.g. the node-missing test).
+_PYTHON3 = sys.executable
 
 
 def _run_script(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
-    """Invoke load_existing.sh with the given arguments."""
-    cmd = [_BASH, str(SCRIPT)] + list(args)
+    """Invoke load_existing.py with the given arguments."""
+    cmd = [_PYTHON3, str(SCRIPT)] + list(args)
     return subprocess.run(
         cmd,
         capture_output=True,
@@ -86,7 +86,7 @@ class TestLoadExistingAlwaysRunnable(unittest.TestCase):
         self._tmp.cleanup()
 
     # ------------------------------------------------------------------
-    # Test 1: missing argument → exit 2
+    # Test 1: missing argument → exit 2 (argparse default for required pos arg)
     # ------------------------------------------------------------------
     def test_missing_argument_exits_2(self) -> None:
         """Invoking with no arguments must exit 2 and mention the missing arg on stderr."""
@@ -96,9 +96,9 @@ class TestLoadExistingAlwaysRunnable(unittest.TestCase):
             r.stderr.strip(),
             "expected a non-empty stderr message for missing argument",
         )
-        # Should mention the missing argument in some form
+        # argparse output: "the following arguments are required: config_path"
         self.assertTrue(
-            "argument" in r.stderr.lower() or "usage" in r.stderr.lower() or "missing" in r.stderr.lower(),
+            "argument" in r.stderr.lower() or "usage" in r.stderr.lower() or "required" in r.stderr.lower(),
             f"stderr should mention missing argument; got: {r.stderr!r}",
         )
 
@@ -107,15 +107,11 @@ class TestLoadExistingAlwaysRunnable(unittest.TestCase):
     # ------------------------------------------------------------------
     def test_node_missing_exits_nonzero_with_message(self) -> None:
         """A PATH with no node binary must cause non-zero exit and stderr mentioning 'node'."""
-        # Build an environment with an empty directory as the sole PATH entry,
-        # so node cannot be found regardless of where it's installed.
         empty_dir = str(self.tmpdir / "empty_bin")
         os.makedirs(empty_dir, exist_ok=True)
 
-        # Pass only the minimal env needed for bash to execute; keep HOME so
-        # the shell can initialise, but strip everything node-related from PATH.
-        # Keep only minimal env; bash is invoked via absolute path (_BASH),
-        # so it doesn't need to be on the stripped PATH.
+        # Stripped PATH so shutil.which("node") inside the script returns None.
+        # python3 is invoked via absolute sys.executable, so it doesn't need PATH.
         minimal_env = {
             "PATH": empty_dir,
             "HOME": str(Path.home()),
@@ -133,19 +129,13 @@ class TestLoadExistingAlwaysRunnable(unittest.TestCase):
     # Test 3: groundcrew not installed → non-zero, stderr mentions ERR_MODULE_NOT_FOUND
     # ------------------------------------------------------------------
     def test_groundcrew_not_installed_exits_nonzero(self) -> None:
-        """When @clipboard-health/groundcrew is not installed, must exit non-zero.
-
-        This test is expected to PASS on this machine (groundcrew not installed
-        globally). If it fails, groundcrew has been installed and the conditional
-        tests should now also run.
-        """
+        """When @clipboard-health/groundcrew is not installed, must exit non-zero."""
         if _groundcrew_available():
             self.skipTest(
                 "@clipboard-health/groundcrew is installed; "
                 "this test covers the not-installed case — skipping."
             )
 
-        # Create a real directory with a plausible config filename so the cd succeeds
         config_path = self.tmpdir / "groundcrew.config.ts"
         config_path.write_text("// placeholder\n")
 
@@ -155,18 +145,16 @@ class TestLoadExistingAlwaysRunnable(unittest.TestCase):
             r.stderr.strip(),
             "expected a non-empty stderr message",
         )
-        # Node can surface this as "ERR_MODULE_NOT_FOUND", "Cannot find package",
-        # or a wrapped message from the script. Accept any of these forms.
         stderr_lower = r.stderr.lower()
         self.assertTrue(
             "ERR_MODULE_NOT_FOUND" in r.stderr
-            or "cannot find package" in r.stderr.lower()
+            or "cannot find package" in stderr_lower
             or "not found" in stderr_lower,
             f"stderr should indicate the package is missing; got: {r.stderr!r}",
         )
 
     # ------------------------------------------------------------------
-    # Test 4: nonexistent config path → non-zero (cd fails)
+    # Test 4: nonexistent config dir → non-zero
     # ------------------------------------------------------------------
     def test_nonexistent_config_path_exits_nonzero(self) -> None:
         """Invoking with a path whose parent directory does not exist must exit non-zero."""
@@ -199,7 +187,7 @@ class TestLoadExistingConditional(unittest.TestCase):
     def _render_config(self, answers: dict, target: Path) -> Path:
         """Use render_config.py to write a valid groundcrew.config.ts."""
         result = subprocess.run(
-            ["python3", str(RENDER_CONFIG), "--target", str(target)],
+            [_PYTHON3, str(RENDER_CONFIG), "--target", str(target)],
             input=json.dumps(answers),
             capture_output=True,
             text=True,
@@ -231,7 +219,6 @@ class TestLoadExistingConditional(unittest.TestCase):
         except json.JSONDecodeError as exc:
             self.fail(f"stdout is not valid JSON: {exc}; stdout={r.stdout!r}")
 
-        # Verify the loaded config contains the expected workspace fields
         workspace = loaded.get("workspace", {})
         self.assertIn(
             "projectDir",
@@ -244,7 +231,6 @@ class TestLoadExistingConditional(unittest.TestCase):
             f"loaded JSON missing workspace.knownRepositories; got: {loaded!r}",
         )
 
-        # Project dir may be expanded (~ → absolute), so just check repos
         loaded_repos = workspace["knownRepositories"]
         self.assertEqual(
             sorted(loaded_repos),
@@ -260,7 +246,6 @@ class TestLoadExistingConditional(unittest.TestCase):
         self._skip_if_unavailable()
 
         config_path = self.tmpdir / "groundcrew.config.ts"
-        # Write deliberately invalid TypeScript that groundcrew cannot parse
         config_path.write_text(
             "export default { broken syntax }; satisfies Config;\n"
         )

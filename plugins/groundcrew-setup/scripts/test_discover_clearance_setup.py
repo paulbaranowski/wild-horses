@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stdlib unittest tests for discover_clearance_setup.sh.
+"""Stdlib unittest tests for discover_clearance_setup.py.
 
 Run from anywhere:
 
@@ -21,18 +21,19 @@ is garbage).
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).parent / "discover_clearance_setup.sh"
+SCRIPT = Path(__file__).parent / "discover_clearance_setup.py"
 
 
 def run_script(home: Path) -> subprocess.CompletedProcess:
-    """Run discover_clearance_setup.sh with an isolated HOME."""
+    """Run discover_clearance_setup.py with an isolated HOME."""
     return subprocess.run(
-        ["bash", str(SCRIPT)],
+        [sys.executable, str(SCRIPT)],
         capture_output=True,
         text=True,
         env={"HOME": str(home), "PATH": os.environ["PATH"]},

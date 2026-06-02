@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stdlib unittest suite for discover_repos.sh.
+"""Stdlib unittest suite for discover_repos.py.
 
 Tests invoke the script as a subprocess so exit codes, stdout/stderr
 separation, and argument-handling are exercised exactly as a dispatched
@@ -27,15 +27,14 @@ import json
 import os
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).parent / "discover_repos.sh"
+SCRIPT = Path(__file__).parent / "discover_repos.py"
 
-_BASH = subprocess.run(
-    ["which", "bash"], capture_output=True, text=True
-).stdout.strip() or "/bin/bash"
+_PYTHON3 = sys.executable
 
 
 def _make_stub_gh(bin_dir: Path, exit_code: int = 0, output: str = "[]") -> None:
@@ -61,19 +60,19 @@ def _run_script(
     bin_dir: Path,
     extra_env: dict | None = None,
 ) -> subprocess.CompletedProcess:
-    """Invoke discover_repos.sh with isolated HOME and PATH."""
+    """Invoke discover_repos.py with isolated HOME and PATH."""
     path_val = f"{bin_dir}:/usr/bin:/bin"
     env: dict[str, str] = {
         "HOME": str(home),
         "PATH": path_val,
         "TMPDIR": tempfile.gettempdir(),
-        # Keep LANG/LC_ALL for sane output on macOS
+        # Keep LANG for sane output on macOS
         "LANG": os.environ.get("LANG", "en_US.UTF-8"),
     }
     if extra_env:
         env.update(extra_env)
     return subprocess.run(
-        [_BASH, str(SCRIPT), *args],
+        [_PYTHON3, str(SCRIPT), *args],
         capture_output=True,
         text=True,
         timeout=30,
@@ -356,10 +355,12 @@ class DiscoverReposTestCase(unittest.TestCase):
     # Test 14: --workspace-dir without a value errors with exit 1
     # ==================================================================
     def test_workspace_dir_without_value_errors(self) -> None:
-        """Calling --workspace-dir with no following argument exits 1 and says so."""
+        """Calling --workspace-dir with no following argument exits non-zero and says so."""
         r = self.run_script("--workspace-dir")
-        self.assertEqual(r.returncode, 1, f"expected exit 1; stderr={r.stderr!r}")
-        self.assertIn("requires a path argument", r.stderr, f"expected error message in stderr; got {r.stderr!r}")
+        # argparse: exit 2 with "expected one argument" on missing option value.
+        self.assertEqual(r.returncode, 2, f"expected exit 2; stderr={r.stderr!r}")
+        self.assertIn("--workspace-dir", r.stderr, f"expected --workspace-dir in stderr; got {r.stderr!r}")
+        self.assertIn("argument", r.stderr.lower(), f"expected error message in stderr; got {r.stderr!r}")
 
     # ==================================================================
     # Test 15: --workspace-dir that duplicates a default scan dir is deduped

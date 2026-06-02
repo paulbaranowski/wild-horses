@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stdlib unittest tests for detect_installed_skills.sh.
+"""Stdlib unittest tests for detect_installed_skills.py.
 
 Run from anywhere:
 
@@ -16,17 +16,18 @@ user's real ~/.claude directory.
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).parent / "detect_installed_skills.sh"
+SCRIPT = Path(__file__).parent / "detect_installed_skills.py"
 
 
 def run_script(home: Path) -> subprocess.CompletedProcess:
-    """Run detect_installed_skills.sh with an isolated HOME."""
+    """Run detect_installed_skills.py with an isolated HOME."""
     return subprocess.run(
-        ["bash", str(SCRIPT)],
+        [sys.executable, str(SCRIPT)],
         capture_output=True,
         text=True,
         env={"HOME": str(home), "PATH": os.environ["PATH"]},

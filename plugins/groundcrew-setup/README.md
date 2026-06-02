@@ -39,18 +39,18 @@ After the wizard finishes, `crew doctor` should exit 0.
 
 | Script                        | Purpose                                                                                                                                  |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `discover_existing_config.sh` | Find an existing groundcrew config (`groundcrew.config.*` in CWD, or `config.*` in `~/.config/groundcrew/`); prints its path or nothing. |
-| `load_existing.sh`            | Load an existing config via groundcrew's `loadConfig()` and print it as JSON for seeding.                                                |
-| `discover_repos.sh`           | Discover repos via `gh` and local clone scan; prints a JSON array of `{owner, repo, sources}`.                                           |
-| `detect_installed_skills.sh`  | Detect whether `superpowers` and `core:babysit-pr` skills are installed; prints JSON booleans.                                           |
-| `discover_clearance_setup.sh` | Inspect the clearance egress setup (personal file, env vars, daemon); prints a JSON status blob.                                         |
+| `discover_existing_config.py` | Find an existing groundcrew config (`groundcrew.config.*` in CWD, or `config.*` in `~/.config/groundcrew/`); prints its path or nothing. |
+| `load_existing.py`            | Load an existing config via groundcrew's `loadConfig()` and print it as JSON for seeding.                                                |
+| `discover_repos.py`           | Discover repos via `gh` and local clone scan; prints a JSON array of `{owner, repo, sources}`.                                           |
+| `detect_installed_skills.py`  | Detect whether `superpowers` and `core:babysit-pr` skills are installed; prints JSON booleans.                                           |
+| `discover_clearance_setup.py` | Inspect the clearance egress setup (personal file, env vars, daemon); prints a JSON status blob.                                         |
 | `compose_initial_prompt.py`   | Compose the `initial-prompt.md` body from a comma-separated list of feature keys.                                                        |
 | `render_clearance_hosts.py`   | Write or append the two Claude hosts to `~/.config/clearance/personal-allow-hosts`.                                                      |
 | `render_config.py`            | Read an `Answers` JSON object on stdin and render it to a `config.ts` file at `--target`.                                                |
 
 ## Troubleshooting
 
-**Seeding fallback is expected on source-only installs.** `load_existing.sh` calls groundcrew's `loadConfig()`, which requires `@clipboard-health/groundcrew` to be npm-installed (a global install, not just a source clone). If you only have a source clone the wizard prints one line and falls back to static defaults — this is normal. Re-enter your values and the output will be identical.
+**Seeding fallback is expected on source-only installs.** `load_existing.py` calls groundcrew's `loadConfig()`, which requires `@clipboard-health/groundcrew` to be npm-installed (a global install, not just a source clone). If you only have a source clone the wizard prints one line and falls back to static defaults — this is normal. Re-enter your values and the output will be identical.
 
 **Clearance rc lines: paste, don't assume.** The wizard prints the `export` lines for `CLEARANCE_ALLOW_HOSTS_FILES` and `CLEARANCE_PERSONAL_HOSTS` but never edits your shell rc files. Paste them into `~/.zshrc` (or equivalent) and start a new shell — or `source` the rc — before running `crew` again.
 
