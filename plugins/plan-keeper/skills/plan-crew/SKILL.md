@@ -33,6 +33,8 @@ Follow these steps in order. Do not skip the confirmation step.
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" queue list
 ```
 
+**Run `queue list` fresh every time you reach this step — including on a re-invocation later in the same conversation, and again whenever step 5 sends you back here.** Never reprint an earlier queue from memory: plans get promoted, dequeued, or dispatched between turns, so a cached queue can be stale — and the user picks actions by the row numbers, so stale numbers target the wrong plan. The numbered queue you show must come from the output you just ran.
+
 Output is a JSON array of `{repo, file, status, agent}` objects (one per active plan). Group them for
 the user by `status` and present each ACTIONABLE plan with a global number:
 

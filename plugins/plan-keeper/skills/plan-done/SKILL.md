@@ -52,6 +52,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --status in-prog
 
 Display the output as a numbered list with each plan's status tag, and ask the user to pick (the filename is the part after the tab). If stderr carried a hidden-plans note, mention it below the list so the user can ask to see the rest.
 
+**Run this command fresh every time you reach this step — including on a re-invocation later in the same conversation.** Never reprint an earlier listing from memory: plans get saved, archived, or change status between turns, so a cached list can be stale. The numbered list you show must come from the output you just ran.
+
 **If stdout is empty:**
 
 - **stderr has a hidden-plans note** → nothing is in-progress or todo, but other active plans exist (e.g. all backlog). Tell the user, and offer `list` with no `--status` to pick from everything.

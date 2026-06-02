@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat \"${CLAUDE_PLUGIN_ROOT}/assets/reminder.txt\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

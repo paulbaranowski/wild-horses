@@ -46,6 +46,8 @@ Then invoke the CLI, filtered to the plans that haven't been started yet:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --status todo,backlog
 ```
 
+**Run this command every time you reach step 1 — including when you've already listed the plans earlier in this same conversation.** The plan set changes between turns (a plan saved mid-conversation, a status flipped by another skill), so a list you printed a moment ago may already be stale. Never reproduce a previously shown list from memory; the numbered list you display must come from the output of the command you _just_ ran.
+
 Add `--override <name>` if you found one. The CLI handles repo derivation. With `--status todo,backlog` it keeps only not-yet-started plans (a missing/blank `Status` counts as `backlog`), groups them `todo` then `backlog`, newest-first within each, and prints one `status<TAB>filename` line per plan. Any active plans it excluded (in-progress, in-review, …) are summarized on **stderr** as a `note: N other active plan(s) hidden (...)` line.
 
 **If stdout is empty:**
@@ -182,6 +184,7 @@ If the user wants to steer manually, just stop the skill here. The plan is read 
 
 ## Common mistakes
 
+- **Don't re-display a previously shown plan list from memory.** Step 1's `list` command must be re-run on every invocation — even a re-invocation moments later. The plan set changes between turns (a plan saved mid-conversation won't appear if you reprint a cached list), so the numbered list you show must always come from the output of the command you just ran, never from recall.
 - **Reading and classifying multiple plans before the user picks.** Step 1 lists `status<TAB>filename` lines only. Reading multiple plans wastes context and biases classification toward whatever was read last.
 - **Marking in-progress too early (or on manual-steer).** Step 6 flips `Status` to `in-progress` only _after_ the user confirms a skill handoff. Don't mark it on the manual-steer path, and don't mark it before confirmation — a plan the user hasn't committed to should stay in plan-do's not-yet-started list.
 - **Saying "no plans" when stdout is empty but stderr has a hidden-plans note.** Empty stdout with a `note: N other active plan(s) hidden` line means everything is already in-progress/in-review — surface that, don't claim the repo is empty.
