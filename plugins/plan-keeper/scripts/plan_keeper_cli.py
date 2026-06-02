@@ -74,6 +74,20 @@ def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _iso_from_stat(st: os.stat_result) -> str:
+    """Convert a file's stat to an ISO-8601 UTC stamp from its birthtime.
+
+    Prefers `st_birthtime` (macOS/BSD); falls back to `st_mtime` where birthtime
+    is unavailable (many Linux filesystems). The single home for the
+    birthtime→stamp format + fallback, shared by `backfill-created` and the `.md`
+    `--from-path` move path so both stamp a pre-existing file's age identically.
+    """
+    ts = getattr(st, "st_birthtime", None)
+    if ts is None:
+        ts = st.st_mtime
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 # --- Slugify ----------------------------------------------------------------
 
 
@@ -575,14 +589,7 @@ def cmd_backfill_created(args) -> int:
             # Best-effort: a stat/write failure on one file (permissions, I/O
             # error) must not abort the whole backfill — skip it and move on.
             try:
-                st = path.stat()
-                # st_birthtime is macOS/BSD; absent on many Linux fs → use mtime.
-                ts = getattr(st, "st_birthtime", None)
-                if ts is None:
-                    ts = st.st_mtime
-                meta["Created"] = datetime.fromtimestamp(ts, timezone.utc).strftime(
-                    "%Y-%m-%dT%H:%M:%SZ"
-                )
+                meta["Created"] = _iso_from_stat(path.stat())
                 new_text = serialize_frontmatter(meta, body)
                 if not new_text.endswith("\n"):
                     new_text += "\n"
@@ -671,13 +678,37 @@ def cmd_save(args) -> int:
         # "overwrite" → fall through
 
     if source is not None:
-        # File already exists on disk — relocate it byte-for-byte, preserving
-        # mtime/permissions and avoiding the trailing-newline normalization
-        # that write_atomic applies. shutil.move uses os.rename when src and
-        # dst are on the same filesystem (a single atomic syscall), and falls
-        # back to copy2 + unlink across filesystems.
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(source), str(target))
+        if target.suffix.lower() == ".md":
+            # A moved-in .md becomes a fully managed plan: fill the same
+            # Agent/Status/Created block a heredoc .md save gets (fill-if-absent —
+            # a .md already carrying them keeps its own values), so
+            # plan-do/plan-done see it by Status and list orders it with intra-day
+            # precision. Created comes from the source file's birthtime (via
+            # _iso_from_stat), not _iso_utc_now() — the plan pre-existed the move.
+            # No Kind is injected (--from-path rejects --kind; set it later via
+            # file-meta). This rewrites bytes, so .md moves are NOT byte-verbatim.
+            #
+            # Order matters: compute the injected content from the SOURCE and
+            # write the target, THEN unlink the source. A malformed-frontmatter
+            # .md raises here while the source still exists (retry-safe, no
+            # stranded half-move), and the source is removed only once the target
+            # write succeeded — the same "delete only on success" contract the
+            # byte-verbatim path gets from shutil.move.
+            injected = _inject_default_frontmatter(
+                source.read_text(encoding="utf-8"),
+                args.agent,
+                created=_iso_from_stat(source.stat()),
+            )
+            write_atomic(target, injected)
+            source.unlink()
+        else:
+            # Non-.md: relocate byte-for-byte — no stat, no rewrite, no
+            # trailing-newline normalization. shutil.move uses os.rename on the
+            # same filesystem (one atomic syscall) and falls back to copy2 +
+            # unlink across filesystems. This is the verbatim guarantee the
+            # paired .json sibling relies on, and it preserves the source mtime.
+            shutil.move(str(source), str(target))
     else:
         # Heredoc / piped input — write_atomic normalizes a missing trailing
         # newline because shell heredocs and pasted text can end mid-line.
@@ -903,7 +934,12 @@ def serialize_frontmatter(meta: dict[str, str], body: str) -> str:
     return "\n".join(lines) + "\n" + body
 
 
-def _inject_default_frontmatter(body_text: str, agent: str, kind: Optional[str] = None) -> str:
+def _inject_default_frontmatter(
+    body_text: str,
+    agent: str,
+    kind: Optional[str] = None,
+    created: Optional[str] = None,
+) -> str:
     """Ensure body_text starts with frontmatter containing Agent, Status, and
     Created (and Kind, when a kind is supplied).
 
@@ -920,6 +956,12 @@ def _inject_default_frontmatter(body_text: str, agent: str, kind: Optional[str] 
     override. `kind` is only written when the caller passed one — there is no
     default Kind, because an absent Kind is a valid state (plan-do then infers
     it from the content instead).
+
+    `created` overrides the `Created` source: `None` (the heredoc path) stamps
+    `_iso_utc_now()` because the plan is being authored now; a caller that passes
+    a value (the `--from-path` move path) supplies the source file's birthtime,
+    since a relocated plan pre-existed the move. Either way `Created` is
+    fill-if-absent — a body that already carries a valid `Created` keeps it.
     """
     meta, body = parse_frontmatter(body_text)
     if not meta.get("Agent"):
@@ -933,7 +975,7 @@ def _inject_default_frontmatter(body_text: str, agent: str, kind: Optional[str] 
     # matching Agent/Status/Kind. See _plan_sort_key for why it lives in
     # frontmatter rather than relying on file timestamps.
     if not meta.get("Created"):
-        meta["Created"] = _iso_utc_now()
+        meta["Created"] = created if created is not None else _iso_utc_now()
     out = serialize_frontmatter(meta, body)
     if not out.endswith("\n"):
         out += "\n"
