@@ -319,9 +319,15 @@ def list_plans(repo: str, state: str) -> list[Path]:
     return files
 
 
-# Leading YYYY-MM-DD on a plan filename (e.g. "2026-06-02-foo.md"). Also matches
-# the same prefix on an ISO-8601 `Created:` value ("2026-06-02T14:30:00Z").
+# Leading YYYY-MM-DD on a plan filename (e.g. "2026-06-02-foo.md").
 _DATE_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+
+# The exact shape plan-save writes for `Created:` (see _iso_utc_now). A
+# `Created` value is trusted as the sort key only if it matches this in full —
+# a half-valid value like "2026-06-02 junk" would otherwise sort-compare as a
+# raw string (the space sorts before 'T', so it would wrongly lead well-formed
+# same-day stamps) instead of falling back to the filename date.
+_CREATED_STAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 
 def _plan_sort_key(path: Path) -> tuple[str, str]:
@@ -351,7 +357,7 @@ def _plan_sort_key(path: Path) -> tuple[str, str]:
     try:
         meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
         candidate = (meta.get("Created") or "").strip()
-        if _DATE_PREFIX_RE.match(candidate):
+        if _CREATED_STAMP_RE.match(candidate):
             created = candidate
     except (PlanKeeperCliError, OSError, UnicodeDecodeError):
         pass
@@ -566,18 +572,24 @@ def cmd_backfill_created(args) -> int:
             if (meta.get("Created") or "").strip():
                 skipped += 1
                 continue
-            st = path.stat()
-            # st_birthtime is macOS/BSD; absent on many Linux fs → use mtime.
-            ts = getattr(st, "st_birthtime", None)
-            if ts is None:
-                ts = st.st_mtime
-            meta["Created"] = datetime.fromtimestamp(ts, timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
-            new_text = serialize_frontmatter(meta, body)
-            if not new_text.endswith("\n"):
-                new_text += "\n"
-            write_atomic(path, new_text)
+            # Best-effort: a stat/write failure on one file (permissions, I/O
+            # error) must not abort the whole backfill — skip it and move on.
+            try:
+                st = path.stat()
+                # st_birthtime is macOS/BSD; absent on many Linux fs → use mtime.
+                ts = getattr(st, "st_birthtime", None)
+                if ts is None:
+                    ts = st.st_mtime
+                meta["Created"] = datetime.fromtimestamp(ts, timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                )
+                new_text = serialize_frontmatter(meta, body)
+                if not new_text.endswith("\n"):
+                    new_text += "\n"
+                write_atomic(path, new_text)
+            except OSError:
+                skipped += 1
+                continue
             stamped += 1
     print(f"backfilled Created on {stamped} plan(s); skipped {skipped}")
     return 0

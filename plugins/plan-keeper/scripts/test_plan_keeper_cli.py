@@ -3041,7 +3041,7 @@ class TestListIntraDayOrder(IsolatedHomeTestCase):
     def _write(self, name: str, created: str | None) -> None:
         d = self.plans_root / "scratch"
         d.mkdir(parents=True, exist_ok=True)
-        fm = f"Status: todo\n"
+        fm = "Status: todo\n"
         if created is not None:
             fm += f"Created: {created}\n"
         (d / name).write_text(f"---\n{fm}---\n\n# {name}\n", encoding="utf-8")
@@ -3056,6 +3056,21 @@ class TestListIntraDayOrder(IsolatedHomeTestCase):
         self.assertEqual(
             r.stdout.strip().split("\n"),
             ["2026-06-02-apple.md", "2026-06-02-zebra.md"],
+        )
+
+    def test_malformed_created_falls_back_to_filename_date(self) -> None:
+        # A half-valid `Created` (matches YYYY-MM-DD but has trailing junk) must
+        # NOT be trusted as the sort key — it falls back to the filename date.
+        # If it were trusted, "2026-06-02 junk" (space < 'T') would sort below
+        # the well-formed midnight stamp, flipping the name-tiebreak order.
+        self._write("2026-06-02-zzz.md", "2026-06-02 junk")
+        self._write("2026-06-02-aaa.md", "2026-06-02T00:00:00Z")
+        r = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # Both resolve to the same midnight key → tiebreak on filename desc.
+        self.assertEqual(
+            r.stdout.strip().split("\n"),
+            ["2026-06-02-zzz.md", "2026-06-02-aaa.md"],
         )
 
     def test_cross_day_still_orders_by_date(self) -> None:
@@ -3159,6 +3174,48 @@ class TestBackfillCreated(IsolatedHomeTestCase):
         r = run_cli("backfill-created", "--override", "scratch", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("Created:", path.read_text())
+
+
+class TestBackfillCreatedBestEffort(unittest.TestCase):
+    """A stat/write failure on one file must not abort the whole run.
+
+    In-process (patches write_atomic) because the subprocess harness can't
+    inject a filesystem error.
+    """
+
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name) / "plans"
+        (self.root / "scratch").mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _write(self, name: str) -> Path:
+        path = self.root / "scratch" / name
+        path.write_text("---\nStatus: todo\n---\n\n# x\n", encoding="utf-8")
+        return path
+
+    def test_write_failure_on_one_file_does_not_abort(self) -> None:
+        bad = self._write("2026-06-01-bad.md")
+        good = self._write("2026-06-02-good.md")
+        real_write = self.cli.write_atomic
+
+        def flaky_write(path: Path, content: str) -> None:
+            if path == bad:
+                raise OSError("disk gone")
+            real_write(path, content)
+
+        args = MagicMock()
+        args.override = "scratch"
+        with patch.object(self.cli, "PLAN_ROOT", self.root), \
+             patch.object(self.cli, "write_atomic", side_effect=flaky_write):
+            rc = self.cli.cmd_backfill_created(args)
+        self.assertEqual(rc, 0)
+        # The healthy file is still stamped even though the other file errored.
+        self.assertIn("Created:", good.read_text())
+        self.assertNotIn("Created:", bad.read_text())
 
 
 if __name__ == "__main__":

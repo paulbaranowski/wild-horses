@@ -15,7 +15,7 @@ Save one or more files from the current conversation to `~/plans/<repo>/<YYYY-MM
 - **`<ext>`:** defaults to `md`. Set via `--extension` when the content is not markdown — see [Choosing the extension](#choosing-the-extension).
 - **Date:** today, in the user's local timezone (CLI handles).
 - **Collision:** ask the user; never overwrite silently.
-- **Content:** file body verbatim — no preamble, footer, or commentary. (For `.md` saves, the CLI injects an `Agent: claude\nStatus: backlog\nCreated: <iso>\n` frontmatter block if one isn't present, and fills missing Agent/Status/Created/Kind fields if a partial block is. `--from-path` and non-`.md` saves are byte-exact.)
+- **Content:** file body verbatim — no preamble, footer, or commentary. (For `.md` saves, the CLI injects an `Agent: claude\nStatus: backlog\nCreated: <iso>\n` frontmatter block if one isn't present, and fills missing Agent/Status/Created fields if a partial block is; `Kind` is filled only when `--kind` is passed. `--from-path` and non-`.md` saves are byte-exact.)
 - **`--agent`:** override the default `claude` (e.g., `--agent codex`); only affects `.md` heredoc saves.
 - **`--kind`:** the document type — one of `idea` / `prd` / `design` / `spec` / `exec-plan` (see [../../plan-kinds.md](../../plan-kinds.md)). Infer it from the content and pass it on `.md` heredoc saves; `plan-do` later reads it to route the plan. Fill-if-absent, `.md`-only. See [Classifying the Kind](#classifying-the-kind).
 - **Multiple files:** when the user has produced a paired/grouped artifact (most commonly task-list-builder's `.json` + `.md`), save each file with one `save` invocation, sharing `--topic` (and `--date` if you set it) so the resulting filenames pair on the base name.
