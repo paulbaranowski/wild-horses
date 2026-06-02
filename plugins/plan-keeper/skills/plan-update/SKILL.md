@@ -32,6 +32,8 @@ Otherwise, list active plans:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list
 ```
 
+**Run this command fresh every time you reach this step — including on a re-invocation later in the same conversation.** Never reprint an earlier listing from memory: plans get saved, archived, or change status between turns, so a cached list can be stale. The numbered list you show must come from the output you just ran.
+
 Present numbered to the user; they pick.
 
 ### 2. Identify the field(s) to change
