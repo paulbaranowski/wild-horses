@@ -1086,7 +1086,7 @@ class TestFileMetaGet(IsolatedHomeTestCase):
         )
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
-        self.assertEqual(data, {"Ticket": "", "Ticket System": "", "Completed on": "", "Agent": "", "Status": "", "Kind": ""})
+        self.assertEqual(data, {"Ticket": "", "Ticket System": "", "Completed on": "", "Agent": "", "Status": "", "Kind": "", "Created": ""})
 
     def test_full_frontmatter_parses(self) -> None:
         path = self._write_plan(
@@ -1110,6 +1110,7 @@ class TestFileMetaGet(IsolatedHomeTestCase):
             "Agent": "",
             "Status": "",
             "Kind": "",
+            "Created": "",
         })
 
     def test_partial_frontmatter_returns_present_fields(self) -> None:
@@ -2997,6 +2998,167 @@ class TestQueue(IsolatedHomeTestCase):
         self.assertNotEqual(r.returncode, 0)
         # good plan must be untouched because validation fails before any write
         self.assertIn("Status: backlog", good.read_text())
+
+
+class TestCreatedStamp(IsolatedHomeTestCase):
+    """`save` records a `Created:` ISO-8601 stamp, fill-if-absent."""
+
+    def test_save_injects_created_iso(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "stamp me",
+            stdin="# Body\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        # e.g. "Created: 2026-06-02T14:30:00Z"
+        self.assertRegex(text, r"Created: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+
+    def test_created_is_fill_if_absent(self) -> None:
+        # A hand-written Created in the body must win over the save-time stamp.
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "preset",
+            stdin="---\nCreated: 2020-01-01T00:00:00Z\n---\n\n# Body\n",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        self.assertEqual(text.count("Created:"), 1)
+        self.assertIn("Created: 2020-01-01T00:00:00Z", text)
+
+    def test_non_md_save_has_no_created(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "data", "--extension", "json",
+            stdin='{"a": 1}\n', home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("Created:", Path(r.stdout.strip()).read_text())
+
+
+class TestListIntraDayOrder(IsolatedHomeTestCase):
+    """list orders by `Created` (newest-first) with intra-day precision,
+    falling back to the filename date when Created is absent."""
+
+    def _write(self, name: str, created: str | None) -> None:
+        d = self.plans_root / "scratch"
+        d.mkdir(parents=True, exist_ok=True)
+        fm = f"Status: todo\n"
+        if created is not None:
+            fm += f"Created: {created}\n"
+        (d / name).write_text(f"---\n{fm}---\n\n# {name}\n", encoding="utf-8")
+
+    def test_created_overrides_filename_alphabetical_within_day(self) -> None:
+        # Same day. Alphabetically apple < zebra, so the old filename-desc sort
+        # put zebra first. But apple was Created later → it must now lead.
+        self._write("2026-06-02-apple.md", "2026-06-02T15:00:00Z")
+        self._write("2026-06-02-zebra.md", "2026-06-02T09:00:00Z")
+        r = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            r.stdout.strip().split("\n"),
+            ["2026-06-02-apple.md", "2026-06-02-zebra.md"],
+        )
+
+    def test_cross_day_still_orders_by_date(self) -> None:
+        self._write("2026-06-01-old.md", "2026-06-01T23:00:00Z")
+        self._write("2026-06-02-new.md", "2026-06-02T01:00:00Z")
+        r = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertEqual(
+            r.stdout.strip().split("\n"),
+            ["2026-06-02-new.md", "2026-06-01-old.md"],
+        )
+
+    def test_missing_created_falls_back_to_filename_date(self) -> None:
+        # No-Created plan dated 06-03 must sort above a Created plan dated 06-01,
+        # because the fallback uses the filename's day.
+        self._write("2026-06-03-nostamp.md", None)
+        self._write("2026-06-01-stamped.md", "2026-06-01T12:00:00Z")
+        r = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertEqual(
+            r.stdout.strip().split("\n"),
+            ["2026-06-03-nostamp.md", "2026-06-01-stamped.md"],
+        )
+
+    def test_status_filtered_listing_respects_created_order(self) -> None:
+        # The --status path stable-sorts by tier over list_plans' order, so the
+        # Created ordering must survive inside a status group.
+        self._write("2026-06-02-apple.md", "2026-06-02T15:00:00Z")
+        self._write("2026-06-02-zebra.md", "2026-06-02T09:00:00Z")
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "todo", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            r.stdout.strip().split("\n"),
+            ["todo\t2026-06-02-apple.md", "todo\t2026-06-02-zebra.md"],
+        )
+
+    def test_order_survives_status_mutation(self) -> None:
+        # A status flip rewrites the file (new inode/birthtime) but Created is
+        # untouched, so the relative order must not change.
+        self._write("2026-06-02-apple.md", "2026-06-02T15:00:00Z")
+        self._write("2026-06-02-zebra.md", "2026-06-02T09:00:00Z")
+        d = self.plans_root / "scratch"
+        run_cli(
+            "file-meta", "update", "--file", str(d / "2026-06-02-zebra.md"),
+            "--field", "Status=in-progress", home=self.home,
+        )
+        r = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertEqual(
+            r.stdout.strip().split("\n"),
+            ["2026-06-02-apple.md", "2026-06-02-zebra.md"],
+        )
+
+
+class TestBackfillCreated(IsolatedHomeTestCase):
+    """`backfill-created` stamps `Created` (from file birthtime) on plans
+    missing it, idempotently, skipping files it can't or shouldn't touch."""
+
+    def _write(self, name: str, body: str) -> Path:
+        d = self.plans_root / "scratch"
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / name
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_stamps_plan_missing_created(self) -> None:
+        path = self._write("2026-06-01-a.md", "---\nStatus: todo\n---\n\n# A\n")
+        r = run_cli("backfill-created", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("backfilled Created on 1 plan(s)", r.stdout)
+        self.assertRegex(
+            path.read_text(), r"Created: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
+        )
+
+    def test_idempotent_skips_already_stamped(self) -> None:
+        self._write(
+            "2026-06-01-a.md",
+            "---\nStatus: todo\nCreated: 2026-06-01T08:00:00Z\n---\n\n# A\n",
+        )
+        r = run_cli("backfill-created", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("backfilled Created on 0 plan(s)", r.stdout)
+        # Existing value preserved.
+        self.assertIn(
+            "Created: 2026-06-01T08:00:00Z",
+            (self.plans_root / "scratch" / "2026-06-01-a.md").read_text(),
+        )
+
+    def test_skips_non_md_and_no_frontmatter(self) -> None:
+        self._write("2026-06-01-data.json", '{"a": 1}\n')
+        bare = self._write("2026-06-01-bare.md", "# No frontmatter\n")
+        r = run_cli("backfill-created", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("backfilled Created on 0 plan(s)", r.stdout)
+        self.assertNotIn("Created:", bare.read_text())
+
+    def test_covers_done_subdir(self) -> None:
+        d = self.plans_root / "scratch" / "done"
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / "2026-06-01-archived.md"
+        path.write_text("---\nStatus: done\n---\n\n# Archived\n", encoding="utf-8")
+        r = run_cli("backfill-created", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Created:", path.read_text())
 
 
 if __name__ == "__main__":

@@ -315,8 +315,50 @@ def list_plans(repo: str, state: str) -> list[Path]:
     if not d.exists():
         return []
     files = [p for p in d.iterdir() if p.is_file() and not p.name.startswith(".")]
-    files.sort(key=lambda p: p.name, reverse=True)
+    files.sort(key=_plan_sort_key, reverse=True)
     return files
+
+
+# Leading YYYY-MM-DD on a plan filename (e.g. "2026-06-02-foo.md"). Also matches
+# the same prefix on an ISO-8601 `Created:` value ("2026-06-02T14:30:00Z").
+_DATE_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+
+
+def _plan_sort_key(path: Path) -> tuple[str, str]:
+    """Return (timestamp, filename) for a newest-first ordering.
+
+    The primary key is the plan's `Created:` frontmatter — an ISO-8601 UTC
+    stamp written once at save time (e.g. "2026-06-02T14:30:00Z"). Because
+    those strings are fixed-width and lexically chronological, a plain string
+    compare orders them correctly, and the time component gives precise
+    *intra-day* ordering. This is the signal filename-date can't provide:
+    every plan saved on the same day shares one `YYYY-MM-DD-` prefix, so the
+    old filename sort fell back to slug-alphabetical within a day.
+
+    `Created` (not file mtime/birthtime) is the source of truth because plan
+    mutations — a `plan-do` status flip, a `plan-update`, a bulk `queue` set —
+    rewrite the file via write_atomic/os.replace, which swaps in a fresh inode
+    and resets both mtime and birthtime to the last-write time. A persisted
+    frontmatter stamp survives those rewrites untouched.
+
+    Fallback for plans that predate the field (or can't carry it): the
+    filename's leading YYYY-MM-DD, padded to midnight UTC, so day-level
+    ordering still holds and same-day ties break on the filename (the prior
+    behavior). Covers byte-verbatim --from-path saves and non-.md siblings,
+    which never get frontmatter. Run `backfill-created` to stamp old plans.
+    """
+    created = ""
+    try:
+        meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+        candidate = (meta.get("Created") or "").strip()
+        if _DATE_PREFIX_RE.match(candidate):
+            created = candidate
+    except (PlanKeeperCliError, OSError, UnicodeDecodeError):
+        pass
+    if not created:
+        m = _DATE_PREFIX_RE.match(path.name)
+        created = f"{m.group(1)}T00:00:00Z" if m else ""
+    return (created, path.name)
 
 
 def plan_status(path: Path) -> str:
@@ -468,6 +510,76 @@ def cmd_list_repos(args) -> int:
         if deferred:
             parts.append(f"deferred={deferred}")
         print(f"{entry.name}: {' '.join(parts)}")
+    return 0
+
+
+def cmd_backfill_created(args) -> int:
+    """One-time, best-effort: stamp `Created` on plans that lack it.
+
+    Newly saved plans get an exact `Created` at save time; this exists only
+    to retrofit plans saved before the field existed, so list's newest-first
+    sort orders them by something better than slug-alphabetical within a day.
+
+    Source is each file's current birthtime (st_birthtime; falls back to
+    st_mtime where birthtime is unavailable, e.g. some Linux filesystems).
+    Best-effort by nature: status mutations rewrite plan files via
+    write_atomic/os.replace, which resets birthtime to the last-write time —
+    so for a plan that has been promoted or status-flipped since it was saved,
+    the stamp reflects that last write, not the original save. The stamp is
+    read *before* this command's own write, so backfilling never clobbers the
+    value with its own rewrite time.
+
+    Only touches .md files that already have frontmatter and have no `Created`
+    yet. Non-.md siblings (paired .json) and bare files without frontmatter are
+    skipped — they fall back to filename-date ordering. Covers the repo's
+    active dir plus done/ and deferred/.
+    """
+    repo = derive_repo(args.override)
+    base = repo_dir(repo)
+    if not base.exists():
+        print(f"no plans for repo {repo!r}", file=sys.stderr)
+        return 0
+    stamped = 0
+    skipped = 0
+    for d in (base, base / "done", base / "deferred"):
+        if not d.exists():
+            continue
+        for path in sorted(d.iterdir()):
+            if not path.is_file() or path.name.startswith("."):
+                continue
+            if path.suffix.lower() != ".md":
+                skipped += 1
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                skipped += 1
+                continue
+            if not (text.startswith("---\n") or text.startswith("---\r\n")):
+                skipped += 1
+                continue
+            try:
+                meta, body = parse_frontmatter(text)
+            except PlanKeeperCliError:
+                skipped += 1
+                continue
+            if (meta.get("Created") or "").strip():
+                skipped += 1
+                continue
+            st = path.stat()
+            # st_birthtime is macOS/BSD; absent on many Linux fs → use mtime.
+            ts = getattr(st, "st_birthtime", None)
+            if ts is None:
+                ts = st.st_mtime
+            meta["Created"] = datetime.fromtimestamp(ts, timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            new_text = serialize_frontmatter(meta, body)
+            if not new_text.endswith("\n"):
+                new_text += "\n"
+            write_atomic(path, new_text)
+            stamped += 1
+    print(f"backfilled Created on {stamped} plan(s); skipped {skipped}")
     return 0
 
 
@@ -672,7 +784,7 @@ def cmd_ticket_system_config_list(args) -> int:
 # --- Frontmatter ------------------------------------------------------------
 
 # Order matters in the output — keep this canonical so callers see a stable shape.
-_FRONTMATTER_FIELDS = ("Ticket", "Ticket System", "Completed on", "Agent", "Status", "Kind")
+_FRONTMATTER_FIELDS = ("Ticket", "Ticket System", "Completed on", "Agent", "Status", "Kind", "Created")
 
 # `Kind` classifies the *document type* (orthogonal to Status, which is the
 # lifecycle). The values are ordered by pipeline position, idea → ready-to-build.
@@ -780,17 +892,17 @@ def serialize_frontmatter(meta: dict[str, str], body: str) -> str:
 
 
 def _inject_default_frontmatter(body_text: str, agent: str, kind: Optional[str] = None) -> str:
-    """Ensure body_text starts with frontmatter containing Agent and Status
-    (and Kind, when a kind is supplied).
+    """Ensure body_text starts with frontmatter containing Agent, Status, and
+    Created (and Kind, when a kind is supplied).
 
     Three cases:
-      1. body has no frontmatter → prepend a fresh '---\\nAgent: <agent>\\nStatus: backlog\\n---\\n\\n' block.
+      1. body has no frontmatter → prepend a fresh '---\\nAgent: <agent>\\nStatus: backlog\\nCreated: <iso>\\n---\\n\\n' block.
       2. body has frontmatter with the fields already set → return unchanged
          (user-supplied values win over defaults).
       3. body has frontmatter missing some → fill in the missing fields,
          re-serialize, return.
 
-    Why agent/status/kind are 'fill if absent' rather than 'overwrite':
+    Why agent/status/created/kind are 'fill if absent' rather than 'overwrite':
     a user who hand-wrote `Status: todo` (or `Kind: prd`) in the body shouldn't
     have it stomped by the save invocation. The CLI default is a floor, not an
     override. `kind` is only written when the caller passed one — there is no
@@ -804,6 +916,12 @@ def _inject_default_frontmatter(body_text: str, agent: str, kind: Optional[str] 
         meta["Status"] = "backlog"
     if kind and not meta.get("Kind"):
         meta["Kind"] = kind
+    # Save-time stamp that powers list's newest-first sort with intra-day
+    # precision. Fill-if-absent (a hand-written Created in the body wins),
+    # matching Agent/Status/Kind. See _plan_sort_key for why it lives in
+    # frontmatter rather than relying on file timestamps.
+    if not meta.get("Created"):
+        meta["Created"] = _iso_utc_now()
     out = serialize_frontmatter(meta, body)
     if not out.endswith("\n"):
         out += "\n"
@@ -2139,6 +2257,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="list all repos under ~/plans/ with per-state counts",
     )
 
+    p_backfill = sub.add_parser(
+        "backfill-created",
+        help="one-time: stamp `Created` (from file birthtime) on plans missing it",
+    )
+    p_backfill.add_argument("--override", help="explicit override for <repo>")
+
     p_save = sub.add_parser(
         "save",
         help="write body (stdin) to ~/plans/<repo>/<date>-<slug>.<ext>",
@@ -2379,6 +2503,7 @@ def main() -> int:
         "repo": cmd_repo,
         "list": cmd_list,
         "list-repos": cmd_list_repos,
+        "backfill-created": cmd_backfill_created,
         "save": cmd_save,
         "archive": cmd_archive,
         "file-meta": lambda a: _FILE_META_DISPATCH[a.file_meta_cmd](a),

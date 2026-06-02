@@ -15,7 +15,7 @@ Save one or more files from the current conversation to `~/plans/<repo>/<YYYY-MM
 - **`<ext>`:** defaults to `md`. Set via `--extension` when the content is not markdown — see [Choosing the extension](#choosing-the-extension).
 - **Date:** today, in the user's local timezone (CLI handles).
 - **Collision:** ask the user; never overwrite silently.
-- **Content:** file body verbatim — no preamble, footer, or commentary. (For `.md` saves, the CLI injects an `Agent: claude\nStatus: backlog\n` frontmatter block if one isn't present, and fills missing Agent/Status/Kind fields if a partial block is. `--from-path` and non-`.md` saves are byte-exact.)
+- **Content:** file body verbatim — no preamble, footer, or commentary. (For `.md` saves, the CLI injects an `Agent: claude\nStatus: backlog\nCreated: <iso>\n` frontmatter block if one isn't present, and fills missing Agent/Status/Created/Kind fields if a partial block is. `--from-path` and non-`.md` saves are byte-exact.)
 - **`--agent`:** override the default `claude` (e.g., `--agent codex`); only affects `.md` heredoc saves.
 - **`--kind`:** the document type — one of `idea` / `prd` / `design` / `spec` / `exec-plan` (see [../../plan-kinds.md](../../plan-kinds.md)). Infer it from the content and pass it on `.md` heredoc saves; `plan-do` later reads it to route the plan. Fill-if-absent, `.md`-only. See [Classifying the Kind](#classifying-the-kind).
 - **Multiple files:** when the user has produced a paired/grouped artifact (most commonly task-list-builder's `.json` + `.md`), save each file with one `save` invocation, sharing `--topic` (and `--date` if you set it) so the resulting filenames pair on the base name.
@@ -180,6 +180,7 @@ produces a file that starts with:
 Agent: claude
 Status: backlog
 Kind: spec
+Created: 2026-06-02T14:30:00Z
 ---
 
 # My Plan
@@ -187,7 +188,7 @@ Kind: spec
 Body.
 ```
 
-The defaults are a floor, not an override: if the user pipes in a body that already declares `Agent:`, `Status:`, or `Kind:` in its own frontmatter, those values are kept untouched. `Status: backlog` means the plan is fetched but not dispatched (confirm via `crew status <id>`) — promote via `/plan-update` (or `file-meta update --field Status=todo`) when the plan is ready for groundcrew to pick up. `Kind` (omitted entirely if you don't pass `--kind`) records the document type — see [Classifying the Kind](#classifying-the-kind) and [../../plan-kinds.md](../../plan-kinds.md).
+The defaults are a floor, not an override: if the user pipes in a body that already declares `Agent:`, `Status:`, `Created:`, or `Kind:` in its own frontmatter, those values are kept untouched. `Status: backlog` means the plan is fetched but not dispatched (confirm via `crew status <id>`) — promote via `/plan-update` (or `file-meta update --field Status=todo`) when the plan is ready for groundcrew to pick up. `Created` is an ISO-8601 UTC save-time stamp that gives `plan-do`'s newest-first listing precise _intra-day_ ordering (filenames carry only a `YYYY-MM-DD` date, so without it same-day plans fell back to slug-alphabetical). It's persisted in frontmatter so status mutations — which rewrite the file and reset its OS timestamps — never disturb the order. `Kind` (omitted entirely if you don't pass `--kind`) records the document type — see [Classifying the Kind](#classifying-the-kind) and [../../plan-kinds.md](../../plan-kinds.md).
 
 The injection only happens for `.md` saves (the default extension and explicit `--extension md`). JSON and other extensions are written byte-for-byte. `--from-path` always preserves source bytes, even for `.md`.
 
