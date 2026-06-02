@@ -171,11 +171,18 @@ Track what happened (file written/appended, rc lines printed, daemon killed) for
 
    The renderer prints the written path on stdout. Exit 2 means a validation error — read its stderr, fix the `Answers` object, and re-run.
 
-4. Print the absolute path(s) written (`config.ts`, plus `initial-prompt.md` if Phase 4 picked features) and a numbered Next-Steps block. Surface the Phase 5 rc lines again here if they were printed, so the user has one artifact to act on:
+4. Print the absolute path(s) written (`config.ts`, plus `initial-prompt.md` if Phase 4 picked features) and a numbered Next-Steps block. Surface the Phase 5 rc lines again here if they were printed, so the user has one artifact to act on.
+
+   Generate the Step 1 clone commands from `knownRepositories`, filtering out repos the Phase 2 picker reported with `"local"` in `sources` (those are already cloned). Emit `PROJECT_DIR=<workspaceProjectDir>` once, then one `git clone` line per remaining repo using groundcrew's own format (matches `crew init`'s clone guidance). If every selected repo was local, omit Step 1 entirely.
+
+   Example with `workspaceProjectDir: "~/work"` and two not-yet-cloned repos:
 
    ```text
    Next steps:
-     1. Run `crew setup repos` to clone your known repositories into the workspace.
+     1. Clone your configured repositories into the workspace:
+          PROJECT_DIR=~/work
+          git clone git@github.com:foo/bar.git "$PROJECT_DIR/foo/bar"
+          git clone git@github.com:baz/qux.git "$PROJECT_DIR/baz/qux"
      2. In Linear: Settings → Integrations → GitHub, connect your workspace
         (required for crew to map Linear tickets to GitHub PRs).
      3. (If clearance rc lines were printed) Paste the exports above into your
