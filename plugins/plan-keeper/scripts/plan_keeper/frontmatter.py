@@ -156,7 +156,7 @@ def _inject_default_frontmatter(
         meta["Kind"] = kind
     # Save-time stamp that powers list's newest-first sort with intra-day
     # precision. Fill-if-absent (a hand-written Created in the body wins),
-    # matching Agent/Status/Kind. See _plan_sort_key for why it lives in
+    # matching Status/Kind. See _plan_sort_key for why it lives in
     # frontmatter rather than relying on file timestamps.
     if not meta.get("Created"):
         meta["Created"] = created if created is not None else _iso_utc_now()

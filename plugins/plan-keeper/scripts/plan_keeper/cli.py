@@ -309,7 +309,7 @@ def cmd_save(args) -> int:
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.suffix.lower() == ".md":
             # A moved-in .md becomes a fully managed plan: fill the same
-            # Agent/Status/Created block a heredoc .md save gets (fill-if-absent —
+            # Status/Created block a heredoc .md save gets (fill-if-absent —
             # a .md already carrying them keeps its own values), so
             # plan-do/plan-done see it by Status and list orders it with intra-day
             # precision. Created comes from the source file's birthtime (via
