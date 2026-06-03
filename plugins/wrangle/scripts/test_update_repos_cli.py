@@ -15,7 +15,7 @@ agent would see them. Isolation: HOME=<tmpdir> per test so the CLI's
 config path (~/.config/wild-horses/wrangle/repos.json) resolves
 under the tempdir, never touching the user's real config.
 
-Mirrors the precedent at plugins/plan-keeper/scripts/test_plan_keeper_cli.py.
+Mirrors the precedent at plugins/plan-keeper/scripts/tests/.
 """
 import json
 import os
