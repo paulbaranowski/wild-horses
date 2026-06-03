@@ -15,7 +15,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plan-keeper"
-# Version is the single `__version__` attribute in plan_keeper_cli.py (read
+# Version is the single `__version__` attribute in plan_keeper/__init__.py (read
 # dynamically below), kept in lockstep with plugins/plan-keeper/.claude-plugin/
 # plugin.json. The release tag is `plan-keeper-v<version>`.
 dynamic = ["version"]
@@ -36,12 +36,19 @@ Homepage = "https://github.com/paulbaranowski/wild-horses"
 Source = "https://github.com/paulbaranowski/wild-horses/tree/main/plugins/plan-keeper"
 
 [project.scripts]
-plan-keeper = "plan_keeper_cli:main"
+plan-keeper = "plan_keeper.cli:main"
 
 [tool.setuptools]
-# Single-module package: the one file, packaged verbatim. No restructure, no
-# rename — the in-plugin invocation path is unchanged.
+# Two delivery vehicles, one source tree. `plan_keeper_cli` is the thin entry
+# shim the plugin invokes in-place by path (its filename is load-bearing for
+# the PreToolUse allow-hook); `plan_keeper` is the implementation package the
+# console script and the shim both import. The in-plugin invocation path is
+# unchanged.
 py-modules = ["plan_keeper_cli"]
+packages = ["plan_keeper"]
 
 [tool.setuptools.dynamic]
-version = { attr = "plan_keeper_cli.__version__" }
+# Single source of truth: plan_keeper/__init__.__version__, kept in lockstep
+# with plugins/plan-keeper/.claude-plugin/plugin.json. Release tag:
+# `plan-keeper-v<version>`.
+version = { attr = "plan_keeper.__version__" }
