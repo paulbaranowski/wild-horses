@@ -1,6 +1,6 @@
 # plan-keeper
 
-Organize markdown plans on disk across repos. Three skills cover the lifecycle: capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), and archive with a completion stamp (`plan-done`). All three share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine — nothing is committed to any repo.
+Organize markdown plans on disk across repos. Six skills cover the lifecycle: capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), archive with a completion stamp (`plan-done`), edit frontmatter (`plan-update`), manage the cross-repo dispatch queue (`plan-crew`), and file plans as tickets (`plan-push`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine — nothing is committed to any repo.
 
 Install:
 
@@ -10,27 +10,32 @@ Install:
 
 ## Skills
 
-| Skill                                | Role     | What it does                                                                                                                                                |
-| ------------------------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **[`plan-save`](skills/plan-save/)** | Captures | Writes the latest plan from the current conversation to `~/plans/<repo>/<YYYY-MM-DD>-<topic>.md`.                                                           |
-| **[`plan-do`](skills/plan-do/)**     | Routes   | Lists active plans for the current repo, classifies the picked one (idea / spec / sequential impl / task-list-shaped), and invokes the matching next skill. |
-| **[`plan-done`](skills/plan-done/)** | Archives | Moves a completed plan to `~/plans/<repo>/done/` and appends a `*Completed: YYYY-MM-DD*` stamp.                                                             |
+| Skill                                    | Role     | What it does                                                                                                                                                                                                                                                                              |
+| ---------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **[`plan-save`](skills/plan-save/)**     | Captures | Writes the latest plan from the current conversation to `~/plans/<repo>/<YYYY-MM-DD>-<topic>.md`.                                                                                                                                                                                         |
+| **[`plan-do`](skills/plan-do/)**         | Routes   | Lists not-yet-started plans for the current repo, classifies readiness (idea / spec / execution-ready), and routes to the matching next skill. Execution-ready plans get all three execution engines (autonomous / task-list-builder / executing-plans), recommended-first by plan shape. |
+| **[`plan-done`](skills/plan-done/)**     | Archives | Moves a completed plan to `~/plans/<repo>/done/` and appends a `*Completed: YYYY-MM-DD*` stamp.                                                                                                                                                                                           |
+| **[`plan-update`](skills/plan-update/)** | Edits    | Mutates frontmatter fields (`Agent`, `Status`, `Ticket`) for a single plan in the current repo.                                                                                                                                                                                           |
+| **[`plan-crew`](skills/plan-crew/)**     | Queues   | Shows the groundcrew dispatch queue across all repos and bulk-promotes/dequeues plans (`Status todo/backlog`). Cross-repo, multi-select. The bulk/cross-repo counterpart to plan-update.                                                                                                  |
+| **[`plan-push`](skills/plan-push/)**     | Files    | Files the plan as a Linear or Jira ticket and stamps `Ticket:` in frontmatter.                                                                                                                                                                                                            |
 
-All three are model-invoked by description — no slash command is required. Trigger phrases like "save this plan", "do a plan from `<name>`", or "I'm done with the plan" route Claude into the right skill.
+All skills are model-invoked by description — no slash command is required. Trigger phrases like "save this plan", "do a plan from `<name>`", or "I'm done with the plan" route Claude into the right skill.
 
 ## How the pieces fit
 
 ```text
 conversation ──► plan-save ──► ~/plans/<repo>/*.md ──► plan-do ──► (next skill)
-                                                                   ├─► superpowers:brainstorming      (idea)
-                                                                   ├─► superpowers:writing-plans      (spec)
-                                                                   ├─► superpowers:executing-plans    (sequential impl)
-                                                                   └─► harness:task-list-builder      (task-list-shaped)
+                          idea            ─► superpowers:brainstorming
+                          spec            ─► superpowers:writing-plans
+                          execution-ready ─► menu (recommended first):
+                                ├─► harness:autonomous                              (AFK ──► PR)
+                                ├─► harness:task-list-builder ──► task-list-runner  (dispatched tasks)
+                                └─► superpowers:executing-plans                     (sequential, review-gated)
 
                                                        plan-done ──► ~/plans/<repo>/done/<file>.md
 ```
 
-`plan-do` is the entry point that joins the [superpowers](https://github.com/obra/superpowers) brainstorming → writing-plans → executing-plans pipeline (or the [harness task-list-builder](../harness/skills/task-list-builder/)) at the right stage based on the plan's shape — independence of work units is the discriminator between sequential and task-list-shaped plans, not vocabulary.
+`plan-do` is the entry point that joins the [superpowers](https://github.com/obra/superpowers) brainstorming → writing-plans → executing-plans pipeline (plus the [harness autonomous](../harness/skills/autonomous/) and [task-list-builder](../harness/skills/task-list-builder/) engines) at the right stage. It classifies in two tiers: **readiness** (idea / spec / execution-ready) picks the path; for execution-ready plans, **shape** (single-ticket vs. independent task list vs. sequential phases) picks which execution engine is recommended first — though all three are always offered.
 
 ## Repo derivation
 
@@ -40,7 +45,7 @@ The override and auto-derive paths normalize differently: auto-derived names are
 
 ## The bundled CLI
 
-`scripts/plan_keeper_cli.py` is the canonical interface for all three skills — the skills never write to `~/plans/` directly. Subcommands: `repo`, `list`, `list-repos`, `save`, `archive`. Mutations are atomic (tmp file + `fsync` + `os.replace`), and collisions surface as a structured exit-2 signal that the skills present to the user rather than treating as a fatal error.
+`scripts/plan_keeper_cli.py` is the canonical interface for all the skills — the skills never write to `~/plans/` directly. Subcommands: `repo`, `list`, `list-repos`, `save`, `archive`. Mutations are atomic (tmp file + `fsync` + `os.replace`), and collisions surface as a structured exit-2 signal that the skills present to the user rather than treating as a fatal error.
 
 A PreToolUse hook (`hooks/hooks.json`) auto-approves `python3 .../plan_keeper_cli.py` Bash invocations so each skill's flow runs without per-call permission prompts. The allow script anchors on the plugin-specific path so a stray `plan_keeper_cli.py` elsewhere in the workspace won't be auto-approved.
 

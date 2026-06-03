@@ -25,7 +25,7 @@ import sys as _sys
 import tempfile
 import unittest
 import urllib.error
-from datetime import date
+from datetime import date, datetime, timezone
 from email.message import Message
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -519,10 +519,20 @@ class TestSave(IsolatedHomeTestCase):
         self.assertEqual(text, body)  # exact match — no frontmatter
         self.assertNotIn("Agent:", text)
 
-    def test_save_from_path_no_frontmatter_injection(self) -> None:
-        """--from-path preserves source bytes; never injects."""
+    def test_save_from_path_md_injects_full_block(self) -> None:
+        """A `.md` --from-path move with NO frontmatter gets the full managed
+        block (Agent/Status/Created), with Created sourced from the source
+        file's birthtime — NOT the move time."""
         source = self.cwd / "src.md"
         source.write_text("# Plain body\nNo frontmatter here.\n")
+        old = 1_600_000_000.0  # 2020-09-13T12:26:40Z — distinct from "now"
+        os.utime(source, (old, old))
+        # Assert the exact ISO literal the controlled epoch yields, computed
+        # independently of the CLI's _iso_from_stat — so a regression in that
+        # helper's format/timezone can't pass by deriving expected from itself.
+        # Deterministic cross-platform: Linux has no birthtime (uses mtime=old);
+        # macOS clamps birthtime down to the older mtime, so it also reports old.
+        expected_created = datetime.fromtimestamp(old, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         r = run_cli(
             "save", "--override", "testrepo",
             "--from-path", str(source),
@@ -530,8 +540,198 @@ class TestSave(IsolatedHomeTestCase):
         )
         self.assertEqual(r.returncode, 0, msg=r.stderr)
         text = Path(r.stdout.strip()).read_text()
-        self.assertNotIn("Agent:", text)
-        self.assertNotIn("Status:", text)
+        self.assertTrue(text.startswith("---\n"), f"expected frontmatter, got: {text[:120]!r}")
+        self.assertIn("Agent: claude", text)
+        self.assertIn("Status: backlog", text)
+        self.assertIn(f"Created: {expected_created}", text)
+        self.assertIn("# Plain body", text)
+
+    def test_save_from_path_md_partial_frontmatter_fills_only_created(self) -> None:
+        """A `.md` move with a partial block (Agent present, no Created) gets
+        only the missing fields filled; existing Agent/Status are untouched."""
+        source = self.cwd / "src.md"
+        source.write_text("---\nAgent: codex\nStatus: todo\n---\n\n# Body\n")
+        old = 1_600_000_000.0
+        os.utime(source, (old, old))
+        # Exact literal, computed independently of _iso_from_stat (see the
+        # no-frontmatter test above for why this is deterministic cross-platform).
+        expected_created = datetime.fromtimestamp(old, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        r = run_cli(
+            "save", "--override", "testrepo",
+            "--from-path", str(source),
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        self.assertIn("Agent: codex", text)
+        self.assertNotIn("Agent: claude", text)
+        self.assertIn("Status: todo", text)
+        self.assertIn(f"Created: {expected_created}", text)
+
+    def test_save_from_path_md_existing_created_not_overwritten(self) -> None:
+        """A `.md` move whose body already carries a valid Created keeps it —
+        the move never re-stamps an existing value."""
+        source = self.cwd / "src.md"
+        source.write_text(
+            "---\nAgent: codex\nStatus: todo\nCreated: 2020-01-01T00:00:00Z\n---\n\n# Body\n"
+        )
+        r = run_cli(
+            "save", "--override", "testrepo",
+            "--from-path", str(source),
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        self.assertIn("Created: 2020-01-01T00:00:00Z", text)
+        self.assertEqual(text.count("Created:"), 1)
+
+    def test_save_from_path_md_unlinks_source_on_success(self) -> None:
+        """The .md move is a move, not a copy: a successful injection removes
+        the source. (The non-.md move guarantees this via shutil.move; the .md
+        path rewrites + unlinks, so it needs its own coverage.)"""
+        source = self.cwd / "src.md"
+        source.write_text("# Body\n")
+        r = run_cli(
+            "save", "--override", "testrepo",
+            "--from-path", str(source),
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertTrue(Path(r.stdout.strip()).exists())
+        self.assertFalse(source.exists(), "source must be unlinked after a successful .md move")
+
+    def test_save_from_path_md_malformed_frontmatter_is_retry_safe(self) -> None:
+        """A moved-in .md with malformed frontmatter (no closing '---') must
+        fail BEFORE the source is destroyed, leaving nothing in the target dir —
+        otherwise a half-completed move would strand an unstamped file and break
+        the 'delete only on success' retry contract."""
+        source = self.cwd / "broken.md"
+        source.write_text("---\nAgent: codex\n\n# No closing fence\n")
+        r = run_cli(
+            "save", "--override", "testrepo",
+            "--from-path", str(source),
+            home=self.home,
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("malformed frontmatter", r.stderr)
+        self.assertTrue(source.exists(), "source must survive a malformed-frontmatter failure")
+        self.assertFalse(
+            (self.plans_root / "testrepo" / "broken.md").exists(),
+            "no file should be stranded in the target dir on failure",
+        )
+
+    def test_save_from_path_md_same_path_overwrite_preserves_file(self) -> None:
+        """`--from-path` pointing AT an existing target `.md` with
+        `--on-collision overwrite` must NOT delete the file: write_atomic
+        replaces it in place and the unlink is skipped because source and target
+        resolve to the same path. Without the guard, source.unlink() would
+        delete the freshly stamped plan."""
+        repo_dir = self.plans_root / "testrepo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        target = repo_dir / "2026-06-02-inplace.md"
+        target.write_text("# In place\n")
+        r = run_cli(
+            "save", "--override", "testrepo",
+            "--from-path", str(target), "--on-collision", "overwrite",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertTrue(
+            target.exists(),
+            "the in-place file must survive a same-path overwrite — not be unlinked",
+        )
+        text = target.read_text()
+        self.assertIn("# In place", text)
+        self.assertIn("Status: backlog", text)
+        self.assertIn("Created:", text)
+
+    def test_save_from_path_json_byte_verbatim(self) -> None:
+        """A non-.md (.json) move stays byte-for-byte — no frontmatter, no
+        rewrite. This is the regression guard the verbatim guarantee protects."""
+        source = self.cwd / "data.json"
+        raw = '{"tasks": [1, 2, 3]}\n'
+        source.write_text(raw)
+        r = run_cli(
+            "save", "--override", "testrepo",
+            "--from-path", str(source),
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        written = Path(r.stdout.strip())
+        self.assertEqual(written.read_bytes(), raw.encode("utf-8"))
+        self.assertNotIn("Created", written.read_text())
+        self.assertNotIn("Agent", written.read_text())
+
+
+class TestSaveKind(IsolatedHomeTestCase):
+    """`save --kind` injects a `Kind:` frontmatter line on .md saves, validates
+    the value, and is fill-if-absent."""
+
+    def test_kind_written_on_md_save(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "checkout", "--kind", "prd",
+            stdin="# Checkout\n\nProblem.\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        self.assertIn("Kind: prd", text)
+        self.assertIn("Status: backlog", text)
+
+    def test_no_kind_means_no_kind_line(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "no kind",
+            stdin="# X\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        self.assertNotIn("Kind:", text)
+
+    def test_invalid_kind_rejected(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "bad", "--kind", "blueprint",
+            stdin="# X\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("invalid Kind", r.stderr)
+
+    def test_kind_normalized_lowercase(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "caps", "--kind", "Spec",
+            stdin="# X\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Kind: spec", Path(r.stdout.strip()).read_text())
+
+    def test_kind_rejected_for_non_md_extension(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "tasks",
+            "--kind", "exec-plan", "--extension", "json",
+            stdin="{}\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--kind only applies to .md saves", r.stderr)
+
+    def test_kind_rejected_with_from_path(self) -> None:
+        source = self.cwd / "src.md"
+        source.write_text("# Body\n")
+        r = run_cli(
+            "save", "--override", "scratch",
+            "--from-path", str(source), "--kind", "spec",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--kind is incompatible with --from-path", r.stderr)
+
+    def test_kind_is_fill_if_absent(self) -> None:
+        # Body already declares Kind: design — --kind prd must not stomp it.
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "has kind", "--kind", "prd",
+            stdin="---\nKind: design\n---\n\n# Body\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        self.assertIn("Kind: design", text)
+        self.assertNotIn("Kind: prd", text)
 
 
 class TestArchive(IsolatedHomeTestCase):
@@ -756,6 +956,116 @@ class TestList(IsolatedHomeTestCase):
         self.assertIn("real-plan", r.stdout)
 
 
+class TestListByStatus(IsolatedHomeTestCase):
+    """`list --status <set>` filters active plans by Status frontmatter,
+    orders by the given tier sequence (newest-first within each), annotates
+    each line as `status<TAB>filename`, and reports excluded actives on stderr.
+    """
+
+    def _write(self, name: str, status: str | None) -> None:
+        d = self.plans_root / "scratch"
+        d.mkdir(parents=True, exist_ok=True)
+        if status is None:
+            (d / name).write_text("# no frontmatter\n", encoding="utf-8")
+        else:
+            (d / name).write_text(
+                f"---\nStatus: {status}\n---\n\n# {name}\n", encoding="utf-8"
+            )
+
+    def test_filters_and_orders_by_tier_then_newest(self) -> None:
+        self._write("2026-05-28-a.md", "todo")
+        self._write("2026-05-29-b.md", "in-progress")
+        self._write("2026-05-27-d.md", "in-progress")
+        self._write("2026-05-26-e.md", "in-review")
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "in-progress,todo",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = r.stdout.strip().split("\n")
+        # in-progress group first (newest-first within), then todo group.
+        self.assertEqual(
+            lines,
+            [
+                "in-progress\t2026-05-29-b.md",
+                "in-progress\t2026-05-27-d.md",
+                "todo\t2026-05-28-a.md",
+            ],
+        )
+
+    def test_missing_frontmatter_counts_as_backlog(self) -> None:
+        self._write("2026-05-25-f.md", None)
+        self._write("2026-05-30-c.md", "backlog")
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "todo,backlog",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = r.stdout.strip().split("\n")
+        self.assertIn("backlog\t2026-05-30-c.md", lines)
+        self.assertIn("backlog\t2026-05-25-f.md", lines)
+
+    def test_excluded_actives_summarized_on_stderr(self) -> None:
+        self._write("2026-05-28-a.md", "todo")
+        self._write("2026-05-29-b.md", "in-progress")
+        self._write("2026-05-26-e.md", "in-review")
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "todo,backlog",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # Only the todo plan shows; in-progress + in-review are hidden.
+        self.assertEqual(r.stdout.strip(), "todo\t2026-05-28-a.md")
+        self.assertIn("2 other active plan(s) hidden", r.stderr)
+        self.assertIn("in-progress×1", r.stderr)
+        self.assertIn("in-review×1", r.stderr)
+
+    def test_empty_match_with_hidden_actives(self) -> None:
+        self._write("2026-05-29-b.md", "in-progress")
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "todo,backlog",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "")
+        self.assertIn("1 other active plan(s) hidden", r.stderr)
+
+    def test_foreign_frontmatter_field_honors_real_status(self) -> None:
+        # A foreign field no longer breaks parsing, so the file's real Status
+        # is read (not lost to a backlog fallback).
+        (self.plans_root / "scratch").mkdir(parents=True, exist_ok=True)
+        (self.plans_root / "scratch" / "2026-05-24-g.md").write_text(
+            "---\nBogusKey: x\nStatus: todo\n---\n\n# g\n", encoding="utf-8"
+        )
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "todo,backlog",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "todo\t2026-05-24-g.md")
+
+    def test_genuinely_malformed_frontmatter_falls_back_to_backlog(self) -> None:
+        # A real parse error (line missing its ':') still can't crash the
+        # listing — the file stays visible as backlog.
+        (self.plans_root / "scratch").mkdir(parents=True, exist_ok=True)
+        (self.plans_root / "scratch" / "2026-05-24-g.md").write_text(
+            "---\nStatus todo\n---\n\n# g\n", encoding="utf-8"
+        )
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "todo,backlog",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "backlog\t2026-05-24-g.md")
+
+    def test_no_status_flag_keeps_bare_filename_output(self) -> None:
+        self._write("2026-05-28-a.md", "todo")
+        r = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "2026-05-28-a.md")
+        self.assertNotIn("\t", r.stdout)
+
+
 class TestListRepos(IsolatedHomeTestCase):
     def test_counts_per_state(self) -> None:
         # Two repos, varied content
@@ -905,7 +1215,7 @@ class TestFileMetaGet(IsolatedHomeTestCase):
         )
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
-        self.assertEqual(data, {"Ticket": "", "Ticket System": "", "Completed on": "", "Agent": "", "Status": ""})
+        self.assertEqual(data, {"Ticket": "", "Ticket System": "", "Completed on": "", "Agent": "", "Status": "", "Kind": "", "Created": ""})
 
     def test_full_frontmatter_parses(self) -> None:
         path = self._write_plan(
@@ -928,6 +1238,8 @@ class TestFileMetaGet(IsolatedHomeTestCase):
             "Completed on": "2026-05-20",
             "Agent": "",
             "Status": "",
+            "Kind": "",
+            "Created": "",
         })
 
     def test_partial_frontmatter_returns_present_fields(self) -> None:
@@ -966,14 +1278,17 @@ class TestFileMetaGet(IsolatedHomeTestCase):
         self.assertEqual(result.returncode, 5)
         self.assertIn("closing", result.stderr.lower())
 
-    def test_malformed_frontmatter_unknown_field_exits_5(self) -> None:
+    def test_unknown_field_is_preserved_not_rejected(self) -> None:
+        # Foreign frontmatter (e.g. Obsidian `tags:`) must round-trip, not
+        # crash parsing — the serializer preserves it, so it's no longer lost.
         path = self._write_plan("---\nUnknownField: x\n---\n")
         result = run_cli(
             "file-meta", "get", "--file", str(path),
             home=self.home, cwd=self.cwd,
         )
-        self.assertEqual(result.returncode, 5)
-        self.assertIn("unknown field", result.stderr.lower())
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["UnknownField"], "x")
 
     def test_frontmatter_parses_agent_and_status(self) -> None:
         """Agent and Status are recognized frontmatter fields."""
@@ -1006,15 +1321,16 @@ class TestFileMetaGet(IsolatedHomeTestCase):
         self.assertEqual(meta["Agent"], "")
         self.assertEqual(meta["Status"], "")
 
-    def test_frontmatter_rejects_unknown_key_still(self) -> None:
-        """Whitelist enforcement is preserved after adding Agent/Status."""
+    def test_frontmatter_passes_through_foreign_key(self) -> None:
+        """A field outside the managed vocabulary is read back, not rejected."""
         path = self._write_plan("---\nFakeKey: nope\n---\n# Body\n")
         result = run_cli(
             "file-meta", "get", "--file", str(path),
             home=self.home, cwd=self.cwd,
         )
-        self.assertEqual(result.returncode, 5)
-        self.assertIn("unknown field", result.stderr.lower())
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["FakeKey"], "nope")
 
     def test_missing_file_exits_3(self) -> None:
         result = run_cli(
@@ -1092,6 +1408,29 @@ class TestFileMetaSet(IsolatedHomeTestCase):
         new_text = path.read_text(encoding="utf-8")
         self.assertIn("Ticket: KEEP-1", new_text)
         self.assertIn("Completed on: 2026-05-20", new_text)
+
+    def test_preserves_foreign_field_through_write(self) -> None:
+        # A rewrite (setting a managed field) must not drop foreign frontmatter.
+        path = self._write_plan(
+            "---\n"
+            "tags: [planning, infra]\n"
+            "Ticket: KEEP-1\n"
+            "---\n"
+            "\n# H\n"
+        )
+        result = run_cli(
+            "file-meta", "set",
+            "--file", str(path),
+            "--completed-on", "2026-05-20",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        new_text = path.read_text(encoding="utf-8")
+        self.assertIn("tags: [planning, infra]", new_text)
+        self.assertIn("Ticket: KEEP-1", new_text)
+        self.assertIn("Completed on: 2026-05-20", new_text)
+        # Managed fields serialize in canonical order ahead of foreign ones.
+        self.assertLess(new_text.index("Ticket:"), new_text.index("tags:"))
 
     def test_omits_empty_fields(self) -> None:
         path = self._write_plan("# H\n\nBody.\n")
@@ -1230,6 +1569,28 @@ class TestFileMetaUpdate(IsolatedHomeTestCase):
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("Ticket: ENG-123=draft", plan.read_text())
+
+    def test_file_meta_update_sets_valid_kind(self) -> None:
+        """Kind is whitelisted; a valid value writes back (normalized lowercase)."""
+        plan = self._write_plan("---\nAgent: claude\nStatus: backlog\n---\n\n# Body\n")
+        result = run_cli(
+            "file-meta", "update", "--file", str(plan), "--field", "Kind=Exec-Plan",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Kind: exec-plan", plan.read_text())
+
+    def test_file_meta_update_rejects_invalid_kind(self) -> None:
+        """An out-of-enum Kind is rejected before any write."""
+        plan = self._write_plan("---\nAgent: claude\nStatus: backlog\n---\n\n# Body\n")
+        result = run_cli(
+            "file-meta", "update", "--file", str(plan), "--field", "Kind=blueprint",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("invalid Kind", result.stderr)
+        # File untouched — no Kind line leaked in.
+        self.assertNotIn("Kind:", plan.read_text())
 
 
 class TestTicketSystemConfig(IsolatedHomeTestCase):
@@ -1548,10 +1909,17 @@ class TestTicketSystemConfigRefreshLinear(unittest.TestCase):
         # call into module-level functions, not subprocess.
         self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
         self._home_patch.start()
+        # PLAN_ROOT is frozen at import time (Path.home() / "plans"), so patching
+        # Path.home() above does NOT redirect it — patch the constant directly,
+        # or these in-process tests write to the real ~/plans. Mirrors the
+        # precedent in TestBackfillCreatedBestEffort.
+        self._plan_root_patch = patch.object(self.cli, "PLAN_ROOT", self.home / "plans")
+        self._plan_root_patch.start()
         self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
         self._cwd_patch.start()
 
     def tearDown(self) -> None:
+        self._plan_root_patch.stop()
         self._home_patch.stop()
         self._cwd_patch.stop()
         self._tmp.cleanup()
@@ -1656,10 +2024,17 @@ class TestPushLinearCreate(unittest.TestCase):
         )
         self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
         self._home_patch.start()
+        # PLAN_ROOT is frozen at import time (Path.home() / "plans"), so patching
+        # Path.home() above does NOT redirect it — patch the constant directly,
+        # or these in-process tests write to the real ~/plans. Mirrors the
+        # precedent in TestBackfillCreatedBestEffort.
+        self._plan_root_patch = patch.object(self.cli, "PLAN_ROOT", self.home / "plans")
+        self._plan_root_patch.start()
         self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
         self._cwd_patch.start()
 
     def tearDown(self) -> None:
+        self._plan_root_patch.stop()
         self._home_patch.stop()
         self._cwd_patch.stop()
         self._tmp.cleanup()
@@ -1766,6 +2141,12 @@ class TestPushLinearUpdate(unittest.TestCase):
         )
         self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
         self._home_patch.start()
+        # PLAN_ROOT is frozen at import time (Path.home() / "plans"), so patching
+        # Path.home() above does NOT redirect it — patch the constant directly,
+        # or these in-process tests write to the real ~/plans. Mirrors the
+        # precedent in TestBackfillCreatedBestEffort.
+        self._plan_root_patch = patch.object(self.cli, "PLAN_ROOT", self.home / "plans")
+        self._plan_root_patch.start()
         self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
         self._cwd_patch.start()
         self.cli.save_config("herds", {"linear": {
@@ -1775,6 +2156,7 @@ class TestPushLinearUpdate(unittest.TestCase):
         }})
 
     def tearDown(self) -> None:
+        self._plan_root_patch.stop()
         self._home_patch.stop()
         self._cwd_patch.stop()
         self._tmp.cleanup()
@@ -1960,10 +2342,17 @@ class TestTicketSystemConfigRefreshJira(unittest.TestCase):
         self.cwd.mkdir()
         self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
         self._home_patch.start()
+        # PLAN_ROOT is frozen at import time (Path.home() / "plans"), so patching
+        # Path.home() above does NOT redirect it — patch the constant directly,
+        # or these in-process tests write to the real ~/plans. Mirrors the
+        # precedent in TestBackfillCreatedBestEffort.
+        self._plan_root_patch = patch.object(self.cli, "PLAN_ROOT", self.home / "plans")
+        self._plan_root_patch.start()
         self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
         self._cwd_patch.start()
 
     def tearDown(self) -> None:
+        self._plan_root_patch.stop()
         self._home_patch.stop()
         self._cwd_patch.stop()
         self._tmp.cleanup()
@@ -2025,6 +2414,12 @@ class TestPushJira(unittest.TestCase):
         )
         self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
         self._home_patch.start()
+        # PLAN_ROOT is frozen at import time (Path.home() / "plans"), so patching
+        # Path.home() above does NOT redirect it — patch the constant directly,
+        # or these in-process tests write to the real ~/plans. Mirrors the
+        # precedent in TestBackfillCreatedBestEffort.
+        self._plan_root_patch = patch.object(self.cli, "PLAN_ROOT", self.home / "plans")
+        self._plan_root_patch.start()
         self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
         self._cwd_patch.start()
         self.cli.save_config("herds", {"jira": {
@@ -2041,6 +2436,7 @@ class TestPushJira(unittest.TestCase):
         }})
 
     def tearDown(self) -> None:
+        self._plan_root_patch.stop()
         self._home_patch.stop()
         self._cwd_patch.stop()
         self._tmp.cleanup()
@@ -2140,13 +2536,17 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             issues = json.loads(result.stdout)
             self.assertEqual(len(issues), 3)  # done/ excluded
 
-            by_id = {i["id"]: i for i in issues}
-            self.assertEqual(by_id["2026-01-01-a"]["status"], "todo")
-            self.assertEqual(by_id["2026-01-02-b"]["status"], "other")  # backlog → other
-            self.assertEqual(by_id["2026-01-03-c"]["status"], "in-progress")
-            self.assertEqual(by_id["2026-01-01-a"]["repository"], "groundcrew")
-            self.assertEqual(by_id["2026-01-03-c"]["repository"], "herds")
-            self.assertEqual(by_id["2026-01-01-a"]["model"], "claude")
+            # Ids are synthesized (plan-<digits>), not the filename stem, so
+            # key the lookup on each plan's stem recovered from sourceRef.path.
+            by_stem = {Path(i["sourceRef"]["path"]).stem: i for i in issues}
+            self.assertEqual(by_stem["2026-01-01-a"]["status"], "todo")
+            self.assertEqual(by_stem["2026-01-02-b"]["status"], "other")  # backlog → other
+            self.assertEqual(by_stem["2026-01-03-c"]["status"], "in-progress")
+            self.assertEqual(by_stem["2026-01-01-a"]["repository"], "groundcrew")
+            self.assertEqual(by_stem["2026-01-03-c"]["repository"], "herds")
+            self.assertEqual(by_stem["2026-01-01-a"]["model"], "claude")
+            for issue in issues:
+                self.assertRegex(issue["id"], r"^plan-\d+$")
 
     def test_groundcrew_fetch_uses_h1_as_title(self):
         """Title comes from the first H1 in the body, not the filename."""
@@ -2172,6 +2572,90 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             issues = json.loads(result.stdout)
             self.assertEqual(issues[0]["sourceRef"]["path"], str(plan.resolve()))
 
+    def test_groundcrew_fetch_stamps_id_into_frontmatter(self):
+        """fetch mirrors the synthesized id into the Ticket / Ticket System
+        pair (Ticket System: groundcrew) so a human can see the mapping."""
+        with tempfile.TemporaryDirectory() as home:
+            d = Path(home) / "plans" / "herds"
+            d.mkdir(parents=True)
+            plan = d / "2026-04-30-typed-models.md"
+            plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# Typed\n")
+            issues = json.loads(
+                run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd).stdout
+            )
+            text = plan.read_text()
+            self.assertIn(f"Ticket: {issues[0]['id']}", text)
+            self.assertIn("Ticket System: groundcrew", text)
+
+    def test_groundcrew_fetch_stamp_is_idempotent(self):
+        """Once stamped, repeated fetches don't rewrite the file."""
+        with tempfile.TemporaryDirectory() as home:
+            d = Path(home) / "plans" / "r"
+            d.mkdir(parents=True)
+            plan = d / "2026-01-01-x.md"
+            plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# T\n")
+            run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
+            after_first = plan.read_text()
+            run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
+            self.assertEqual(plan.read_text(), after_first)
+
+    def test_groundcrew_fetch_stamp_preserves_foreign_fields(self):
+        """Stamping the id keeps foreign frontmatter (Obsidian tags etc.)."""
+        with tempfile.TemporaryDirectory() as home:
+            d = Path(home) / "plans" / "r"
+            d.mkdir(parents=True)
+            plan = d / "2026-01-01-x.md"
+            plan.write_text(
+                "---\ntags: [infra]\nAgent: claude\nStatus: todo\n---\n# T\n"
+            )
+            issues = json.loads(
+                run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd).stdout
+            )
+            text = plan.read_text()
+            self.assertIn("tags: [infra]", text)
+            self.assertIn(f"Ticket: {issues[0]['id']}", text)
+
+    def test_groundcrew_fetch_heals_stale_stamp(self):
+        """A stale groundcrew Ticket is corrected to the canonical (hash) id —
+        the frontmatter is a mirror, never the source of truth."""
+        with tempfile.TemporaryDirectory() as home:
+            d = Path(home) / "plans" / "r"
+            d.mkdir(parents=True)
+            plan = d / "2026-01-01-x.md"
+            plan.write_text(
+                "---\nTicket: plan-999999\nTicket System: groundcrew\n"
+                "Agent: claude\nStatus: todo\n---\n# T\n"
+            )
+            issues = json.loads(
+                run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd).stdout
+            )
+            self.assertNotEqual(issues[0]["id"], "plan-999999")
+            self.assertIn(f"Ticket: {issues[0]['id']}", plan.read_text())
+            self.assertNotIn("plan-999999", plan.read_text())
+
+    def test_groundcrew_fetch_does_not_clobber_external_ticket(self):
+        """A plan already filed in Linear/Jira keeps its tracker reference;
+        groundcrew dispatches via the recomputed id without touching it."""
+        with tempfile.TemporaryDirectory() as home:
+            d = Path(home) / "plans" / "r"
+            d.mkdir(parents=True)
+            plan = d / "2026-01-01-x.md"
+            plan.write_text(
+                "---\nTicket: ENG-1\nTicket System: linear\n"
+                "Agent: claude\nStatus: todo\n---\n# T\n"
+            )
+            issues = json.loads(
+                run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd).stdout
+            )
+            text = plan.read_text()
+            self.assertIn("Ticket: ENG-1", text)
+            self.assertIn("Ticket System: linear", text)
+            self.assertRegex(issues[0]["id"], r"^plan-\d+$")
+            # The recomputed id still resolves the plan.
+            r = run_cli("groundcrew-resolve-one", issues[0]["id"],
+                        home=Path(home), cwd=self.cwd)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+
     def test_groundcrew_fetch_skips_files_without_frontmatter(self):
         """A bare .md (no frontmatter) is skipped, not crashed on."""
         with tempfile.TemporaryDirectory() as home:
@@ -2182,9 +2666,25 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             result = run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
             self.assertEqual(result.returncode, 0)
             issues = json.loads(result.stdout)
-            ids = {i["id"] for i in issues}
-            self.assertIn("good", ids)
-            self.assertNotIn("bare", ids)
+            stems = {Path(i["sourceRef"]["path"]).stem for i in issues}
+            self.assertIn("good", stems)
+            self.assertNotIn("bare", stems)
+
+    def test_groundcrew_fetch_includes_plan_with_foreign_frontmatter(self):
+        """Regression: a plan with extra frontmatter (e.g. Obsidian tags) must
+        not silently vanish from the queue — it parses and is dispatchable."""
+        with tempfile.TemporaryDirectory() as home:
+            d = Path(home) / "plans" / "herds"
+            d.mkdir(parents=True)
+            (d / "2026-01-01-tagged.md").write_text(
+                "---\ntags: [infra]\nAgent: claude\nStatus: todo\n---\n# Tagged\n"
+            )
+            result = run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            issues = json.loads(result.stdout)
+            self.assertEqual(len(issues), 1)
+            self.assertEqual(issues[0]["status"], "todo")
+            self.assertRegex(issues[0]["id"], r"^plan-\d+$")
 
     def test_groundcrew_fetch_empty_when_no_plans(self):
         """`[]` (not error) when ~/plans/ is empty or missing."""
@@ -2194,22 +2694,81 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             self.assertEqual(json.loads(result.stdout), [])
 
 
+class TestGroundcrewId(IsolatedHomeTestCase):
+    """Synthesized groundcrew ticket id (stateless deterministic hash)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.cli = _import_cli_module()
+
+    def test_id_matches_groundcrew_ticket_shape(self):
+        # groundcrew enforces TICKET_RE = /^[a-z][\\da-z]*-\\d+$/.
+        self.assertRegex(
+            self.cli.groundcrew_id("herds", "2026-04-30-foo"),
+            r"^[a-z][\da-z]*-\d+$",
+        )
+
+    def test_id_is_stable_across_calls(self):
+        self.assertEqual(
+            self.cli.groundcrew_id("herds", "2026-04-30-foo"),
+            self.cli.groundcrew_id("herds", "2026-04-30-foo"),
+        )
+
+    def test_id_differs_by_repo(self):
+        # Same stem in two repos must not collide: groundcrew uses the bare
+        # id as a git branch and run-state filename, with no repo qualifier.
+        self.assertNotEqual(
+            self.cli.groundcrew_id("r1", "2026-01-01-x"),
+            self.cli.groundcrew_id("r2", "2026-01-01-x"),
+        )
+
+    def test_id_differs_by_stem(self):
+        self.assertNotEqual(
+            self.cli.groundcrew_id("r", "2026-01-01-x"),
+            self.cli.groundcrew_id("r", "2026-01-02-y"),
+        )
+
+    def test_collision_guard_raises_with_both_paths(self):
+        issues = [
+            {"id": "plan-1", "sourceRef": {"path": "/a.md"}},
+            {"id": "plan-1", "sourceRef": {"path": "/b.md"}},
+        ]
+        with self.assertRaises(self.cli.PlanKeeperCliError) as ctx:
+            self.cli._assert_no_groundcrew_id_collisions(issues)
+        self.assertIn("/a.md", str(ctx.exception))
+        self.assertIn("/b.md", str(ctx.exception))
+
+    def test_collision_guard_passes_distinct_ids(self):
+        issues = [
+            {"id": "plan-1", "sourceRef": {"path": "/a.md"}},
+            {"id": "plan-2", "sourceRef": {"path": "/b.md"}},
+        ]
+        self.cli._assert_no_groundcrew_id_collisions(issues)  # no raise
+
+
 class TestGroundcrewResolveOne(IsolatedHomeTestCase):
     """Tests for the groundcrew-resolve-one subcommand."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        # A real caller passes resolve-one an id it got from a prior fetch.
+        # Tests reproduce that by computing the same id via the module fn.
+        self.cli = _import_cli_module()
 
     def test_groundcrew_resolve_one_finds_active_plan(self):
         d = self.home / "plans" / "r"
         d.mkdir(parents=True)
-        (d / "2026-01-01-x.md").write_text(
-            "---\nAgent: claude\nStatus: todo\n---\n# Title\n"
-        )
-        result = run_cli("groundcrew-resolve-one", "2026-01-01-x",
+        plan = d / "2026-01-01-x.md"
+        plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# Title\n")
+        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        result = run_cli("groundcrew-resolve-one", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         issue = json.loads(result.stdout)
-        self.assertEqual(issue["id"], "2026-01-01-x")
+        self.assertEqual(issue["id"], ticket)
         self.assertEqual(issue["status"], "todo")
         self.assertEqual(issue["title"], "Title")
+        self.assertEqual(issue["sourceRef"]["path"], str(plan.resolve()))
 
     def test_groundcrew_resolve_one_finds_done_plan(self):
         d = self.home / "plans" / "r" / "done"
@@ -2217,7 +2776,10 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         (d / "2025-12-31-old.md").write_text(
             "---\nAgent: claude\nStatus: done\n---\n# Old\n"
         )
-        result = run_cli("groundcrew-resolve-one", "2025-12-31-old",
+        # Archived plan's repo is the grandparent dir ("r"), so its id is
+        # keyed on ("r", stem) — same as when it was active.
+        ticket = self.cli.groundcrew_id("r", "2025-12-31-old")
+        result = run_cli("groundcrew-resolve-one", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0)
         issue = json.loads(result.stdout)
@@ -2245,7 +2807,8 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         (d / "2025-12-31-old.md").write_text(
             "---\nAgent: claude\nStatus: done\n---\n# Old\n"
         )
-        result = run_cli("groundcrew-resolve-one", "2025-12-31-old",
+        ticket = self.cli.groundcrew_id("myrepo", "2025-12-31-old")
+        result = run_cli("groundcrew-resolve-one", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         issue = json.loads(result.stdout)
@@ -2258,11 +2821,30 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         (d / "2025-06-15-paused.md").write_text(
             "---\nAgent: claude\nStatus: backlog\n---\n# Paused\n"
         )
-        result = run_cli("groundcrew-resolve-one", "2025-06-15-paused",
+        ticket = self.cli.groundcrew_id("myrepo", "2025-06-15-paused")
+        result = run_cli("groundcrew-resolve-one", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         issue = json.loads(result.stdout)
         self.assertEqual(issue["repository"], "myrepo")
+
+    def test_groundcrew_resolve_one_round_trips_fetched_id(self):
+        """The id fetch emits resolves back to the exact same plan file."""
+        d = self.home / "plans" / "herds"
+        d.mkdir(parents=True)
+        plan = d / "2026-04-30-notification-service-typed-models.md"
+        plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# Typed models\n")
+
+        issues = json.loads(
+            run_cli("groundcrew-fetch", home=self.home, cwd=self.cwd).stdout
+        )
+        ticket = issues[0]["id"]
+        result = run_cli("groundcrew-resolve-one", ticket,
+                         home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        issue = json.loads(result.stdout)
+        self.assertEqual(issue["id"], ticket)
+        self.assertEqual(issue["sourceRef"]["path"], str(plan.resolve()))
 
 
 class TestGroundcrewMarkInProgress(IsolatedHomeTestCase):
@@ -2360,6 +2942,529 @@ class TestGroundcrewMarkInProgress(IsolatedHomeTestCase):
         )
         self.assertEqual(result.returncode, 2)
         self.assertIn("'path' field required", result.stderr)
+
+
+class TestQueue(IsolatedHomeTestCase):
+    """Cross-repo `queue list` / `queue set` for the plan-crew skill."""
+
+    def _make_plan(
+        self, repo: str, name: str, status: str = "", agent: str = ""
+    ) -> Path:
+        """Create ~/<home>/plans/<repo>/<name> with optional Status/Agent."""
+        d = self.plans_root / repo
+        d.mkdir(parents=True, exist_ok=True)
+        fm = ["---"]
+        if agent:
+            fm.append(f"Agent: {agent}")
+        if status:
+            fm.append(f"Status: {status}")
+        fm.append("---")
+        p = d / name
+        p.write_text("\n".join(fm) + f"\n\n# {name}\n", encoding="utf-8")
+        return p
+
+    def test_queue_list_empty_when_no_plans(self) -> None:
+        r = run_cli("queue", "list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout), [])
+
+    def test_queue_list_reports_status_and_agent_across_repos(self) -> None:
+        self._make_plan("alpha", "2026-05-01-a.md", status="todo", agent="codex")
+        self._make_plan("beta", "2026-05-02-b.md", status="backlog")
+        r = run_cli("queue", "list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = json.loads(r.stdout)
+        by_file = {row["file"]: row for row in rows}
+        self.assertEqual(
+            by_file["2026-05-01-a.md"],
+            {"repo": "alpha", "file": "2026-05-01-a.md", "status": "todo", "agent": "codex"},
+        )
+        self.assertEqual(
+            by_file["2026-05-02-b.md"],
+            {"repo": "beta", "file": "2026-05-02-b.md", "status": "backlog", "agent": ""},
+        )
+
+    def test_queue_list_skips_done_and_deferred_and_no_frontmatter(self) -> None:
+        self._make_plan("alpha", "2026-05-01-active.md", status="backlog")
+        # archived/paused subdirs must be ignored
+        done = self.plans_root / "alpha" / "done"
+        done.mkdir(parents=True, exist_ok=True)
+        (done / "2026-04-01-old.md").write_text(
+            "---\nStatus: done\n---\n\n# old\n", encoding="utf-8"
+        )
+        deferred = self.plans_root / "alpha" / "deferred"
+        deferred.mkdir(parents=True, exist_ok=True)
+        (deferred / "2026-04-02-paused.md").write_text(
+            "---\nStatus: backlog\n---\n\n# paused\n", encoding="utf-8"
+        )
+        # a non-plan .md with no frontmatter must be skipped
+        (self.plans_root / "alpha" / "README.md").write_text(
+            "# not a plan\n", encoding="utf-8"
+        )
+        r = run_cli("queue", "list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        files = sorted(row["file"] for row in json.loads(r.stdout))
+        self.assertEqual(files, ["2026-05-01-active.md"])
+
+    def test_queue_list_surfaces_in_progress_and_in_review(self) -> None:
+        self._make_plan("alpha", "2026-05-01-a.md", status="in-progress", agent="claude")
+        self._make_plan("alpha", "2026-05-02-b.md", status="in-review")
+        r = run_cli("queue", "list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        by_file = {row["file"]: row["status"] for row in json.loads(r.stdout)}
+        self.assertEqual(by_file["2026-05-01-a.md"], "in-progress")
+        self.assertEqual(by_file["2026-05-02-b.md"], "in-review")
+
+    def test_queue_list_empty_status_plan(self) -> None:
+        self._make_plan("alpha", "2026-05-01-a.md", agent="codex")  # no Status line
+        r = run_cli("queue", "list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = json.loads(r.stdout)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["status"], "")
+        self.assertEqual(rows[0]["agent"], "codex")
+
+    def test_queue_set_promotes_backlog_to_todo(self) -> None:
+        p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog", agent="codex")
+        r = run_cli(
+            "queue", "set", "--status", "todo",
+            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = p.read_text()
+        self.assertIn("Status: todo", text)
+        self.assertNotIn("Status: backlog", text)
+        self.assertIn("Agent: codex", text)  # existing Agent untouched
+
+    def test_queue_set_promote_stamps_groundcrew_ticket(self) -> None:
+        # Promoting a plan claims the groundcrew Ticket pair so the id is
+        # visible the moment it's queued.
+        p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")
+        r = run_cli(
+            "queue", "set", "--status", "todo",
+            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = p.read_text()
+        self.assertRegex(text, r"Ticket: plan-\d+")
+        self.assertIn("Ticket System: groundcrew", text)
+
+    def test_queue_set_promote_does_not_clobber_external_ticket(self) -> None:
+        # A plan already filed in Linear keeps its tracker reference on promote.
+        d = self.plans_root / "alpha"
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / "2026-05-01-a.md"
+        p.write_text(
+            "---\nTicket: ENG-1\nTicket System: linear\nStatus: backlog\n---\n\n# a\n",
+            encoding="utf-8",
+        )
+        r = run_cli(
+            "queue", "set", "--status", "todo",
+            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = p.read_text()
+        self.assertIn("Ticket: ENG-1", text)
+        self.assertIn("Ticket System: linear", text)
+        self.assertNotIn("groundcrew", text)
+
+    def test_queue_set_dequeue_does_not_stamp_groundcrew(self) -> None:
+        p = self._make_plan("alpha", "2026-05-01-a.md", status="todo")
+        r = run_cli(
+            "queue", "set", "--status", "backlog",
+            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("groundcrew", p.read_text())
+
+    def test_queue_set_promote_fills_missing_agent_with_default(self) -> None:
+        p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")  # no Agent
+        r = run_cli(
+            "queue", "set", "--status", "todo", "--default-agent", "claude",
+            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = p.read_text()
+        self.assertIn("Status: todo", text)
+        self.assertIn("Agent: claude", text)
+
+    def test_queue_set_promote_keeps_existing_agent_over_default(self) -> None:
+        p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog", agent="codex")
+        r = run_cli(
+            "queue", "set", "--status", "todo", "--default-agent", "claude",
+            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = p.read_text()
+        self.assertIn("Agent: codex", text)
+        self.assertNotIn("Agent: claude", text)
+
+    def test_queue_set_dequeues_todo_to_backlog_without_touching_agent(self) -> None:
+        p = self._make_plan("alpha", "2026-05-01-a.md", status="todo")  # no Agent
+        r = run_cli(
+            "queue", "set", "--status", "backlog", "--default-agent", "claude",
+            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = p.read_text()
+        self.assertIn("Status: backlog", text)
+        self.assertNotIn("Agent:", text)  # dequeue never writes a default Agent
+
+    def test_queue_set_promotes_multiple_plans_in_one_call(self) -> None:
+        p1 = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")
+        p2 = self._make_plan("beta", "2026-05-02-b.md", status="backlog")
+        r = run_cli(
+            "queue", "set", "--status", "todo", "--default-agent", "claude",
+            stdin=f"{p1}\n{p2}\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Status: todo", p1.read_text())
+        self.assertIn("Status: todo", p2.read_text())
+
+    def test_queue_set_rejects_path_outside_plan_root(self) -> None:
+        outside = self.home / "evil.md"
+        outside.write_text("---\nStatus: backlog\n---\n\n# evil\n", encoding="utf-8")
+        r = run_cli(
+            "queue", "set", "--status", "todo",
+            stdin=str(outside) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("outside PLAN_ROOT", r.stderr)
+        self.assertIn("Status: backlog", outside.read_text())  # untouched
+
+    def test_queue_set_rejects_plan_without_frontmatter(self) -> None:
+        d = self.plans_root / "alpha"
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / "2026-05-01-a.md"
+        p.write_text("# no frontmatter\n", encoding="utf-8")
+        r = run_cli(
+            "queue", "set", "--status", "todo",
+            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no frontmatter", r.stderr)
+
+    def test_queue_set_errors_on_empty_stdin(self) -> None:
+        r = run_cli(
+            "queue", "set", "--status", "todo",
+            stdin="\n  \n", home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no plan paths", r.stderr)
+
+    def test_queue_set_is_all_or_nothing_on_bad_path(self) -> None:
+        good = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")
+        bad = self.plans_root / "alpha" / "missing.md"  # does not exist
+        r = run_cli(
+            "queue", "set", "--status", "todo",
+            stdin=f"{good}\n{bad}\n", home=self.home, cwd=self.cwd,
+        )
+        self.assertNotEqual(r.returncode, 0)
+        # good plan must be untouched because validation fails before any write
+        self.assertIn("Status: backlog", good.read_text())
+
+
+class TestCreatedStamp(IsolatedHomeTestCase):
+    """`save` records a `Created:` ISO-8601 stamp, fill-if-absent."""
+
+    def test_save_injects_created_iso(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "stamp me",
+            stdin="# Body\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        # e.g. "Created: 2026-06-02T14:30:00Z"
+        self.assertRegex(text, r"Created: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+
+    def test_created_is_fill_if_absent(self) -> None:
+        # A hand-written Created in the body must win over the save-time stamp.
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "preset",
+            stdin="---\nCreated: 2020-01-01T00:00:00Z\n---\n\n# Body\n",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        self.assertEqual(text.count("Created:"), 1)
+        self.assertIn("Created: 2020-01-01T00:00:00Z", text)
+
+    def test_non_md_save_has_no_created(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "data", "--extension", "json",
+            stdin='{"a": 1}\n', home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("Created:", Path(r.stdout.strip()).read_text())
+
+
+class TestListIntraDayOrder(IsolatedHomeTestCase):
+    """list orders by `Created` (newest-first) with intra-day precision,
+    falling back to the filename date when Created is absent."""
+
+    def _write(self, name: str, created: str | None) -> None:
+        d = self.plans_root / "scratch"
+        d.mkdir(parents=True, exist_ok=True)
+        fm = "Status: todo\n"
+        if created is not None:
+            fm += f"Created: {created}\n"
+        (d / name).write_text(f"---\n{fm}---\n\n# {name}\n", encoding="utf-8")
+
+    def test_created_overrides_filename_alphabetical_within_day(self) -> None:
+        # Same day. Alphabetically apple < zebra, so the old filename-desc sort
+        # put zebra first. But apple was Created later → it must now lead.
+        self._write("2026-06-02-apple.md", "2026-06-02T15:00:00Z")
+        self._write("2026-06-02-zebra.md", "2026-06-02T09:00:00Z")
+        r = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            r.stdout.strip().split("\n"),
+            ["2026-06-02-apple.md", "2026-06-02-zebra.md"],
+        )
+
+    def test_malformed_created_falls_back_to_filename_date(self) -> None:
+        # A half-valid `Created` (matches YYYY-MM-DD but has trailing junk) must
+        # NOT be trusted as the sort key — it falls back to the filename date.
+        # If it were trusted, "2026-06-02 junk" (space < 'T') would sort below
+        # the well-formed midnight stamp, flipping the name-tiebreak order.
+        self._write("2026-06-02-zzz.md", "2026-06-02 junk")
+        self._write("2026-06-02-aaa.md", "2026-06-02T00:00:00Z")
+        r = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # Both resolve to the same midnight key → tiebreak on filename desc.
+        self.assertEqual(
+            r.stdout.strip().split("\n"),
+            ["2026-06-02-zzz.md", "2026-06-02-aaa.md"],
+        )
+
+    def test_cross_day_still_orders_by_date(self) -> None:
+        self._write("2026-06-01-old.md", "2026-06-01T23:00:00Z")
+        self._write("2026-06-02-new.md", "2026-06-02T01:00:00Z")
+        r = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertEqual(
+            r.stdout.strip().split("\n"),
+            ["2026-06-02-new.md", "2026-06-01-old.md"],
+        )
+
+    def test_missing_created_falls_back_to_filename_date(self) -> None:
+        # No-Created plan dated 06-03 must sort above a Created plan dated 06-01,
+        # because the fallback uses the filename's day.
+        self._write("2026-06-03-nostamp.md", None)
+        self._write("2026-06-01-stamped.md", "2026-06-01T12:00:00Z")
+        r = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertEqual(
+            r.stdout.strip().split("\n"),
+            ["2026-06-03-nostamp.md", "2026-06-01-stamped.md"],
+        )
+
+    def test_status_filtered_listing_respects_created_order(self) -> None:
+        # The --status path stable-sorts by tier over list_plans' order, so the
+        # Created ordering must survive inside a status group.
+        self._write("2026-06-02-apple.md", "2026-06-02T15:00:00Z")
+        self._write("2026-06-02-zebra.md", "2026-06-02T09:00:00Z")
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "todo", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            r.stdout.strip().split("\n"),
+            ["todo\t2026-06-02-apple.md", "todo\t2026-06-02-zebra.md"],
+        )
+
+    def test_order_survives_status_mutation(self) -> None:
+        # A status flip rewrites the file (new inode/birthtime) but Created is
+        # untouched, so the relative order must not change.
+        self._write("2026-06-02-apple.md", "2026-06-02T15:00:00Z")
+        self._write("2026-06-02-zebra.md", "2026-06-02T09:00:00Z")
+        d = self.plans_root / "scratch"
+        run_cli(
+            "file-meta", "update", "--file", str(d / "2026-06-02-zebra.md"),
+            "--field", "Status=in-progress", home=self.home,
+        )
+        r = run_cli("list", "--override", "scratch", home=self.home)
+        self.assertEqual(
+            r.stdout.strip().split("\n"),
+            ["2026-06-02-apple.md", "2026-06-02-zebra.md"],
+        )
+
+
+class TestBackfillCreated(IsolatedHomeTestCase):
+    """`backfill-created` stamps `Created` (from file birthtime) on plans
+    missing it, idempotently, skipping files it can't or shouldn't touch."""
+
+    def _write(self, name: str, body: str) -> Path:
+        d = self.plans_root / "scratch"
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / name
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_stamps_plan_missing_created(self) -> None:
+        path = self._write("2026-06-01-a.md", "---\nStatus: todo\n---\n\n# A\n")
+        r = run_cli("backfill-created", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("backfilled Created on 1 plan(s)", r.stdout)
+        self.assertRegex(
+            path.read_text(), r"Created: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
+        )
+
+    def test_idempotent_skips_already_stamped(self) -> None:
+        self._write(
+            "2026-06-01-a.md",
+            "---\nStatus: todo\nCreated: 2026-06-01T08:00:00Z\n---\n\n# A\n",
+        )
+        r = run_cli("backfill-created", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("backfilled Created on 0 plan(s)", r.stdout)
+        # Existing value preserved.
+        self.assertIn(
+            "Created: 2026-06-01T08:00:00Z",
+            (self.plans_root / "scratch" / "2026-06-01-a.md").read_text(),
+        )
+
+    def test_skips_non_md_and_no_frontmatter(self) -> None:
+        self._write("2026-06-01-data.json", '{"a": 1}\n')
+        bare = self._write("2026-06-01-bare.md", "# No frontmatter\n")
+        r = run_cli("backfill-created", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("backfilled Created on 0 plan(s)", r.stdout)
+        self.assertNotIn("Created:", bare.read_text())
+
+    def test_covers_done_subdir(self) -> None:
+        d = self.plans_root / "scratch" / "done"
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / "2026-06-01-archived.md"
+        path.write_text("---\nStatus: done\n---\n\n# Archived\n", encoding="utf-8")
+        r = run_cli("backfill-created", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Created:", path.read_text())
+
+
+class TestBackfillCreatedBestEffort(unittest.TestCase):
+    """A stat/write failure on one file must not abort the whole run.
+
+    In-process (patches write_atomic) because the subprocess harness can't
+    inject a filesystem error.
+    """
+
+    def setUp(self) -> None:
+        self.cli = _import_cli_module()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name) / "plans"
+        (self.root / "scratch").mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _write(self, name: str) -> Path:
+        path = self.root / "scratch" / name
+        path.write_text("---\nStatus: todo\n---\n\n# x\n", encoding="utf-8")
+        return path
+
+    def test_write_failure_on_one_file_does_not_abort(self) -> None:
+        bad = self._write("2026-06-01-bad.md")
+        good = self._write("2026-06-02-good.md")
+        real_write = self.cli.write_atomic
+
+        def flaky_write(path: Path, content: str) -> None:
+            if path == bad:
+                raise OSError("disk gone")
+            real_write(path, content)
+
+        args = MagicMock()
+        args.override = "scratch"
+        with patch.object(self.cli, "PLAN_ROOT", self.root), \
+             patch.object(self.cli, "write_atomic", side_effect=flaky_write):
+            rc = self.cli.cmd_backfill_created(args)
+        self.assertEqual(rc, 0)
+        # The healthy file is still stamped even though the other file errored.
+        self.assertIn("Created:", good.read_text())
+        self.assertNotIn("Created:", bad.read_text())
+
+
+class TestResolveTicket(IsolatedHomeTestCase):
+    def _save_with_ticket(self, repo: str, topic: str, ticket: str) -> Path:
+        r = run_cli("save", "--override", repo, "--topic", topic,
+                    stdin="# Body\ntext\n", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        path = Path(r.stdout.strip())
+        u = run_cli("file-meta", "update", "--file", str(path),
+                    "--field", f"Ticket={ticket}", home=self.home)
+        self.assertEqual(u.returncode, 0, u.stderr)
+        return path
+
+    def test_archive_by_groundcrew_ticket(self) -> None:
+        src = self._save_with_ticket("scratch", "p1", "plan-195296912509085")
+        r = run_cli("archive", "--ticket", "plan-195296912509085", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        target = self.plans_root / "scratch" / "done" / src.name
+        self.assertEqual(r.stdout.strip(), str(target))
+        self.assertTrue(target.exists())
+        self.assertFalse(src.exists())
+
+    def test_archive_by_linear_ticket(self) -> None:
+        src = self._save_with_ticket("scratch", "p2", "ENG-42")
+        r = run_cli("archive", "--ticket", "ENG-42", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((self.plans_root / "scratch" / "done" / src.name).exists())
+
+    def test_archive_ticket_not_found_exits_3(self) -> None:
+        r = run_cli("archive", "--ticket", "plan-000", home=self.home)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("no active plan", r.stderr)
+
+    def test_archive_ticket_multi_match_exits_2(self) -> None:
+        self._save_with_ticket("scratch", "a", "DUP-1")
+        self._save_with_ticket("other", "b", "DUP-1")
+        r = run_cli("archive", "--ticket", "DUP-1", home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("matches 2 plans", r.stderr)
+
+    def test_archive_both_file_and_ticket_exits_2(self) -> None:
+        r = run_cli("archive", "--override", "scratch",
+                    "--file", "x.md", "--ticket", "plan-1", home=self.home)
+        self.assertEqual(r.returncode, 2)
+
+    def test_archive_neither_file_nor_ticket_exits_2(self) -> None:
+        r = run_cli("archive", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 2)
+
+    def test_file_meta_update_by_ticket(self) -> None:
+        src = self._save_with_ticket("scratch", "u", "plan-77")
+        r = run_cli("file-meta", "update", "--ticket", "plan-77",
+                    "--field", "Status=todo", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        meta = run_cli("file-meta", "get", "--file", str(src), home=self.home)
+        self.assertIn('"Status": "todo"', meta.stdout)
+
+    def test_file_meta_update_ticket_not_found_exits_3(self) -> None:
+        r = run_cli("file-meta", "update", "--ticket", "plan-nope",
+                    "--field", "Status=todo", home=self.home)
+        self.assertEqual(r.returncode, 3)
+
+    def test_file_meta_update_both_file_and_ticket_exits_2(self) -> None:
+        r = run_cli("file-meta", "update", "--file", "x.md",
+                    "--ticket", "plan-1", "--field", "Status=todo", home=self.home)
+        self.assertEqual(r.returncode, 2)
+
+    def test_file_meta_update_neither_file_nor_ticket_exits_2(self) -> None:
+        r = run_cli("file-meta", "update", "--field", "Status=todo", home=self.home)
+        self.assertEqual(r.returncode, 2)
+
+    def test_push_ticket_not_found_exits_3(self) -> None:
+        r = run_cli("push", "--name", "linear", "--ticket", "plan-absent",
+                    home=self.home)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("no active plan", r.stderr)
+
+    def test_push_both_file_and_ticket_exits_2(self) -> None:
+        r = run_cli("push", "--name", "linear", "--file", "x.md",
+                    "--ticket", "plan-1", home=self.home)
+        self.assertEqual(r.returncode, 2)
+
+    def test_push_neither_file_nor_ticket_exits_2(self) -> None:
+        r = run_cli("push", "--name", "linear", home=self.home)
+        self.assertEqual(r.returncode, 2)
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ Pairs with [`plan-save`](../plan-save/) (which wrote it) and [`plan-do`](../plan
 
 ## What it does
 
-1. **Identifies the plan.** Prefers a candidate visible in this session — a plan opened by `plan-do` earlier, a filename referenced in recent messages, or one whose topic clearly matches the work just completed. Falls back to a numbered listing via `plan_keeper_cli.py list`.
+1. **Identifies the plan.** Prefers a candidate visible in this session — a plan opened by `plan-do` earlier, a filename referenced in recent messages, or one whose topic clearly matches the work just completed. Falls back to a numbered listing via `plan_keeper_cli.py list --status in-progress,todo` — the plans worth finishing, **in-progress first** (the one you most likely just completed), then `todo`. Other active plans (backlog, in-review) are hidden, with a count on stderr.
 2. **Confirms** the source → destination paths with the user. Always — the skill mutates the tree (file move), so it never auto-archives.
 3. **Invokes the CLI:** `plan_keeper_cli.py archive --file <filename>`. The CLI reads the source, appends a blank line + `---` + `*Completed: <today>*`, atomically writes to `~/plans/<repo>/done/`, then unlinks the source.
 4. **Handles collisions.** On exit 2 (same-name file already in `done/`), asks: overwrite / suffix `-2` / cancel.

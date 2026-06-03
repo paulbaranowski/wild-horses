@@ -1,3 +1,9 @@
 .claude/settings.local.json
 __pycache__/
 *.pyc
+
+# Python build artifacts from `pip install .` / `python -m build` of the
+# standalone plan-keeper CLI (plugins/plan-keeper/scripts/pyproject.toml).
+build/
+dist/
+*.egg-info/

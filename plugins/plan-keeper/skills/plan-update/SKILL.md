@@ -10,12 +10,14 @@ Edit the frontmatter of an existing plan in `~/plans/<repo>/`. The bundled `plan
 ## Quick reference
 
 - **Target:** `~/plans/<repo>/<filename>` (active state — not `done/` or `deferred/`).
-- **Whitelisted fields:** `Agent`, `Status`, `Ticket`, `Ticket System`, `Completed on`.
-- **Status vocabulary:** `backlog` (default; visible to `crew doctor`, not dispatched), `todo` (eligible for dispatch), `in-progress` (set by groundcrew's markInProgress hook), `in-review` (manual), `done` (set by plan-done when archiving). The middle values (`in-progress`, `done`) are normally written by the system — set them by hand only if you know why.
+- **Whitelisted fields:** `Agent`, `Status`, `Ticket`, `Ticket System`, `Completed on`, `Kind`.
+- **Status vocabulary:** `backlog` (default; fetched but not dispatched — confirm via `crew status <id>`), `todo` (eligible for dispatch), `in-progress` (set by groundcrew's markInProgress hook), `in-review` (manual), `done` (set by plan-done when archiving). The middle values (`in-progress`, `done`) are normally written by the system — set them by hand only if you know why.
+- **Kind vocabulary:** `idea` / `prd` / `design` / `spec` / `exec-plan` — the document type, validated against this closed set (see [../../plan-kinds.md](../../plan-kinds.md)). Set by `plan-save`; correct it here if it was inferred wrong.
 - **Common edits:**
   - Promote: `--field Status=todo` (makes the plan eligible for groundcrew dispatch).
   - Change model: `--field Agent=codex`.
   - Reset: `--field Status=backlog`.
+  - Reclassify: `--field Kind=design` (changes how `plan-do` routes the plan).
 - **Confirmation:** required before any mutation.
 
 ## Procedure
@@ -30,6 +32,8 @@ Otherwise, list active plans:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list
 ```
 
+**Run this command fresh every time you reach this step — including on a re-invocation later in the same conversation.** Never reprint an earlier listing from memory: plans get saved, archived, or change status between turns, so a cached list can be stale. The numbered list you show must come from the output you just ran.
+
 Present numbered to the user; they pick.
 
 ### 2. Identify the field(s) to change
@@ -39,6 +43,7 @@ Match the user's invocation:
 - "promote to todo" / "mark ready" / "set status to todo" → `--field Status=todo`
 - "change agent to codex" / "use codex" → `--field Agent=codex`
 - "back to backlog" / "reset" → `--field Status=backlog`
+- "it's actually a spec/design/prd/idea/exec-plan" / "reclassify" → `--field Kind=<value>`
 - Anything else: ask which field, which value.
 
 Multiple fields → repeat `--field` flag.
@@ -62,7 +67,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta update \
   --field "<Key>=<value>"
 ```
 
-Add additional `--field` flags as needed.
+Add additional `--field` flags as needed. `--ticket <id>` is an alternative to `--file`: it locates the plan by its `Ticket:` frontmatter across all repos (exactly one of the two is required).
 
 ### 5. Confirm the result
 
@@ -84,3 +89,4 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta get \
 - This skill never moves files between active/done/deferred — that's plan-done's job.
 - This skill never creates files — that's plan-save's job.
 - The mutation is atomic (tmp file + fsync + os.replace) so a crash mid-update can't corrupt the plan.
+- For promoting many plans at once, or browsing the queue across all repos, use the `plan-crew` skill — it's the cross-repo, multi-select counterpart. plan-update stays the targeted single-plan / current-repo editor (and the way to set `Agent`, `Ticket`, etc.).

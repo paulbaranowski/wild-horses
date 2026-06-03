@@ -11,6 +11,7 @@ See each `plan-*` SKILL.md for invocation patterns.
 """
 import argparse
 import base64
+import hashlib
 import json
 import os
 import re
@@ -31,8 +32,15 @@ MAX_SLUG_LEN = 50
 MAX_SUFFIX = 99
 CONFIG_FILE_NAME = ".plankeeper.json"
 
+# Program name shown in --help/usage and error prefixes. Derived from the
+# invoked binary so the tool brands correctly in both of its homes: it reads
+# `plan_keeper_cli` when run in-plugin as `python3 .../plan_keeper_cli.py`, and
+# `plan-keeper` when installed as the standalone Homebrew console script.
+PROG = Path(sys.argv[0]).stem or "plan_keeper_cli"
+
 # Translates plan-keeper's on-disk Status: vocabulary to the groundcrew shell
-# adapter's enum. `backlog` is visible to `crew doctor` but never dispatched.
+# adapter's enum. `backlog` is fetched but never dispatched (confirm one via
+# `crew status <id>`; the aggregate `crew status` Queue lists only `todo`).
 # Anything else (typos, future values) falls through to "other".
 _GROUNDCREW_STATUS_MAP = {
     "backlog": "other",
@@ -64,6 +72,20 @@ class PlanKeeperCliError(Exception):
 
 def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _iso_from_stat(st: os.stat_result) -> str:
+    """Convert a file's stat to an ISO-8601 UTC stamp from its birthtime.
+
+    Prefers `st_birthtime` (macOS/BSD); falls back to `st_mtime` where birthtime
+    is unavailable (many Linux filesystems). The single home for the
+    birthtime→stamp format + fallback, shared by `backfill-created` and the `.md`
+    `--from-path` move path so both stamp a pre-existing file's age identically.
+    """
+    ts = getattr(st, "st_birthtime", None)
+    if ts is None:
+        ts = st.st_mtime
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # --- Slugify ----------------------------------------------------------------
@@ -307,8 +329,123 @@ def list_plans(repo: str, state: str) -> list[Path]:
     if not d.exists():
         return []
     files = [p for p in d.iterdir() if p.is_file() and not p.name.startswith(".")]
-    files.sort(key=lambda p: p.name, reverse=True)
+    files.sort(key=_plan_sort_key, reverse=True)
     return files
+
+
+def find_plans_by_ticket(ticket_id: str) -> list[Path]:
+    """Return active (top-level) plans across all repos whose `Ticket:`
+    frontmatter equals `ticket_id`.
+
+    Global and system-agnostic: a literal match on the stored value, so
+    groundcrew (`plan-<hash>`), Linear (`ENG-123`), and Jira ids all resolve
+    through one path — no re-synthesis of the groundcrew id. `done/` and
+    `deferred/` are excluded because every operation that resolves by ticket
+    (archive, status flip, push) acts on an active plan.
+    """
+    matches: list[Path] = []
+    if not PLAN_ROOT.exists():
+        return matches
+    for repo_entry in sorted(PLAN_ROOT.iterdir()):
+        if not repo_entry.is_dir() or repo_entry.name.startswith("."):
+            continue
+        for path in sorted(repo_entry.iterdir()):
+            if (not path.is_file() or path.name.startswith(".")
+                    or path.suffix != ".md"):
+                continue
+            try:
+                meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+            except (PlanKeeperCliError, OSError, UnicodeDecodeError):
+                continue
+            if (meta.get("Ticket") or "").strip() == ticket_id:
+                matches.append(path)
+    return matches
+
+
+def resolve_ticket_to_path(ticket_id: str) -> Path:
+    """Resolve a ticket id to the single active plan that carries it.
+
+    0 matches -> code 3 (parallels archive's "plan not found"). >1 -> code 2
+    listing every candidate, so the caller can disambiguate with --file.
+    """
+    matches = find_plans_by_ticket(ticket_id)
+    if not matches:
+        raise PlanKeeperCliError(
+            f"no active plan with Ticket {ticket_id!r} found under {PLAN_ROOT}",
+            code=3,
+        )
+    if len(matches) > 1:
+        listing = "\n".join(f"  {p}" for p in matches)
+        raise PlanKeeperCliError(
+            f"ticket {ticket_id!r} matches {len(matches)} plans; "
+            f"disambiguate with --file:\n{listing}",
+            code=2,
+        )
+    return matches[0]
+
+
+# Leading YYYY-MM-DD on a plan filename (e.g. "2026-06-02-foo.md").
+_DATE_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+
+# The exact shape plan-save writes for `Created:` (see _iso_utc_now). A
+# `Created` value is trusted as the sort key only if it matches this in full —
+# a half-valid value like "2026-06-02 junk" would otherwise sort-compare as a
+# raw string (the space sorts before 'T', so it would wrongly lead well-formed
+# same-day stamps) instead of falling back to the filename date.
+_CREATED_STAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+
+def _plan_sort_key(path: Path) -> tuple[str, str]:
+    """Return (timestamp, filename) for a newest-first ordering.
+
+    The primary key is the plan's `Created:` frontmatter — an ISO-8601 UTC
+    stamp written once at save time (e.g. "2026-06-02T14:30:00Z"). Because
+    those strings are fixed-width and lexically chronological, a plain string
+    compare orders them correctly, and the time component gives precise
+    *intra-day* ordering. This is the signal filename-date can't provide:
+    every plan saved on the same day shares one `YYYY-MM-DD-` prefix, so the
+    old filename sort fell back to slug-alphabetical within a day.
+
+    `Created` (not file mtime/birthtime) is the source of truth because plan
+    mutations — a `plan-do` status flip, a `plan-update`, a bulk `queue` set —
+    rewrite the file via write_atomic/os.replace, which swaps in a fresh inode
+    and resets both mtime and birthtime to the last-write time. A persisted
+    frontmatter stamp survives those rewrites untouched.
+
+    Fallback for plans that predate the field (or can't carry it): the
+    filename's leading YYYY-MM-DD, padded to midnight UTC, so day-level
+    ordering still holds and same-day ties break on the filename (the prior
+    behavior). Covers byte-verbatim --from-path saves and non-.md siblings,
+    which never get frontmatter. Run `backfill-created` to stamp old plans.
+    """
+    created = ""
+    try:
+        meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+        candidate = (meta.get("Created") or "").strip()
+        if _CREATED_STAMP_RE.match(candidate):
+            created = candidate
+    except (PlanKeeperCliError, OSError, UnicodeDecodeError):
+        pass
+    if not created:
+        m = _DATE_PREFIX_RE.match(path.name)
+        created = f"{m.group(1)}T00:00:00Z" if m else ""
+    return (created, path.name)
+
+
+def plan_status(path: Path) -> str:
+    """Return a plan's `Status:` frontmatter, lowercased; 'backlog' if absent.
+
+    Blank/missing Status maps to 'backlog' to match plan-save's default, so a
+    file with no frontmatter never silently vanishes from a status-filtered
+    listing. A file that fails to parse (malformed frontmatter, unreadable
+    bytes) is also treated as 'backlog' — one bad file must not break the whole
+    listing, and 'backlog' keeps it visible in plan-do where it would be noticed.
+    """
+    try:
+        meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+    except (PlanKeeperCliError, OSError, UnicodeDecodeError):
+        return "backlog"
+    return (meta.get("Status") or "").strip().lower() or "backlog"
 
 
 def parse_date_arg(s: str) -> str:
@@ -380,8 +517,40 @@ def cmd_repo(args) -> int:
 
 def cmd_list(args) -> int:
     repo = derive_repo(args.override)
-    for p in list_plans(repo, args.state):
-        print(p.name)
+    plans = list_plans(repo, args.state)
+
+    raw_filter = getattr(args, "status", None)
+    if not raw_filter:
+        for p in plans:
+            print(p.name)
+        return 0
+
+    # Status-filtered listing. The filter doubles as the tier order: plans are
+    # grouped by the requested statuses in the order given (e.g. "in-progress,
+    # todo" => in-progress group first), newest-first within each group. Output
+    # is `status<TAB>filename` so callers can render "[status] filename".
+    tiers = [s.strip().lower() for s in raw_filter.split(",") if s.strip()]
+    tier_rank = {s: i for i, s in enumerate(tiers)}
+    annotated = [(p, plan_status(p)) for p in plans]
+
+    shown = [(p, s) for (p, s) in annotated if s in tier_rank]
+    # list_plans is already newest-first; a stable sort by tier preserves that
+    # within each group.
+    shown.sort(key=lambda ps: tier_rank[ps[1]])
+    for p, s in shown:
+        print(f"{s}\t{p.name}")
+
+    # Transparency: never silently drop active plans the filter excluded.
+    hidden = [s for (_, s) in annotated if s not in tier_rank]
+    if hidden:
+        counts: dict[str, int] = {}
+        for s in hidden:
+            counts[s] = counts.get(s, 0) + 1
+        summary = ", ".join(f"{st}×{n}" for st, n in sorted(counts.items()))
+        print(
+            f"note: {len(hidden)} other active plan(s) hidden ({summary})",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -415,6 +584,75 @@ def cmd_list_repos(args) -> int:
     return 0
 
 
+def cmd_backfill_created(args) -> int:
+    """One-time, best-effort: stamp `Created` on plans that lack it.
+
+    Newly saved plans get an exact `Created` at save time; this exists only
+    to retrofit plans saved before the field existed, so list's newest-first
+    sort orders them by something better than slug-alphabetical within a day.
+
+    Source is each file's current birthtime (st_birthtime; falls back to
+    st_mtime where birthtime is unavailable, e.g. some Linux filesystems).
+    Best-effort by nature: status mutations rewrite plan files via
+    write_atomic/os.replace, which resets birthtime to the last-write time —
+    so for a plan that has been promoted or status-flipped since it was saved,
+    the stamp reflects that last write, not the original save. The stamp is
+    read *before* this command's own write, so backfilling never clobbers the
+    value with its own rewrite time.
+
+    Only touches .md files that already have frontmatter and have no `Created`
+    yet. Non-.md siblings (paired .json) and bare files without frontmatter are
+    skipped — they fall back to filename-date ordering. Covers the repo's
+    active dir plus done/ and deferred/.
+    """
+    repo = derive_repo(args.override)
+    base = repo_dir(repo)
+    if not base.exists():
+        print(f"no plans for repo {repo!r}", file=sys.stderr)
+        return 0
+    stamped = 0
+    skipped = 0
+    for d in (base, base / "done", base / "deferred"):
+        if not d.exists():
+            continue
+        for path in sorted(d.iterdir()):
+            if not path.is_file() or path.name.startswith("."):
+                continue
+            if path.suffix.lower() != ".md":
+                skipped += 1
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                skipped += 1
+                continue
+            if not (text.startswith("---\n") or text.startswith("---\r\n")):
+                skipped += 1
+                continue
+            try:
+                meta, body = parse_frontmatter(text)
+            except PlanKeeperCliError:
+                skipped += 1
+                continue
+            if (meta.get("Created") or "").strip():
+                skipped += 1
+                continue
+            # Best-effort: a stat/write failure on one file (permissions, I/O
+            # error) must not abort the whole backfill — skip it and move on.
+            try:
+                meta["Created"] = _iso_from_stat(path.stat())
+                new_text = serialize_frontmatter(meta, body)
+                if not new_text.endswith("\n"):
+                    new_text += "\n"
+                write_atomic(path, new_text)
+            except OSError:
+                skipped += 1
+                continue
+            stamped += 1
+    print(f"backfilled Created on {stamped} plan(s); skipped {skipped}")
+    return 0
+
+
 def cmd_save(args) -> int:
     repo = derive_repo(args.override)
 
@@ -431,17 +669,21 @@ def cmd_save(args) -> int:
     #      <date>-<runid>-<short>.<slug>.{json,md}). Always a move (not a copy):
     #      the realistic workflow is relocating an already-on-disk artifact,
     #      and leaving stale duplicates behind is just confusion.
+    kind = validate_kind(args.kind) if args.kind is not None else None
+
     if args.from_path:
         for flag, value in (
             ("--topic", args.topic),
             ("--extension", args.extension),
             ("--date", args.date),
+            ("--kind", args.kind),
         ):
             if value is not None:
                 raise PlanKeeperCliError(
                     f"{flag} is incompatible with --from-path "
-                    "(--from-path preserves the source basename verbatim); "
-                    f"drop {flag} or drop --from-path",
+                    "(--from-path preserves the source bytes verbatim); "
+                    f"drop {flag} or drop --from-path "
+                    "(set Kind afterward via `file-meta update --field Kind=...`)",
                     code=2,
                 )
         source = Path(args.from_path)
@@ -465,6 +707,12 @@ def cmd_save(args) -> int:
                 f"topic {args.topic!r} slugified to empty string", code=2
             )
         ext = validate_extension(args.extension) if args.extension is not None else "md"
+        if kind and ext != "md":
+            raise PlanKeeperCliError(
+                f"--kind only applies to .md saves (frontmatter lives in markdown); "
+                f"got --extension {ext}. Drop --kind, or save the paired .md with it.",
+                code=2,
+            )
         date_str = (
             parse_date_arg(args.date) if args.date else date.today().isoformat()
         )
@@ -481,13 +729,43 @@ def cmd_save(args) -> int:
         # "overwrite" → fall through
 
     if source is not None:
-        # File already exists on disk — relocate it byte-for-byte, preserving
-        # mtime/permissions and avoiding the trailing-newline normalization
-        # that write_atomic applies. shutil.move uses os.rename when src and
-        # dst are on the same filesystem (a single atomic syscall), and falls
-        # back to copy2 + unlink across filesystems.
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(source), str(target))
+        if target.suffix.lower() == ".md":
+            # A moved-in .md becomes a fully managed plan: fill the same
+            # Agent/Status/Created block a heredoc .md save gets (fill-if-absent —
+            # a .md already carrying them keeps its own values), so
+            # plan-do/plan-done see it by Status and list orders it with intra-day
+            # precision. Created comes from the source file's birthtime (via
+            # _iso_from_stat), not _iso_utc_now() — the plan pre-existed the move.
+            # No Kind is injected (--from-path rejects --kind; set it later via
+            # file-meta). This rewrites bytes, so .md moves are NOT byte-verbatim.
+            #
+            # Order matters: compute the injected content from the SOURCE and
+            # write the target, THEN unlink the source. A malformed-frontmatter
+            # .md raises here while the source still exists (retry-safe, no
+            # stranded half-move), and the source is removed only once the target
+            # write succeeded — the same "delete only on success" contract the
+            # byte-verbatim path gets from shutil.move.
+            injected = _inject_default_frontmatter(
+                source.read_text(encoding="utf-8"),
+                args.agent,
+                created=_iso_from_stat(source.stat()),
+            )
+            write_atomic(target, injected)
+            # Skip the unlink when --from-path already points AT the target
+            # (e.g. `--on-collision overwrite` on a file already in the plans
+            # dir): write_atomic has just replaced target in place, so unlinking
+            # the (same) path would delete the freshly stamped plan. Different
+            # paths → this is a real move, so remove the source.
+            if source.resolve() != target.resolve():
+                source.unlink()
+        else:
+            # Non-.md: relocate byte-for-byte — no stat, no rewrite, no
+            # trailing-newline normalization. shutil.move uses os.rename on the
+            # same filesystem (one atomic syscall) and falls back to copy2 +
+            # unlink across filesystems. This is the verbatim guarantee the
+            # paired .json sibling relies on, and it preserves the source mtime.
+            shutil.move(str(source), str(target))
     else:
         # Heredoc / piped input — write_atomic normalizes a missing trailing
         # newline because shell heredocs and pasted text can end mid-line.
@@ -498,26 +776,31 @@ def cmd_save(args) -> int:
         # so JSON/YAML siblings of paired saves remain byte-exact). Merges
         # into user-supplied frontmatter rather than duplicating.
         if ext == "md":
-            content = _inject_default_frontmatter(content, args.agent)
+            content = _inject_default_frontmatter(content, args.agent, kind)
         write_atomic(target, content)
     print(target)
     return 0
 
 
 def cmd_archive(args) -> int:
-    repo = derive_repo(args.override)
-    if "/" in args.file or "\\" in args.file or args.file in ("", ".", ".."):
-        raise PlanKeeperCliError(
-            f"--file must be a basename only (no path separators), got: {args.file!r}",
-            code=2,
-        )
-    source = repo_dir(repo) / args.file
+    if args.ticket:
+        source = resolve_ticket_to_path(args.ticket)
+    else:
+        repo = derive_repo(args.override)
+        if "/" in args.file or "\\" in args.file or args.file in ("", ".", ".."):
+            raise PlanKeeperCliError(
+                f"--file must be a basename only (no path separators), got: {args.file!r}",
+                code=2,
+            )
+        source = repo_dir(repo) / args.file
     if not source.exists():
         raise PlanKeeperCliError(f"plan not found: {source}", code=3)
     if not source.is_file():
         raise PlanKeeperCliError(f"not a file: {source}", code=3)
 
-    target = repo_dir(repo) / "done" / args.file
+    # Destination is the plan's own repo's done/ — correct for both the
+    # repo-scoped --file path and the global --ticket path.
+    target = source.parent / "done" / source.name
     if target.exists():
         if args.on_collision == "fail":
             emit_collision(target)
@@ -606,7 +889,25 @@ def cmd_ticket_system_config_list(args) -> int:
 # --- Frontmatter ------------------------------------------------------------
 
 # Order matters in the output — keep this canonical so callers see a stable shape.
-_FRONTMATTER_FIELDS = ("Ticket", "Ticket System", "Completed on", "Agent", "Status")
+_FRONTMATTER_FIELDS = ("Ticket", "Ticket System", "Completed on", "Agent", "Status", "Kind", "Created")
+
+# `Kind` classifies the *document type* (orthogonal to Status, which is the
+# lifecycle). The values are ordered by pipeline position, idea → ready-to-build.
+# plan-save infers and writes it; plan-do reads it as its primary routing signal.
+# Canonical definitions + the plan-do routing map live in plan-kinds.md.
+VALID_KINDS = ("idea", "prd", "design", "spec", "exec-plan")
+
+
+def validate_kind(value: str) -> str:
+    """Return a normalized (lowercased) Kind, or raise if not in VALID_KINDS."""
+    normalized = value.strip().lower()
+    if normalized not in VALID_KINDS:
+        raise PlanKeeperCliError(
+            f"invalid Kind {value!r}: must be one of "
+            + ", ".join(VALID_KINDS),
+            code=2,
+        )
+    return normalized
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -616,14 +917,20 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     inner line is "Key: value" (whitespace around the colon ignored).
 
     Returns:
-        (meta, body) where meta ALWAYS has exactly the fields in
-        _FRONTMATTER_FIELDS (empty string when a field is absent or when
-        the file has no frontmatter at all), and body is the text after
-        the closing `---` (or all of `text` if no frontmatter).
+        (meta, body) where meta ALWAYS contains the fields in
+        _FRONTMATTER_FIELDS (empty string when absent, or when the file has
+        no frontmatter at all), PLUS any other fields present in the file,
+        preserved verbatim. Foreign fields (e.g. Obsidian `tags:`) are kept
+        so a round-trip through serialize_frontmatter doesn't silently drop
+        them. body is the text after the closing `---` (or all of `text` if
+        no frontmatter).
 
     Raises:
-        PlanKeeperCliError(code=5) on malformed frontmatter (no closing `---`,
-        unrecognized field, missing colon).
+        PlanKeeperCliError(code=5) on malformed frontmatter (no closing `---`
+        or a line missing its `:`). Unknown field *names* are no longer an
+        error — they pass through. The trade-off is that a typo in a managed
+        field (e.g. `Staus:`) is preserved as a foreign field rather than
+        flagged; callers that care validate values at set time.
     """
     meta = {k: "" for k in _FRONTMATTER_FIELDS}
     if not (text.startswith("---\n") or text.startswith("---\r\n")):
@@ -645,13 +952,10 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
                 f"malformed frontmatter: missing ':' on line {line!r}", code=5
             )
         key, _, value = line.partition(":")
-        key = key.strip()
-        value = value.strip()
-        if key not in _FRONTMATTER_FIELDS:
-            raise PlanKeeperCliError(
-                f"malformed frontmatter: unknown field {key!r}", code=5
-            )
-        meta[key] = value
+        # Preserve every field — known ones overwrite their seeded default,
+        # foreign ones are appended so serialize_frontmatter can round-trip
+        # them instead of silently dropping them on the next rewrite.
+        meta[key.strip()] = value.strip()
     body = "\n".join(lines[closing_idx + 1 :])
     # Drop a single leading blank line if present (cosmetic — frontmatter
     # is usually followed by a blank line before the H1). Handle both
@@ -667,13 +971,19 @@ def serialize_frontmatter(meta: dict[str, str], body: str) -> str:
     """Compose a plan-file text with frontmatter on top, then body.
 
     Fields with empty-string value are omitted (so a "Completed on" that
-    was never set stays out of the file entirely). Field order matches
-    _FRONTMATTER_FIELDS.
+    was never set stays out of the file entirely). Managed fields
+    (_FRONTMATTER_FIELDS) are emitted first in canonical order, then any
+    foreign fields in the order they appear in `meta` (i.e. file order, since
+    parse_frontmatter appends them) — so plan-keeper round-trips fields it
+    doesn't manage rather than dropping them.
 
-    If meta has all-empty values, returns body unchanged (no frontmatter
-    block written). This preserves the "bare plan has no `---`" invariant.
+    If every field (managed and foreign) is empty, returns body unchanged (no
+    frontmatter block written). This preserves the "bare plan has no `---`"
+    invariant.
     """
-    non_empty = [(k, v) for k in _FRONTMATTER_FIELDS for v in [meta.get(k, "")] if v]
+    managed = [(k, meta.get(k, "")) for k in _FRONTMATTER_FIELDS]
+    foreign = [(k, v) for k, v in meta.items() if k not in _FRONTMATTER_FIELDS]
+    non_empty = [(k, v) for k, v in (*managed, *foreign) if v]
     if not non_empty:
         return body
     lines = ["---"]
@@ -686,26 +996,48 @@ def serialize_frontmatter(meta: dict[str, str], body: str) -> str:
     return "\n".join(lines) + "\n" + body
 
 
-def _inject_default_frontmatter(body_text: str, agent: str) -> str:
-    """Ensure body_text starts with frontmatter containing Agent and Status.
+def _inject_default_frontmatter(
+    body_text: str,
+    agent: str,
+    kind: Optional[str] = None,
+    created: Optional[str] = None,
+) -> str:
+    """Ensure body_text starts with frontmatter containing Agent, Status, and
+    Created (and Kind, when a kind is supplied).
 
     Three cases:
-      1. body has no frontmatter → prepend a fresh '---\\nAgent: <agent>\\nStatus: backlog\\n---\\n\\n' block.
-      2. body has frontmatter with Agent and Status already set → return unchanged
+      1. body has no frontmatter → prepend a fresh '---\\nAgent: <agent>\\nStatus: backlog\\nCreated: <iso>\\n---\\n\\n' block.
+      2. body has frontmatter with the fields already set → return unchanged
          (user-supplied values win over defaults).
-      3. body has frontmatter missing one or both → fill in the missing fields,
+      3. body has frontmatter missing some → fill in the missing fields,
          re-serialize, return.
 
-    Why agents/status defaults are 'fill if absent' rather than 'overwrite':
-    a user who hand-wrote `Status: todo` in the body shouldn't have it stomped
-    back to backlog by the save invocation. The CLI default is a floor, not
-    an override.
+    Why agent/status/created/kind are 'fill if absent' rather than 'overwrite':
+    a user who hand-wrote `Status: todo` (or `Kind: prd`) in the body shouldn't
+    have it stomped by the save invocation. The CLI default is a floor, not an
+    override. `kind` is only written when the caller passed one — there is no
+    default Kind, because an absent Kind is a valid state (plan-do then infers
+    it from the content instead).
+
+    `created` overrides the `Created` source: `None` (the heredoc path) stamps
+    `_iso_utc_now()` because the plan is being authored now; a caller that passes
+    a value (the `--from-path` move path) supplies the source file's birthtime,
+    since a relocated plan pre-existed the move. Either way `Created` is
+    fill-if-absent — a body that already carries a valid `Created` keeps it.
     """
     meta, body = parse_frontmatter(body_text)
     if not meta.get("Agent"):
         meta["Agent"] = agent
     if not meta.get("Status"):
         meta["Status"] = "backlog"
+    if kind and not meta.get("Kind"):
+        meta["Kind"] = kind
+    # Save-time stamp that powers list's newest-first sort with intra-day
+    # precision. Fill-if-absent (a hand-written Created in the body wins),
+    # matching Agent/Status/Kind. See _plan_sort_key for why it lives in
+    # frontmatter rather than relying on file timestamps.
+    if not meta.get("Created"):
+        meta["Created"] = created if created is not None else _iso_utc_now()
     out = serialize_frontmatter(meta, body)
     if not out.endswith("\n"):
         out += "\n"
@@ -798,8 +1130,13 @@ def cmd_file_meta_update(args) -> int:
                 + ", ".join(repr(k) for k in _FRONTMATTER_FIELDS),
                 code=2,
             )
+        if key == "Kind" and value.strip():
+            value = validate_kind(value)
         updates.append((key, value))
-    path = Path(args.file)
+    if args.ticket:
+        path = resolve_ticket_to_path(args.ticket)
+    else:
+        path = Path(args.file)
     if not path.exists():
         raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
     text = path.read_text(encoding="utf-8")
@@ -1510,7 +1847,8 @@ def _push_jira(section: dict, title: str, description: str, meta: dict, force_ne
 
 
 def cmd_push(args) -> int:
-    result = push_subcommand(args.name, args.file, force_new=args.force_new)
+    path = resolve_ticket_to_path(args.ticket) if args.ticket else Path(args.file)
+    result = push_subcommand(args.name, str(path), force_new=args.force_new)
     print(json.dumps(result))
     return 0
 
@@ -1613,6 +1951,103 @@ def cmd_ticket_api(args) -> int:
 # --- groundcrew shell adapter ----------------------------------------------
 
 
+def groundcrew_id(repo: str, stem: str) -> str:
+    """Synthesize a groundcrew ticket id for a plan: ``plan-<digits>``.
+
+    groundcrew requires every ticket id to match ``/^[a-z][\\da-z]*-\\d+$/``
+    and reuses the bare id as a permanent key — the worktree dir
+    (``<repo>-<id>``), the git branch (``<user>-<id>``), and the run-state
+    filename all derive from it. Plan filenames (e.g.
+    ``2026-04-30-notification-service-typed-models``) don't fit that shape,
+    so we hash a stable identity into a conforming id.
+
+    Stateless by design: the id is a pure function of ``(repo, stem)``, so
+    ``fetch`` and ``resolve-one`` agree with no stored mapping, and the id
+    stays stable across a plan's lifecycle (status flip, move to ``done/``,
+    which change neither the repo nor the stem). The repo is part of the key
+    because the id carries no repo qualifier downstream — two same-named
+    plans in different repos must not collide. Uses a 48-bit BLAKE2 digest:
+    plenty of headroom for a personal plan set, and ``cmd_groundcrew_fetch``
+    fails loudly on the astronomically-unlikely collision rather than
+    silently merging two plans onto one worktree.
+    """
+    digest = hashlib.blake2b(f"{repo}/{stem}".encode("utf-8"), digest_size=6).digest()
+    return f"plan-{int.from_bytes(digest, 'big')}"
+
+
+def _assert_no_groundcrew_id_collisions(issues: list[dict]) -> None:
+    """Raise if two plans synthesized the same groundcrew id.
+
+    A collision would make groundcrew treat two distinct plans as one ticket
+    (shared worktree/branch/run-state) — a silent state-corrupting outcome.
+    The hash space makes this practically impossible, but if it ever happens
+    the user can break the tie by renaming one plan file.
+    """
+    seen: dict[str, str] = {}
+    for issue in issues:
+        ticket = issue["id"]
+        path = issue["sourceRef"]["path"]
+        if ticket in seen:
+            raise PlanKeeperCliError(
+                f"groundcrew id collision: {seen[ticket]!r} and {path!r} "
+                f"both map to {ticket!r}; rename one plan file to break the tie",
+                code=2,
+            )
+        seen[ticket] = path
+
+
+GROUNDCREW_TICKET_SYSTEM = "groundcrew"
+
+
+def _repo_for_plan(path: Path) -> str:
+    """The repo a plan belongs to: its parent dir name, or the grandparent
+    when the plan lives under `done/` or `deferred/`. Single source of truth
+    so the synthesized id is stable across a plan's move into those subdirs."""
+    parent = path.parent
+    if parent.name in {"done", "deferred"}:
+        return parent.parent.name
+    return parent.name
+
+
+def _apply_groundcrew_ticket(meta: dict[str, str], ticket: str) -> bool:
+    """Claim the `Ticket` / `Ticket System` pair for groundcrew on an in-hand
+    meta dict, returning True iff it changed.
+
+    Claims the pair only when it's empty or already ``groundcrew``; a
+    ``linear``/``jira`` reference (written by plan-push) — or an orphan
+    ``Ticket`` under no system — is left untouched, so a tracked plan keeps
+    its real reference and still dispatches via the recomputed id.
+    """
+    system = (meta.get("Ticket System") or "").strip().lower()
+    if system == GROUNDCREW_TICKET_SYSTEM:
+        if meta.get("Ticket") == ticket:
+            return False  # already current
+    elif system or meta.get("Ticket"):
+        return False  # another tracker (or an orphan Ticket) owns these fields
+    meta["Ticket"] = ticket
+    meta["Ticket System"] = GROUNDCREW_TICKET_SYSTEM
+    return True
+
+
+def _stamp_groundcrew_ticket(path: Path, ticket: str) -> None:
+    """Mirror the synthesized id into the plan's `Ticket` / `Ticket System`
+    frontmatter (the same pair plan-push uses), so a human can see which plan
+    a ``plan-<n>`` id maps to.
+
+    Display-only and self-healing: ``groundcrew_id()`` stays the canonical id,
+    so ``resolve-one`` never trusts these fields — it recomputes the hash.
+    Rewrites only when absent or stale (see _apply_groundcrew_ticket), so
+    steady-state fetches don't churn the file. Best-effort: a read/parse error
+    is swallowed so one unwritable file can't abort the whole fetch.
+    """
+    try:
+        meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
+    except (OSError, PlanKeeperCliError):
+        return
+    if _apply_groundcrew_ticket(meta, ticket):
+        write_atomic(path, serialize_frontmatter(meta, body))
+
+
 def _plan_to_issue(path: Path) -> Optional[dict]:
     """Convert one plan file to a shell-adapter issue dict. None if unparseable.
 
@@ -1632,17 +2067,11 @@ def _plan_to_issue(path: Path) -> Optional[dict]:
     raw_status = meta.get("Status", "").strip()
     adapter_status = _GROUNDCREW_STATUS_MAP.get(raw_status, "other")
     title = _extract_h1_safe(body) or path.stem
-    parent = path.parent
-    if parent.name in {"done", "deferred"}:
-        # Plan is archived/paused — the repo dir is the grandparent. Without
-        # this, `groundcrew-resolve-one` would report repository="done" for
-        # any plan it found in ~/plans/<repo>/done/, breaking groundcrew's
-        # `workspace.knownRepositories` lookup.
-        repo_name = parent.parent.name
-    else:
-        repo_name = parent.name
+    # repo is the grandparent for archived/paused plans (done/, deferred/), so
+    # groundcrew-resolve-one reports the real repo, not "done"/"deferred".
+    repo_name = _repo_for_plan(path)
     return {
-        "id": path.stem,
+        "id": groundcrew_id(repo_name, path.stem),
         "title": title,
         "description": body.rstrip(),
         "status": adapter_status,
@@ -1699,6 +2128,9 @@ def cmd_groundcrew_fetch(args) -> int:
             issue = _plan_to_issue(plan)
             if issue is not None:
                 issues.append(issue)
+    _assert_no_groundcrew_id_collisions(issues)
+    for issue in issues:
+        _stamp_groundcrew_ticket(Path(issue["sourceRef"]["path"]), issue["id"])
     print(json.dumps(issues))
     return 0
 
@@ -1715,20 +2147,23 @@ def cmd_groundcrew_resolve_one(args) -> int:
         )
     if not PLAN_ROOT.exists():
         return 3
-    # Search active plans first, then done/, then deferred/.
+    # The id is synthesized (see groundcrew_id), so we can't map it straight
+    # to a filename — instead recompute each plan's id and match. Search
+    # active plans first, then done/, then deferred/, so a live plan wins
+    # over an archived plan that shares its stem (same synthesized id).
     for repo_entry in PLAN_ROOT.iterdir():
         if not repo_entry.is_dir() or repo_entry.name.startswith("."):
             continue
         for subdir in (repo_entry, repo_entry / "done", repo_entry / "deferred"):
             if not subdir.exists():
                 continue
-            candidate = subdir / f"{args.id}.md"
-            if candidate.is_file():
-                issue = _plan_to_issue(candidate)
-                if issue is None:
+            for plan in sorted(subdir.iterdir()):
+                if not plan.is_file() or not plan.name.endswith(".md"):
                     continue
-                print(json.dumps(issue))
-                return 0
+                issue = _plan_to_issue(plan)
+                if issue is not None and issue["id"] == args.id:
+                    print(json.dumps(issue))
+                    return 0
     return 3
 
 
@@ -1788,12 +2223,118 @@ def cmd_groundcrew_mark_in_progress(args) -> int:
     return 0
 
 
+def cmd_queue_set(args) -> int:
+    """Bulk-set Status on plans named by newline-delimited stdin paths.
+
+    Reads absolute plan paths (one per line) from stdin and writes each
+    plan's frontmatter Status to --status (todo|backlog), atomically. When
+    --status is todo and --default-agent is given, a plan whose Agent is
+    missing/empty also gets Agent: <name> in the same update; a plan that
+    already names an Agent keeps it. Dequeue (--status backlog) never
+    touches Agent.
+
+    Path validation mirrors groundcrew-mark-in-progress: every path must be
+    absolute, end in .md, resolve inside PLAN_ROOT, exist, and have
+    frontmatter. The whole batch is validated FIRST — if any path is
+    invalid, nothing is written (all-or-nothing), so a typo can't leave the
+    queue half-mutated.
+    """
+    raw = sys.stdin.read()
+    paths = [line.strip() for line in raw.splitlines() if line.strip()]
+    if not paths:
+        raise PlanKeeperCliError("queue set: no plan paths on stdin", code=2)
+    plan_root = PLAN_ROOT.resolve()
+    resolved_paths: list[Path] = []
+    for raw_path in paths:
+        path = Path(raw_path)
+        if not path.is_absolute():
+            raise PlanKeeperCliError(f"path must be absolute: {path}", code=2)
+        if path.suffix != ".md":
+            raise PlanKeeperCliError(
+                f"path must point to a .md plan file: {path}", code=2
+            )
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(plan_root)
+        except ValueError as err:
+            raise PlanKeeperCliError(
+                f"path is outside PLAN_ROOT ({plan_root}): {path}", code=2
+            ) from err
+        if not resolved.exists():
+            raise PlanKeeperCliError(f"plan file not found: {resolved}", code=3)
+        text = resolved.read_text(encoding="utf-8")
+        if not (text.startswith("---\n") or text.startswith("---\r\n")):
+            raise PlanKeeperCliError(
+                f"{resolved} has no frontmatter (cannot set Status)", code=2
+            )
+        resolved_paths.append(resolved)
+    for resolved in resolved_paths:
+        text = resolved.read_text(encoding="utf-8")
+        meta, body = parse_frontmatter(text)
+        meta["Status"] = args.status
+        if args.status == "todo":
+            # Promote = "ready for groundcrew", so claim the groundcrew Ticket
+            # now (same id fetch would synthesize) — the mapping is visible the
+            # moment a plan is queued, not only after the first dispatch tick.
+            if args.default_agent and not meta.get("Agent", "").strip():
+                meta["Agent"] = args.default_agent
+            _apply_groundcrew_ticket(
+                meta, groundcrew_id(_repo_for_plan(resolved), resolved.stem)
+            )
+        new_text = serialize_frontmatter(meta, body)
+        if not new_text.endswith("\n"):
+            new_text += "\n"
+        write_atomic(resolved, new_text)
+        print(resolved)
+    return 0
+
+
+def cmd_queue_list(args) -> int:
+    """Emit a JSON array of active plans across all repos, for plan-crew.
+
+    Each element is {repo, file, status, agent} where status/agent are the
+    raw frontmatter values ("" when unset). Scans ~/plans/<repo>/*.md one
+    level deep — skips done/ and deferred/ (those are not dispatchable) and
+    skips files without frontmatter (not plan-keeper plans). This is the
+    read side of the groundcrew queue the plan-crew skill renders.
+    """
+    del args
+    rows: list[dict] = []
+    if not PLAN_ROOT.exists():
+        print("[]")
+        return 0
+    for repo_entry in sorted(PLAN_ROOT.iterdir()):
+        if not repo_entry.is_dir() or repo_entry.name.startswith("."):
+            continue
+        for plan in sorted(repo_entry.iterdir()):
+            if not plan.is_file() or not plan.name.endswith(".md"):
+                continue
+            try:
+                text = plan.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if not (text.startswith("---\n") or text.startswith("---\r\n")):
+                continue
+            try:
+                meta, _ = parse_frontmatter(text)
+            except PlanKeeperCliError:
+                continue
+            rows.append({
+                "repo": repo_entry.name,
+                "file": plan.name,
+                "status": meta.get("Status", "").strip(),
+                "agent": meta.get("Agent", "").strip(),
+            })
+    print(json.dumps(rows))
+    return 0
+
+
 # --- Parser -----------------------------------------------------------------
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = HelpfulArgumentParser(
-        prog="plan_keeper_cli",
+        prog=PROG,
         description="I/O backend for the plan-keeper skills.",
     )
     sub = parser.add_subparsers(
@@ -1820,11 +2361,27 @@ def build_parser() -> argparse.ArgumentParser:
         default="active",
         help="which subset to list (default: active)",
     )
+    p_list.add_argument(
+        "--status",
+        help=(
+            "comma-separated Status values to keep (e.g. 'in-progress,todo'). "
+            "Doubles as tier order: groups appear in the order given, newest-"
+            "first within each. Output becomes 'status<TAB>filename'. "
+            "Missing/blank Status counts as 'backlog'. Excluded active plans "
+            "are summarized on stderr. Omit to list bare filenames as before."
+        ),
+    )
 
     sub.add_parser(
         "list-repos",
         help="list all repos under ~/plans/ with per-state counts",
     )
+
+    p_backfill = sub.add_parser(
+        "backfill-created",
+        help="one-time: stamp `Created` (from file birthtime) on plans missing it",
+    )
+    p_backfill.add_argument("--override", help="explicit override for <repo>")
 
     p_save = sub.add_parser(
         "save",
@@ -1864,6 +2421,14 @@ def build_parser() -> argparse.ArgumentParser:
              "ignored for --extension other than md and for --from-path.",
     )
     p_save.add_argument(
+        "--kind",
+        help="document kind to inject as 'Kind: <value>' frontmatter on "
+             "markdown saves. One of: " + ", ".join(VALID_KINDS) + ". "
+             "Heredoc + .md shape only — rejected for non-md extensions and "
+             "for --from-path (set Kind afterward via `file-meta update`). "
+             "Fill-if-absent: a Kind already in the body is preserved.",
+    )
+    p_save.add_argument(
         "--on-collision",
         choices=["fail", "suffix", "overwrite"],
         default="fail",
@@ -1876,10 +2441,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="append a completion stamp and move ~/plans/<repo>/<file> to done/",
     )
     p_archive.add_argument("--override", help="explicit override for <repo>")
-    p_archive.add_argument(
+    archive_target = p_archive.add_mutually_exclusive_group(required=True)
+    archive_target.add_argument(
         "--file",
-        required=True,
         help="filename (basename only, must live in ~/plans/<repo>/)",
+    )
+    archive_target.add_argument(
+        "--ticket",
+        help="ticket id (e.g. plan-195..., ENG-123); resolved across all "
+             "repos via Ticket: frontmatter. --override is ignored with --ticket.",
     )
     p_archive.add_argument(
         "--on-collision",
@@ -1917,7 +2487,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="apply --field Key=value updates to plan frontmatter "
              "(any whitelisted field)",
     )
-    p_fm_update.add_argument("--file", required=True, help="path to a plan file")
+    fm_update_target = p_fm_update.add_mutually_exclusive_group(required=True)
+    fm_update_target.add_argument("--file", help="path to a plan file")
+    fm_update_target.add_argument(
+        "--ticket",
+        help="locate the plan by its Ticket: frontmatter across all repos "
+             "(alternative to --file)",
+    )
     p_fm_update.add_argument(
         "--field",
         action="append",
@@ -1973,7 +2549,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_push = sub.add_parser("push", help="create or update a ticket from a plan file")
     p_push.add_argument("--name", required=True, choices=["linear", "jira"])
-    p_push.add_argument("--file", required=True)
+    push_target = p_push.add_mutually_exclusive_group(required=True)
+    push_target.add_argument("--file", help="path to a plan .md file")
+    push_target.add_argument(
+        "--ticket",
+        help="locate the plan by its Ticket: frontmatter across all repos "
+             "(alternative to --file)",
+    )
     p_push.add_argument(
         "--force-new",
         action="store_true",
@@ -1989,11 +2571,40 @@ def build_parser() -> argparse.ArgumentParser:
         "groundcrew-resolve-one",
         help="emit one shell-adapter issue JSON for ${id}, or exit 3 if missing",
     )
-    p_gc_one.add_argument("id", help="plan id (filename stem, no .md)")
+    p_gc_one.add_argument("id", help="synthesized plan id (plan-<digits>, from fetch)")
 
     sub.add_parser(
         "groundcrew-mark-in-progress",
         help="flip Status to in-progress on a plan named by stdin sourceRef JSON",
+    )
+
+    p_queue = sub.add_parser(
+        "queue",
+        help="cross-repo groundcrew queue: list active plans / set Status in bulk",
+    )
+    queue_sub = p_queue.add_subparsers(
+        dest="queue_cmd", required=True, metavar="<subcommand>",
+        parser_class=HelpfulArgumentParser,
+    )
+
+    _ = queue_sub.add_parser(
+        "list",
+        help="emit JSON array of active plans across all repos "
+             "(repo/file/status/agent)",
+    )
+
+    p_queue_set = queue_sub.add_parser(
+        "set",
+        help="set Status on plans named by newline-delimited stdin paths",
+    )
+    p_queue_set.add_argument(
+        "--status", required=True, choices=["todo", "backlog"],
+        help="Status to write on every listed plan",
+    )
+    p_queue_set.add_argument(
+        "--default-agent",
+        help="when --status todo, fill Agent: <name> on plans with no Agent "
+             "set (ignored for --status backlog)",
     )
 
     return parser
@@ -2016,6 +2627,11 @@ _TICKET_SYSTEM_CONFIG_DISPATCH = {
     "refresh": cmd_ticket_system_config_refresh,
 }
 
+_QUEUE_DISPATCH = {
+    "list": cmd_queue_list,
+    "set": cmd_queue_set,
+}
+
 
 def main() -> int:
     parser = build_parser()
@@ -2024,6 +2640,7 @@ def main() -> int:
         "repo": cmd_repo,
         "list": cmd_list,
         "list-repos": cmd_list_repos,
+        "backfill-created": cmd_backfill_created,
         "save": cmd_save,
         "archive": cmd_archive,
         "file-meta": lambda a: _FILE_META_DISPATCH[a.file_meta_cmd](a),
@@ -2033,11 +2650,12 @@ def main() -> int:
         "groundcrew-fetch": cmd_groundcrew_fetch,
         "groundcrew-resolve-one": cmd_groundcrew_resolve_one,
         "groundcrew-mark-in-progress": cmd_groundcrew_mark_in_progress,
+        "queue": lambda a: _QUEUE_DISPATCH[a.queue_cmd](a),
     }
     try:
         return dispatch[args.cmd](args)
     except PlanKeeperCliError as e:
-        print(f"plan_keeper_cli: {e}", file=sys.stderr)
+        print(f"{PROG}: {e}", file=sys.stderr)
         return e.code
 
 

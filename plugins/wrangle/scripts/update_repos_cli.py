@@ -22,6 +22,8 @@ CONFIG_PATH = CONFIG_DIR / "repos.json"
 
 NOISE_DIRS = {"node_modules", ".venv", "venv", "__pycache__", ".tox", ".cache", "target", "dist", "build", ".next"}
 
+VALID_DIRTY_ACTIONS = ("ask", "skip", "stash")
+
 # pull-all fans repos out across threads (the work is network/subprocess-bound,
 # so the GIL isn't the bottleneck). Capped so a large config doesn't spawn
 # dozens of simultaneous `git` processes.
@@ -49,6 +51,13 @@ def load_config() -> dict:
     if not isinstance(data, dict) or "repos" not in data or not isinstance(data["repos"], list):
         sys.stderr.write(f"ERROR: config missing 'repos' list at {CONFIG_PATH}\n")
         sys.exit(3)
+    da = data.get("default_dirty_action")
+    if da is not None and da not in VALID_DIRTY_ACTIONS:
+        sys.stderr.write(
+            f"ERROR: invalid default_dirty_action {da!r} in {CONFIG_PATH}; "
+            f"expected one of {', '.join(VALID_DIRTY_ACTIONS)}\n"
+        )
+        sys.exit(3)
     for i, repo in enumerate(data["repos"]):
         if (
             not isinstance(repo, dict)
@@ -58,6 +67,13 @@ def load_config() -> dict:
             sys.stderr.write(
                 f"ERROR: invalid repo entry at index {i} in {CONFIG_PATH}; "
                 "expected {'path': non-empty str, 'branch': non-empty str}\n"
+            )
+            sys.exit(3)
+        rda = repo.get("dirty_action")
+        if rda is not None and rda not in VALID_DIRTY_ACTIONS:
+            sys.stderr.write(
+                f"ERROR: invalid dirty_action {rda!r} at index {i} in {CONFIG_PATH}; "
+                f"expected one of {', '.join(VALID_DIRTY_ACTIONS)}\n"
             )
             sys.exit(3)
     return data
@@ -313,23 +329,84 @@ def cmd_remove(args: argparse.Namespace) -> None:
     print(json.dumps({"removed": str(p)}, indent=2))
 
 
+def cmd_set_action(args: argparse.Namespace) -> None:
+    """Set the default dirty-repo action — global (no --repo) or per-repo.
+
+    Global: writes top-level default_dirty_action. Per-repo: writes the entry's
+    dirty_action, or removes it when the action is the `inherit` sentinel.
+    """
+    cfg = load_config()
+
+    if args.repo is None:
+        if args.action == "inherit":
+            sys.stderr.write("ERROR: 'inherit' is only valid with --repo\n")
+            sys.exit(2)
+        cfg["default_dirty_action"] = args.action
+        save_config(cfg)
+        print(json.dumps({"default_dirty_action": args.action}, indent=2))
+        return
+
+    p = resolve_path(args.repo)
+    entry = next((r for r in cfg["repos"] if resolve_path(r["path"]) == p), None)
+    if not entry:
+        sys.stderr.write(f"ERROR: not in config: {p}\n")
+        sys.exit(2)
+
+    if args.action == "inherit":
+        entry.pop("dirty_action", None)
+        save_config(cfg)
+        print(json.dumps({"repo": entry["path"], "dirty_action": None}, indent=2))
+        return
+
+    entry["dirty_action"] = args.action
+    save_config(cfg)
+    print(json.dumps({"repo": entry["path"], "dirty_action": args.action}, indent=2))
+
+
 def cmd_list(args: argparse.Namespace) -> None:
     del args
     cfg = load_config()
     cfg["config_path"] = str(CONFIG_PATH)
+    # Display-only: cmd_list never saves, so this injected default must not persist.
+    cfg.setdefault("default_dirty_action", "ask")
     print(json.dumps(cfg, indent=2))
 
 
-def _status_then_pull(entry: dict) -> dict:
-    """One repo's pull-all unit of work: status-check, then pull only if ready.
+def resolve_dirty_action(cfg: dict, entry: dict) -> str:
+    """Effective dirty action for one repo: per-repo override -> global default -> 'ask'.
 
-    Self-contained (reads/writes only its own repo) so pull-all can run many
-    of these concurrently without shared state. Never auto-stashes — dirty
-    repos are reported and handled interactively via pull-one.
+    A per-repo `dirty_action` always wins (including an explicit "ask"). Otherwise
+    the top-level `default_dirty_action` applies; absent/invalid falls back to "ask".
     """
+    a = entry.get("dirty_action")
+    if a in VALID_DIRTY_ACTIONS:
+        return a
+    d = cfg.get("default_dirty_action")
+    return d if d in VALID_DIRTY_ACTIONS else "ask"
+
+
+def _status_then_pull(work: tuple[dict, str]) -> dict:
+    """One repo's pull-all unit of work: status-check, then act per resolved action.
+
+    Self-contained (reads/writes only its own repo) so pull-all can run many of
+    these concurrently without shared state. For a dirty repo the pre-resolved
+    `action` decides: `skip` -> report a `skipped` status untouched; `stash` ->
+    inline stash-pull-pop (same path as `pull-one --stash`); `ask` -> report
+    `dirty` so the skill can prompt (unchanged behavior).
+    """
+    entry, action = work
     s = repo_status(entry["path"], entry["branch"])
     if s["status"] == "ready":
-        s = pull_repo(entry["path"], entry["branch"], stash=False, verbose=False)
+        return pull_repo(entry["path"], entry["branch"], stash=False, verbose=False)
+    if s["status"] == "dirty":
+        if action == "skip":
+            s["status"] = "skipped"
+            s["reason"] = "dirty"
+            return s
+        if action == "stash":
+            return pull_repo(entry["path"], entry["branch"], stash=True, verbose=False)
+        s["effective_action"] = "ask"
+        return s
     return s
 
 
@@ -345,13 +422,23 @@ def cmd_pull_all(args: argparse.Namespace) -> None:
         }, indent=2))
         return
 
-    # `executor.map` yields results in submission order, so the output stays in
-    # config order regardless of which repo's pull finishes first — the step-5
-    # summary relies on that ordering.
+    # Resolve each repo's dirty action up front (cmd_pull_all holds cfg), then
+    # fan out. `executor.map` yields results in submission order, so output
+    # stays in config order regardless of which pull finishes first — the
+    # step-5 summary relies on that ordering.
+    work = [(r, resolve_dirty_action(cfg, r)) for r in repos]
     with ThreadPoolExecutor(max_workers=min(MAX_PULL_WORKERS, len(repos))) as ex:
-        results = list(ex.map(_status_then_pull, repos))
+        results = list(ex.map(_status_then_pull, work))
 
-    print(json.dumps({"results": results}, indent=2))
+    # Collapse already-current repos into a bare count rather than a full entry
+    # each. They need no per-repo action in the skill flow, so emitting one
+    # object apiece just burns the reading agent's context — 18 up-to-date repos
+    # would be ~90 lines of indented JSON the agent reads only to render a single
+    # summary line. `results` keeps only repos that need attention or changed.
+    up_to_date = sum(1 for r in results if r["status"] == "up-to-date")
+    results = [r for r in results if r["status"] != "up-to-date"]
+
+    print(json.dumps({"results": results, "up_to_date": up_to_date}, indent=2))
 
 
 def cmd_pull_one(args: argparse.Namespace) -> None:
@@ -387,6 +474,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_rm = sp.add_parser("remove", help="Remove one repo from the config.")
     p_rm.add_argument("path")
     p_rm.set_defaults(func=cmd_remove)
+
+    p_sa = sp.add_parser("set-action", help="Set the default dirty-repo action (global, or per-repo with --repo).")
+    p_sa.add_argument(
+        "action",
+        choices=[*VALID_DIRTY_ACTIONS, "inherit"],
+        help="ask|skip|stash. 'inherit' (only valid with --repo) clears a per-repo override.",
+    )
+    p_sa.add_argument("--repo", help="Set this repo's override instead of the global default.")
+    p_sa.set_defaults(func=cmd_set_action)
 
     p_ls = sp.add_parser("list", help="Print the current config as JSON.")
     p_ls.set_defaults(func=cmd_list)

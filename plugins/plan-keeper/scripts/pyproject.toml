@@ -1,0 +1,41 @@
+# Packaging manifest for the standalone `plan-keeper` CLI.
+#
+# This is the SAME file the plan-keeper plugin invokes in-place as
+# `python3 .../plan_keeper_cli.py`. Variant-B dual-home: one physical source,
+# two delivery vehicles. The plugin keeps calling the script by path; Homebrew
+# builds this directory into the `plan-keeper` binary. There is no second copy
+# to drift — both entry points read and write the same ~/plans/<repo>/ tree.
+#
+# Build/install locally:  python3 -m pip install .
+# (zero third-party deps — pure stdlib, so there are no [project] dependencies)
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plan-keeper"
+version = "0.1.0"
+description = "I/O backend for the plan-keeper skills — organize markdown plans in ~/plans/<repo>/ and push them to Linear/Jira."
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Paul Baranowski" }]
+keywords = ["cli", "plans", "planning", "linear", "jira", "frontmatter"]
+classifiers = [
+  "Environment :: Console",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+]
+
+[project.urls]
+Homepage = "https://github.com/paulbaranowski/wild-horses"
+Source = "https://github.com/paulbaranowski/wild-horses/tree/main/plugins/plan-keeper"
+
+[project.scripts]
+plan-keeper = "plan_keeper_cli:main"
+
+[tool.setuptools]
+# Single-module package: the one file, packaged verbatim. No restructure, no
+# rename — the in-plugin invocation path is unchanged.
+py-modules = ["plan_keeper_cli"]

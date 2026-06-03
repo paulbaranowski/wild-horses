@@ -11,6 +11,7 @@ Archive a completed plan from `~/plans/<repo>/` into `~/plans/<repo>/done/`, wit
 
 - **Moves:** `~/plans/<repo>/<file>.md` → `~/plans/<repo>/done/<file>.md`.
 - **Stamp:** the CLI writes `Completed on: YYYY-MM-DD` into the YAML frontmatter at the top of the archived file.
+- **Identifier:** a filename (`--file`) or a ticket id (`--ticket`) — see step 1 and step 3.
 - **`<repo>`:** auto-derived or override — see [../../repo-derivation.md](../../repo-derivation.md).
 - **Collision in `done/`:** ask the user; never overwrite silently.
 - **Confirmation:** required before any file mutation.
@@ -32,6 +33,8 @@ Prefer conversation context; fall back to a CLI listing.
 
 If present, extract `<name>` and pass `--override <name>` to all CLI calls below.
 
+**If the user names the plan by its `Ticket:` id** (e.g. `plan-195296912509085`, `ENG-123`) instead of a filename, skip the listing and archive it directly with `--ticket <id>` in step 3. Resolution is global across `~/plans/`, so no `--override` is needed; the CLI exits 3 when no active plan carries that ticket and exits 2 (listing candidates) when more than one does.
+
 **Look for a clear plan candidate from this session:**
 
 - A plan opened by `plan-do` earlier in the conversation.
@@ -42,13 +45,34 @@ If exactly one candidate is identifiable, propose it:
 
 > Mark `<filename>` done? (Y/n, or name a different one.)
 
-**If no clear candidate, or the user rejects the proposed one**, list active plans via the CLI:
+**If no clear candidate, or the user rejects the proposed one**, list the plans worth finishing via the CLI — the ones you're actively working (`in-progress`) or have queued (`todo`):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --status in-progress,todo
 ```
 
-(Add `--override <name>` if found.) Display the output as a numbered list, newest-first, and ask the user to pick. If the output is empty, tell the user there are no active plans for this repo and stop. Do not silently fall back to another folder.
+(Add `--override <name>` if found.) With `--status in-progress,todo` the CLI keeps only those two statuses, lists **in-progress first** (the plan you most likely just finished), then `todo`, newest-first within each, and prints one `status<TAB>filename` line per plan. Any other active plans (backlog, in-review, …) are summarized on **stderr** as a `note: N other active plan(s) hidden (...)` line.
+
+Display the output as a numbered list with each plan's status tag, and ask the user to pick (the filename is the part after the tab). If stderr carried a hidden-plans note, mention it below the list so the user can ask to see the rest.
+
+**Run this command fresh every time you reach this step — including on a re-invocation later in the same conversation.** Never reprint an earlier listing from memory: plans get saved, archived, or change status between turns, so a cached list can be stale. The numbered list you show must come from the output you just ran.
+
+**If stdout is empty:**
+
+- **stderr has a hidden-plans note** → nothing is in-progress or todo, but other active plans exist (e.g. all backlog). Tell the user, and offer `list` with no `--status` to pick from everything.
+- **stderr is also empty** → there are no active plans for this repo. Say so and stop. Do not silently fall back to another folder.
+
+Example output to the user:
+
+```text
+Plans to finish in ~/plans/wild-horses/:
+
+  1. [in-progress] 2026-05-29-plan-do-design.md
+  2. [in-progress] 2026-05-27-task-list-runner-refactor.md
+  3. [todo]        2026-05-19-plan-save-design.md
+
+Which one did you finish?
+```
 
 ### 2. Confirm before mutating
 
@@ -66,6 +90,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" archive \
 ```
 
 Add `--override <name>` if step 1 found one. The CLI does: read source, write `Completed on: <today>` into the YAML frontmatter, atomic-write to `~/plans/<repo>/done/<filename>`, unlink the source. Today's date is in the user's local timezone.
+
+When the user named the plan by its ticket id, pass `--ticket <id>` instead of `--file` (the two are mutually exclusive — supply exactly one). `--ticket` resolves the plan across all repos by its `Ticket:` frontmatter, so `--override` is irrelevant; the destination `done/` is derived from the plan's own repo:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" archive \
+  --ticket <ticket-id>
+```
 
 **On exit 0:** the CLI prints the archived absolute path on stdout. Go to step 5.
 
@@ -105,7 +136,7 @@ Tell the user the archived path that the CLI returned in step 3. One line is eno
 
 ## Notes
 
-- This skill is the only `plan-*` skill that mutates the `~/plans/` tree by moving files. `plan-save` creates; `plan-do` reads only.
+- This skill is the only `plan-*` skill that mutates the `~/plans/` tree by **moving files**. `plan-save` creates; `plan-do` only flips a started plan's `Status` to `in-progress` (no move). The status field is what makes this skill's `--status in-progress,todo` list surface the plan you were just working on first.
 - The completion date is stored as `Completed on: YYYY-MM-DD` in the YAML frontmatter, keeping the plan body intact and making the date machine-readable without disturbing markdown rendering.
 - Archived plans live in `~/plans/<repo>/done/`. `plan-do`'s `list` only enumerates direct children of the repo dir — `done/` files are excluded from the active-plans list automatically.
 - Sibling skills in the `plan-` family (`plan-save`, `plan-do`) share the same CLI and the same `~/plans/<repo>/` tree.
