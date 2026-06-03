@@ -319,6 +319,57 @@ def list_plans(repo: str, state: str) -> list[Path]:
     return files
 
 
+def find_plans_by_ticket(ticket_id: str) -> list[Path]:
+    """Return active (top-level) plans across all repos whose `Ticket:`
+    frontmatter equals `ticket_id`.
+
+    Global and system-agnostic: a literal match on the stored value, so
+    groundcrew (`plan-<hash>`), Linear (`ENG-123`), and Jira ids all resolve
+    through one path — no re-synthesis of the groundcrew id. `done/` and
+    `deferred/` are excluded because every operation that resolves by ticket
+    (archive, status flip, push) acts on an active plan.
+    """
+    matches: list[Path] = []
+    if not PLAN_ROOT.exists():
+        return matches
+    for repo_entry in sorted(PLAN_ROOT.iterdir()):
+        if not repo_entry.is_dir() or repo_entry.name.startswith("."):
+            continue
+        for path in sorted(repo_entry.iterdir()):
+            if (not path.is_file() or path.name.startswith(".")
+                    or path.suffix != ".md"):
+                continue
+            try:
+                meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+            except (PlanKeeperCliError, OSError, UnicodeDecodeError):
+                continue
+            if (meta.get("Ticket") or "").strip() == ticket_id:
+                matches.append(path)
+    return matches
+
+
+def resolve_ticket_to_path(ticket_id: str) -> Path:
+    """Resolve a ticket id to the single active plan that carries it.
+
+    0 matches -> code 3 (parallels archive's "plan not found"). >1 -> code 2
+    listing every candidate, so the caller can disambiguate with --file.
+    """
+    matches = find_plans_by_ticket(ticket_id)
+    if not matches:
+        raise PlanKeeperCliError(
+            f"no active plan with Ticket {ticket_id!r} found under {PLAN_ROOT}",
+            code=3,
+        )
+    if len(matches) > 1:
+        listing = "\n".join(f"  {p}" for p in matches)
+        raise PlanKeeperCliError(
+            f"ticket {ticket_id!r} matches {len(matches)} plans; "
+            f"disambiguate with --file:\n{listing}",
+            code=2,
+        )
+    return matches[0]
+
+
 # Leading YYYY-MM-DD on a plan filename (e.g. "2026-06-02-foo.md").
 _DATE_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
 
@@ -695,19 +746,24 @@ def cmd_save(args) -> int:
 
 
 def cmd_archive(args) -> int:
-    repo = derive_repo(args.override)
-    if "/" in args.file or "\\" in args.file or args.file in ("", ".", ".."):
-        raise PlanKeeperCliError(
-            f"--file must be a basename only (no path separators), got: {args.file!r}",
-            code=2,
-        )
-    source = repo_dir(repo) / args.file
+    if args.ticket:
+        source = resolve_ticket_to_path(args.ticket)
+    else:
+        repo = derive_repo(args.override)
+        if "/" in args.file or "\\" in args.file or args.file in ("", ".", ".."):
+            raise PlanKeeperCliError(
+                f"--file must be a basename only (no path separators), got: {args.file!r}",
+                code=2,
+            )
+        source = repo_dir(repo) / args.file
     if not source.exists():
         raise PlanKeeperCliError(f"plan not found: {source}", code=3)
     if not source.is_file():
         raise PlanKeeperCliError(f"not a file: {source}", code=3)
 
-    target = repo_dir(repo) / "done" / args.file
+    # Destination is the plan's own repo's done/ — correct for both the
+    # repo-scoped --file path and the global --ticket path.
+    target = source.parent / "done" / source.name
     if target.exists():
         if args.on_collision == "fail":
             emit_collision(target)
@@ -2333,10 +2389,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="append a completion stamp and move ~/plans/<repo>/<file> to done/",
     )
     p_archive.add_argument("--override", help="explicit override for <repo>")
-    p_archive.add_argument(
+    archive_target = p_archive.add_mutually_exclusive_group(required=True)
+    archive_target.add_argument(
         "--file",
-        required=True,
         help="filename (basename only, must live in ~/plans/<repo>/)",
+    )
+    archive_target.add_argument(
+        "--ticket",
+        help="ticket id (e.g. plan-195..., ENG-123); resolved across all "
+             "repos via Ticket: frontmatter. --override is ignored with --ticket.",
     )
     p_archive.add_argument(
         "--on-collision",

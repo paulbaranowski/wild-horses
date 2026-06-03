@@ -3218,5 +3218,53 @@ class TestBackfillCreatedBestEffort(unittest.TestCase):
         self.assertNotIn("Created:", bad.read_text())
 
 
+class TestResolveTicket(IsolatedHomeTestCase):
+    def _save_with_ticket(self, repo: str, topic: str, ticket: str) -> Path:
+        r = run_cli("save", "--override", repo, "--topic", topic,
+                    stdin="# Body\ntext\n", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        path = Path(r.stdout.strip())
+        u = run_cli("file-meta", "update", "--file", str(path),
+                    "--field", f"Ticket={ticket}", home=self.home)
+        self.assertEqual(u.returncode, 0, u.stderr)
+        return path
+
+    def test_archive_by_groundcrew_ticket(self) -> None:
+        src = self._save_with_ticket("scratch", "p1", "plan-195296912509085")
+        r = run_cli("archive", "--ticket", "plan-195296912509085", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        target = self.plans_root / "scratch" / "done" / src.name
+        self.assertEqual(r.stdout.strip(), str(target))
+        self.assertTrue(target.exists())
+        self.assertFalse(src.exists())
+
+    def test_archive_by_linear_ticket(self) -> None:
+        src = self._save_with_ticket("scratch", "p2", "ENG-42")
+        r = run_cli("archive", "--ticket", "ENG-42", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((self.plans_root / "scratch" / "done" / src.name).exists())
+
+    def test_archive_ticket_not_found_exits_3(self) -> None:
+        r = run_cli("archive", "--ticket", "plan-000", home=self.home)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("no active plan", r.stderr)
+
+    def test_archive_ticket_multi_match_exits_2(self) -> None:
+        self._save_with_ticket("scratch", "a", "DUP-1")
+        self._save_with_ticket("other", "b", "DUP-1")
+        r = run_cli("archive", "--ticket", "DUP-1", home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("matches 2 plans", r.stderr)
+
+    def test_archive_both_file_and_ticket_exits_2(self) -> None:
+        r = run_cli("archive", "--override", "scratch",
+                    "--file", "x.md", "--ticket", "plan-1", home=self.home)
+        self.assertEqual(r.returncode, 2)
+
+    def test_archive_neither_file_nor_ticket_exits_2(self) -> None:
+        r = run_cli("archive", "--override", "scratch", home=self.home)
+        self.assertEqual(r.returncode, 2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
