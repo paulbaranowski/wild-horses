@@ -1,6 +1,6 @@
 # plan-keeper
 
-Organize markdown plans on disk across repos. Six skills cover the lifecycle: capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), archive with a completion stamp (`plan-done`), edit frontmatter (`plan-update`), manage the cross-repo dispatch queue (`plan-crew`), and file plans as tickets (`plan-push`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine — nothing is committed to any repo.
+Organize markdown plans on disk across repos. Seven skills cover the lifecycle: list a repo's plans read-only (`plan-list`), capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), archive with a completion stamp (`plan-done`), edit frontmatter (`plan-update`), manage the cross-repo dispatch queue (`plan-crew`), and file plans as tickets (`plan-push`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine — nothing is committed to any repo.
 
 Install:
 
@@ -12,6 +12,7 @@ Install:
 
 | Skill                                    | Role     | What it does                                                                                                                                                                                                                                                                              |
 | ---------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **[`plan-list`](skills/plan-list/)**     | Lists    | Read-only inventory of a repo's plans, grouped by `Status` (in-progress / in-review / todo / backlog), newest-first. Shows what's there and stops — no body read, no mutation. `--state done`/`deferred` for the archives.                                                                |
 | **[`plan-save`](skills/plan-save/)**     | Captures | Writes the latest plan from the current conversation to `~/plans/<repo>/<YYYY-MM-DD>-<topic>.md`.                                                                                                                                                                                         |
 | **[`plan-do`](skills/plan-do/)**         | Routes   | Lists not-yet-started plans for the current repo, classifies readiness (idea / spec / execution-ready), and routes to the matching next skill. Execution-ready plans get all three execution engines (autonomous / task-list-builder / executing-plans), recommended-first by plan shape. |
 | **[`plan-done`](skills/plan-done/)**     | Archives | Moves a completed plan to `~/plans/<repo>/done/` and appends a `*Completed: YYYY-MM-DD*` stamp.                                                                                                                                                                                           |
@@ -53,7 +54,7 @@ A PreToolUse hook (`hooks/hooks.json`) auto-approves `python3 .../plan_keeper_cl
 
 - **Local-only.** `~/plans/` lives on your machine. Nothing is staged, committed, or pushed to any repo.
 - **No silent overwrites.** Collisions on save or archive surface as a structured exit-2 error; the skill asks whether to overwrite, suffix `-2`, or pick a new name.
-- **`plan-do` is read-only.** Only `plan-save` (creates) and `plan-done` (moves) mutate the tree.
+- **`plan-list` is read-only**, and `plan-do` only ever flips a started plan's `Status` to `in-progress`. The tree is mutated by `plan-save` (creates), `plan-done` (moves), and the frontmatter editors (`plan-update`, `plan-crew`).
 - **Confirmation before mutating.** `plan-done` always shows source/destination paths and asks before invoking the CLI.
 - **Empty-repo isolation.** When the current repo has no active plans, `plan-do` and `plan-done` say so and stop — they do not silently fall back to a different repo's folder.
 
@@ -61,6 +62,7 @@ A PreToolUse hook (`hooks/hooks.json`) auto-approves `python3 .../plan_keeper_cl
 
 | Path                               | Purpose                                                                                                              |
 | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `skills/plan-list/SKILL.md`        | Instructions for the read-only listing flow                                                                          |
 | `skills/plan-save/SKILL.md`        | Instructions for the save flow                                                                                       |
 | `skills/plan-do/SKILL.md`          | Instructions for the list-and-route flow                                                                             |
 | `skills/plan-done/SKILL.md`        | Instructions for the archive flow                                                                                    |
