@@ -322,6 +322,42 @@ class TestFileMetaUpdate(IsolatedHomeTestCase):
         self.assertIn("Agent: claude", text)  # untouched
         self.assertIn("# Body", text)  # body preserved
 
+    def test_file_meta_update_empty_value_clears_field(self) -> None:
+        """`update --field Agent=` (empty value) removes the Agent tag — this is
+        how plan-do strips the groundcrew dispatch signal when it starts a plan
+        locally. An empty managed field is omitted on serialize."""
+        plan = self._write_plan(
+            "---\nAgent: claude\nStatus: backlog\n---\n\n# Body\n"
+        )
+        result = run_cli(
+            "file-meta", "update", "--file", str(plan), "--field", "Agent=",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        text = plan.read_text()
+        self.assertNotIn("Agent:", text)
+        self.assertIn("Status: backlog", text)  # other fields untouched
+        self.assertIn("# Body", text)
+
+    def test_file_meta_update_plan_do_start_clears_agent_and_sets_status(self) -> None:
+        """The exact mutation plan-do step 6 makes: flip Status to in-progress
+        and clear Agent in one call, so a plan being driven locally drops out of
+        the groundcrew queue."""
+        plan = self._write_plan(
+            "---\nAgent: claude\nStatus: todo\nTicket: plan-123\n---\n\n# Body\n"
+        )
+        result = run_cli(
+            "file-meta", "update", "--file", str(plan),
+            "--field", "Status=in-progress",
+            "--field", "Agent=",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        text = plan.read_text()
+        self.assertNotIn("Agent:", text)
+        self.assertIn("Status: in-progress", text)
+        self.assertIn("Ticket: plan-123", text)  # unrelated fields survive
+
     def test_file_meta_update_multiple_fields(self) -> None:
         """Multiple --field flags apply in order."""
         plan = self._write_plan(

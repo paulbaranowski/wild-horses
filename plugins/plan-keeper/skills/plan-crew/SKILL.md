@@ -17,7 +17,10 @@ directions in bulk: promote `backlog → todo` (add to the queue) and dequeue `t
 - **Groundcrew ticket stamp:** on promote, the plan's synthesized groundcrew id (`plan-<digits>`) is written to `Ticket` with `Ticket System: groundcrew`, so the dispatch id is visible the moment a plan is queued. A plan already tracked in `linear`/`jira` keeps that reference untouched.
 - **Promote default agent:** a `backlog` plan with no `Agent` gets `Agent: claude` on promote, so it
   dispatches as the `claude` agent explicitly (groundcrew would already default to claude, but this
-  makes it visible in the frontmatter and the queue view).
+  makes it visible in the frontmatter and the queue view). Promote here is the **only** path that
+  writes the `Agent` tag automatically — `plan-save` no longer stamps it at birth, and `plan-do`
+  strips it when you start a plan locally. So the tag's presence means "queued for groundcrew," and
+  nothing else adds it behind your back.
 - **Confirmation:** required before any mutation.
 - **Sibling:** `plan-update` is the targeted single-plan / current-repo frontmatter editor; plan-crew
   is its cross-repo, multi-select counterpart. Both can promote a single plan — use plan-update when

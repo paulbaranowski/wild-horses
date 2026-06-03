@@ -33,9 +33,10 @@ class TestSave(IsolatedHomeTestCase):
         expected = self.plans_root / "scratch" / f"{today}-test-plan.md"
         self.assertEqual(r.stdout.strip(), str(expected))
         self.assertTrue(expected.exists())
-        # MD files now get injected Agent/Status frontmatter
+        # MD files get an injected Status block, but NO Agent tag — the Agent
+        # tag is the groundcrew dispatch signal, written only by plan-crew.
         text = expected.read_text()
-        self.assertIn("Agent: claude", text)
+        self.assertNotIn("Agent:", text)
         self.assertIn("Status: backlog", text)
         self.assertIn("# Test plan", text)
 
@@ -95,9 +96,9 @@ class TestSave(IsolatedHomeTestCase):
         r2 = run_cli(*common, "--on-collision", "overwrite", stdin="second\n", home=self.home)
         self.assertEqual(r2.returncode, 0, r2.stderr)
         written = Path(r2.stdout.strip())
-        # MD files now get injected Agent/Status frontmatter
+        # MD files get an injected Status block, but no Agent tag.
         text = written.read_text()
-        self.assertIn("Agent: claude", text)
+        self.assertNotIn("Agent:", text)
         self.assertIn("Status: backlog", text)
         self.assertIn("second", text)
 
@@ -313,8 +314,10 @@ class TestSave(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("--date is incompatible with --from-path", r.stderr)
 
-    def test_save_injects_default_agent_and_backlog_status(self) -> None:
-        """Bare `save --topic foo` produces 'Agent: claude\\nStatus: backlog\\n' frontmatter."""
+    def test_save_injects_backlog_status_and_no_agent(self) -> None:
+        """Bare `save --topic foo` produces a 'Status: backlog' block with NO
+        Agent tag — the Agent tag is the groundcrew dispatch signal, written
+        only by plan-crew on promote."""
         r = run_cli(
             "save", "--override", "testrepo", "--topic", "Test Plan",
             stdin="# Body\nSome plan content.\n",
@@ -327,22 +330,21 @@ class TestSave(IsolatedHomeTestCase):
             text.startswith("---\n"),
             f"expected frontmatter at top, got: {text[:200]!r}",
         )
-        self.assertIn("Agent: claude", text)
+        self.assertNotIn("Agent:", text)
         self.assertIn("Status: backlog", text)
         self.assertIn("# Body", text)
 
-    def test_save_with_agent_codex(self) -> None:
-        """`--agent codex` injects Agent: codex."""
+    def test_save_rejects_removed_agent_flag(self) -> None:
+        """`--agent` was removed — save must not accept it (the Agent tag is
+        plan-crew's to write, not plan-save's)."""
         r = run_cli(
             "save", "--override", "testrepo", "--topic", "Test",
             "--agent", "codex",
             stdin="# Body\n",
             home=self.home,
         )
-        self.assertEqual(r.returncode, 0)
-        text = Path(r.stdout.strip()).read_text()
-        self.assertIn("Agent: codex", text)
-        self.assertIn("Status: backlog", text)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--agent", r.stderr)
 
     def test_save_merges_existing_frontmatter(self) -> None:
         """Body that already has frontmatter is merged, not duplicated."""
@@ -354,26 +356,27 @@ class TestSave(IsolatedHomeTestCase):
         )
         self.assertEqual(r.returncode, 0, msg=r.stderr)
         text = Path(r.stdout.strip()).read_text()
-        # All three fields present, exactly once (frontmatter has opener and closer)
+        # Incoming Ticket preserved; Status backlog filled; no Agent injected.
         self.assertIn("---\n", text)  # has frontmatter markers
         self.assertEqual(text.count("Ticket: ENG-1"), 1)
-        self.assertEqual(text.count("Agent: claude"), 1)
+        self.assertNotIn("Agent:", text)
         self.assertEqual(text.count("Status: backlog"), 1)
         # Verify the structure: should have opening ---, then fields, then closing ---
         self.assertTrue(text.startswith("---\n"))
 
     def test_save_existing_agent_status_not_overwritten(self) -> None:
-        """If incoming body already declares Agent/Status, the CLI does NOT overwrite."""
+        """If incoming body already declares Agent/Status, the CLI preserves
+        them verbatim — save never injects or overwrites an Agent tag, and a
+        hand-declared one round-trips untouched."""
         body = "---\nAgent: codex\nStatus: todo\n---\n\n# Body\n"
         r = run_cli(
             "save", "--override", "testrepo", "--topic", "Test",
-            "--agent", "claude",
             stdin=body,
             home=self.home,
         )
         self.assertEqual(r.returncode, 0, msg=r.stderr)
         text = Path(r.stdout.strip()).read_text()
-        # Body's values win — --agent only fills when absent
+        # Body's values win and are preserved as-is.
         self.assertIn("Agent: codex", text)
         self.assertIn("Status: todo", text)
         self.assertNotIn("Agent: claude", text)
@@ -393,8 +396,8 @@ class TestSave(IsolatedHomeTestCase):
         self.assertNotIn("Agent:", text)
 
     def test_save_from_path_md_injects_full_block(self) -> None:
-        """A `.md` --from-path move with NO frontmatter gets the full managed
-        block (Agent/Status/Created), with Created sourced from the source
+        """A `.md` --from-path move with NO frontmatter gets the managed block
+        (Status/Created, no Agent), with Created sourced from the source
         file's birthtime — NOT the move time."""
         source = self.cwd / "src.md"
         source.write_text("# Plain body\nNo frontmatter here.\n")
@@ -414,7 +417,7 @@ class TestSave(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 0, msg=r.stderr)
         text = Path(r.stdout.strip()).read_text()
         self.assertTrue(text.startswith("---\n"), f"expected frontmatter, got: {text[:120]!r}")
-        self.assertIn("Agent: claude", text)
+        self.assertNotIn("Agent:", text)
         self.assertIn("Status: backlog", text)
         self.assertIn(f"Created: {expected_created}", text)
         self.assertIn("# Plain body", text)
