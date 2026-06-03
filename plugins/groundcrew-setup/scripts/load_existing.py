@@ -46,10 +46,15 @@ def main(argv: list[str]) -> int:
         print("could not load existing config: node not found on PATH", file=sys.stderr)
         return 1
 
-    config_dir = Path(args.config_path).parent
-    if not config_dir.is_dir():
-        print(f"could not load existing config: directory not found: {config_dir}", file=sys.stderr)
+    config_path = Path(args.config_path)
+    # Validate that the EXACT file exists, not just its parent directory.
+    # cosmiconfig (groundcrew's loader) walks upward from cwd looking for any
+    # config, so cd'ing into a directory whose target file is missing can
+    # silently load a stray config from a parent dir — the wrong-seed bug.
+    if not config_path.is_file():
+        print(f"could not load existing config: file not found: {config_path}", file=sys.stderr)
         return 1
+    config_dir = config_path.parent
 
     try:
         result = subprocess.run(

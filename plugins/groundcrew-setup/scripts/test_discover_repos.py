@@ -115,9 +115,16 @@ class DiscoverReposTestCase(unittest.TestCase):
     # Test 1: no gh, no local → empty array
     # ==================================================================
     def test_no_gh_no_local_empty_array(self) -> None:
-        """gh not on PATH, no scan dirs exist → [] with exit 0."""
-        # No stub gh created; PATH only has /usr/bin:/bin with no gh there either
-        # (We pass a bin_dir that has no gh binary.)
+        """gh not on PATH, no scan dirs exist → [] with exit 0.
+
+        Stubs `gh` with a binary that always exits non-zero (simulating an
+        unauthenticated or missing-config gh CLI). A bare empty bin_dir was
+        non-deterministic — a real `gh` from /usr/bin would leak through PATH
+        and change the expected output on machines where it's globally
+        authenticated.
+        """
+        # Shadow any real gh on PATH with a stub that always fails.
+        _make_stub_gh(self.bin_dir, exit_code=1, output="")
         r = _run_script(home=self.tmpdir, bin_dir=self.bin_dir)
         self.assertEqual(r.returncode, 0, f"expected exit 0; stderr={r.stderr!r}")
         data = self.assertValidJson(r.stdout)

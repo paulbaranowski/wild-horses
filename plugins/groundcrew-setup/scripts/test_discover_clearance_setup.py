@@ -186,7 +186,7 @@ class TestDiscoverClearanceSetup(unittest.TestCase):
     def test_env_with_inline_trailing_comment_still_exported(self) -> None:
         """export CLEARANCE_ALLOW_HOSTS_FILES with inline trailing comment → envExported true."""
         rc = self._rc_file(".zshrc")
-        rc.write_text('export CLEARANCE_ALLOW_HOSTS_FILES="/path  # comment\n')
+        rc.write_text('export CLEARANCE_ALLOW_HOSTS_FILES="/path"  # comment\n')
         proc = run_script(self.home)
         self.assertEqual(proc.returncode, 0)
         result = json.loads(proc.stdout)
