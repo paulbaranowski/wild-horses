@@ -86,6 +86,16 @@
       },
       "category": "development",
       "license": "MIT"
+    },
+    {
+      "name": "pr-status-hook",
+      "source": "./plugins/pr-status-hook",
+      "description": "Stop hook that reports, at every turn-end, whether an open PR exists for the current branch (with its link), whether the last commits were actually pushed, and whether the working tree is dirty — all computed from real git/gh state, never from memory. Stays silent unless there is something worth reporting.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
     }
   ]
 }
