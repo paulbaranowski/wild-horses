@@ -112,10 +112,15 @@ def validate_extension(ext: str) -> str:
     return ext
 
 
-def derive_repo(override: Optional[str], cwd: Optional[str] = None) -> str:
-    """Resolve <repo> per repo-derivation.md."""
-    if override:
-        return validate_repo_name(normalize_override(override))
+def _repo_from_git(cwd: Optional[str] = None) -> Optional[str]:
+    """Return the repo folder name from `git remote origin`, or None.
+
+    The git half of derive_repo, split out so callers that need to distinguish
+    "there is a repo context here" from "fall back to something" can do so —
+    `list` treats a None here as "no repo context, list every repo". Returns the
+    validated single-token name (origin URL basename, `.git` stripped); None when
+    cwd is not a git repo, has no `origin`, or the URL has no usable basename.
+    """
     cwd = cwd or os.getcwd()
     try:
         result = subprocess.run(
@@ -135,6 +140,22 @@ def derive_repo(override: Optional[str], cwd: Optional[str] = None) -> str:
                     return validate_repo_name(base)
     except (subprocess.SubprocessError, OSError):
         pass
+    return None
+
+
+def derive_repo(override: Optional[str], cwd: Optional[str] = None) -> str:
+    """Resolve <repo> per repo-derivation.md.
+
+    Contract unchanged: override (normalized) → git origin → cwd basename. The
+    git lookup is delegated to _repo_from_git; this still always returns exactly
+    one repo name (the cwd-basename fallback guarantees a value).
+    """
+    if override:
+        return validate_repo_name(normalize_override(override))
+    from_git = _repo_from_git(cwd)
+    if from_git is not None:
+        return from_git
+    cwd = cwd or os.getcwd()
     return validate_repo_name(os.path.basename(os.path.abspath(cwd)))
 
 
