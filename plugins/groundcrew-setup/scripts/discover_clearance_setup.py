@@ -21,9 +21,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
+
+_EXPORT_ALLOW_HOSTS_RE = re.compile(r"^\s*export\s+CLEARANCE_ALLOW_HOSTS_FILES(?=[=\s]|$)")
 
 
 def check_personal_file(personal_file: Path) -> tuple[bool, bool]:
@@ -46,7 +49,13 @@ def check_personal_file(personal_file: Path) -> tuple[bool, bool]:
 
 
 def check_env_exported(home: Path) -> bool:
-    """Return True if any rc file exports CLEARANCE_ALLOW_HOSTS_FILES (commented lines excluded)."""
+    """Return True if any rc file exports CLEARANCE_ALLOW_HOSTS_FILES (commented lines excluded).
+
+    Matches `export CLEARANCE_ALLOW_HOSTS_FILES=...` at the start of the
+    line, NOT any line that merely mentions the var name (e.g. an
+    `echo "set CLEARANCE_ALLOW_HOSTS_FILES"` reminder, an unset alias,
+    or the var appearing inside another export's value as ${VAR:+...}).
+    """
     rc_files = [home / ".zshrc", home / ".bash_profile", home / ".bashrc", home / ".profile"]
     for rc_path in rc_files:
         try:
@@ -55,15 +64,43 @@ def check_env_exported(home: Path) -> bool:
                     stripped = line.strip()
                     if not stripped or stripped.startswith("#"):
                         continue
-                    if "CLEARANCE_ALLOW_HOSTS_FILES" in stripped:
+                    if _EXPORT_ALLOW_HOSTS_RE.match(stripped):
                         return True
         except OSError:
             continue
     return False
 
 
+def _pid_is_alive(pid: int) -> bool:
+    """Return True if a process with this pid currently exists.
+
+    Uses signal 0, which performs the standard kernel permission/existence
+    check without delivering any signal. ProcessLookupError → dead/missing;
+    PermissionError → the process exists but we can't signal it (still
+    "alive" for our purpose).
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def check_daemon(pid_file: Path) -> tuple[int | None, int | None]:
-    """Return (pid, age_seconds) parsed from the daemon pid file."""
+    """Return (pid, age_seconds) parsed from the daemon pid file.
+
+    `daemon_pid` is None when the pid file is missing, unreadable,
+    contains non-integer garbage, OR the pid no longer points at a
+    live process. The age field tracks the pid FILE's mtime regardless
+    — useful even with a stale pid for "this daemon hasn't been
+    refreshed in N seconds." Callers should treat `daemon_pid == null`
+    as "no live daemon to kill" (avoids `kill <stale-pid>` no-ops or,
+    worse, killing a recycled pid).
+    """
     if not pid_file.is_file():
         return None, None
     daemon_pid: int | None = None
@@ -75,9 +112,11 @@ def check_daemon(pid_file: Path) -> tuple[int | None, int | None]:
         pass
     try:
         raw = pid_file.read_text(encoding="utf-8").strip()
-        daemon_pid = int(raw)
+        candidate = int(raw)
     except (OSError, ValueError):
-        daemon_pid = None
+        return None, daemon_age_seconds
+    if _pid_is_alive(candidate):
+        daemon_pid = candidate
     return daemon_pid, daemon_age_seconds
 
 

@@ -23,8 +23,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-_SAFE_FN_RE = re.compile(r"^\s*safe\s*\(\)", re.MULTILINE)
-_SAFE_CLAUDE_FN_RE = re.compile(r"^\s*safe-claude\s*\(\)", re.MULTILINE)
+_SAFE_FN_RE = re.compile(r"^\s*safe\s*\(\s*\)", re.MULTILINE)
+_SAFE_CLAUDE_FN_RE = re.compile(r"^\s*safe-claude\s*\(\s*\)", re.MULTILINE)
+_EXPORT_APPEND_PROFILE_RE = re.compile(r"^\s*export\s+SAFEHOUSE_APPEND_PROFILE(?=[=\s]|$)")
 
 
 def probe_binary() -> tuple[bool, str | None]:
@@ -49,7 +50,11 @@ def probe_brew_formula(brew_path: str | None) -> bool:
 
 
 def probe_env_exported(home: Path) -> bool:
-    """Return True if any rc file exports SAFEHOUSE_APPEND_PROFILE (commented lines excluded)."""
+    """Return True if any rc file exports SAFEHOUSE_APPEND_PROFILE (commented lines excluded).
+
+    Matches `export SAFEHOUSE_APPEND_PROFILE=...` at the start of the
+    stripped line, NOT any line that merely mentions the var name.
+    """
     rc_files = [home / ".zshrc", home / ".bash_profile", home / ".bashrc", home / ".profile"]
     for rc_path in rc_files:
         try:
@@ -58,7 +63,7 @@ def probe_env_exported(home: Path) -> bool:
                     stripped = line.strip()
                     if not stripped or stripped.startswith("#"):
                         continue
-                    if "SAFEHOUSE_APPEND_PROFILE" in stripped:
+                    if _EXPORT_APPEND_PROFILE_RE.match(stripped):
                         return True
         except OSError:
             continue

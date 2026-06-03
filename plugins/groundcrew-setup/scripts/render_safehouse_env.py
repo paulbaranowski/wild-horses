@@ -45,17 +45,20 @@ FN_SAFE_CLAUDE = "safe-claude"
 
 RC_CANDIDATES = (".zshrc", ".bash_profile", ".bashrc", ".profile")
 
-# Function-definition patterns (POSIX sh): `name()` at line start, optional
-# whitespace between name and parens. Match anywhere from start of line.
+# Anchored patterns. A bare substring match for the var name flags any line that
+# mentions it (e.g. `echo "set $VAR"`, an unset alias). Function patterns match
+# `name()` at the start of a stripped line, with optional whitespace.
+_EXPORT_RE = re.compile(rf"^\s*export\s+{re.escape(VAR_APPEND_PROFILE)}(?=[=\s]|$)")
 _FN_RE = {
-    FN_SAFE: re.compile(r"^\s*safe\s*\(\)"),
-    FN_SAFE_CLAUDE: re.compile(r"^\s*safe-claude\s*\(\)"),
+    FN_SAFE: re.compile(r"^\s*safe\s*\(\s*\)"),
+    FN_SAFE_CLAUDE: re.compile(r"^\s*safe-claude\s*\(\s*\)"),
 }
 
 
 class RcMatch(TypedDict):
     item: str
     file: str
+    value: str | None
     line: int
 
 
@@ -65,6 +68,10 @@ def scan_rc(home: Path) -> dict[str, RcMatch]:
     Items scanned: SAFEHOUSE_APPEND_PROFILE export, safe() definition,
     safe-claude() definition. First match wins per item; rc candidates
     are scanned in canonical login order.
+
+    For the SAFEHOUSE_APPEND_PROFILE export, the matched line's RHS is
+    captured into `value` so the sidecar's commented note can show the
+    actual path the rc points at, not the wizard's default.
     """
     found: dict[str, RcMatch] = {}
     items_to_find = {VAR_APPEND_PROFILE, FN_SAFE, FN_SAFE_CLAUDE}
@@ -77,20 +84,40 @@ def scan_rc(home: Path) -> dict[str, RcMatch]:
                     stripped = line.strip()
                     if not stripped or stripped.startswith("#"):
                         continue
-                    if VAR_APPEND_PROFILE not in found and VAR_APPEND_PROFILE in stripped:
+                    if VAR_APPEND_PROFILE not in found and _EXPORT_RE.match(stripped):
+                        value = _extract_export_value(stripped, VAR_APPEND_PROFILE)
                         found[VAR_APPEND_PROFILE] = RcMatch(
-                            item=VAR_APPEND_PROFILE, file=str(rc_path), line=line_num,
+                            item=VAR_APPEND_PROFILE, file=str(rc_path),
+                            value=value, line=line_num,
                         )
                     for fn_name, pattern in _FN_RE.items():
                         if fn_name in found:
                             continue
                         if pattern.match(line):
-                            found[fn_name] = RcMatch(item=fn_name, file=str(rc_path), line=line_num)
+                            found[fn_name] = RcMatch(
+                                item=fn_name, file=str(rc_path),
+                                value=None, line=line_num,
+                            )
         except OSError:
             continue
         if set(found.keys()) >= items_to_find:
             break
     return found
+
+
+def _extract_export_value(stripped_line: str, var: str) -> str | None:
+    """Return the RHS of `export VAR=...`, stripped of optional surrounding quotes.
+
+    Returns None if the line is `export VAR` alone (declaration without value),
+    or if the value can't be cleanly extracted.
+    """
+    m = re.match(rf"^\s*export\s+{re.escape(var)}=(.*)$", stripped_line)
+    if not m:
+        return None
+    raw = m.group(1).strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ('"', "'"):
+        return raw[1:-1]
+    return raw or None
 
 
 def render_sidecar(rc_conflicts: dict[str, RcMatch], overrides_path: Path) -> str:
@@ -106,8 +133,11 @@ def render_sidecar(rc_conflicts: dict[str, RcMatch], overrides_path: Path) -> st
     ]
     if VAR_APPEND_PROFILE in rc_conflicts:
         m = rc_conflicts[VAR_APPEND_PROFILE]
+        # Show the rc's actual value, not the wizard's default — the commented-out
+        # line is for diagnostic clarity, not a fallback definition.
+        rc_value = m.get("value") or "(see rc line for value)"
         lines.append(f"# Already exported in {m['file']}:{m['line']} — sidecar leaving this alone.")
-        lines.append(f'# export {VAR_APPEND_PROFILE}="{overrides_path}"')
+        lines.append(f'# (rc value: "{rc_value}")')
     else:
         lines.append(f'export {VAR_APPEND_PROFILE}="{overrides_path}"')
     lines.append("")
@@ -190,7 +220,6 @@ def write_atomic(target: Path, content: str, mode: int = 0o644) -> None:
 def main(argv: list[str]) -> int:
     home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
     default_target = home / ".config" / "agent-safehouse" / "env.sh"
-    default_overrides = home / ".config" / "agent-safehouse" / "local-overrides.sb"
 
     parser = argparse.ArgumentParser(
         description="Render the agent-safehouse env sidecar.",
@@ -202,8 +231,12 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--overrides-file",
-        default=str(default_overrides),
-        help=f"Path to write (or reference) the local-overrides.sb file (default: {default_overrides}).",
+        default=None,
+        help=(
+            "Path to write (or reference) the local-overrides.sb file. "
+            "Defaults to <target_dir>/local-overrides.sb — derived from --target "
+            "so a custom --target keeps the stub colocated with the sidecar."
+        ),
     )
     parser.add_argument(
         "--no-overrides-stub",
@@ -212,10 +245,17 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
-    rc_conflicts = scan_rc(home)
-    overrides_path = Path(args.overrides_file)
-    content = render_sidecar(rc_conflicts, overrides_path)
     target = Path(args.target)
+    # When --overrides-file is not specified, derive it from --target's parent so
+    # a custom --target keeps the stub colocated with the sidecar instead of
+    # landing at the fixed default. This avoids the split-paths failure mode
+    # where the sidecar at /A references a stub at /B.
+    overrides_path = (
+        Path(args.overrides_file) if args.overrides_file is not None
+        else target.parent / "local-overrides.sb"
+    )
+    rc_conflicts = scan_rc(home)
+    content = render_sidecar(rc_conflicts, overrides_path)
 
     overrides_written: str | None = None
     try:

@@ -89,9 +89,13 @@ class TestRenderSafehouseEnv(unittest.TestCase):
         self.assertEqual(items, ["SAFEHOUSE_APPEND_PROFILE"])
 
         content = self._read(target)
-        # export is commented; functions are still active.
+        # No active export in the sidecar; the "already exported in <rc>" note
+        # plus an "(rc value: ...)" line replaces the previous commented-out
+        # export line (which would have shown the wizard's default path, not
+        # the rc's actual value — misleading).
         self.assertNotRegex(content, r"(?m)^export SAFEHOUSE_APPEND_PROFILE=")
-        self.assertRegex(content, r"(?m)^# export SAFEHOUSE_APPEND_PROFILE=")
+        self.assertIn("Already exported in", content)
+        self.assertIn("rc value:", content)
         self.assertRegex(content, r"(?m)^safe\(\) \{$")
         self.assertRegex(content, r"(?m)^safe-claude\(\) \{$")
 
@@ -162,6 +166,46 @@ class TestRenderSafehouseEnv(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         report = json.loads(r.stdout)
         self.assertEqual(report["rcConflicts"], [])
+
+    def test_substring_mention_is_not_a_conflict(self) -> None:
+        """Lines that mention SAFEHOUSE_APPEND_PROFILE in passing must not flag."""
+        (self.home / ".zshrc").write_text(
+            'echo "set SAFEHOUSE_APPEND_PROFILE if needed"\n'
+            'alias unsafe="unset SAFEHOUSE_APPEND_PROFILE"\n',
+            encoding="utf-8",
+        )
+        target = self.tmpdir / "env.sh"
+        r = _run_cli(self.home, target=target)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        report = json.loads(r.stdout)
+        self.assertEqual(report["rcConflicts"], [])
+
+    def test_rc_value_shown_in_conflict_comment(self) -> None:
+        """When the rc owns SAFEHOUSE_APPEND_PROFILE, the sidecar's note shows the rc's actual value."""
+        (self.home / ".zshrc").write_text(
+            'export SAFEHOUSE_APPEND_PROFILE="/my/very-specific/policy.sb"\n',
+            encoding="utf-8",
+        )
+        target = self.tmpdir / "env.sh"
+        r = _run_cli(self.home, target=target)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        content = self._read(target)
+        self.assertIn('(rc value: "/my/very-specific/policy.sb")', content)
+
+    def test_overrides_path_derived_from_custom_target(self) -> None:
+        """When --target is custom but --overrides-file is not, overrides should land beside the sidecar."""
+        custom_dir = self.tmpdir / "custom-dir"
+        custom_dir.mkdir()
+        target = custom_dir / "env.sh"
+        r = _run_cli(self.home, target=target)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        report = json.loads(r.stdout)
+        # Overrides stub should land in custom_dir, not in ~/.config/agent-safehouse/.
+        self.assertEqual(Path(report["overridesStub"]), custom_dir / "local-overrides.sb")
+        self.assertTrue((custom_dir / "local-overrides.sb").exists())
+        # Default ~/.config/... must not have been written.
+        default_overrides = self.home / ".config" / "agent-safehouse" / "local-overrides.sb"
+        self.assertFalse(default_overrides.exists(), "default overrides path should NOT have been touched")
 
     # ------------------------------------------------------------------
     # local-overrides.sb stub

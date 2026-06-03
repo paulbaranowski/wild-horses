@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -58,12 +59,28 @@ class RcMatch(TypedDict):
     line: int
 
 
+def _export_pattern(var: str) -> re.Pattern[str]:
+    """Match `export VAR=...` (POSIX) or `VAR=... export` only when VAR is the assignment LHS.
+
+    A bare `if var in stripped` substring match flags lines that merely mention the var
+    name (e.g. `echo "set $VAR"`, an unset alias, or the var appearing inside another
+    export's value as `${VAR:+...}`). That produces false-positive "conflicts" and the
+    sidecar's smart-merge comments out a var the rc doesn't actually own.
+    """
+    return re.compile(rf"^\s*export\s+{re.escape(var)}(?=[=\s]|$)")
+
+
 def scan_rc(home: Path, var_names: tuple[str, ...]) -> dict[str, RcMatch]:
     """Return {var: RcMatch} for vars exported (uncommented) in any rc candidate.
 
     First match wins; rc candidates are scanned in the canonical order used
     by login shells (zshrc first on macOS).
+
+    "Exported" means the line is an `export VAR=...` (or `export VAR` alone) at the
+    start of a stripped line — not just any line that contains the var name. See
+    `_export_pattern`.
     """
+    patterns = {var: _export_pattern(var) for var in var_names}
     found: dict[str, RcMatch] = {}
     for rc_name in RC_CANDIDATES:
         rc_path = home / rc_name
@@ -73,10 +90,10 @@ def scan_rc(home: Path, var_names: tuple[str, ...]) -> dict[str, RcMatch]:
                     stripped = line.strip()
                     if not stripped or stripped.startswith("#"):
                         continue
-                    for var in var_names:
+                    for var, pattern in patterns.items():
                         if var in found:
                             continue
-                        if var in stripped:
+                        if pattern.match(stripped):
                             found[var] = RcMatch(var=var, file=str(rc_path), line=line_num)
         except OSError:
             continue

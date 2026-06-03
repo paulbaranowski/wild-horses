@@ -126,6 +126,32 @@ class TestRenderClearanceEnv(unittest.TestCase):
         content = self._read_sidecar(target)
         self.assertRegex(content, r"(?m)^export CLEARANCE_ALLOW_HOSTS_FILES=")
 
+    def test_substring_mention_is_not_a_conflict(self) -> None:
+        """Lines that mention the var name in passing must NOT count as conflicts.
+
+        Regression: the original scanner used `if var in stripped`, which would
+        flag an `echo "set ..."` reminder, an `unset alias`, or — most painfully
+        — the var name appearing inside another export's `${VAR:+...}` value as
+        a "conflict," silently commenting out the sidecar's actual export.
+        """
+        (self.home / ".zshrc").write_text(
+            'echo "Remember to set CLEARANCE_ALLOW_HOSTS_FILES if not in sidecar"\n'
+            'alias unset-clearance="unset CLEARANCE_PERSONAL_HOSTS"\n'
+            'export OTHER_VAR="/p${CLEARANCE_PERSONAL_HOSTS:+:foo}"\n',
+            encoding="utf-8",
+        )
+        target = self.tmpdir / "env.sh"
+        r = _run_cli(self.home, target=target)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        report = json.loads(r.stdout)
+        self.assertEqual(
+            report["rcConflicts"], [],
+            "non-export mentions of the var name must not be flagged as conflicts",
+        )
+        content = self._read_sidecar(target)
+        self.assertRegex(content, r"(?m)^export CLEARANCE_PERSONAL_HOSTS=1")
+        self.assertRegex(content, r"(?m)^export CLEARANCE_ALLOW_HOSTS_FILES=")
+
     # ------------------------------------------------------------------
     # Rc scanning across multiple files
     # ------------------------------------------------------------------

@@ -25,18 +25,18 @@ Three entry points:
 
 ## What the full wizard does
 
-Ten phases (0–9). Before asking anything, Phase 0 silently runs seven discovery / install-check scripts in parallel.
+Ten phases (0–9), matching `skills/config/SKILL.md`. Phase 0 silently runs seven discovery / install-check scripts in parallel before any prompt is shown.
 
-1. **Pre-flight discovery** — existing-config scan, repo discovery, installed-skill detection, clearance probe, safehouse probe, groundcrew install-check, safehouse install-check.
-2. **Install prerequisites** — `npm install -g @clipboard-health/groundcrew` (brings clearance along) and `brew install eugene1g/safehouse/agent-safehouse`, one Yes/No question each on missing.
-3. **Existing-config check** — detects any existing config and asks before overwriting; seeds defaults from it if you say yes.
-4. **Workspace** — workspace kind (`auto` / `cmux` / `tmux`), project directory, and a repo picker built from GitHub (`gh`) + local clone discovery.
-5. **Claude permissions and model commands** — bypass-permissions flag, and optional custom `claude` / `codex` command strings.
-6. **Initial-prompt features** — additive snippets on top of the always-on baseline: `superpowers` skill invocation, `core:babysit-pr` after PRs, code-style pointer. Pre-selects features it detects as already installed.
-7. **Clearance egress allowlist** — writes/appends `~/.config/clearance/personal-allow-hosts`, then writes `~/.config/clearance/env.sh` sidecar with smart-merge against your existing rc-file exports.
-8. **Safehouse env sidecar** — writes `~/.config/agent-safehouse/env.sh` with `SAFEHOUSE_APPEND_PROFILE` + `safe()` / `safe-claude()` wrapper functions, plus an empty `local-overrides.sb` stub.
-9. **Orchestrator and logging** — optional session-usage cap and custom log-file path.
-10. **Render config + crew doctor** — pipes the collected answers to `render_config.py`, writes `config.ts` (and `initial-prompt.md` if features were chosen), invokes `crew doctor`, and prints next steps including the one-line snippet you add to your rc to source both sidecars.
+- **Phase 0 — Pre-flight discovery** — existing-config scan, repo discovery, installed-skill detection, clearance probe, safehouse probe, groundcrew install-check, safehouse install-check.
+- **Phase 1 — Install prerequisites** — `npm install -g @clipboard-health/groundcrew` (brings clearance along) and `brew install eugene1g/safehouse/agent-safehouse`, one Yes/No question each on missing.
+- **Phase 2 — Existing-config check** — detects any existing config and asks before overwriting; seeds defaults from it if you say yes.
+- **Phase 3 — Workspace** — workspace kind (`auto` / `cmux` / `tmux`), project directory, and a repo picker built from GitHub (`gh`) + local clone discovery.
+- **Phase 4 — Claude permissions and model commands** — bypass-permissions flag, and optional custom `claude` / `codex` command strings.
+- **Phase 5 — Initial-prompt features** — additive snippets on top of the always-on baseline: `superpowers` skill invocation, `core:babysit-pr` after PRs, code-style pointer. Pre-selects features it detects as already installed.
+- **Phase 6 — Clearance egress allowlist** — writes/appends `~/.config/clearance/personal-allow-hosts`, then writes `~/.config/clearance/env.sh` sidecar with smart-merge against your existing rc-file exports.
+- **Phase 7 — Safehouse env sidecar** — writes `~/.config/agent-safehouse/env.sh` with `SAFEHOUSE_APPEND_PROFILE` + `safe()` / `safe-claude()` wrapper functions, plus an empty `local-overrides.sb` stub.
+- **Phase 8 — Orchestrator and logging** — optional session-usage cap and custom log-file path.
+- **Phase 9 — Render config + crew doctor** — pipes the collected answers to `render_config.py`, writes `config.ts` (and `initial-prompt.md` if features were chosen), invokes `crew doctor`, and prints next steps including the one-line snippet you add to your rc to source both sidecars.
 
 ## What the wizard produces
 

@@ -196,10 +196,15 @@ class TestDiscoverClearanceSetup(unittest.TestCase):
     # Test 8 — pid file with valid pid and known mtime
     # ------------------------------------------------------------------
 
-    def test_pid_file_reports_pid_and_age(self) -> None:
-        """Pid file with integer content → daemonPid set; age within ±5 s of mtime delta."""
+    def test_pid_file_reports_live_pid_and_age(self) -> None:
+        """Pid file with a LIVE pid → daemonPid set; age within ±5 s of mtime delta.
+
+        Uses os.getpid() so the kill(pid, 0) liveness check inside the script
+        passes against a process that's guaranteed to exist (the test runner).
+        """
+        live_pid = os.getpid()
         pf = self._pid_file()
-        pf.write_text("12345\n")
+        pf.write_text(f"{live_pid}\n")
         now = time.time()
         offset = 3600  # 1 hour ago
         os.utime(str(pf), (now - offset, now - offset))
@@ -207,7 +212,45 @@ class TestDiscoverClearanceSetup(unittest.TestCase):
         proc = run_script(self.home)
         self.assertEqual(proc.returncode, 0)
         result = json.loads(proc.stdout)
-        self.assertEqual(result["daemonPid"], 12345)
+        self.assertEqual(result["daemonPid"], live_pid)
+        self.assertIsNotNone(result["daemonAgeSeconds"])
+        self.assertAlmostEqual(result["daemonAgeSeconds"], offset, delta=5)
+
+    def test_pid_file_reports_dead_pid_as_null(self) -> None:
+        """Pid file with a DEAD pid → daemonPid null; daemonAgeSeconds still set from mtime.
+
+        Regression for the reviewer-flagged issue where a stale pid file from a
+        crashed daemon was reported as if the daemon were running, leading the
+        skill to offer `kill <dead-pid>` (no-op at best; killing a recycled pid
+        at worst).
+        """
+        # 99999 is high enough that it's unlikely to be in use; if it happens to be,
+        # iterate until we find a dead one. PID 0 would be invalid; PIDs >= 99999 are
+        # rare on macOS but possible.
+        dead_pid = 99999
+        while True:
+            try:
+                os.kill(dead_pid, 0)
+                # Process exists; pick another.
+                dead_pid += 1
+            except ProcessLookupError:
+                break
+            except PermissionError:
+                # Process exists but we can't signal it; still alive.
+                dead_pid += 1
+        pf = self._pid_file()
+        pf.write_text(f"{dead_pid}\n")
+        now = time.time()
+        offset = 7200  # 2 hours ago
+        os.utime(str(pf), (now - offset, now - offset))
+
+        proc = run_script(self.home)
+        self.assertEqual(proc.returncode, 0)
+        result = json.loads(proc.stdout)
+        self.assertIsNone(
+            result["daemonPid"],
+            f"dead pid {dead_pid} should be reported as null daemonPid",
+        )
         self.assertIsNotNone(result["daemonAgeSeconds"])
         self.assertAlmostEqual(result["daemonAgeSeconds"], offset, delta=5)
 
@@ -249,9 +292,11 @@ class TestDiscoverClearanceSetup(unittest.TestCase):
         # rc file
         rc = self._rc_file(".zshrc")
         rc.write_text('export CLEARANCE_ALLOW_HOSTS_FILES="/x"\n')
-        # pid file
+        # pid file — use the test runner's pid so the liveness check inside the
+        # script reports a live process.
+        live_pid = os.getpid()
         pid_p = self._pid_file()
-        pid_p.write_text("9999\n")
+        pid_p.write_text(f"{live_pid}\n")
 
         proc = run_script(self.home)
         self.assertEqual(proc.returncode, 0)
@@ -259,7 +304,7 @@ class TestDiscoverClearanceSetup(unittest.TestCase):
         self.assertTrue(result["personalFileExists"])
         self.assertTrue(result["personalFileHasClaudeHosts"])
         self.assertTrue(result["envExported"])
-        self.assertEqual(result["daemonPid"], 9999)
+        self.assertEqual(result["daemonPid"], live_pid)
         self.assertIsNotNone(result["daemonAgeSeconds"])
 
 
