@@ -25,7 +25,7 @@ import sys as _sys
 import tempfile
 import unittest
 import urllib.error
-from datetime import date
+from datetime import date, datetime, timezone
 from email.message import Message
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -519,10 +519,20 @@ class TestSave(IsolatedHomeTestCase):
         self.assertEqual(text, body)  # exact match — no frontmatter
         self.assertNotIn("Agent:", text)
 
-    def test_save_from_path_no_frontmatter_injection(self) -> None:
-        """--from-path preserves source bytes; never injects."""
+    def test_save_from_path_md_injects_full_block(self) -> None:
+        """A `.md` --from-path move with NO frontmatter gets the full managed
+        block (Agent/Status/Created), with Created sourced from the source
+        file's birthtime — NOT the move time."""
         source = self.cwd / "src.md"
         source.write_text("# Plain body\nNo frontmatter here.\n")
+        old = 1_600_000_000.0  # 2020-09-13T12:26:40Z — distinct from "now"
+        os.utime(source, (old, old))
+        # Assert the exact ISO literal the controlled epoch yields, computed
+        # independently of the CLI's _iso_from_stat — so a regression in that
+        # helper's format/timezone can't pass by deriving expected from itself.
+        # Deterministic cross-platform: Linux has no birthtime (uses mtime=old);
+        # macOS clamps birthtime down to the older mtime, so it also reports old.
+        expected_created = datetime.fromtimestamp(old, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         r = run_cli(
             "save", "--override", "testrepo",
             "--from-path", str(source),
@@ -530,8 +540,127 @@ class TestSave(IsolatedHomeTestCase):
         )
         self.assertEqual(r.returncode, 0, msg=r.stderr)
         text = Path(r.stdout.strip()).read_text()
-        self.assertNotIn("Agent:", text)
-        self.assertNotIn("Status:", text)
+        self.assertTrue(text.startswith("---\n"), f"expected frontmatter, got: {text[:120]!r}")
+        self.assertIn("Agent: claude", text)
+        self.assertIn("Status: backlog", text)
+        self.assertIn(f"Created: {expected_created}", text)
+        self.assertIn("# Plain body", text)
+
+    def test_save_from_path_md_partial_frontmatter_fills_only_created(self) -> None:
+        """A `.md` move with a partial block (Agent present, no Created) gets
+        only the missing fields filled; existing Agent/Status are untouched."""
+        source = self.cwd / "src.md"
+        source.write_text("---\nAgent: codex\nStatus: todo\n---\n\n# Body\n")
+        old = 1_600_000_000.0
+        os.utime(source, (old, old))
+        # Exact literal, computed independently of _iso_from_stat (see the
+        # no-frontmatter test above for why this is deterministic cross-platform).
+        expected_created = datetime.fromtimestamp(old, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        r = run_cli(
+            "save", "--override", "testrepo",
+            "--from-path", str(source),
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        self.assertIn("Agent: codex", text)
+        self.assertNotIn("Agent: claude", text)
+        self.assertIn("Status: todo", text)
+        self.assertIn(f"Created: {expected_created}", text)
+
+    def test_save_from_path_md_existing_created_not_overwritten(self) -> None:
+        """A `.md` move whose body already carries a valid Created keeps it —
+        the move never re-stamps an existing value."""
+        source = self.cwd / "src.md"
+        source.write_text(
+            "---\nAgent: codex\nStatus: todo\nCreated: 2020-01-01T00:00:00Z\n---\n\n# Body\n"
+        )
+        r = run_cli(
+            "save", "--override", "testrepo",
+            "--from-path", str(source),
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        text = Path(r.stdout.strip()).read_text()
+        self.assertIn("Created: 2020-01-01T00:00:00Z", text)
+        self.assertEqual(text.count("Created:"), 1)
+
+    def test_save_from_path_md_unlinks_source_on_success(self) -> None:
+        """The .md move is a move, not a copy: a successful injection removes
+        the source. (The non-.md move guarantees this via shutil.move; the .md
+        path rewrites + unlinks, so it needs its own coverage.)"""
+        source = self.cwd / "src.md"
+        source.write_text("# Body\n")
+        r = run_cli(
+            "save", "--override", "testrepo",
+            "--from-path", str(source),
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertTrue(Path(r.stdout.strip()).exists())
+        self.assertFalse(source.exists(), "source must be unlinked after a successful .md move")
+
+    def test_save_from_path_md_malformed_frontmatter_is_retry_safe(self) -> None:
+        """A moved-in .md with malformed frontmatter (no closing '---') must
+        fail BEFORE the source is destroyed, leaving nothing in the target dir —
+        otherwise a half-completed move would strand an unstamped file and break
+        the 'delete only on success' retry contract."""
+        source = self.cwd / "broken.md"
+        source.write_text("---\nAgent: codex\n\n# No closing fence\n")
+        r = run_cli(
+            "save", "--override", "testrepo",
+            "--from-path", str(source),
+            home=self.home,
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("malformed frontmatter", r.stderr)
+        self.assertTrue(source.exists(), "source must survive a malformed-frontmatter failure")
+        self.assertFalse(
+            (self.plans_root / "testrepo" / "broken.md").exists(),
+            "no file should be stranded in the target dir on failure",
+        )
+
+    def test_save_from_path_md_same_path_overwrite_preserves_file(self) -> None:
+        """`--from-path` pointing AT an existing target `.md` with
+        `--on-collision overwrite` must NOT delete the file: write_atomic
+        replaces it in place and the unlink is skipped because source and target
+        resolve to the same path. Without the guard, source.unlink() would
+        delete the freshly stamped plan."""
+        repo_dir = self.plans_root / "testrepo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        target = repo_dir / "2026-06-02-inplace.md"
+        target.write_text("# In place\n")
+        r = run_cli(
+            "save", "--override", "testrepo",
+            "--from-path", str(target), "--on-collision", "overwrite",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertTrue(
+            target.exists(),
+            "the in-place file must survive a same-path overwrite — not be unlinked",
+        )
+        text = target.read_text()
+        self.assertIn("# In place", text)
+        self.assertIn("Status: backlog", text)
+        self.assertIn("Created:", text)
+
+    def test_save_from_path_json_byte_verbatim(self) -> None:
+        """A non-.md (.json) move stays byte-for-byte — no frontmatter, no
+        rewrite. This is the regression guard the verbatim guarantee protects."""
+        source = self.cwd / "data.json"
+        raw = '{"tasks": [1, 2, 3]}\n'
+        source.write_text(raw)
+        r = run_cli(
+            "save", "--override", "testrepo",
+            "--from-path", str(source),
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        written = Path(r.stdout.strip())
+        self.assertEqual(written.read_bytes(), raw.encode("utf-8"))
+        self.assertNotIn("Created", written.read_text())
+        self.assertNotIn("Agent", written.read_text())
 
 
 class TestSaveKind(IsolatedHomeTestCase):
@@ -1780,10 +1909,17 @@ class TestTicketSystemConfigRefreshLinear(unittest.TestCase):
         # call into module-level functions, not subprocess.
         self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
         self._home_patch.start()
+        # PLAN_ROOT is frozen at import time (Path.home() / "plans"), so patching
+        # Path.home() above does NOT redirect it — patch the constant directly,
+        # or these in-process tests write to the real ~/plans. Mirrors the
+        # precedent in TestBackfillCreatedBestEffort.
+        self._plan_root_patch = patch.object(self.cli, "PLAN_ROOT", self.home / "plans")
+        self._plan_root_patch.start()
         self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
         self._cwd_patch.start()
 
     def tearDown(self) -> None:
+        self._plan_root_patch.stop()
         self._home_patch.stop()
         self._cwd_patch.stop()
         self._tmp.cleanup()
@@ -1888,10 +2024,17 @@ class TestPushLinearCreate(unittest.TestCase):
         )
         self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
         self._home_patch.start()
+        # PLAN_ROOT is frozen at import time (Path.home() / "plans"), so patching
+        # Path.home() above does NOT redirect it — patch the constant directly,
+        # or these in-process tests write to the real ~/plans. Mirrors the
+        # precedent in TestBackfillCreatedBestEffort.
+        self._plan_root_patch = patch.object(self.cli, "PLAN_ROOT", self.home / "plans")
+        self._plan_root_patch.start()
         self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
         self._cwd_patch.start()
 
     def tearDown(self) -> None:
+        self._plan_root_patch.stop()
         self._home_patch.stop()
         self._cwd_patch.stop()
         self._tmp.cleanup()
@@ -1998,6 +2141,12 @@ class TestPushLinearUpdate(unittest.TestCase):
         )
         self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
         self._home_patch.start()
+        # PLAN_ROOT is frozen at import time (Path.home() / "plans"), so patching
+        # Path.home() above does NOT redirect it — patch the constant directly,
+        # or these in-process tests write to the real ~/plans. Mirrors the
+        # precedent in TestBackfillCreatedBestEffort.
+        self._plan_root_patch = patch.object(self.cli, "PLAN_ROOT", self.home / "plans")
+        self._plan_root_patch.start()
         self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
         self._cwd_patch.start()
         self.cli.save_config("herds", {"linear": {
@@ -2007,6 +2156,7 @@ class TestPushLinearUpdate(unittest.TestCase):
         }})
 
     def tearDown(self) -> None:
+        self._plan_root_patch.stop()
         self._home_patch.stop()
         self._cwd_patch.stop()
         self._tmp.cleanup()
@@ -2192,10 +2342,17 @@ class TestTicketSystemConfigRefreshJira(unittest.TestCase):
         self.cwd.mkdir()
         self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
         self._home_patch.start()
+        # PLAN_ROOT is frozen at import time (Path.home() / "plans"), so patching
+        # Path.home() above does NOT redirect it — patch the constant directly,
+        # or these in-process tests write to the real ~/plans. Mirrors the
+        # precedent in TestBackfillCreatedBestEffort.
+        self._plan_root_patch = patch.object(self.cli, "PLAN_ROOT", self.home / "plans")
+        self._plan_root_patch.start()
         self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
         self._cwd_patch.start()
 
     def tearDown(self) -> None:
+        self._plan_root_patch.stop()
         self._home_patch.stop()
         self._cwd_patch.stop()
         self._tmp.cleanup()
@@ -2257,6 +2414,12 @@ class TestPushJira(unittest.TestCase):
         )
         self._home_patch = patch.object(self.cli.Path, "home", return_value=self.home)
         self._home_patch.start()
+        # PLAN_ROOT is frozen at import time (Path.home() / "plans"), so patching
+        # Path.home() above does NOT redirect it — patch the constant directly,
+        # or these in-process tests write to the real ~/plans. Mirrors the
+        # precedent in TestBackfillCreatedBestEffort.
+        self._plan_root_patch = patch.object(self.cli, "PLAN_ROOT", self.home / "plans")
+        self._plan_root_patch.start()
         self._cwd_patch = patch("os.getcwd", return_value=str(self.cwd))
         self._cwd_patch.start()
         self.cli.save_config("herds", {"jira": {
@@ -2273,6 +2436,7 @@ class TestPushJira(unittest.TestCase):
         }})
 
     def tearDown(self) -> None:
+        self._plan_root_patch.stop()
         self._home_patch.stop()
         self._cwd_patch.stop()
         self._tmp.cleanup()
