@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """update-git-repos CLI.
 
-Maintains ~/.config/wild-horses/wrangle/repos.json and runs
+Maintains ~/.config/wild-horses/update-git-repos/repos.json and runs
 `git pull --ff-only` against each configured repo. All subcommands print
 JSON on stdout; non-zero exit means the command itself failed to run
 (not a per-repo error — those are reported inside the JSON).
@@ -17,7 +17,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / ".config" / "wild-horses" / "wrangle"
+CONFIG_DIR = Path.home() / ".config" / "wild-horses" / "update-git-repos"
 CONFIG_PATH = CONFIG_DIR / "repos.json"
 
 NOISE_DIRS = {"node_modules", ".venv", "venv", "__pycache__", ".tox", ".cache", "target", "dist", "build", ".next"}
@@ -31,7 +31,7 @@ MAX_PULL_WORKERS = 8
 
 # Every git call is bounded by this, so one slow or unreachable remote can't
 # hang the (parallel) batch forever. Generous enough for a large first fetch;
-# override with WRANGLE_GIT_TIMEOUT (seconds) for unusually large repos.
+# override with UPDATE_GIT_REPOS_TIMEOUT (seconds) for unusually large repos.
 GIT_TIMEOUT_SECONDS = 120.0
 
 # Synthetic return code for a git call we killed on timeout. Matches the
@@ -94,8 +94,8 @@ def save_config(cfg: dict) -> None:
 
 
 def git_timeout() -> float:
-    """Per-call git timeout, overridable via WRANGLE_GIT_TIMEOUT (seconds)."""
-    raw = os.environ.get("WRANGLE_GIT_TIMEOUT")
+    """Per-call git timeout, overridable via UPDATE_GIT_REPOS_TIMEOUT (seconds)."""
+    raw = os.environ.get("UPDATE_GIT_REPOS_TIMEOUT")
     if raw:
         try:
             return float(raw)

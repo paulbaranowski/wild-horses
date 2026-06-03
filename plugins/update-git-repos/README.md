@@ -1,11 +1,11 @@
-# wrangle
+# update-git-repos
 
 A personal git/PR tooling plugin. Today it ships one skill, `/update-git-repos`. Future skills (PR babysitting, etc.) can land here without needing their own plugin.
 
 ## Install
 
 ```text
-/plugin install wrangle@wild-horses
+/plugin install update-git-repos@wild-horses
 ```
 
 ## Skills
@@ -14,7 +14,7 @@ A personal git/PR tooling plugin. Today it ships one skill, `/update-git-repos`.
 
 Pull every configured git repo from `origin/<branch>` in one shot.
 
-First run, with an empty config, walks you through bootstrap: scan a root directory (e.g. `~/dev`), pick which discovered repos to track, and the config is written to `~/.config/wild-horses/wrangle/repos.json`. Every subsequent run reads that config and pulls each repo.
+First run, with an empty config, walks you through bootstrap: scan a root directory (e.g. `~/dev`), pick which discovered repos to track, and the config is written to `~/.config/wild-horses/update-git-repos/repos.json`. Every subsequent run reads that config and pulls each repo.
 
 For each repo, the skill:
 
@@ -24,7 +24,7 @@ For each repo, the skill:
 
 ## How it works
 
-A bundled `scripts/update_repos_cli.py` does all I/O and git calls. Each subcommand prints JSON so the skill can sequence prompts without screen-scraping. A PreToolUse hook (`hooks/hooks.json` + `scripts/update-repos-cli-allow.sh`) auto-approves the CLI so the per-turn flow isn't repeatedly gated by the auto-mode classifier. The CLI writes config under `~/.config/wild-horses/wrangle/` and runs `git` calls against configured repo paths.
+A bundled `scripts/update_repos_cli.py` does all I/O and git calls. Each subcommand prints JSON so the skill can sequence prompts without screen-scraping. A PreToolUse hook (`hooks/hooks.json` + `scripts/update-repos-cli-allow.sh`) auto-approves the CLI so the per-turn flow isn't repeatedly gated by the auto-mode classifier. The CLI writes config under `~/.config/wild-horses/update-git-repos/` and runs `git` calls against configured repo paths.
 
 ### Subcommands
 
@@ -50,7 +50,7 @@ A bundled `scripts/update_repos_cli.py` does all I/O and git calls. Each subcomm
 Stdlib `unittest`, no extra dependencies. Run from the repo root:
 
 ```bash
-python3 plugins/wrangle/scripts/test_update_repos_cli.py
+python3 plugins/update-git-repos/scripts/test_update_repos_cli.py
 ```
 
 Covers config validation, allow-list shell-injection bypass, the `pull-one` preflight gate, and the `pull-all` / `pull-one` happy paths (using local bare-repo fixtures so the real `git pull --ff-only` semantics are exercised).
