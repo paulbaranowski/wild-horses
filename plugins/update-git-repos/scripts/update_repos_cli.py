@@ -12,6 +12,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import signal
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -32,12 +34,23 @@ MAX_PULL_WORKERS = 8
 # Every git call is bounded by this, so one slow or unreachable remote can't
 # hang the (parallel) batch forever. Generous enough for a large first fetch;
 # override with UPDATE_GIT_REPOS_TIMEOUT (seconds) for unusually large repos.
-GIT_TIMEOUT_SECONDS = 120.0
+GIT_TIMEOUT_SECONDS = 300.0
 
 # Synthetic return code for a git call we killed on timeout. Matches the
 # convention of timeout(1) / coreutils so it reads the same as babysit-pr's
 # `timeout 600 ...` handling.
 GIT_TIMEOUT_RC = 124
+
+# After a timeout we SIGTERM the whole git process group (so `git fetch` /
+# `git index-pack` get a chance to delete their own tmp_pack_* files), wait this
+# long for it to exit, then SIGKILL anything still alive. See _terminate_group.
+GIT_TERM_GRACE_SECONDS = 3.0
+
+# pull-all/pull-one refuse to fetch a repo when its filesystem has less than
+# this much free space — a near-full disk is exactly where a giant fetch can't
+# finish, gets killed, and leaves a tmp_pack_* behind, so re-runs just pile on
+# more garbage. Override with UPDATE_GIT_REPOS_MIN_FREE_GB (gigabytes).
+MIN_FREE_GB_DEFAULT = 5.0
 
 
 def load_config() -> dict:
@@ -120,6 +133,40 @@ def git_env() -> dict[str, str]:
     return env
 
 
+def _terminate_group(proc: subprocess.Popen) -> None:
+    """Kill the entire process group of a timed-out git call, then reap it.
+
+    This is the fix for the disk-fill runaway. `subprocess` only ever signals
+    the *direct* child, but `git pull` forks `git fetch`, which forks
+    `git index-pack`. A plain proc.kill() leaves those grandchildren orphaned
+    and still writing multi-GB tmp_pack_* files to a disk that's already too
+    full for them to finish — so the pull reports `timed-out` while the real
+    work grinds on for hours and re-runs pile on more orphans.
+
+    git ran with start_new_session=True, so it's the leader of its own process
+    group. We SIGTERM the whole group first — git's own signal handlers then
+    delete their in-progress tmp packs — wait a short grace period, then SIGKILL
+    anything still alive. communicate() after each signal reaps the child and
+    closes the pipes (the grandchildren inherit them, so this also unblocks once
+    they die).
+    """
+    try:
+        pgid = os.getpgid(proc.pid)
+    except (ProcessLookupError, OSError):
+        return  # already gone
+
+    for sig, grace in ((signal.SIGTERM, GIT_TERM_GRACE_SECONDS), (signal.SIGKILL, GIT_TERM_GRACE_SECONDS)):
+        try:
+            os.killpg(pgid, sig)
+        except (ProcessLookupError, OSError):
+            return  # whole group exited between signals
+        try:
+            proc.communicate(timeout=grace)
+            return  # group is gone and reaped
+        except subprocess.TimeoutExpired:
+            continue  # escalate to the next signal
+
+
 def git(cwd: Path, *args: str) -> tuple[int, str, str]:
     """Run a git command. Returns (rc, stdout, stderr) with both trimmed.
 
@@ -127,17 +174,51 @@ def git(cwd: Path, *args: str) -> tuple[int, str, str]:
     slow/unreachable/auth-needing remote can't hang the batch. A timeout
     surfaces as rc=GIT_TIMEOUT_RC with a marker on stderr; callers map that to
     a `timed-out` status.
+
+    git runs in its own session (start_new_session=True) so that on timeout we
+    can signal the *whole* process group — see _terminate_group for why killing
+    only the direct child isn't enough.
     """
     try:
-        r = subprocess.run(
+        proc = subprocess.Popen(
             ["git", "-C", str(cwd), *args],
-            capture_output=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             env=git_env(),
-            timeout=git_timeout(),
+            start_new_session=True,
         )
+    except FileNotFoundError:
+        return 127, "", "git not found"
+    try:
+        out, err = proc.communicate(timeout=git_timeout())
     except subprocess.TimeoutExpired:
+        _terminate_group(proc)
         return GIT_TIMEOUT_RC, "", "timed out"
-    return r.returncode, r.stdout.strip(), r.stderr.strip()
+    return proc.returncode, out.strip(), err.strip()
+
+
+def min_free_bytes() -> int:
+    """Free-space floor below which we refuse to fetch, overridable via
+    UPDATE_GIT_REPOS_MIN_FREE_GB (gigabytes)."""
+    raw = os.environ.get("UPDATE_GIT_REPOS_MIN_FREE_GB")
+    gb = MIN_FREE_GB_DEFAULT
+    if raw:
+        try:
+            gb = float(raw)
+        except ValueError:
+            pass
+    return int(gb * 1024 ** 3)
+
+
+def free_bytes(path: Path) -> int | None:
+    """Free bytes on the filesystem holding `path` (or its nearest existing
+    parent). Returns None if it can't be determined."""
+    probe = path
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    try:
+        return shutil.disk_usage(probe).free
+    except OSError:
+        return None
 
 
 def is_git_repo(path: Path) -> bool:
@@ -210,6 +291,22 @@ def pull_repo(repo_path: str, branch: str, *, stash: bool = False, verbose: bool
     """
     p = Path(repo_path).expanduser()
     out: dict = {"path": str(p), "branch": branch}
+
+    # Refuse to fetch when the disk is near-full: that's exactly where a large
+    # fetch can't complete, gets killed, and leaves a tmp_pack_* behind, so a
+    # re-run would just add more orphaned garbage. Bail before touching anything
+    # (no stash, no fetch) so the repo is left exactly as we found it.
+    free = free_bytes(p)
+    floor = min_free_bytes()
+    if free is not None and free < floor:
+        out["status"] = "low-disk"
+        out["free_gb"] = round(free / 1024 ** 3, 2)
+        out["min_free_gb"] = round(floor / 1024 ** 3, 2)
+        out["error"] = (
+            f"only {out['free_gb']} GB free (need >= {out['min_free_gb']} GB); "
+            "skipped to avoid leaving a partial pack. Free disk space, then re-run."
+        )
+        return out
 
     stashed = False
     if stash:

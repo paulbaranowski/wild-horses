@@ -552,6 +552,115 @@ class TestPullTimeout(IsolatedHomeTestCase):
         self.assertFalse((repo / "extra.txt").exists())
 
 
+class TestTimeoutKillsProcessGroup(IsolatedHomeTestCase):
+    """Regression coverage for the disk-fill runaway: a timed-out `git pull`
+    must take its *grandchildren* (`git fetch` -> `git index-pack`) down with
+    it. subprocess only kills the direct child, so before the process-group
+    kill those grandchildren were orphaned and kept writing multi-GB tmp_pack_*
+    files for hours. The shim here spawns a long-lived grandchild that keeps
+    appending to a marker file; after the timeout fires, the marker must STOP
+    growing — proof the grandchild was reaped, not orphaned."""
+
+    def _install_git_shim_that_forks_a_grandchild(self, marker: Path) -> dict[str, str]:
+        """`git` shim that, on `pull`, backgrounds a grandchild which appends to
+        `marker` forever, then blocks. Everything else defers to real git so
+        status checks still classify the repo as ready. The grandchild is NOT
+        `exec`'d, so it's a separate PID in the shim's process group — exactly
+        the orphan case. start_new_session in the CLI means killpg gets it."""
+        real_git = shutil.which("git")
+        assert real_git, "git must be on PATH for this test"
+        shim_dir = self.home / "bin"
+        shim_dir.mkdir()
+        shim = shim_dir / "git"
+        shim.write_text(
+            "#!/bin/sh\n"
+            'for a in "$@"; do\n'
+            '  if [ "$a" = "pull" ]; then\n'
+            f"    ( while true; do echo x >> '{marker}'; sleep 0.1; done ) &\n"
+            "    sleep 30\n"
+            "    exit 0\n"
+            "  fi\n"
+            "done\n"
+            f'exec "{real_git}" "$@"\n'
+        )
+        shim.chmod(0o755)
+        return {"PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}", "UPDATE_GIT_REPOS_TIMEOUT": "1"}
+
+    def test_timed_out_pull_reaps_its_grandchildren(self) -> None:
+        bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        commit_to_bare(bare, self.scratch, "main")
+        self.write_config([{"path": str(repo), "branch": "main"}])
+
+        marker = self.home / "grandchild-heartbeat"
+        marker.write_text("")
+        env_extra = self._install_git_shim_that_forks_a_grandchild(marker)
+
+        r = run_cli("pull-all", home=self.home, env_extra=env_extra)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["results"][0]["status"], "timed-out")
+
+        # Right after the CLI returns, sample the marker, wait, sample again.
+        # If the grandchild were orphaned it would keep appending; a reaped
+        # grandchild leaves the size frozen.
+        size_after_return = marker.stat().st_size
+        time.sleep(1.5)
+        size_later = marker.stat().st_size
+        self.assertEqual(
+            size_after_return, size_later,
+            "grandchild process kept writing after the pull timed out — "
+            "it was orphaned instead of killed with its process group",
+        )
+
+
+class TestLowDiskPreflight(IsolatedHomeTestCase):
+    """A near-full disk is where a giant fetch can't finish, gets killed, and
+    leaves a tmp_pack_* behind — so pull refuses to even start when free space
+    is under UPDATE_GIT_REPOS_MIN_FREE_GB, leaving the repo untouched."""
+
+    def test_pull_all_refuses_when_below_floor(self) -> None:
+        # Force the floor absurdly high so any real disk reads as "too full".
+        bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        commit_to_bare(bare, self.scratch, "main")  # a real pull would fast-forward
+        self.write_config([{"path": str(repo), "branch": "main"}])
+
+        r = run_cli(
+            "pull-all", home=self.home,
+            env_extra={"UPDATE_GIT_REPOS_MIN_FREE_GB": "100000000"},  # 100 PB
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        result = json.loads(r.stdout)["results"][0]
+        self.assertEqual(result["status"], "low-disk")
+        self.assertIn("free_gb", result)
+        self.assertIn("min_free_gb", result)
+        # The repo must be left exactly as found — no fetch happened.
+        self.assertFalse((repo / "extra.txt").exists())
+
+    def test_pull_one_refuses_when_below_floor(self) -> None:
+        bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        commit_to_bare(bare, self.scratch, "main")
+        self.write_config([{"path": str(repo), "branch": "main"}])
+
+        r = run_cli(
+            "pull-one", str(repo), home=self.home,
+            env_extra={"UPDATE_GIT_REPOS_MIN_FREE_GB": "100000000"},
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        data = json.loads(r.stdout)
+        self.assertEqual(data["status"], "low-disk")
+        self.assertFalse((repo / "extra.txt").exists())
+
+    def test_normal_floor_still_pulls(self) -> None:
+        # With a 0 GB floor the preflight is a no-op and the pull proceeds.
+        bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        commit_to_bare(bare, self.scratch, "main")
+        self.write_config([{"path": str(repo), "branch": "main"}])
+
+        r = run_cli("pull-all", home=self.home, env_extra={"UPDATE_GIT_REPOS_MIN_FREE_GB": "0"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["results"][0]["status"], "pulled")
+        self.assertTrue((repo / "extra.txt").exists())
+
+
 class TestPullOnePreflight(IsolatedHomeTestCase):
     """Regression coverage for the CodeRabbit Thread 3 finding: `pull-one`
     previously called `pull_repo()` directly, sidestepping the same safety
