@@ -49,6 +49,8 @@ The override and auto-derive paths normalize differently: auto-derived names are
 
 A PreToolUse hook (`hooks/hooks.json`) auto-approves `python3 .../plan_keeper_cli.py` Bash invocations so each skill's flow runs without per-call permission prompts. The allow script anchors on the plugin-specific path so a stray `plan_keeper_cli.py` elsewhere in the workspace won't be auto-approved.
 
+The same file is also distributed as a standalone `plan-keeper` Homebrew binary. To cut a new version, see [`RELEASING.md`](RELEASING.md).
+
 ## Guardrails
 
 - **Local-only.** `~/plans/` lives on your machine. Nothing is staged, committed, or pushed to any repo.
@@ -69,6 +71,7 @@ A PreToolUse hook (`hooks/hooks.json`) auto-approves `python3 .../plan_keeper_cl
 | `scripts/plan-keeper-cli-allow.sh` | PreToolUse hook script — auto-approves CLI Bash invocations   |
 | `hooks/hooks.json`                 | PreToolUse hook registration                                  |
 | `repo-derivation.md`               | Shared algorithm — auto-derive + override normalization rules |
+| `RELEASING.md`                     | Maintainer runbook — cutting a Homebrew release               |
 
 Run the CLI tests from the repo root:
 
