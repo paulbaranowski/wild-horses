@@ -3278,6 +3278,17 @@ class TestResolveTicket(IsolatedHomeTestCase):
                     "--field", "Status=todo", home=self.home)
         self.assertEqual(r.returncode, 3)
 
+    def test_push_ticket_not_found_exits_3(self) -> None:
+        r = run_cli("push", "--name", "linear", "--ticket", "plan-absent",
+                    home=self.home)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("no active plan", r.stderr)
+
+    def test_push_both_file_and_ticket_exits_2(self) -> None:
+        r = run_cli("push", "--name", "linear", "--file", "x.md",
+                    "--ticket", "plan-1", home=self.home)
+        self.assertEqual(r.returncode, 2)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

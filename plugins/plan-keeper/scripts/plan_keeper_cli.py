@@ -1799,7 +1799,8 @@ def _push_jira(section: dict, title: str, description: str, meta: dict, force_ne
 
 
 def cmd_push(args) -> int:
-    result = push_subcommand(args.name, args.file, force_new=args.force_new)
+    path = resolve_ticket_to_path(args.ticket) if args.ticket else Path(args.file)
+    result = push_subcommand(args.name, str(path), force_new=args.force_new)
     print(json.dumps(result))
     return 0
 
@@ -2500,7 +2501,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_push = sub.add_parser("push", help="create or update a ticket from a plan file")
     p_push.add_argument("--name", required=True, choices=["linear", "jira"])
-    p_push.add_argument("--file", required=True)
+    push_target = p_push.add_mutually_exclusive_group(required=True)
+    push_target.add_argument("--file", help="path to a plan .md file")
+    push_target.add_argument(
+        "--ticket",
+        help="locate the plan by its Ticket: frontmatter across all repos "
+             "(alternative to --file)",
+    )
     p_push.add_argument(
         "--force-new",
         action="store_true",
