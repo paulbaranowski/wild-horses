@@ -1085,7 +1085,7 @@ def cmd_file_meta_update(args) -> int:
         if key == "Kind" and value.strip():
             value = validate_kind(value)
         updates.append((key, value))
-    if getattr(args, "ticket", None):
+    if args.ticket:
         path = resolve_ticket_to_path(args.ticket)
     else:
         path = Path(args.file)
