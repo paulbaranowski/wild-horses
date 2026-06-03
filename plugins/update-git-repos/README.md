@@ -8,6 +8,10 @@ A personal git/PR tooling plugin. Today it ships one skill, `/update-git-repos`.
 /plugin install update-git-repos@wild-horses
 ```
 
+> Upgrading from the old `wrangle@wild-horses`? See
+> [`skills/update-git-repos/MIGRATION.md`](skills/update-git-repos/MIGRATION.md) — the
+> rename has no automatic redirect, so existing installs need a few manual steps.
+
 ## Skills
 
 ### `/update-git-repos`
