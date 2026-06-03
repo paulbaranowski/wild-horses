@@ -78,6 +78,16 @@
       "license": "MIT"
     },
     {
+      "name": "groundcrew-setup",
+      "source": "./plugins/groundcrew-setup",
+      "description": "Interactive first-run wizard for groundcrew. Walks first-run users through scaffolding `~/.config/groundcrew/config.ts` conversationally, with GitHub repo discovery, best-effort seeding from any existing config, and an optional `@clipboard-health/clearance` egress-allowlist setup step. Ships one skill: `config`.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
       "name": "yes-no-questions-hook",
       "source": "./plugins/yes-no-questions-hook",
       "description": "Per-turn UserPromptSubmit hook that reminds Claude to pose decision questions as numbered yes/no questions, collapsing either/or choices into single yes/no items.",
