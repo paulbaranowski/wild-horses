@@ -3467,5 +3467,30 @@ class TestResolveTicket(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 2)
 
 
+class TestVersion(IsolatedHomeTestCase):
+    """`--version` reports the single-source-of-truth __version__, kept in
+    lockstep with plugin.json. These tests guard the release invariant: the
+    Homebrew package version (pyproject reads __version__ dynamically), the
+    CLI's --version output, and the plugin manifest must all agree."""
+
+    def test_version_flag_reports_module_version(self) -> None:
+        module = _import_cli_module()
+        r = run_cli("--version", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(module.__version__, r.stdout)
+
+    def test_version_matches_plugin_manifest(self) -> None:
+        module = _import_cli_module()
+        manifest = json.loads(
+            (CLI.parent.parent / ".claude-plugin" / "plugin.json").read_text()
+        )
+        self.assertEqual(
+            module.__version__,
+            manifest["version"],
+            "plan_keeper_cli.__version__ must match plugin.json version "
+            "(bump both together when releasing)",
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

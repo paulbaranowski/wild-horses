@@ -15,7 +15,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plan-keeper"
-version = "0.1.0"
+# Version is the single `__version__` attribute in plan_keeper_cli.py (read
+# dynamically below), kept in lockstep with plugins/plan-keeper/.claude-plugin/
+# plugin.json. The release tag is `plan-keeper-v<version>`.
+dynamic = ["version"]
 description = "I/O backend for the plan-keeper skills — organize markdown plans in ~/plans/<repo>/ and push them to Linear/Jira."
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -39,3 +42,6 @@ plan-keeper = "plan_keeper_cli:main"
 # Single-module package: the one file, packaged verbatim. No restructure, no
 # rename — the in-plugin invocation path is unchanged.
 py-modules = ["plan_keeper_cli"]
+
+[tool.setuptools.dynamic]
+version = { attr = "plan_keeper_cli.__version__" }
