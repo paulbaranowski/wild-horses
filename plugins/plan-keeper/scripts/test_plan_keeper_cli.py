@@ -3265,6 +3265,19 @@ class TestResolveTicket(IsolatedHomeTestCase):
         r = run_cli("archive", "--override", "scratch", home=self.home)
         self.assertEqual(r.returncode, 2)
 
+    def test_file_meta_update_by_ticket(self) -> None:
+        src = self._save_with_ticket("scratch", "u", "plan-77")
+        r = run_cli("file-meta", "update", "--ticket", "plan-77",
+                    "--field", "Status=todo", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        meta = run_cli("file-meta", "get", "--file", str(src), home=self.home)
+        self.assertIn('"Status": "todo"', meta.stdout)
+
+    def test_file_meta_update_ticket_not_found_exits_3(self) -> None:
+        r = run_cli("file-meta", "update", "--ticket", "plan-nope",
+                    "--field", "Status=todo", home=self.home)
+        self.assertEqual(r.returncode, 3)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

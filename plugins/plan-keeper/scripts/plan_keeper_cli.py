@@ -1085,7 +1085,10 @@ def cmd_file_meta_update(args) -> int:
         if key == "Kind" and value.strip():
             value = validate_kind(value)
         updates.append((key, value))
-    path = Path(args.file)
+    if getattr(args, "ticket", None):
+        path = resolve_ticket_to_path(args.ticket)
+    else:
+        path = Path(args.file)
     if not path.exists():
         raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
     text = path.read_text(encoding="utf-8")
@@ -2435,7 +2438,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="apply --field Key=value updates to plan frontmatter "
              "(any whitelisted field)",
     )
-    p_fm_update.add_argument("--file", required=True, help="path to a plan file")
+    fm_update_target = p_fm_update.add_mutually_exclusive_group(required=True)
+    fm_update_target.add_argument("--file", help="path to a plan file")
+    fm_update_target.add_argument(
+        "--ticket",
+        help="locate the plan by its Ticket: frontmatter across all repos "
+             "(alternative to --file)",
+    )
     p_fm_update.add_argument(
         "--field",
         action="append",
