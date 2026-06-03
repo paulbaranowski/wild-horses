@@ -13,7 +13,7 @@ Tests invoke the CLI as a subprocess so exit codes, argparse behavior,
 and stdout/stderr separation are exercised exactly as a dispatched
 agent would see them.
 
-Mirrors the precedent at plugins/wrangle/scripts/test_update_repos_cli.py.
+Mirrors the precedent at plugins/update-git-repos/scripts/test_update_repos_cli.py.
 """
 
 import subprocess
