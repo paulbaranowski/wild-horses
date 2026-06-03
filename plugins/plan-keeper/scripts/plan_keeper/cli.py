@@ -14,6 +14,7 @@ import shutil
 import sys
 from datetime import date
 from pathlib import Path
+from typing import Optional
 
 from plan_keeper import __version__, storage
 from plan_keeper.config import (
@@ -58,10 +59,13 @@ from plan_keeper.linear import (
     refresh_linear_cache,
 )
 from plan_keeper.naming import (
+    _repo_from_git,
     derive_repo,
     derive_repo_full,
+    normalize_override,
     slugify_topic,
     validate_extension,
+    validate_repo_name,
 )
 from plan_keeper.push import push_subcommand
 from plan_keeper.storage import (
@@ -92,30 +96,34 @@ def cmd_repo(args) -> int:
     return 0
 
 
-def cmd_list(args) -> int:
-    repo = derive_repo(args.override)
-    plans = list_plans(repo, args.state)
+def _render_listing(items: list[tuple[str, Path]], raw_filter: Optional[str]) -> int:
+    """Render a listing of (display_name, path) pairs already in display order.
 
-    raw_filter = getattr(args, "status", None)
+    `display_name` is what prints in the filename column — a bare filename in
+    single-repo mode, `repo/filename` in cross-repo mode. The scope resolution
+    (which repos) lives in cmd_list; this only formats, so both modes share one
+    code path for the --status tiering and the hidden-plans stderr note.
+
+    Without a filter, prints one display_name per line. With a filter, groups by
+    the requested Status values in the order given (the filter doubles as tier
+    order), preserving the incoming order within each tier (stable sort), emits
+    `status<TAB>display_name`, and summarizes excluded active plans on stderr.
+    """
     if not raw_filter:
-        for p in plans:
-            print(p.name)
+        for name, _ in items:
+            print(name)
         return 0
 
-    # Status-filtered listing. The filter doubles as the tier order: plans are
-    # grouped by the requested statuses in the order given (e.g. "in-progress,
-    # todo" => in-progress group first), newest-first within each group. Output
-    # is `status<TAB>filename` so callers can render "[status] filename".
     tiers = [s.strip().lower() for s in raw_filter.split(",") if s.strip()]
     tier_rank = {s: i for i, s in enumerate(tiers)}
-    annotated = [(p, plan_status(p)) for p in plans]
+    annotated = [(name, plan_status(p)) for name, p in items]
 
-    shown = [(p, s) for (p, s) in annotated if s in tier_rank]
-    # list_plans is already newest-first; a stable sort by tier preserves that
+    shown = [(name, s) for (name, s) in annotated if s in tier_rank]
+    # `items` is already in display order; a stable sort by tier preserves that
     # within each group.
-    shown.sort(key=lambda ps: tier_rank[ps[1]])
-    for p, s in shown:
-        print(f"{s}\t{p.name}")
+    shown.sort(key=lambda ns: tier_rank[ns[1]])
+    for name, s in shown:
+        print(f"{s}\t{name}")
 
     # Transparency: never silently drop active plans the filter excluded.
     hidden = [s for (_, s) in annotated if s not in tier_rank]
@@ -129,6 +137,46 @@ def cmd_list(args) -> int:
             file=sys.stderr,
         )
     return 0
+
+
+def _all_repos_items(state: str) -> list[tuple[str, Path]]:
+    """Build the (display_name, path) list across every repo under ~/plans/.
+
+    Repos are iterated alphabetically (same enumeration as cmd_list_repos —
+    sorted, dotfiles/non-dirs skipped); plans within a repo stay newest-first
+    (list_plans order). Display name is `repo/filename` so every line is
+    self-labeling. Repos with no plans in `state` contribute nothing.
+    """
+    items: list[tuple[str, Path]] = []
+    if not storage.PLAN_ROOT.exists():
+        return items
+    for entry in sorted(storage.PLAN_ROOT.iterdir()):
+        if not entry.is_dir() or entry.name.startswith("."):
+            continue
+        for p in list_plans(entry.name, state):
+            items.append((f"{entry.name}/{p.name}", p))
+    return items
+
+
+def cmd_list(args) -> int:
+    # Scope resolution: --all-repos forces cross-repo; --override and a git
+    # origin each pin a single repo; with neither (no repo context) we fall back
+    # to cross-repo rather than the dir-name guess that used to point at a
+    # nonexistent ~/plans/<cwd-basename>/ and print nothing. --all-repos and
+    # --override are mutually exclusive — argparse rejects the combination
+    # (exit 2) before we get here.
+    raw_filter = getattr(args, "status", None)
+
+    if args.override:
+        explicit: Optional[str] = validate_repo_name(normalize_override(args.override))
+    else:
+        explicit = _repo_from_git()
+
+    if args.all_repos or explicit is None:
+        items = _all_repos_items(args.state)
+    else:
+        items = [(p.name, p) for p in list_plans(explicit, args.state)]
+    return _render_listing(items, raw_filter)
 
 
 def cmd_list_repos(args) -> int:
@@ -909,8 +957,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit owner/name (e.g., herds-social/herds) by parsing git remote origin URL",
     )
 
-    p_list = sub.add_parser("list", help="list plans for a repo, newest-first")
-    p_list.add_argument("--override", help="explicit override for <repo>")
+    p_list = sub.add_parser(
+        "list",
+        help="list plans for a repo (or every repo) newest-first",
+    )
+    # Scope is single-repo by default (override or git origin); --all-repos
+    # forces cross-repo. The two are mutually exclusive. With neither flag and
+    # no git origin, list also falls back to cross-repo (see cmd_list).
+    list_scope = p_list.add_mutually_exclusive_group()
+    list_scope.add_argument("--override", help="explicit override for <repo>")
+    list_scope.add_argument(
+        "--all-repos",
+        action="store_true",
+        help=(
+            "list plans across every repo under ~/plans/ (alphabetical by repo, "
+            "newest-first within). Output is prefixed 'repo/filename'. This is "
+            "also the automatic behavior when there is no repo context (no "
+            "--override and no git origin in the cwd)."
+        ),
+    )
     p_list.add_argument(
         "--state",
         choices=["active", "done", "deferred"],
@@ -922,9 +987,11 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "comma-separated Status values to keep (e.g. 'in-progress,todo'). "
             "Doubles as tier order: groups appear in the order given, newest-"
-            "first within each. Output becomes 'status<TAB>filename'. "
-            "Missing/blank Status counts as 'backlog'. Excluded active plans "
-            "are summarized on stderr. Omit to list bare filenames as before."
+            "first within each. Output becomes 'status<TAB>filename' (or "
+            "'status<TAB>repo/filename' in cross-repo mode). Missing/blank "
+            "Status counts as 'backlog'. Excluded active plans are summarized "
+            "on stderr (aggregated across repos in cross-repo mode). Omit to "
+            "list bare filenames as before."
         ),
     )
 

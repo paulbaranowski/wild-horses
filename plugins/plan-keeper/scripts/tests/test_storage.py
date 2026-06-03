@@ -4,6 +4,7 @@
 Part of the plan_keeper test suite; shared harness lives in support.py.
 Run all: python3 -m unittest discover -s plugins/plan-keeper/scripts/tests
 """
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -208,6 +209,108 @@ class TestListByStatus(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), "2026-05-28-a.md")
         self.assertNotIn("\t", r.stdout)
+
+class TestListCrossRepo(IsolatedHomeTestCase):
+    """`list` resolves a *scope*, not always a single repo. With no repo
+    context (no --override and no git origin) — or with --all-repos — it lists
+    every repo under ~/plans/, prefixing each line `repo/filename`. A repo
+    context (override or git origin) keeps the old single-repo, bare-filename
+    output so skills that parse `list` inside a repo are unaffected.
+    """
+
+    def _make_git_repo(self, dirname: str, origin: str) -> Path:
+        """A throwaway git checkout whose `origin` derives to a known repo name.
+
+        derive_repo resolves the repo from `git remote get-url origin`, so an
+        origin of .../<name>.git makes the cwd look like repo `<name>`.
+        """
+        d = self.home / dirname
+        d.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+        subprocess.run(["git", "remote", "add", "origin", origin], cwd=d, check=True)
+        return d
+
+    def test_no_remote_no_override_lists_all_repos_prefixed(self) -> None:
+        run_cli("save", "--override", "alpha", "--topic", "a", stdin="x\n", home=self.home)
+        run_cli("save", "--override", "beta", "--topic", "b", stdin="x\n", home=self.home)
+        # cwd is the non-git workdir, so there is no git origin to resolve.
+        r = run_cli("list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = r.stdout.strip().split("\n")
+        self.assertTrue(any(l.startswith("alpha/") and l.endswith(".md") for l in lines))
+        self.assertTrue(any(l.startswith("beta/") and l.endswith(".md") for l in lines))
+
+    def test_all_repos_flag_overrides_git_context(self) -> None:
+        run_cli("save", "--override", "alpha", "--topic", "a", stdin="x\n", home=self.home)
+        run_cli("save", "--override", "beta", "--topic", "b", stdin="x\n", home=self.home)
+        # Inside a git checkout that resolves to `alpha`, --all-repos still
+        # spans every repo rather than narrowing to alpha.
+        git_repo = self._make_git_repo("alpha-checkout", "https://github.com/me/alpha.git")
+        r = run_cli("list", "--all-repos", home=self.home, cwd=git_repo)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("alpha/", r.stdout)
+        self.assertIn("beta/", r.stdout)
+
+    def test_git_context_no_flag_is_single_repo_bare_filenames(self) -> None:
+        run_cli("save", "--override", "myrepo", "--topic", "only one", stdin="x\n", home=self.home)
+        run_cli("save", "--override", "other", "--topic", "elsewhere", stdin="x\n", home=self.home)
+        git_repo = self._make_git_repo("myrepo-checkout", "https://github.com/me/myrepo.git")
+        r = run_cli("list", home=self.home, cwd=git_repo)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = r.stdout.strip()
+        # Single-repo mode (regression guard): bare filenames, no repo prefix,
+        # and the other repo's plans are absent.
+        self.assertIn("only-one", out)
+        self.assertNotIn("/", out)
+        self.assertNotIn("elsewhere", out)
+
+    def test_all_repos_with_override_is_error(self) -> None:
+        r = run_cli(
+            "list", "--all-repos", "--override", "alpha",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2)
+
+    def test_cross_repo_respects_state_done(self) -> None:
+        res = run_cli("save", "--override", "alpha", "--topic", "to archive", stdin="x\n", home=self.home)
+        fname = Path(res.stdout.strip()).name
+        run_cli("archive", "--override", "alpha", "--file", fname, home=self.home)
+        run_cli("save", "--override", "beta", "--topic", "active one", stdin="x\n", home=self.home)
+        done = run_cli("list", "--state", "done", home=self.home, cwd=self.cwd)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(f"alpha/{fname}", done.stdout)
+        self.assertNotIn("beta/", done.stdout)
+
+    def test_cross_repo_status_filter_prefixes_and_aggregates(self) -> None:
+        a = self.plans_root / "alpha"
+        a.mkdir(parents=True)
+        (a / "2026-05-28-a.md").write_text("---\nStatus: todo\n---\n\n# a\n", encoding="utf-8")
+        (a / "2026-05-29-b.md").write_text("---\nStatus: in-progress\n---\n\n# b\n", encoding="utf-8")
+        b = self.plans_root / "beta"
+        b.mkdir(parents=True)
+        (b / "2026-05-27-c.md").write_text("---\nStatus: todo\n---\n\n# c\n", encoding="utf-8")
+        r = run_cli("list", "--status", "todo", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = r.stdout.strip().split("\n")
+        self.assertIn("todo\talpha/2026-05-28-a.md", lines)
+        self.assertIn("todo\tbeta/2026-05-27-c.md", lines)
+        # The hidden in-progress plan is counted, aggregated across repos.
+        self.assertIn("1 other active plan(s) hidden", r.stderr)
+        self.assertIn("in-progress×1", r.stderr)
+
+    def test_empty_plans_root_no_output(self) -> None:
+        # No saves at all: ~/plans/ does not exist. Cross-repo mode must still
+        # exit 0 with empty output rather than erroring.
+        r = run_cli("list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "")
+
+    def test_whitespace_only_override_is_rejected(self) -> None:
+        # cmd_list normalizes + validates --override itself (a path distinct
+        # from derive_repo). A whitespace-only override normalizes to "" and
+        # must be rejected (exit 2), not silently fall through to cross-repo.
+        r = run_cli("list", "--override", "   ", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 2)
 
 class TestListRepos(IsolatedHomeTestCase):
     def test_counts_per_state(self) -> None:
