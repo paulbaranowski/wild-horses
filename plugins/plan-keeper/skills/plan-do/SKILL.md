@@ -167,7 +167,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta update \
   --file ~/plans/<repo>/<filename> --field Status=in-progress
 ```
 
-`--file` takes the **full path** (no `--override` here — `file-meta` resolves the path directly). Do this only when you are about to hand off to a skill. **Do not** mark in-progress on the manual-steer path (the user hasn't committed to working it through a skill yet) or before the user has confirmed.
+`--file` takes the **full path** (no `--override` here — `file-meta` resolves the path directly). `--ticket <id>` is an alternative to `--file`: it locates the plan by its `Ticket:` frontmatter across all repos (exactly one of the two is required). Do this only when you are about to hand off to a skill. **Do not** mark in-progress on the manual-steer path (the user hasn't committed to working it through a skill yet) or before the user has confirmed.
 
 **Then** use the `Skill` tool to invoke the chosen skill. The plan content is already in conversation context from step 3, so the invoked skill has full access — no explicit handoff payload is needed.
 

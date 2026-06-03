@@ -67,7 +67,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta update \
   --field "<Key>=<value>"
 ```
 
-Add additional `--field` flags as needed.
+Add additional `--field` flags as needed. `--ticket <id>` is an alternative to `--file`: it locates the plan by its `Ticket:` frontmatter across all repos (exactly one of the two is required).
 
 ### 5. Confirm the result
 

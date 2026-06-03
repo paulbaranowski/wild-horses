@@ -186,6 +186,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" push \
   --name <sys> --file <path> [--force-new if step 7 chose option 1]
 ```
 
+`--ticket <id>` is an alternative to `--file`: it locates the plan by its `Ticket:` frontmatter across all repos (exactly one of the two is required).
+
 Returns JSON on stdout: `{"action": "create"|"update", "id": "...", "url": "...", "title": "...", "system": "..."}`.
 
 **Error handling** — branch on exit code:
