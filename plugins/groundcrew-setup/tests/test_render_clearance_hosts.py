@@ -3,7 +3,7 @@
 
 Stdlib-only — no pytest needed. Run from anywhere:
 
-    python3 plugins/groundcrew-setup/scripts/test_render_clearance_hosts.py
+    python3 plugins/groundcrew-setup/tests/test_render_clearance_hosts.py
 
 Uses --target pointed at paths inside a TemporaryDirectory so the real
 ~/.config/clearance/ directory is never touched.
@@ -19,7 +19,7 @@ from pathlib import Path
 
 # Module-local import: resolved at runtime via the sys.path.insert below, so
 # pyright (run from the repo root by the lint hook) can't see it statically.
-SCRIPTS_DIR = Path(__file__).parent
+SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from render_clearance_hosts import DEFAULT_BODY  # pyright: ignore[reportMissingImports]

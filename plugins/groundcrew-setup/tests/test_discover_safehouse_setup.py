@@ -6,7 +6,7 @@ the user's real `safehouse`/`brew` binaries are never observed.
 
 Run from anywhere:
 
-    python3 plugins/groundcrew-setup/scripts/test_discover_safehouse_setup.py -v
+    python3 plugins/groundcrew-setup/tests/test_discover_safehouse_setup.py -v
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-CLI = Path(__file__).parent / "discover_safehouse_setup.py"
+CLI = Path(__file__).parent.parent / "scripts" / "discover_safehouse_setup.py"
 _PYTHON3 = sys.executable
 
 

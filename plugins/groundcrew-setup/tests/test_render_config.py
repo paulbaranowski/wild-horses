@@ -12,11 +12,11 @@ is not installed globally and `tsc` may not be on PATH for unattended runs.
 
 Run from anywhere:
 
-    python3 plugins/groundcrew-setup/scripts/test_render_config.py
+    python3 plugins/groundcrew-setup/tests/test_render_config.py
 
 Or via unittest discovery:
 
-    python3 -m unittest discover -s plugins/groundcrew-setup/scripts -p 'test_render_config.py'
+    python3 -m unittest discover -s plugins/groundcrew-setup/tests -p 'test_render_config.py'
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-CLI = Path(__file__).parent / "render_config.py"
+CLI = Path(__file__).parent.parent / "scripts" / "render_config.py"
 
 
 def run_cli(answers: dict[str, Any], target: str) -> subprocess.CompletedProcess:

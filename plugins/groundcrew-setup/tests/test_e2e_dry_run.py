@@ -21,7 +21,7 @@ Verifies:
 
 Run from anywhere:
 
-    python3 plugins/groundcrew-setup/scripts/test_e2e_dry_run.py -v
+    python3 plugins/groundcrew-setup/tests/test_e2e_dry_run.py -v
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
-SCRIPTS_DIR = Path(__file__).parent
+SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
 _PYTHON3 = sys.executable
 
 # The scripts the config skill orchestrates, in invocation order.

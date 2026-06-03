@@ -3,11 +3,11 @@
 
 Run from anywhere:
 
-    python3 plugins/groundcrew-setup/scripts/test_discover_clearance_setup.py -v
+    python3 plugins/groundcrew-setup/tests/test_discover_clearance_setup.py -v
 
 Or via unittest discovery:
 
-    python3 -m unittest discover -s plugins/groundcrew-setup/scripts \
+    python3 -m unittest discover -s plugins/groundcrew-setup/tests \
         -p 'test_discover_clearance_setup.py'
 
 Each test sets HOME to an isolated tmpdir so the script never touches the
@@ -27,7 +27,7 @@ import time
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).parent / "discover_clearance_setup.py"
+SCRIPT = Path(__file__).parent.parent / "scripts" / "discover_clearance_setup.py"
 
 
 def run_script(home: Path) -> subprocess.CompletedProcess:

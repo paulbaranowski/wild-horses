@@ -14,11 +14,11 @@ Isolation strategy:
 
 Run from anywhere:
 
-    python3 plugins/groundcrew-setup/scripts/test_discover_repos.py -v
+    python3 plugins/groundcrew-setup/tests/test_discover_repos.py -v
 
 Or via unittest discovery:
 
-    python3 -m unittest discover -s plugins/groundcrew-setup/scripts -p 'test_discover_repos.py'
+    python3 -m unittest discover -s plugins/groundcrew-setup/tests -p 'test_discover_repos.py'
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).parent / "discover_repos.py"
+SCRIPT = Path(__file__).parent.parent / "scripts" / "discover_repos.py"
 
 _PYTHON3 = sys.executable
 

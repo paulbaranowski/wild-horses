@@ -6,7 +6,7 @@ Mirrors test_install_groundcrew.py's stub-based approach.
 
 Run from anywhere:
 
-    python3 plugins/groundcrew-setup/scripts/test_install_safehouse.py -v
+    python3 plugins/groundcrew-setup/tests/test_install_safehouse.py -v
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
-CLI = Path(__file__).parent / "install_safehouse.py"
+CLI = Path(__file__).parent.parent / "scripts" / "install_safehouse.py"
 _PYTHON3 = sys.executable
 
 

@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-CLI = Path(__file__).parent / "render_clearance_env.py"
+CLI = Path(__file__).parent.parent / "scripts" / "render_clearance_env.py"
 _PYTHON3 = sys.executable
 
 

@@ -3,7 +3,7 @@
 
 Stdlib-only — no pytest. Run from anywhere:
 
-    python3 plugins/groundcrew-setup/scripts/test_discover_existing_config.py
+    python3 plugins/groundcrew-setup/tests/test_discover_existing_config.py
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-CLI = Path(__file__).parent / "discover_existing_config.py"
+CLI = Path(__file__).parent.parent / "scripts" / "discover_existing_config.py"
 
 
 def run_cli(cwd: Path, xdg_config_home: Path | None = None, home: Path | None = None) -> subprocess.CompletedProcess[str]:

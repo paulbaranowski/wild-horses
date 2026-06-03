@@ -8,7 +8,7 @@ still finds no package — represents a corrupt npm registry).
 
 Run from anywhere:
 
-    python3 plugins/groundcrew-setup/scripts/test_install_groundcrew.py -v
+    python3 plugins/groundcrew-setup/tests/test_install_groundcrew.py -v
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
-CLI = Path(__file__).parent / "install_groundcrew.py"
+CLI = Path(__file__).parent.parent / "scripts" / "install_groundcrew.py"
 _PYTHON3 = sys.executable
 
 

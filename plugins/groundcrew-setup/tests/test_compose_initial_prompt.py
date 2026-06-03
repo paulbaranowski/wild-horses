@@ -3,11 +3,11 @@
 
 Stdlib-only — no pytest needed. Run from anywhere:
 
-    python3 plugins/groundcrew-setup/scripts/test_compose_initial_prompt.py
+    python3 plugins/groundcrew-setup/tests/test_compose_initial_prompt.py
 
 Or via unittest discovery:
 
-    python3 -m unittest discover -s plugins/groundcrew-setup/scripts -p 'test_compose_initial_prompt.py'
+    python3 -m unittest discover -s plugins/groundcrew-setup/tests -p 'test_compose_initial_prompt.py'
 
 Tests invoke the CLI as a subprocess so exit codes, argparse behavior,
 and stdout/stderr separation are exercised exactly as a dispatched
@@ -22,12 +22,12 @@ import unittest
 from pathlib import Path
 
 # Module-local import: requires sys.path.insert below.
-SCRIPTS_DIR = Path(__file__).parent
+SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from compose_initial_prompt import BASE_CONTEXT_BLOCK, PROMPT_FEATURES
 
-CLI = Path(__file__).parent / "compose_initial_prompt.py"
+CLI = Path(__file__).parent.parent / "scripts" / "compose_initial_prompt.py"
 
 
 def run_cli(*args: str) -> subprocess.CompletedProcess:

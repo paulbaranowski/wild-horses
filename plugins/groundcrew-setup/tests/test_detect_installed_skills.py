@@ -3,11 +3,11 @@
 
 Run from anywhere:
 
-    python3 plugins/groundcrew-setup/scripts/test_detect_installed_skills.py -v
+    python3 plugins/groundcrew-setup/tests/test_detect_installed_skills.py -v
 
 Or via unittest discovery:
 
-    python3 -m unittest discover -s plugins/groundcrew-setup/scripts \
+    python3 -m unittest discover -s plugins/groundcrew-setup/tests \
         -p 'test_detect_installed_skills.py'
 
 Each test sets HOME to an isolated tmpdir, so the script never reads the
@@ -21,7 +21,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).parent / "detect_installed_skills.py"
+SCRIPT = Path(__file__).parent.parent / "scripts" / "detect_installed_skills.py"
 
 
 def run_script(home: Path) -> subprocess.CompletedProcess:
