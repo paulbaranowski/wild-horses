@@ -27,6 +27,12 @@ from typing import Callable, Optional
 from urllib.parse import urlencode
 
 
+# Single source of truth for the package version. `pyproject.toml` reads this
+# attribute (dynamic = ["version"]) so the Homebrew package and `--version`
+# never drift, and it is kept in lockstep with the plan-keeper plugin.json
+# version. Bump both together when releasing.
+__version__ = "1.12.0"
+
 PLAN_ROOT = Path.home() / "plans"
 MAX_SLUG_LEN = 50
 MAX_SUFFIX = 99
@@ -2336,6 +2342,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = HelpfulArgumentParser(
         prog=PROG,
         description="I/O backend for the plan-keeper skills.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     sub = parser.add_subparsers(
         dest="cmd",
