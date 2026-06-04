@@ -352,101 +352,76 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         self.assertEqual(issue["id"], ticket)
         self.assertEqual(issue["sourceRef"]["path"], str(plan.resolve()))
 
-class TestGroundcrewMarkInProgress(IsolatedHomeTestCase):
-    """Tests for the groundcrew-mark-in-progress subcommand."""
+class TestCrewStart(IsolatedHomeTestCase):
+    """`crew start ${id}` resolves the synthesized id (reusing `crew get`'s
+    resolver) and flips that plan's Status to in-progress.
 
-    def test_groundcrew_mark_in_progress_flips_status(self):
+    The interface is an `${id}` positional, not the old stdin `{path}` JSON:
+    an id can only ever name a plan inside PLAN_ROOT (resolution globs only
+    PLAN_ROOT), so the path-validation guard the JSON form needed is gone."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        # A real caller passes start an id it got from a prior fetch. Tests
+        # reproduce that by computing the same id via the module fn.
+        self.cli = _import_cli_module()
+
+    def test_crew_start_flips_status_for_resolved_id(self):
         d = self.home / "plans" / "r"
         d.mkdir(parents=True)
         plan = d / "2026-01-01-x.md"
-        plan.write_text(
-            "---\nAgent: claude\nStatus: todo\n---\n# Title\n"
-        )
-        result = run_cli(
-            "crew", "start",
-            home=self.home, cwd=self.cwd,
-            stdin=json.dumps({"path": str(plan)}),
-        )
+        plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# Title\n")
+        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        result = run_cli("crew", "start", ticket, home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("Status: in-progress", plan.read_text())
         self.assertNotIn("Status: todo", plan.read_text())
+        # Echoes the resolved path (mirrors the old interface's stdout).
+        self.assertEqual(result.stdout.strip(), str(plan.resolve()))
 
-    def test_groundcrew_mark_in_progress_rejects_missing_path(self):
-        """Path inside PLAN_ROOT but file doesn't exist → exit 3 (not-found)."""
-        (self.home / "plans" / "r").mkdir(parents=True)
-        missing = self.home / "plans" / "r" / "nonexistent.md"
-        result = run_cli(
-            "crew", "start",
-            home=self.home, cwd=self.cwd,
-            stdin=json.dumps({"path": str(missing)}),
+    def test_crew_start_round_trips_fetched_id(self):
+        """The id fetch emits is the id start consumes — same plan, both ends."""
+        d = self.home / "plans" / "herds"
+        d.mkdir(parents=True)
+        plan = d / "2026-04-30-typed-models.md"
+        plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# Typed\n")
+        issues = json.loads(
+            run_cli("crew", "fetch", home=self.home, cwd=self.cwd).stdout
         )
+        ticket = issues[0]["id"]
+        result = run_cli("crew", "start", ticket, home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Status: in-progress", plan.read_text())
+
+    def test_crew_start_missing_id_exits_3(self):
+        """An id no plan maps to → exit 3 (mirrors `crew get`)."""
+        (self.home / "plans" / "r").mkdir(parents=True)
+        result = run_cli("crew", "start", "plan-999999",
+                         home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 3)
 
-    def test_groundcrew_mark_in_progress_rejects_path_outside_plan_root(self):
-        """Path outside PLAN_ROOT → exit 2 (validation), even if file exists."""
-        outside = self.home / "outside.md"
-        outside.write_text("---\nStatus: todo\n---\n# Outside\n")
-        result = run_cli(
-            "crew", "start",
-            home=self.home, cwd=self.cwd,
-            stdin=json.dumps({"path": str(outside)}),
-        )
+    def test_crew_start_rejects_path_separator(self):
+        """An id can't contain '/' — defends against ../../-style inputs."""
+        result = run_cli("crew", "start", "../escape",
+                         home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 2)
-        self.assertIn("outside PLAN_ROOT", result.stderr)
-        # File must NOT have been mutated.
-        self.assertIn("Status: todo", outside.read_text())
+        self.assertIn("invalid id", result.stderr)
 
-    def test_groundcrew_mark_in_progress_rejects_non_absolute_path(self):
-        """Relative path → exit 2 (validation) — never resolved against cwd."""
-        result = run_cli(
-            "crew", "start",
-            home=self.home, cwd=self.cwd,
-            stdin=json.dumps({"path": "relative/file.md"}),
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("must be absolute", result.stderr)
-
-    def test_groundcrew_mark_in_progress_rejects_non_md_suffix(self):
-        """Path inside PLAN_ROOT but not .md → exit 2."""
-        d = self.home / "plans" / "r"
-        d.mkdir(parents=True)
-        not_md = d / "config.json"
-        not_md.write_text("{}")
-        result = run_cli(
-            "crew", "start",
-            home=self.home, cwd=self.cwd,
-            stdin=json.dumps({"path": str(not_md)}),
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn(".md plan file", result.stderr)
-
-    def test_groundcrew_mark_in_progress_rejects_non_string_path(self):
-        """path JSON field of wrong type → exit 2."""
-        result = run_cli(
-            "crew", "start",
-            home=self.home, cwd=self.cwd,
-            stdin=json.dumps({"path": 42}),
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("non-empty string", result.stderr)
-
-    def test_groundcrew_mark_in_progress_rejects_bad_json(self):
-        result = run_cli(
-            "crew", "start",
-            home=self.home, cwd=self.cwd,
-            stdin="not json",
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("not valid JSON", result.stderr)
-
-    def test_groundcrew_mark_in_progress_rejects_missing_path_key(self):
-        result = run_cli(
-            "crew", "start",
-            home=self.home, cwd=self.cwd,
-            stdin=json.dumps({"other": "value"}),
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("'path' field required", result.stderr)
+    def test_crew_start_active_wins_over_archived_same_stem(self):
+        """Active and done/ share a stem → same synthesized id. start flips the
+        active plan (resolver's first-match: active before done) and leaves the
+        archived one untouched."""
+        repo = self.home / "plans" / "r"
+        done = repo / "done" / "2026-01-01-x.md"
+        done.parent.mkdir(parents=True)
+        active = repo / "2026-01-01-x.md"
+        active.write_text("---\nStatus: todo\n---\n# X\n")
+        done.write_text("---\nStatus: done\n---\n# X\n")
+        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        result = run_cli("crew", "start", ticket, home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Status: in-progress", active.read_text())
+        self.assertIn("Status: done", done.read_text())  # archived untouched
 
 class TestQueue(IsolatedHomeTestCase):
     """Cross-repo `queue list` / `queue set` for the plan-crew skill."""

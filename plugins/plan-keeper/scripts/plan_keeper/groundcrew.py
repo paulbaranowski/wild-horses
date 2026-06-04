@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from plan_keeper import storage
 from plan_keeper.dates import _iso_utc_now
 from plan_keeper.errors import PlanKeeperCliError
 from plan_keeper.frontmatter import parse_frontmatter, serialize_frontmatter
@@ -180,3 +181,69 @@ def _iso_mtime(path: Path) -> str:
     except OSError:
         return _iso_utc_now()
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _collect_crew_issues() -> list[dict]:
+    """Every active plan under ``~/plans/<repo>/*.md`` as shell-adapter issues.
+
+    One level deep — ``done/`` and ``deferred/`` are excluded (they're not
+    dispatchable). Shared by ``crew fetch`` (which then asserts no id
+    collisions and stamps the Ticket frontmatter) and ``crew install``'s
+    post-patch data-path check, so both see the exact same plan set.
+    """
+    issues: list[dict] = []
+    if not storage.PLAN_ROOT.exists():
+        return issues
+    for repo_entry in sorted(storage.PLAN_ROOT.iterdir()):
+        if not repo_entry.is_dir() or repo_entry.name.startswith("."):
+            continue
+        for plan in sorted(repo_entry.iterdir()):
+            if not plan.is_file() or not plan.name.endswith(".md"):
+                continue
+            issue = _plan_to_issue(plan)
+            if issue is not None:
+                issues.append(issue)
+    return issues
+
+
+def _discover_plan_repos() -> list[str]:
+    """The repo directory names one level under ``~/plans/`` (sorted).
+
+    These seed the ``knownRepositories`` allow-list that ``crew install``
+    writes into the groundcrew config. Hidden dirs and non-directories are
+    skipped; ``done``/``deferred`` are *not* special here — they only ever
+    appear nested inside a repo dir, never as a top-level repo.
+    """
+    if not storage.PLAN_ROOT.exists():
+        return []
+    return sorted(
+        entry.name
+        for entry in storage.PLAN_ROOT.iterdir()
+        if entry.is_dir() and not entry.name.startswith(".")
+    )
+
+
+def _resolve_crew_id(plan_id: str) -> Optional[dict]:
+    """The issue dict whose synthesized id == ``plan_id``, or None if none.
+
+    Recomputes each plan's id across active, then ``done/``, then
+    ``deferred/`` (a live plan wins over an archived one sharing its stem).
+    The single resolver behind both ``crew get`` and ``crew start``: because
+    they share this lookup, "if get can find it, start can mark it" holds by
+    construction — the two can never diverge on which id maps to which file.
+    """
+    if not storage.PLAN_ROOT.exists():
+        return None
+    for repo_entry in sorted(storage.PLAN_ROOT.iterdir()):
+        if not repo_entry.is_dir() or repo_entry.name.startswith("."):
+            continue
+        for subdir in (repo_entry, repo_entry / "done", repo_entry / "deferred"):
+            if not subdir.exists():
+                continue
+            for plan in sorted(subdir.iterdir()):
+                if not plan.is_file() or not plan.name.endswith(".md"):
+                    continue
+                issue = _plan_to_issue(plan)
+                if issue is not None and issue["id"] == plan_id:
+                    return issue
+    return None

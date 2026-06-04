@@ -9,6 +9,7 @@ and a single patch point.
 """
 import argparse
 import json
+import os
 import re
 import shutil
 import sys
@@ -31,11 +32,17 @@ from plan_keeper.frontmatter import (
     serialize_frontmatter,
     validate_kind,
 )
+from plan_keeper.crew_install import (
+    default_run_doctor,
+    resolve_config_path,
+    run_crew_install,
+)
 from plan_keeper.groundcrew import (
     _apply_groundcrew_ticket,
     _assert_no_groundcrew_id_collisions,
-    _plan_to_issue,
+    _collect_crew_issues,
     _repo_for_plan,
+    _resolve_crew_id,
     _stamp_groundcrew_ticket,
     groundcrew_id,
 )
@@ -676,22 +683,12 @@ def cmd_ticket_api(args) -> int:
 def cmd_crew_fetch(args) -> int:
     """Emit a JSON array of issues for groundcrew's shell adapter to consume.
 
-    Scans ~/plans/*/*.md (one level deep — skips done/ and deferred/).
+    Scans ~/plans/*/*.md (one level deep — skips done/ and deferred/), asserts
+    no two plans synthesized the same id, then mirrors each id into its plan's
+    Ticket frontmatter for human traceability.
     """
     del args
-    issues: list[dict] = []
-    if not storage.PLAN_ROOT.exists():
-        print("[]")
-        return 0
-    for repo_entry in sorted(storage.PLAN_ROOT.iterdir()):
-        if not repo_entry.is_dir() or repo_entry.name.startswith("."):
-            continue
-        for plan in sorted(repo_entry.iterdir()):
-            if not plan.is_file() or not plan.name.endswith(".md"):
-                continue
-            issue = _plan_to_issue(plan)
-            if issue is not None:
-                issues.append(issue)
+    issues = _collect_crew_issues()
     _assert_no_groundcrew_id_collisions(issues)
     for issue in issues:
         _stamp_groundcrew_ticket(Path(issue["sourceRef"]["path"]), issue["id"])
@@ -709,82 +706,60 @@ def cmd_crew_get(args) -> int:
             f"invalid id {args.id!r}: must match [A-Za-z0-9._-]+ (no path separators)",
             code=2,
         )
-    if not storage.PLAN_ROOT.exists():
+    issue = _resolve_crew_id(args.id)
+    if issue is None:
         return 3
-    # The id is synthesized (see groundcrew_id), so we can't map it straight
-    # to a filename — instead recompute each plan's id and match. Search
-    # active plans first, then done/, then deferred/, so a live plan wins
-    # over an archived plan that shares its stem (same synthesized id).
-    for repo_entry in storage.PLAN_ROOT.iterdir():
-        if not repo_entry.is_dir() or repo_entry.name.startswith("."):
-            continue
-        for subdir in (repo_entry, repo_entry / "done", repo_entry / "deferred"):
-            if not subdir.exists():
-                continue
-            for plan in sorted(subdir.iterdir()):
-                if not plan.is_file() or not plan.name.endswith(".md"):
-                    continue
-                issue = _plan_to_issue(plan)
-                if issue is not None and issue["id"] == args.id:
-                    print(json.dumps(issue))
-                    return 0
-    return 3
+    print(json.dumps(issue))
+    return 0
 
 
 def cmd_crew_start(args) -> int:
-    """Read {'path': ...} from stdin, flip that plan's Status to in-progress.
+    """Flip the plan named by `${id}` to Status: in-progress, exit 3 if no
+    plan maps to that id.
 
-    Validates the path is a string, absolute, points to a .md file, and
-    resolves to a location inside PLAN_ROOT. This is defense-in-depth:
-    groundcrew is the expected caller (and always produces well-formed
-    sourceRef.path values), but the CLI is also auto-approved by a
-    PreToolUse hook, so it should not be willing to mutate arbitrary
-    .md files anywhere on disk.
+    Resolution reuses `crew get`'s resolver (recompute each plan's synthesized
+    id and match), so the two agree by construction. The id can only ever name
+    a plan inside PLAN_ROOT — resolution globs only PLAN_ROOT — so the path
+    guard the old stdin-`{path}` interface needed is gone by construction: an
+    id has no way to express a path outside the plan tree.
     """
-    del args
-    raw = sys.stdin.read()
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise PlanKeeperCliError(f"stdin is not valid JSON: {e}", code=2)
-    if not isinstance(payload, dict) or "path" not in payload:
+    if not _GROUNDCREW_ID_RE.match(args.id):
         raise PlanKeeperCliError(
-            "stdin JSON must be {'path': <abs-path>}; 'path' field required",
+            f"invalid id {args.id!r}: must match [A-Za-z0-9._-]+ (no path separators)",
             code=2,
         )
-    raw_path = payload["path"]
-    if not isinstance(raw_path, str) or not raw_path.strip():
-        raise PlanKeeperCliError(
-            "stdin JSON field 'path' must be a non-empty string", code=2,
-        )
-    path = Path(raw_path)
-    if not path.is_absolute():
-        raise PlanKeeperCliError(f"path must be absolute: {path}", code=2)
-    if path.suffix != ".md":
-        raise PlanKeeperCliError(f"path must point to a .md plan file: {path}", code=2)
-    resolved = path.resolve()
-    plan_root = storage.PLAN_ROOT.resolve()
-    try:
-        resolved.relative_to(plan_root)
-    except ValueError:
-        raise PlanKeeperCliError(
-            f"path is outside PLAN_ROOT ({plan_root}): {path}", code=2,
-        )
-    if not resolved.exists():
-        raise PlanKeeperCliError(f"plan file not found: {resolved}", code=3)
-    text = resolved.read_text(encoding="utf-8")
-    if not (text.startswith("---\n") or text.startswith("---\r\n")):
-        raise PlanKeeperCliError(
-            f"{resolved} has no frontmatter (cannot mark in-progress)", code=2,
-        )
-    meta, body = parse_frontmatter(text)
+    issue = _resolve_crew_id(args.id)
+    if issue is None:
+        raise PlanKeeperCliError(f"no plan maps to id {args.id!r}", code=3)
+    path = Path(issue["sourceRef"]["path"])
+    # _resolve_crew_id only returns plans that parsed as frontmatter, so the
+    # read+parse below is safe without re-checking for a frontmatter header.
+    meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
     meta["Status"] = "in-progress"
     new_text = serialize_frontmatter(meta, body)
     if not new_text.endswith("\n"):
         new_text += "\n"
-    write_atomic(resolved, new_text)
-    print(resolved)
+    write_atomic(path, new_text)
+    print(path)
     return 0
+
+
+def cmd_crew_install(args) -> int:
+    """Patch the groundcrew config so it dispatches plans from ~/plans/*.
+
+    Composition root: resolves the config path and our own ``plan-keeper``
+    binary, then hands the real ``crew doctor`` runner to the orchestration in
+    ``crew_install`` (kept separate so its patch logic is unit-testable).
+    """
+    config_path = resolve_config_path(args.config, dict(os.environ), Path.home())
+    pk = shutil.which("plan-keeper") or "plan-keeper"
+    return run_crew_install(
+        config_path,
+        dry_run=args.dry_run,
+        pk=pk,
+        run_doctor=default_run_doctor,
+        out=sys.stdout,
+    )
 
 
 def cmd_queue_set(args) -> int:
@@ -1204,15 +1179,16 @@ def build_parser() -> argparse.ArgumentParser:
     _add_provider_parser(sub, "jira")
 
     # `crew` groups the groundcrew dispatch adapter (fetch/get/start — the
-    # machine protocol the crew.config.ts shell wrappers call) with the
-    # cross-repo `queue` manager the plan-crew skill drives. fetch/get/start
-    # deliberately avoid list/get/set naming: fetch and start both mutate
-    # (fetch stamps the groundcrew Ticket; start flips Status), so a read-only
-    # `list`/`get` label would mislead — and `crew queue list`/`crew queue set` are the
-    # genuinely read-only / general-write pair.
+    # machine protocol the crew.config.ts source calls directly) with `install`
+    # (one-shot config wiring) and the cross-repo `queue` manager the plan-crew
+    # skill drives. fetch/get/start deliberately avoid list/get/set naming:
+    # fetch and start both mutate (fetch stamps the groundcrew Ticket; start
+    # flips Status), so a read-only `list`/`get` label would mislead — and
+    # `crew queue list`/`crew queue set` are the genuinely read-only /
+    # general-write pair.
     p_crew = sub.add_parser(
         "crew",
-        help="groundcrew dispatch adapter (fetch/get/start) + cross-repo queue",
+        help="groundcrew dispatch adapter (fetch/get/start) + install + queue",
     )
     crew_sub = p_crew.add_subparsers(
         dest="crew_cmd", required=True, metavar="<subcommand>",
@@ -1230,9 +1206,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_crew_get.add_argument("id", help="synthesized plan id (plan-<digits>, from fetch)")
 
-    crew_sub.add_parser(
+    p_crew_start = crew_sub.add_parser(
         "start",
-        help="flip Status to in-progress on a plan named by stdin sourceRef JSON",
+        help="flip Status to in-progress on the plan named by ${id}",
+    )
+    p_crew_start.add_argument(
+        "id", help="synthesized plan id (plan-<digits>, from fetch)"
+    )
+
+    p_crew_install = crew_sub.add_parser(
+        "install",
+        help="wire ~/plans/* into a groundcrew config (idempotent, validated)",
+    )
+    p_crew_install.add_argument(
+        "--config",
+        help="path to crew.config.ts "
+             "(default: $GROUNDCREW_CONFIG or ~/.config/groundcrew/crew.config.ts)",
+    )
+    p_crew_install.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the diff that would be applied; write nothing",
     )
 
     p_crew_queue = crew_sub.add_parser(
@@ -1299,6 +1293,7 @@ _CREW_DISPATCH = {
     "fetch": cmd_crew_fetch,
     "get": cmd_crew_get,
     "start": cmd_crew_start,
+    "install": cmd_crew_install,
     "queue": lambda a: _QUEUE_DISPATCH[a.queue_cmd](a),
 }
 

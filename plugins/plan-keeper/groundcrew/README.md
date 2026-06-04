@@ -1,61 +1,113 @@
-# plan-keeper → groundcrew shell adapter
+# plan-keeper → groundcrew connection
 
-These scripts let groundcrew dispatch tickets from `~/plans/<repo>/*.md`. They are thin bash wrappers around `plan_keeper_cli.py` subcommands.
+groundcrew can dispatch tickets straight from your `~/plans/<repo>/*.md` plans.
+One command wires it up, and the connection survives plan-keeper upgrades.
+
+## Why a command instead of shell wrappers
+
+groundcrew runs _outside_ Claude Code, so it never sees `CLAUDE_PLUGIN_ROOT` (the
+env var in-plugin scripts use to find the current plugin version). The old setup
+worked around this two ways — pinning a version-stamped plugin-cache path, or
+copying shell wrappers out of the tree and setting `$PLAN_KEEPER_CLI`. Both rotted
+on upgrade (the cache path moved; the wrappers drifted on subcommand renames).
+
+Homebrew supplies the missing stable entrypoint. `brew install` puts `plan-keeper`
+on `$PATH` at a brew-managed symlink (e.g. `/opt/homebrew/bin/plan-keeper`) that
+`brew upgrade` relinks in place. The brew binary is version-locked in lockstep
+with the plugin (see `../RELEASING.md`), so calling it directly eliminates both
+rot modes.
 
 ## Install
 
-You have two options:
-
-### Option A — reference the plugin path directly (simplest)
-
-Set `crew.config.ts` to point at the scripts inside the installed plugin tree. The scripts auto-resolve `plan_keeper_cli.py` next door, so no env var is needed. Trade-off: the path embeds the plugin version (e.g., `~/.claude/plugins/cache/wild-horses/plan-keeper/<version>/groundcrew/...`) and will need to be updated when the plugin version bumps.
-
-### Option B — copy to a stable location and set `$PLAN_KEEPER_CLI`
-
-Copy the scripts to `~/.config/groundcrew/plan-source/`, then point `$PLAN_KEEPER_CLI` at the bundled CLI. The scripts honor that env var and fall back to a sibling relative path only when it's unset:
+Two steps:
 
 ```bash
-mkdir -p ~/.config/groundcrew/plan-source
-cp -p ./fetch.sh ./resolveOne.sh ./markInProgress.sh ~/.config/groundcrew/plan-source/
+# 1. Put the version-stable `plan-keeper` binary on your PATH.
+brew install paulbaranowski/tap/plan-keeper
 
-# Add to ~/.zshrc, ~/.bashrc, or wherever your shell rc lives:
-export PLAN_KEEPER_CLI="$HOME/.claude/plugins/cache/wild-horses/plan-keeper/<version>/scripts/plan_keeper_cli.py"
+# 2. Wire it into your groundcrew config (idempotent — safe to re-run).
+plan-keeper crew install
 ```
 
-Replace `<version>` with the installed plugin version. When you upgrade the plugin, only `$PLAN_KEEPER_CLI` needs to change — your `crew.config.ts` paths stay stable.
+`crew install` resolves your config path from `--config`, then `$GROUNDCREW_CONFIG`,
+then `~/.config/groundcrew/crew.config.ts`. If you don't have a config yet, run
+`crew init` first.
 
-## crew.config.ts entry
+What it does:
+
+1. Resolves the absolute path to your `plan-keeper` binary (via `which`) and bakes
+   it into the injected command strings, so dispatch never depends on groundcrew's
+   runtime `$PATH`.
+2. Backs up your config to `crew.config.ts.bak`.
+3. Injects two **sentinel-wrapped** regions — one in `sources:`, one in
+   `workspace.knownRepositories:` — each delimited by
+   `/* plan-keeper:managed:start */ … /* plan-keeper:managed:end */`. Re-running
+   replaces these regions in place (no duplication; the repo set refreshes), so
+   it's fully idempotent. The default `crew init` config ships `sources:`
+   commented out (the Linear adapter is implicit); when there's no active
+   `sources:` array, `crew install` adds one.
+4. Validates the patched config with `crew doctor`. The gate is whether doctor
+   can **load** the config — a patch that broke the TS is rolled back from the
+   backup. Doctor failures unrelated to the plans source (a missing Linear API
+   key, an absent `projectDir`) do **not** roll back: the plans wiring stays in
+   place and `crew install` prints a note pointing you at `crew doctor` to
+   review the rest.
+5. Reports how many plans are visible to `fetch`.
+
+`plan-keeper crew install --dry-run` prints the diff it would apply and writes
+nothing. If your config has no active `sources:` array and no `export default`
+object to add one to — or no `knownRepositories:` array — `crew install` writes
+nothing and prints the exact blocks for you to paste manually.
+
+## What gets injected
+
+Into `sources:`:
 
 ```ts
-sources: [
-  {
-    kind: "shell",
-    name: "plans",
-    commands: {
-      fetch: "/Users/<you>/.config/groundcrew/plan-source/fetch.sh",
-      resolveOne: "/Users/<you>/.config/groundcrew/plan-source/resolveOne.sh ${id}",
-      markInProgress: "/Users/<you>/.config/groundcrew/plan-source/markInProgress.sh",
-    },
-  },
-],
+/* plan-keeper:managed:start */
+      { kind: "shell", name: "plans",
+        commands: {
+          verify: "/opt/homebrew/bin/plan-keeper crew fetch >/dev/null",
+          fetch: "/opt/homebrew/bin/plan-keeper crew fetch",
+          resolveOne: "/opt/homebrew/bin/plan-keeper crew get ${id}",
+          markInProgress: "/opt/homebrew/bin/plan-keeper crew start ${id}" } },
+/* plan-keeper:managed:end */
 ```
 
-## How it works
+Into `workspace.knownRepositories:`: the repo directory names discovered one
+level under `~/plans/`, alongside whatever entries are already there.
 
-- **fetch.sh** — globs `~/plans/*/*.md` (one level deep, skipping `done/` and `deferred/`). Each plan with valid frontmatter becomes one issue. `Status: backlog` translates to adapter status `other` (fetched but never dispatched — `crew status` hides non-`todo` plans from its Queue, so confirm a specific one with `crew status <id>`). `Status: todo` translates to `todo` (dispatchable). Each issue's `id` is a synthesized `plan-<digits>` (a stable hash of repo + filename, so it satisfies groundcrew's ticket-id shape — plan filenames don't). fetch also mirrors that id into the plan's `Ticket` / `Ticket System` frontmatter (`Ticket System: groundcrew`) so a human can see the mapping. It's display-only and self-healing — the hash stays canonical — and it never overwrites a `linear`/`jira` reference left by plan-linear/plan-jira, so a pushed plan keeps its real tracker ticket and still dispatches via the recomputed id.
-- **resolveOne.sh** — given a synthesized `${id}` (`plan-<digits>`), recomputes each plan's id across active, then `done/`, then `deferred/`, and returns the match. Exits 3 if no plan maps to that id.
-- **markInProgress.sh** — reads `{"path": "..."}` from stdin, atomic-write flips that plan's `Status` to `in-progress` so the next `fetch` tick sees it as out of the dispatch pool.
+## How dispatch works
+
+- **fetch** — globs `~/plans/*/*.md` (one level deep, skipping `done/` and
+  `deferred/`). Each plan with valid frontmatter becomes one issue. `Status:
+backlog` maps to adapter status `other` (fetched but not dispatched); `Status:
+todo` maps to `todo` (dispatchable). Each issue's `id` is a synthesized
+  `plan-<digits>` (a stable hash of repo + filename — plan filenames don't fit
+  groundcrew's ticket-id shape). fetch also mirrors that id into the plan's
+  `Ticket` / `Ticket System: groundcrew` frontmatter so a human can read the
+  mapping. It's display-only and self-healing (the hash stays canonical), and it
+  never overwrites a `linear`/`jira` reference left by plan-linear/plan-jira.
+- **resolveOne** (`crew get ${id}`) — recomputes each plan's id across active,
+  then `done/`, then `deferred/`, and returns the match. Exits 3 if no plan maps
+  to that id.
+- **markInProgress** (`crew start ${id}`) — resolves `${id}` with the _same_
+  resolver as `crew get`, then atomic-write flips that plan's `Status` to
+  `in-progress` so the next `fetch` sees it out of the dispatch pool. Because the
+  id can only ever name a plan inside `~/plans/`, there's no path to validate —
+  the resolver never globs anywhere else.
 
 ## Promoting a plan
 
 ```bash
 # Save a plan via plan-save (defaults to Status: backlog).
-# Then promote to todo via plan-update or directly:
-python3 /path/to/plan_keeper_cli.py file-meta set \
-  --file ~/plans/<repo>/<file>.md \
-  --status todo
+# Then promote to todo:
+plan-keeper file-meta set --file ~/plans/<repo>/<file>.md --status todo
 ```
 
-Or, to promote (and dequeue) plans across all repos interactively, use the `plan-crew` skill, which wraps the `crew queue list` / `crew queue set` CLI subcommands.
+Or promote/dequeue across all repos interactively with the `plan-crew` skill,
+which wraps the `crew queue list` / `crew queue set` subcommands.
 
-After promotion, the next `crew run` will dispatch the plan, and it shows up in the `crew status` Queue. (`crew doctor` only checks host prerequisites — it doesn't list plans.)
+After promotion, the next `crew run` dispatches the plan and it shows up in the
+`crew status` Queue. (`crew doctor` only checks host prerequisites — it doesn't
+list plans.)
