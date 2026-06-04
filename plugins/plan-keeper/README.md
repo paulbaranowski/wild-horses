@@ -1,6 +1,6 @@
 # plan-keeper
 
-Organize markdown plans on disk across repos. Seven skills cover the lifecycle: list a repo's plans read-only (`plan-list`), capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), archive with a completion stamp (`plan-done`), edit frontmatter (`plan-update`), manage the cross-repo dispatch queue (`plan-crew`), and file plans as tickets (`plan-push`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine — nothing is committed to any repo.
+Organize markdown plans on disk across repos. Eight skills cover the lifecycle: list a repo's plans read-only (`plan-list`), capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), archive with a completion stamp (`plan-done`), edit frontmatter (`plan-update`), manage the cross-repo dispatch queue (`plan-crew`), and file plans as Linear or Jira tickets (`plan-linear`, `plan-jira`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine — nothing is committed to any repo.
 
 Install:
 
@@ -18,7 +18,8 @@ Install:
 | **[`plan-done`](skills/plan-done/)**     | Archives | Moves a completed plan to `~/plans/<repo>/done/` and appends a `*Completed: YYYY-MM-DD*` stamp.                                                                                                                                                                                           |
 | **[`plan-update`](skills/plan-update/)** | Edits    | Mutates frontmatter fields (`Agent`, `Status`, `Ticket`) for a single plan in the current repo.                                                                                                                                                                                           |
 | **[`plan-crew`](skills/plan-crew/)**     | Queues   | Shows the groundcrew dispatch queue across all repos and bulk-promotes/dequeues plans (`Status todo/backlog`). Cross-repo, multi-select. The bulk/cross-repo counterpart to plan-update.                                                                                                  |
-| **[`plan-push`](skills/plan-push/)**     | Files    | Files the plan as a Linear or Jira ticket and stamps `Ticket:` in frontmatter.                                                                                                                                                                                                            |
+| **[`plan-linear`](skills/plan-linear/)** | Files    | Files the plan as a Linear ticket and stamps `Ticket:` in frontmatter.                                                                                                                                                                                                                    |
+| **[`plan-jira`](skills/plan-jira/)**     | Files    | Files the plan as a Jira ticket and stamps `Ticket:` in frontmatter.                                                                                                                                                                                                                      |
 
 All skills are model-invoked by description — no slash command is required. Trigger phrases like "save this plan", "do a plan from `<name>`", or "I'm done with the plan" route Claude into the right skill.
 
@@ -46,7 +47,7 @@ The override and auto-derive paths normalize differently: auto-derived names are
 
 ## The bundled CLI
 
-`scripts/plan_keeper_cli.py` is the canonical interface for all the skills — the skills never write to `~/plans/` directly. Key subcommands include `repo`, `list`, `list-repos`, `save`, `file-meta` (get/set/strip), `push`, `crew`, and `ticket-system-config`/`ticket-api` (run `--help` for the full set). Completing a plan is `file-meta set --status done`, which relocates it into `done/` and stamps `Completed on`. Mutations are atomic (tmp file + `fsync` + `os.replace`), and collisions surface as a structured exit-2 signal that the skills present to the user rather than treating as a fatal error.
+`scripts/plan_keeper_cli.py` is the canonical interface for all the skills — the skills never write to `~/plans/` directly. Key subcommands include `repo`, `list`, `list-repos`, `save`, `file-meta` (get/set/strip), `crew`, and the per-provider `linear`/`jira` subtrees (`api`/`push`/`config`) (run `--help` for the full set). Completing a plan is `file-meta set --status done`, which relocates it into `done/` and stamps `Completed on`. Mutations are atomic (tmp file + `fsync` + `os.replace`), and collisions surface as a structured exit-2 signal that the skills present to the user rather than treating as a fatal error.
 
 A PreToolUse hook (`hooks/hooks.json`) auto-approves `python3 .../plan_keeper_cli.py` Bash invocations so each skill's flow runs without per-call permission prompts. The allow script anchors on the plugin-specific path so a stray `plan_keeper_cli.py` elsewhere in the workspace won't be auto-approved.
 

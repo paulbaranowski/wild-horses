@@ -77,28 +77,28 @@ def _validate_config_for_push(name: str, section: object) -> None:
     if not isinstance(defaults, dict):
         raise PlanKeeperCliError(
             f"config section for {name!r} is missing 'defaults' — "
-            f"run /plan-push setup to configure",
+            f"run /plan-{name} setup to configure",
             code=2,
         )
     if name == "linear":
         if not section.get("apiKey"):
             raise PlanKeeperCliError(
-                "linear config missing apiKey — run /plan-push setup", code=2,
+                "linear config missing apiKey — run /plan-linear setup", code=2,
             )
         if not defaults.get("teamId"):
             raise PlanKeeperCliError(
-                "linear config defaults missing teamId — run /plan-push setup",
+                "linear config defaults missing teamId — run /plan-linear setup",
                 code=2,
             )
     elif name == "jira":
         for field in ("site", "email", "apiToken"):
             if not section.get(field):
                 raise PlanKeeperCliError(
-                    f"jira config missing {field} — run /plan-push setup",
+                    f"jira config missing {field} — run /plan-jira setup",
                     code=2,
                 )
         if not defaults.get("projectKey"):
             raise PlanKeeperCliError(
-                "jira config defaults missing projectKey — run /plan-push setup",
+                "jira config defaults missing projectKey — run /plan-jira setup",
                 code=2,
             )

@@ -439,16 +439,6 @@ def cmd_ticket_system_config_save(args) -> int:
     return 0
 
 
-def cmd_ticket_system_config_list(args) -> int:
-    del args
-    repo = derive_repo(None)
-    config = load_config(repo)
-    # Only return keys that look like ticket-system sections.
-    systems = [k for k in sorted(config.keys()) if k in ("linear", "jira")]
-    print(json.dumps(systems))
-    return 0
-
-
 def cmd_ticket_system_config_refresh(args) -> int:
     if args.name == "linear":
         if not args.api_key:
@@ -604,50 +594,52 @@ def cmd_push(args) -> int:
     return 0
 
 
-_LINEAR_KINDS = {"viewer", "teams", "projects", "labels", "users"}
-_JIRA_KINDS_BASE = {"viewer", "projects", "components", "users", "issuetypes"}
+_PROVIDER_API_KINDS = {
+    "linear": ["viewer", "teams", "projects", "labels", "users"],
+    "jira": ["viewer", "projects", "components", "issuetypes", "users"],
+}
 _JIRA_KINDS_NEED_PROJECT_KEY = {"components", "users", "issuetypes"}
 
 
 def _validate_ticket_api_args(args) -> None:
     """Verify required flags are present for the requested (name, kind).
 
-    Without this, missing flags slip through and cause downstream calls
-    like `jira_viewer(None, None, None)` that surface as network or
-    `_resolve_jira_project_id(... None)` errors. Validation up-front gives
-    the user a clear CLI message instead.
+    Per-provider argparse `choices` already guarantee the kind is valid for
+    this provider, so this only checks the credential/flag preconditions each
+    kind needs before a network call. Up-front validation gives the user a
+    clear CLI message instead of a downstream `jira_viewer(None, None, None)`
+    network error.
     """
-    kind = args.ticket_api_kind
+    kind = args.api_kind
     if args.name == "linear":
-        if kind in _LINEAR_KINDS and not args.api_key:
+        if not args.api_key:
             raise PlanKeeperCliError(
-                f"ticket-api {kind} --name linear requires --api-key", code=2,
+                f"linear api {kind} requires --api-key", code=2,
             )
     else:  # jira
-        if kind in _JIRA_KINDS_BASE:
-            for flag, value in (
-                ("--site", args.site),
-                ("--email", args.email),
-                ("--api-key", args.api_key),
-            ):
-                if not value:
-                    raise PlanKeeperCliError(
-                        f"ticket-api {kind} --name jira requires {flag}",
-                        code=2,
-                    )
-            _validate_jira_site(args.site)
+        for flag, value in (
+            ("--site", args.site),
+            ("--email", args.email),
+            ("--api-key", args.api_key),
+        ):
+            if not value:
+                raise PlanKeeperCliError(
+                    f"jira api {kind} requires {flag}", code=2,
+                )
+        _validate_jira_site(args.site)
         if kind in _JIRA_KINDS_NEED_PROJECT_KEY and not args.project_key:
             raise PlanKeeperCliError(
-                f"ticket-api {kind} --name jira requires --project-key",
-                code=2,
+                f"jira api {kind} requires --project-key", code=2,
             )
 
 
 def cmd_ticket_api(args) -> int:
-    """Dispatch ticket-api subcommands.
+    """Dispatch `<provider> api <kind>`.
 
-    Each kind ({viewer, teams, projects, labels, users, components, issuetypes})
-    is implemented by a per-system function. Output is always JSON to stdout.
+    Each kind is implemented by a per-system function. Output is always JSON
+    to stdout. `args.name` arrives from the provider subparser's set_defaults,
+    and the kind is constrained to this provider's valid set by argparse
+    `choices`, so the `impl` lookup below always hits.
     """
     _validate_ticket_api_args(args)
     if args.name == "linear":
@@ -671,13 +663,7 @@ def cmd_ticket_api(args) -> int:
                 _resolve_jira_project_id(site, email, token, pkey),
             ),
         }
-    fn = impl.get(args.ticket_api_kind)
-    if fn is None:
-        raise PlanKeeperCliError(
-            f"ticket-api {args.ticket_api_kind} not implemented for {args.name}",
-            code=2,
-        )
-    print(json.dumps(fn()))
+    print(json.dumps(impl[args.api_kind]()))
     return 0
 
 
@@ -907,6 +893,94 @@ def cmd_queue_list(args) -> int:
 # --- Parser -----------------------------------------------------------------
 
 
+def _add_api_flags(p, provider: str) -> None:
+    """Attach the credential flags an `api <kind>` call needs.
+
+    --api-key is shared (Linear key / Jira token). The jira-only flags attach
+    only under the jira subtree, so `linear api` never advertises them.
+    """
+    p.add_argument("--api-key", help="API key (Linear) or token (Jira)")
+    if provider == "jira":
+        p.add_argument("--email", help="email for Jira Basic auth")
+        p.add_argument("--site", help="Jira site URL (e.g., herds.atlassian.net)")
+        p.add_argument(
+            "--project-key",
+            help="project key (required for per-project kinds: "
+                 "components/users/issuetypes)",
+        )
+
+
+def _add_push_target(p) -> None:
+    """Attach the shared `--file | --ticket` push target (exactly one)."""
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument("--file", help="path to a plan .md file")
+    g.add_argument(
+        "--ticket",
+        help="locate the plan by its Ticket: frontmatter across all repos "
+             "(alternative to --file)",
+    )
+
+
+def _add_provider_parser(sub, provider: str) -> None:
+    """Attach a `<provider> {api,push,config}` subtree for linear or jira.
+
+    The provider is pinned via set_defaults(name=provider) so the shared
+    handlers read it off args.name exactly as they did from the old --name
+    flag. api kinds are per-provider argparse `choices`, making an invalid
+    (provider, kind) pair unrepresentable at parse time.
+    """
+    p = sub.add_parser(
+        provider,
+        help=f"{provider} operations (api / push / config)",
+    )
+    p.set_defaults(name=provider)
+    psub = p.add_subparsers(
+        dest="provider_cmd", required=True, metavar="<subcommand>",
+        parser_class=HelpfulArgumentParser,
+    )
+
+    p_api = psub.add_parser(
+        "api", help="low-level API calls (used by setup and refresh)"
+    )
+    p_api.add_argument("api_kind", choices=_PROVIDER_API_KINDS[provider])
+    _add_api_flags(p_api, provider)
+
+    p_push = psub.add_parser(
+        "push", help="create or update a ticket from a plan file"
+    )
+    _add_push_target(p_push)
+    p_push.add_argument(
+        "--force-new",
+        action="store_true",
+        help="ignore existing Ticket frontmatter and create a fresh ticket",
+    )
+
+    p_cfg = psub.add_parser(
+        "config",
+        help="CRUD for this provider's section in ~/plans/<repo>/.plankeeper.json",
+    )
+    cfg_sub = p_cfg.add_subparsers(
+        dest="config_cmd", required=True, metavar="<subcommand>",
+        parser_class=HelpfulArgumentParser,
+    )
+    p_cfg_get = cfg_sub.add_parser(
+        "get", help="print this provider's config section as JSON"
+    )
+    p_cfg_get.add_argument(
+        "--show-secrets",
+        action="store_true",
+        help="include credentials in output (default: redact apiKey/apiToken)",
+    )
+    cfg_sub.add_parser(
+        "save", help="write this provider's config section (JSON on stdin)"
+    )
+    p_cfg_refresh = cfg_sub.add_parser("refresh", help="re-fetch metadata into cache")
+    p_cfg_refresh.add_argument("--api-key", help="Linear API key (or Jira token)")
+    if provider == "jira":
+        p_cfg_refresh.add_argument("--email", help="Jira email")
+        p_cfg_refresh.add_argument("--site", help="Jira site URL")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = HelpfulArgumentParser(
         prog=PROG,
@@ -1097,65 +1171,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_fm_strip = file_meta_sub.add_parser("strip", help="print body without frontmatter")
     _add_locator(p_fm_strip)
 
-    p_tsc = sub.add_parser(
-        "ticket-system-config",
-        help="CRUD for ticket-system entries in ~/plans/<repo>/.plankeeper.json",
-    )
-    tsc_sub = p_tsc.add_subparsers(
-        dest="tsc_cmd", required=True, metavar="<subcommand>",
-        parser_class=HelpfulArgumentParser,
-    )
-
-    p_tsc_get = tsc_sub.add_parser("get", help="print one ticket-system section as JSON")
-    p_tsc_get.add_argument("--name", required=True, choices=["linear", "jira"])
-    p_tsc_get.add_argument(
-        "--show-secrets",
-        action="store_true",
-        help="include credentials in output (default: redact apiKey/apiToken)",
-    )
-
-    p_tsc_save = tsc_sub.add_parser("save", help="write a ticket-system section (JSON on stdin)")
-    p_tsc_save.add_argument("--name", required=True, choices=["linear", "jira"])
-
-    _ = tsc_sub.add_parser("list", help="list configured ticket-system names")
-
-    p_tsc_refresh = tsc_sub.add_parser("refresh", help="re-fetch metadata into cache")
-    p_tsc_refresh.add_argument("--name", required=True, choices=["linear", "jira"])
-    p_tsc_refresh.add_argument("--api-key", help="Linear API key (or Jira token)")
-    p_tsc_refresh.add_argument("--email", help="Jira email")
-    p_tsc_refresh.add_argument("--site", help="Jira site URL")
-
-    p_ta = sub.add_parser(
-        "ticket-api",
-        help="low-level Linear/Jira API calls (used by setup and refresh)",
-    )
-    p_ta.add_argument(
-        "ticket_api_kind",
-        choices=["viewer", "teams", "projects", "labels", "users", "components", "issuetypes"],
-    )
-    p_ta.add_argument("--name", required=True, choices=["linear", "jira"])
-    p_ta.add_argument("--api-key", help="API key (Linear) or token (Jira)")
-    p_ta.add_argument("--email", help="email for Jira Basic auth")
-    p_ta.add_argument("--site", help="Jira site URL (e.g., herds.atlassian.net)")
-    p_ta.add_argument(
-        "--project-key",
-        help="project key (Jira; required for per-project kinds)",
-    )
-
-    p_push = sub.add_parser("push", help="create or update a ticket from a plan file")
-    p_push.add_argument("--name", required=True, choices=["linear", "jira"])
-    push_target = p_push.add_mutually_exclusive_group(required=True)
-    push_target.add_argument("--file", help="path to a plan .md file")
-    push_target.add_argument(
-        "--ticket",
-        help="locate the plan by its Ticket: frontmatter across all repos "
-             "(alternative to --file)",
-    )
-    p_push.add_argument(
-        "--force-new",
-        action="store_true",
-        help="ignore existing Ticket frontmatter and create a fresh ticket",
-    )
+    # --- noun-first provider subtrees: `linear …` / `jira …` ----------------
+    # Each provider owns api/push/config as subcommands. set_defaults(name=…)
+    # supplies the provider to the shared handlers (cmd_ticket_api/cmd_push/
+    # cmd_ticket_system_config_*), which still read args.name — so the flip is
+    # a parser change, not a handler rewrite. Provider-specific flags
+    # (--site/--email/--project-key) and per-provider api `choices` live only
+    # on the subtree where they apply.
+    _add_provider_parser(sub, "linear")
+    _add_provider_parser(sub, "jira")
 
     # `crew` groups the groundcrew dispatch adapter (fetch/get/start — the
     # machine protocol the crew.config.ts shell wrappers call) with the
@@ -1230,11 +1254,18 @@ _FILE_META_DISPATCH = {
     "strip": cmd_file_meta_strip,
 }
 
-_TICKET_SYSTEM_CONFIG_DISPATCH = {
+_PROVIDER_CONFIG_DISPATCH = {
     "get": cmd_ticket_system_config_get,
     "save": cmd_ticket_system_config_save,
-    "list": cmd_ticket_system_config_list,
     "refresh": cmd_ticket_system_config_refresh,
+}
+
+# `<provider> <api|push|config>` — the provider (linear/jira) arrives on
+# args.name via set_defaults, so one dispatch serves both subtrees.
+_PROVIDER_DISPATCH = {
+    "api": cmd_ticket_api,
+    "push": cmd_push,
+    "config": lambda a: _PROVIDER_CONFIG_DISPATCH[a.config_cmd](a),
 }
 
 _QUEUE_DISPATCH = {
@@ -1260,9 +1291,8 @@ def main() -> int:
         "backfill-created": cmd_backfill_created,
         "save": cmd_save,
         "file-meta": lambda a: _FILE_META_DISPATCH[a.file_meta_cmd](a),
-        "ticket-system-config": lambda a: _TICKET_SYSTEM_CONFIG_DISPATCH[a.tsc_cmd](a),
-        "ticket-api": cmd_ticket_api,
-        "push": cmd_push,
+        "linear": lambda a: _PROVIDER_DISPATCH[a.provider_cmd](a),
+        "jira": lambda a: _PROVIDER_DISPATCH[a.provider_cmd](a),
         "crew": lambda a: _CREW_DISPATCH[a.crew_cmd](a),
     }
     try:
