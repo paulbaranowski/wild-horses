@@ -1,23 +1,20 @@
 #!/usr/bin/env python3
-"""CLI subcommand wiring: save, file-meta set (status lifecycle), backfill, provider api arg validation (cli.py).
+"""CLI subcommand wiring: save, file-meta set (status lifecycle), provider api arg validation (cli.py).
 
 Part of the plan_keeper test suite; shared harness lives in support.py.
 Run all: python3 -m unittest discover -s plugins/plan-keeper/scripts/tests
 """
 import json
 import os
-import tempfile
 import unittest
 from datetime import date, datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 from support import (
     CLI,
     IsolatedHomeTestCase,
     _import_cli_module,
     run_cli,
-    storage,
 )
 
 
@@ -820,98 +817,6 @@ class TestTicketApiArgValidation(IsolatedHomeTestCase):
         )
         self.assertEqual(r.returncode, 2)
         self.assertIn("invalid choice", r.stderr)
-
-class TestBackfillCreated(IsolatedHomeTestCase):
-    """`backfill-created` stamps `Created` (from file birthtime) on plans
-    missing it, idempotently, skipping files it can't or shouldn't touch."""
-
-    def _write(self, name: str, body: str) -> Path:
-        d = self.plans_root / "scratch"
-        d.mkdir(parents=True, exist_ok=True)
-        path = d / name
-        path.write_text(body, encoding="utf-8")
-        return path
-
-    def test_stamps_plan_missing_created(self) -> None:
-        path = self._write("2026-06-01-a.md", "---\nStatus: todo\n---\n\n# A\n")
-        r = run_cli("backfill-created", "--override", "scratch", home=self.home)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("backfilled Created on 1 plan(s)", r.stdout)
-        self.assertRegex(
-            path.read_text(), r"Created: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
-        )
-
-    def test_idempotent_skips_already_stamped(self) -> None:
-        self._write(
-            "2026-06-01-a.md",
-            "---\nStatus: todo\nCreated: 2026-06-01T08:00:00Z\n---\n\n# A\n",
-        )
-        r = run_cli("backfill-created", "--override", "scratch", home=self.home)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("backfilled Created on 0 plan(s)", r.stdout)
-        # Existing value preserved.
-        self.assertIn(
-            "Created: 2026-06-01T08:00:00Z",
-            (self.plans_root / "scratch" / "2026-06-01-a.md").read_text(),
-        )
-
-    def test_skips_non_md_and_no_frontmatter(self) -> None:
-        self._write("2026-06-01-data.json", '{"a": 1}\n')
-        bare = self._write("2026-06-01-bare.md", "# No frontmatter\n")
-        r = run_cli("backfill-created", "--override", "scratch", home=self.home)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("backfilled Created on 0 plan(s)", r.stdout)
-        self.assertNotIn("Created:", bare.read_text())
-
-    def test_covers_done_subdir(self) -> None:
-        d = self.plans_root / "scratch" / "done"
-        d.mkdir(parents=True, exist_ok=True)
-        path = d / "2026-06-01-archived.md"
-        path.write_text("---\nStatus: done\n---\n\n# Archived\n", encoding="utf-8")
-        r = run_cli("backfill-created", "--override", "scratch", home=self.home)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("Created:", path.read_text())
-
-class TestBackfillCreatedBestEffort(unittest.TestCase):
-    """A stat/write failure on one file must not abort the whole run.
-
-    In-process (patches write_atomic) because the subprocess harness can't
-    inject a filesystem error.
-    """
-
-    def setUp(self) -> None:
-        self.cli = _import_cli_module()
-        self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name) / "plans"
-        (self.root / "scratch").mkdir(parents=True)
-
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
-
-    def _write(self, name: str) -> Path:
-        path = self.root / "scratch" / name
-        path.write_text("---\nStatus: todo\n---\n\n# x\n", encoding="utf-8")
-        return path
-
-    def test_write_failure_on_one_file_does_not_abort(self) -> None:
-        bad = self._write("2026-06-01-bad.md")
-        good = self._write("2026-06-02-good.md")
-        real_write = self.cli.write_atomic
-
-        def flaky_write(path: Path, content: str) -> None:
-            if path == bad:
-                raise OSError("disk gone")
-            real_write(path, content)
-
-        args = MagicMock()
-        args.override = "scratch"
-        with patch.object(storage, "PLAN_ROOT", self.root), \
-             patch.object(self.cli, "write_atomic", side_effect=flaky_write):
-            rc = self.cli.cmd_backfill_created(args)
-        self.assertEqual(rc, 0)
-        # The healthy file is still stamped even though the other file errored.
-        self.assertIn("Created:", good.read_text())
-        self.assertNotIn("Created:", bad.read_text())
 
 
 class TestVersion(IsolatedHomeTestCase):

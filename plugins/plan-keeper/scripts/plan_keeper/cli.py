@@ -283,75 +283,6 @@ def cmd_repo_list(args) -> int:
     return 0
 
 
-def cmd_backfill_created(args) -> int:
-    """One-time, best-effort: stamp `Created` on plans that lack it.
-
-    Newly saved plans get an exact `Created` at save time; this exists only
-    to retrofit plans saved before the field existed, so list's newest-first
-    sort orders them by something better than slug-alphabetical within a day.
-
-    Source is each file's current birthtime (st_birthtime; falls back to
-    st_mtime where birthtime is unavailable, e.g. some Linux filesystems).
-    Best-effort by nature: status mutations rewrite plan files via
-    write_atomic/os.replace, which resets birthtime to the last-write time —
-    so for a plan that has been promoted or status-flipped since it was saved,
-    the stamp reflects that last write, not the original save. The stamp is
-    read *before* this command's own write, so backfilling never clobbers the
-    value with its own rewrite time.
-
-    Only touches .md files that already have frontmatter and have no `Created`
-    yet. Non-.md siblings (paired .json) and bare files without frontmatter are
-    skipped — they fall back to filename-date ordering. Covers the repo's
-    active dir plus done/ and deferred/.
-    """
-    repo = derive_repo(args.override)
-    base = repo_dir(repo)
-    if not base.exists():
-        print(f"no plans for repo {repo!r}", file=sys.stderr)
-        return 0
-    stamped = 0
-    skipped = 0
-    for d in (base, base / "done", base / "deferred"):
-        if not d.exists():
-            continue
-        for path in sorted(d.iterdir()):
-            if not path.is_file() or path.name.startswith("."):
-                continue
-            if path.suffix.lower() != ".md":
-                skipped += 1
-                continue
-            try:
-                text = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                skipped += 1
-                continue
-            if not (text.startswith("---\n") or text.startswith("---\r\n")):
-                skipped += 1
-                continue
-            try:
-                meta, body = parse_frontmatter(text)
-            except PlanKeeperCliError:
-                skipped += 1
-                continue
-            if (meta.get("Created") or "").strip():
-                skipped += 1
-                continue
-            # Best-effort: a stat/write failure on one file (permissions, I/O
-            # error) must not abort the whole backfill — skip it and move on.
-            try:
-                meta["Created"] = _iso_from_stat(path.stat())
-                new_text = serialize_frontmatter(meta, body)
-                if not new_text.endswith("\n"):
-                    new_text += "\n"
-                write_atomic(path, new_text)
-            except OSError:
-                skipped += 1
-                continue
-            stamped += 1
-    print(f"backfilled Created on {stamped} plan(s); skipped {skipped}")
-    return 0
-
-
 def cmd_save(args) -> int:
     repo = derive_repo(args.override)
 
@@ -1146,12 +1077,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    p_backfill = sub.add_parser(
-        "backfill-created",
-        help="one-time: stamp `Created` (from file birthtime) on plans missing it",
-    )
-    p_backfill.add_argument("--override", help="explicit override for <repo>")
-
     p_save = sub.add_parser(
         "save",
         help="write body (stdin) to ~/plans/<repo>/<date>-<slug>.<ext> "
@@ -1389,7 +1314,6 @@ def main() -> int:
     dispatch = {
         "repo": lambda a: _REPO_DISPATCH[a.repo_cmd](a),
         "list": cmd_list,
-        "backfill-created": cmd_backfill_created,
         "save": cmd_save,
         "file-meta": lambda a: _FILE_META_DISPATCH[a.file_meta_cmd](a),
         "linear": lambda a: _PROVIDER_DISPATCH[a.provider_cmd](a),
