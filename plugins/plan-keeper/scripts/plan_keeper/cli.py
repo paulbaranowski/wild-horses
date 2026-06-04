@@ -559,6 +559,17 @@ def cmd_file_meta_set(args) -> int:
             if args.on_collision == "suffix":
                 target = find_unused_suffix(target)
             # "overwrite" → write_atomic replaces it below
+    elif args.status is not None and path.parent.name in TERMINAL_DIRS:
+        # Reactivating a terminal plan (moving it back to the active root) is
+        # out of scope. Refuse loudly rather than rewrite in place and leave an
+        # active-status plan parked in done/ or deferred/, where active list,
+        # push --ticket, and ticket resolution would never find it.
+        raise PlanKeeperCliError(
+            f"cannot set active status {args.status!r} on a plan in "
+            f"{path.parent.name}/ — reactivating a {path.parent.name} plan is "
+            f"not supported; move the file back to the active dir first",
+            code=2,
+        )
     else:
         target = path
 

@@ -727,6 +727,35 @@ class TestFileMetaSetStatus(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("invalid choice", r.stderr)
 
+    def test_active_status_on_terminal_source_refused(self) -> None:
+        # Reactivating a done/deferred plan (back to the active dir) is out of
+        # scope; the CLI must refuse loudly rather than park an active-status
+        # plan in done/.
+        source = self._save_one("reactivate me")
+        run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                home=self.home)
+        done_path = self.plans_root / "scratch" / "done" / source.name
+        r = run_cli("file-meta", "set", "--file", str(done_path), "--status", "todo",
+                    home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("reactivating", r.stderr)
+        # The plan stays put with its terminal status untouched.
+        self.assertTrue(done_path.exists())
+        self.assertIn("Status: done", done_path.read_text().split("\n---\n", 1)[0])
+
+    def test_non_status_edit_on_terminal_plan_in_place(self) -> None:
+        # Editing a non-status field (e.g. Kind) on a done plan is still a
+        # legal in-place edit — only an active --status is refused.
+        source = self._save_one("edit done plan")
+        run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                home=self.home)
+        done_path = self.plans_root / "scratch" / "done" / source.name
+        r = run_cli("file-meta", "set", "--file", str(done_path), "--kind", "spec",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(done_path.exists())
+        self.assertIn("Kind: spec", done_path.read_text().split("\n---\n", 1)[0])
+
     def test_archive_subcommand_removed(self) -> None:
         # archive was folded into `file-meta set --status done`; the old
         # subcommand must no longer exist.

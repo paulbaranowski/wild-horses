@@ -1,6 +1,6 @@
 # plan-done
 
-Archive a completed plan from `~/plans/<repo>/` into `~/plans/<repo>/done/`, with a `*Completed: YYYY-MM-DD*` stamp appended to the file.
+Archive a completed plan from `~/plans/<repo>/` into `~/plans/<repo>/done/`, with `Status: done` and a `Completed on: YYYY-MM-DD` stamp written into the file's frontmatter.
 
 The full instructions Claude follows when this skill runs are in [`SKILL.md`](./SKILL.md). This README is a pointer for people browsing the repo.
 
@@ -27,9 +27,9 @@ Pairs with [`plan-save`](../plan-save/) (which wrote it) and [`plan-do`](../plan
 4. **Handles collisions.** On exit 2 (same-name file already in `done/`), asks: overwrite / suffix `-2` / cancel.
 5. **Confirms.** Returns the archived absolute path.
 
-## Why a horizontal-rule stamp
+## Why a frontmatter stamp
 
-The CLI appends `\n---\n*Completed: <date>*\n` — a blank line, then a horizontal rule, then italic text. Renders cleanly in any markdown viewer, doesn't disturb the original plan body, and the leading blank line prevents Markdown from parsing the rule as a setext-H2 underline on the previous content line.
+The CLI writes `Status: done` and `Completed on: <date>` into the plan's YAML frontmatter (it does **not** append anything to the body). Keeping the stamp in frontmatter leaves the plan body untouched, makes the completion date machine-readable alongside the other managed fields (`Agent`, `Status`, `Created`), and keeps `Status` and the `done/` location in agreement.
 
 ## Guardrails
 

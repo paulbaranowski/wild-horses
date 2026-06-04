@@ -76,11 +76,15 @@ Which one did you finish?
 
 ### 2. Confirm before mutating
 
-Show the user the source and destination paths and the action:
+Show the user the action and the plan being completed:
 
 > Will move `~/plans/<repo>/<file>.md` → `~/plans/<repo>/done/<file>.md` and record today's date as `Completed on:` in the frontmatter. Proceed?
 
-Wait for the user's response. Do not proceed without an answer.
+**In ticket mode** (the user gave only a `Ticket:` id, step 1's listing was skipped), you don't have the resolved path yet — the CLI resolves it during the mutate. Confirm by ticket id instead, and rely on the CLI's exit-3/exit-2 to catch a missing/ambiguous ticket:
+
+> Will mark the plan with `Ticket: <id>` as done — move it into its repo's `done/` and stamp `Completed on:`. Proceed?
+
+Wait for the user's response. Do not proceed without an answer. The CLI prints the resolved destination path on success (step 5), so the exact path is still surfaced to the user — just after the move, not before.
 
 ### 3. Invoke the CLI
 
