@@ -8,10 +8,35 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from support import (
+from support import (  # noqa: F401 — also inserts scripts/ onto sys.path
     IsolatedHomeTestCase,
     run_cli,
 )
+
+from plan_keeper import storage  # noqa: E402 — after support's path insert
+from plan_keeper.errors import PlanKeeperCliError  # noqa: E402
+
+
+class TestStateSubdir(unittest.TestCase):
+    """state_subdir maps a lifecycle state to its on-disk directory."""
+
+    def test_active_states_resolve_to_repo_root(self) -> None:
+        root = Path("/plans/myrepo")
+        for state in ("backlog", "todo", "in-progress", "in-review"):
+            self.assertEqual(storage.state_subdir(root, state), root)
+
+    def test_done_resolves_to_done_subdir(self) -> None:
+        root = Path("/plans/myrepo")
+        self.assertEqual(storage.state_subdir(root, "done"), root / "done")
+
+    def test_deferred_resolves_to_deferred_subdir(self) -> None:
+        root = Path("/plans/myrepo")
+        self.assertEqual(storage.state_subdir(root, "deferred"), root / "deferred")
+
+    def test_unknown_state_raises_code_2(self) -> None:
+        with self.assertRaises(PlanKeeperCliError) as ctx:
+            storage.state_subdir(Path("/plans/myrepo"), "bogus")
+        self.assertEqual(ctx.exception.code, 2)
 
 
 class TestList(IsolatedHomeTestCase):
