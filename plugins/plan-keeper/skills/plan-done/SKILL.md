@@ -136,7 +136,7 @@ Tell the user the archived path that the CLI returned in step 3. One line is eno
 
 ## Notes
 
-- This skill is the only `plan-*` skill that mutates the `~/plans/` tree by **moving files**. `plan-save` creates; `plan-do` only flips a started plan's `Status` to `in-progress` (no move). The status field is what makes this skill's `--status in-progress,todo` list surface the plan you were just working on first.
+- This skill is the dedicated flow for **moving** a completed plan into `done/` (via `file-meta set --status done`). `plan-update` can also relocate when explicitly told `--status done`/`--status deferred`; `plan-save` creates; `plan-do` only flips a started plan's `Status` to `in-progress` (no move). The status field is what makes this skill's `--status in-progress,todo` list surface the plan you were just working on first.
 - The completion date is stored as `Completed on: YYYY-MM-DD` in the YAML frontmatter, keeping the plan body intact and making the date machine-readable without disturbing markdown rendering.
 - Archived plans live in `~/plans/<repo>/done/`. `plan-do`'s `list` only enumerates direct children of the repo dir — `done/` files are excluded from the active-plans list automatically.
 - Sibling skills in the `plan-` family (`plan-save`, `plan-do`) share the same CLI and the same `~/plans/<repo>/` tree.

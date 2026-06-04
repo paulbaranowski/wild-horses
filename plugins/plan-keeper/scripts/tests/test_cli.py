@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI subcommand wiring: save, archive, backfill, ticket-api arg validation (cli.py).
+"""CLI subcommand wiring: save, file-meta set (status lifecycle), backfill, ticket-api arg validation (cli.py).
 
 Part of the plan_keeper test suite; shared harness lives in support.py.
 Run all: python3 -m unittest discover -s plugins/plan-keeper/scripts/tests
@@ -643,7 +643,12 @@ class TestFileMetaSetStatus(IsolatedHomeTestCase):
         run_cli("file-meta", "set", "--file", str(source), "--status", "done",
                 "--completed-on", "2020-01-15", home=self.home)
         text = (self.plans_root / "scratch" / "done" / source.name).read_text()
-        self.assertIn("Completed on: 2020-01-15", text.split("\n---\n", 1)[0])
+        front = text.split("\n---\n", 1)[0]
+        self.assertIn("Completed on: 2020-01-15", front)
+        # Supplied date must suppress the auto-stamp: exactly one Completed on,
+        # and today's date must not leak in.
+        self.assertEqual(front.count("Completed on:"), 1)
+        self.assertNotIn(date.today().isoformat(), front)
 
     def test_deferred_relocates_without_stamp(self) -> None:
         source = self._save_one()

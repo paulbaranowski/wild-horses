@@ -471,8 +471,8 @@ def _resolve_file_meta_path(args) -> Path:
 
     Locate by --ticket (cross-repo) or --file, then assert it's a regular
     file *before* any read — a directory passes exists() but would crash
-    read_text() with IsADirectoryError. Mirrors archive's "not a file"
-    contract (exit 3) so every path-taking command fails the same clean way.
+    read_text() with IsADirectoryError. The "not a file" contract (exit 3)
+    keeps every path-taking command failing the same clean way.
     """
     path = resolve_ticket_to_path(args.ticket) if args.ticket else Path(args.file)
     if not path.exists():
@@ -502,7 +502,7 @@ def cmd_file_meta_set(args) -> int:
     """Edit plan frontmatter via one self-documenting flag per field.
 
     The plan is located by `--file` or `--ticket` (the cross-repo locator,
-    consistent with archive/push). `--ticket` is *never* a value — the
+    consistent with push). `--ticket` is *never* a value — the
     `Ticket:` frontmatter value is written with `--ticket-id`, so the word
     "ticket" means the same thing (locate) on every subcommand.
 
@@ -1036,7 +1036,7 @@ def build_parser() -> argparse.ArgumentParser:
         """Add the shared `--file | --ticket` locator group (exactly one).
 
         `--ticket` locates a plan by its Ticket: frontmatter across all repos
-        — the same meaning it has on archive/push, so the flag never doubles
+        — the same meaning it has on push, so the flag never doubles
         as a value setter (set writes the Ticket value via --ticket-id).
         """
         g = p.add_mutually_exclusive_group(required=True)
