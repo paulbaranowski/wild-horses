@@ -11,4 +11,4 @@
 # outside the plugin tree.
 set -euo pipefail
 CLI="${PLAN_KEEPER_CLI:-$(dirname "$0")/../scripts/plan_keeper_cli.py}"
-exec python3 "$CLI" groundcrew-fetch
+exec python3 "$CLI" crew fetch

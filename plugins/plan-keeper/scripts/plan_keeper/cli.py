@@ -670,7 +670,7 @@ def cmd_ticket_api(args) -> int:
 # --- groundcrew shell adapter ----------------------------------------------
 
 
-def cmd_groundcrew_fetch(args) -> int:
+def cmd_crew_fetch(args) -> int:
     """Emit a JSON array of issues for groundcrew's shell adapter to consume.
 
     Scans ~/plans/*/*.md (one level deep — skips done/ and deferred/).
@@ -699,7 +699,7 @@ def cmd_groundcrew_fetch(args) -> int:
 _GROUNDCREW_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
-def cmd_groundcrew_resolve_one(args) -> int:
+def cmd_crew_get(args) -> int:
     """Print one issue JSON for `${id}`, exit 3 if not found."""
     if not _GROUNDCREW_ID_RE.match(args.id):
         raise PlanKeeperCliError(
@@ -728,7 +728,7 @@ def cmd_groundcrew_resolve_one(args) -> int:
     return 3
 
 
-def cmd_groundcrew_mark_in_progress(args) -> int:
+def cmd_crew_start(args) -> int:
     """Read {'path': ...} from stdin, flip that plan's Status to in-progress.
 
     Validates the path is a string, absolute, points to a .md file, and
@@ -794,7 +794,7 @@ def cmd_queue_set(args) -> int:
     already names an Agent keeps it. Dequeue (--status backlog) never
     touches Agent.
 
-    Path validation mirrors groundcrew-mark-in-progress: every path must be
+    Path validation mirrors `crew start`: every path must be
     absolute, end in .md, resolve inside PLAN_ROOT, exist, and have
     frontmatter. The whole batch is validated FIRST — if any path is
     invalid, nothing is written (all-or-nothing), so a typo can't leave the
@@ -803,7 +803,7 @@ def cmd_queue_set(args) -> int:
     raw = sys.stdin.read()
     paths = [line.strip() for line in raw.splitlines() if line.strip()]
     if not paths:
-        raise PlanKeeperCliError("queue set: no plan paths on stdin", code=2)
+        raise PlanKeeperCliError("crew queue set: no plan paths on stdin", code=2)
     plan_root = storage.PLAN_ROOT.resolve()
     resolved_paths: list[Path] = []
     for raw_path in paths:
@@ -1156,38 +1156,54 @@ def build_parser() -> argparse.ArgumentParser:
         help="ignore existing Ticket frontmatter and create a fresh ticket",
     )
 
-    sub.add_parser(
-        "groundcrew-fetch",
+    # `crew` groups the groundcrew dispatch adapter (fetch/get/start — the
+    # machine protocol the crew.config.ts shell wrappers call) with the
+    # cross-repo `queue` manager the plan-crew skill drives. fetch/get/start
+    # deliberately avoid list/get/set naming: fetch and start both mutate
+    # (fetch stamps the groundcrew Ticket; start flips Status), so a read-only
+    # `list`/`get` label would mislead — and `crew queue list`/`crew queue set` are the
+    # genuinely read-only / general-write pair.
+    p_crew = sub.add_parser(
+        "crew",
+        help="groundcrew dispatch adapter (fetch/get/start) + cross-repo queue",
+    )
+    crew_sub = p_crew.add_subparsers(
+        dest="crew_cmd", required=True, metavar="<subcommand>",
+        parser_class=HelpfulArgumentParser,
+    )
+
+    crew_sub.add_parser(
+        "fetch",
         help="emit shell-adapter JSON array of active plans (for crew.config.ts fetch)",
     )
 
-    p_gc_one = sub.add_parser(
-        "groundcrew-resolve-one",
+    p_crew_get = crew_sub.add_parser(
+        "get",
         help="emit one shell-adapter issue JSON for ${id}, or exit 3 if missing",
     )
-    p_gc_one.add_argument("id", help="synthesized plan id (plan-<digits>, from fetch)")
+    p_crew_get.add_argument("id", help="synthesized plan id (plan-<digits>, from fetch)")
 
-    sub.add_parser(
-        "groundcrew-mark-in-progress",
+    crew_sub.add_parser(
+        "start",
         help="flip Status to in-progress on a plan named by stdin sourceRef JSON",
     )
 
-    p_queue = sub.add_parser(
+    p_crew_queue = crew_sub.add_parser(
         "queue",
         help="cross-repo groundcrew queue: list active plans / set Status in bulk",
     )
-    queue_sub = p_queue.add_subparsers(
+    crew_queue_sub = p_crew_queue.add_subparsers(
         dest="queue_cmd", required=True, metavar="<subcommand>",
         parser_class=HelpfulArgumentParser,
     )
 
-    _ = queue_sub.add_parser(
+    crew_queue_sub.add_parser(
         "list",
         help="emit JSON array of active plans across all repos "
              "(repo/file/status/agent)",
     )
 
-    p_queue_set = queue_sub.add_parser(
+    p_queue_set = crew_queue_sub.add_parser(
         "set",
         help="set Status on plans named by newline-delimited stdin paths",
     )
@@ -1225,6 +1241,13 @@ _QUEUE_DISPATCH = {
     "set": cmd_queue_set,
 }
 
+_CREW_DISPATCH = {
+    "fetch": cmd_crew_fetch,
+    "get": cmd_crew_get,
+    "start": cmd_crew_start,
+    "queue": lambda a: _QUEUE_DISPATCH[a.queue_cmd](a),
+}
+
 
 def main() -> int:
     parser = build_parser()
@@ -1240,10 +1263,7 @@ def main() -> int:
         "ticket-system-config": lambda a: _TICKET_SYSTEM_CONFIG_DISPATCH[a.tsc_cmd](a),
         "ticket-api": cmd_ticket_api,
         "push": cmd_push,
-        "groundcrew-fetch": cmd_groundcrew_fetch,
-        "groundcrew-resolve-one": cmd_groundcrew_resolve_one,
-        "groundcrew-mark-in-progress": cmd_groundcrew_mark_in_progress,
-        "queue": lambda a: _QUEUE_DISPATCH[a.queue_cmd](a),
+        "crew": lambda a: _CREW_DISPATCH[a.crew_cmd](a),
     }
     try:
         return dispatch[args.cmd](args)
