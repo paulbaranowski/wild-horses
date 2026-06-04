@@ -5,7 +5,7 @@ description: Use when the user finishes a plan, marks a plan done, archives a pl
 
 # plan-done
 
-Archive a completed plan from `~/plans/<repo>/` into `~/plans/<repo>/done/`, with a `Completed on:` date written into the file's frontmatter. The bundled `plan_keeper_cli.py` handles the actual stamp-and-move (atomic write to `done/`, then unlink the source). This skill identifies which plan to archive, confirms with the user, and handles collisions.
+Archive a completed plan from `~/plans/<repo>/` into `~/plans/<repo>/done/`, with a `Completed on:` date written into the file's frontmatter. The bundled `plan_keeper_cli.py` handles the actual stamp-and-move (atomic write to `done/`, then unlink the source). This skill identifies which plan to archive, confirms only when it had to _infer_ the plan (rather than the user naming it), and handles collisions.
 
 ## Quick reference
 
@@ -14,7 +14,7 @@ Archive a completed plan from `~/plans/<repo>/` into `~/plans/<repo>/done/`, wit
 - **Identifier:** a filename (`--file`) or a ticket id (`--ticket`) — see step 1 and step 3.
 - **`<repo>`:** auto-derived or override — see [../../repo-derivation.md](../../repo-derivation.md).
 - **Collision in `done/`:** ask the user; never overwrite silently.
-- **Confirmation:** required before any file mutation.
+- **Confirmation:** skipped when the user names the plan (filename or ticket id) or picks it from the listing; required only when the skill inferred the plan from conversation context.
 
 ## Procedure
 
@@ -74,17 +74,15 @@ Plans to finish in ~/plans/wild-horses/:
 Which one did you finish?
 ```
 
-### 2. Confirm before mutating
+### 2. Confirm only when you inferred the plan
 
-Show the user the action and the plan being completed:
+**Skip this step entirely when the user identified the plan themselves** — they named it by filename or ticket id in the invocation, or picked it from the step-1 listing. In those cases the user's identification _is_ the confirmation, so a second prompt is redundant: go straight to step 3 and archive. The CLI prints the resolved destination path on success (step 5), so the exact path is still surfaced — just after the move, not before.
 
-> Will move `~/plans/<repo>/<file>.md` → `~/plans/<repo>/done/<file>.md` and record today's date as `Completed on:` in the frontmatter. Proceed?
+**Confirm only when the skill inferred the plan from conversation context** — the "clear plan candidate from this session" path in step 1, where the skill (not the user) chose the file. In that case the step-1 proposal is the confirmation:
 
-**In ticket mode** (the user gave only a `Ticket:` id, step 1's listing was skipped), you don't have the resolved path yet — the CLI resolves it during the mutate. Confirm by ticket id instead, and rely on the CLI's exit-3/exit-2 to catch a missing/ambiguous ticket:
+> Mark `<filename>` done? (Y/n, or name a different one.)
 
-> Will mark the plan with `Ticket: <id>` as done — move it into its repo's `done/` and stamp `Completed on:`. Proceed?
-
-Wait for the user's response. Do not proceed without an answer. The CLI prints the resolved destination path on success (step 5), so the exact path is still surfaced to the user — just after the move, not before.
+Wait for the user's response before step 3. Do not proceed without an answer. If they reject it, fall through to the listing flow in step 1.
 
 ### 3. Invoke the CLI
 
@@ -126,7 +124,8 @@ Tell the user the archived path that the CLI returned in step 3. One line is eno
 
 ## Common mistakes
 
-- **Auto-archiving without confirmation.** Step 2 requires showing source/destination paths and asking before invoking the CLI. The skill is destructive (file moves), not read-only.
+- **Re-prompting a plan the user already named.** When the user gives a filename or ticket id, or picks from the step-1 listing, archive directly — the explicit identification is the confirmation. The step-2 gate was deliberately scoped to the inferred-candidate case only; a second prompt there is friction, not safety.
+- **Archiving an inferred plan without confirmation.** The flip side: when the skill chose the candidate from conversation context (the user did not name it), the step-1 `Mark <filename> done? (Y/n)` proposal must be answered before you mutate. The skill is destructive (file moves), so a plan it guessed at still needs a yes.
 - **Reading the CLI's stderr as a fatal error.** Exit 2 is a structured collision signal, not a failure to act on. Parse it and ask the user (step 4) — do not abort.
 - **Falling back to a different repo's plans when the current one is empty.** Step 1 says: tell the user, stop. Don't archive someone else's plan because the current repo has none.
 - **Re-archiving an already-archived plan.** The CLI errors with `plan not found` (exit 3) when the source isn't in the repo's top level. If you see that, the plan is likely already in `done/` — check with `list --state done`.
