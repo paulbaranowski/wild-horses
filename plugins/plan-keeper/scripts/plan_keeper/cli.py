@@ -126,12 +126,15 @@ def _pipeline_index(kind: str) -> int:
 def _render_grouped(items: list[tuple[str, Path]]) -> int:
     """Render (display_name, path) items clustered by project slug.
 
-    Group order = newest member first: `items` arrives newest-first
-    (list_plans sorts by _plan_sort_key, reverse), so first-encounter order of
-    each group is its newest member's position — preserved. Within a group,
-    members sort along the Kind pipeline, then by filename. The stage column is
-    the frontmatter Kind ('-' when unclassified); Kind is read once per member
-    up front (a stable snapshot — no re-read mid-sort or at print time). Groups
+    Group order follows `items`' incoming order via first-encounter: a group is
+    placed where its first (newest) member appears. So single-repo input
+    (list_plans, newest-first) yields newest-project-first; cross-repo input
+    (_all_repos_items, alphabetical-by-repo then newest-within) yields
+    repo-alphabetical then newest-within — matching the flat `--all-repos`
+    listing's own ordering, not a global recency sort. Within a group, members
+    sort along the Kind pipeline, then by filename. The stage column is the
+    frontmatter Kind ('-' when unclassified); Kind is read once per member up
+    front (a stable snapshot — no re-read mid-sort or at print time). Groups
     print separated by a blank line.
 
     Grouping key is repo-aware: in cross-repo mode the display name is

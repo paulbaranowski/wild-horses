@@ -151,6 +151,20 @@ class TestPlanGroupKey(unittest.TestCase):
     def test_round_trips_topic_ending_in_kind_word(self) -> None:
         self.assertEqual(plan_group_key("2026-06-04-auth-design--design.md"), "auth-design")
 
+    def test_collision_suffixed_file_groups_with_original(self) -> None:
+        # A same-kind/same-day/same-topic re-save lands at `…--<kind>-N.md`
+        # (find_unused_suffix appends -N to the whole stem); the `-N` must be
+        # stripped so the copy groups with its original, not as a new project.
+        self.assertEqual(plan_group_key("2026-06-04-dup--spec-2.md"), "dup")
+        self.assertEqual(plan_group_key("2026-06-04-dup--spec-10.md"), "dup")
+
+    def test_topic_ending_in_kind_word_with_numeric_tail_is_kept(self) -> None:
+        # `auth-spec-2` is a legitimate slug (topic "auth spec 2"); with a real
+        # Kind suffix it round-trips, and the numeric strip must not eat into it.
+        self.assertEqual(
+            plan_group_key("2026-06-04-auth-spec-2--design.md"), "auth-spec-2"
+        )
+
     def test_trailing_segment_not_a_valid_kind_is_kept(self) -> None:
         # "--foo" is not a Kind, so it stays part of the slug (cannot happen
         # via slugify, which collapses --, but the recovery must be safe).

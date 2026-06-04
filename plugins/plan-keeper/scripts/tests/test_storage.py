@@ -645,6 +645,23 @@ class TestListGrouped(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("not allowed with", r.stderr)
 
+    def test_collision_suffixed_resave_groups_under_one_heading(self) -> None:
+        # Two saves of the same topic+kind: the second collides and lands at
+        # `…--spec-2.md`. Both must group under the single `dup` heading, not
+        # split into `dup` and `dup--spec-2`.
+        self._save("dup", "spec")
+        r2 = run_cli(
+            "save", "--override", "scratch", "--topic", "dup", "--kind", "spec",
+            "--on-collision", "suffix", stdin="# Dup\ntwo\n", home=self.home,
+        )
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        r = run_cli("list", "--override", "scratch", "--group", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        headings = [l for l in r.stdout.split("\n") if l and not l.startswith("  ")]
+        self.assertEqual(headings, ["dup"], r.stdout)
+        members = [l for l in r.stdout.split("\n") if l.startswith("  ")]
+        self.assertEqual(len(members), 2, r.stdout)
+
     def test_cross_repo_same_slug_stays_in_separate_repo_groups(self) -> None:
         # The same slug saved under two different repos must NOT merge into one
         # group: cross-repo grouping keys on 'repo/slug', so unrelated projects

@@ -63,6 +63,8 @@ def slugify_topic(text: str) -> str:
 KIND_SEP = "--"
 
 _NAME_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+# A `-N` collision suffix that `find_unused_suffix` appends after the Kind.
+_NAME_COLLISION_SUFFIX_RE = re.compile(r"-\d+$")
 
 
 def plan_filename(date_str: str, slug: str, ext: str, kind: Optional[str]) -> str:
@@ -92,7 +94,11 @@ def plan_group_key(name: str) -> str:
     m = _NAME_DATE_PREFIX_RE.match(stem)
     rest = stem[m.end():] if m else stem
     head, sep, tail = rest.rpartition(KIND_SEP)
-    if sep and tail in VALID_KINDS:
+    # `tail` is the trailing Kind. A same-kind/same-day/same-topic re-save makes
+    # `find_unused_suffix` append `-N` to the whole stem, so the on-disk form is
+    # `…--<kind>-N`; strip that numeric collision suffix before the Kind check so
+    # a copy still groups with its original rather than as its own project.
+    if sep and _NAME_COLLISION_SUFFIX_RE.sub("", tail) in VALID_KINDS:
         return head
     return rest
 
