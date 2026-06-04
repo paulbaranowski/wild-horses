@@ -24,7 +24,7 @@ For plans that aren't execution-ready yet (idea, spec), the skill suggests the s
 - **`<repo>`:** auto-derived or override — see [../../repo-derivation.md](../../repo-derivation.md).
 - **Classification (tier 1, readiness):** idea / spec / execution-ready. Read the plan's `Kind:` frontmatter first (authoritative — see [../../plan-kinds.md](../../plan-kinds.md)); infer from content only when `Kind` is absent.
 - **Classification (tier 2, shape — only for execution-ready):** picks which of the three execution engines to recommend first; all three are always offered.
-- **Routing:** `superpowers:brainstorming` (idea), `superpowers:writing-plans` (spec). Execution-ready → menu of `harness:autonomous`, `harness:task-list-builder`→`task-list-runner`, `superpowers:executing-plans`.
+- **Routing:** `superpowers:brainstorming` (idea), `superpowers:writing-plans` (spec). Execution-ready → menu of `autonomous:autonomous`, `harness:task-list-builder`→`task-list-runner`, `superpowers:executing-plans`.
 - **Confirmation:** required before reading any plan file and before invoking any next skill.
 
 ## Procedure
@@ -133,7 +133,7 @@ Pick the **recommended** engine with this classification (apply in order; first 
 
 | Recommend                                            | Signals in the plan                                                                                                                                                                                                             |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`harness:autonomous`**                             | Self-contained and well-specified; bounded scope; clear acceptance criteria; reads like a single ticket/feature that naturally ends in a PR; no mid-flight human judgment calls implied. _"Could hand this to an AFK agent."_   |
+| **`autonomous:autonomous`**                          | Self-contained and well-specified; bounded scope; clear acceptance criteria; reads like a single ticket/feature that naturally ends in a PR; no mid-flight human judgment calls implied. _"Could hand this to an AFK agent."_   |
 | **`harness:task-list-builder` → `task-list-runner`** | Multiple independent tasks; per-task acceptance criteria; dependency notation between tasks; "dispatch" / "subagents" / "in parallel" / "independent" language; large scope where structured tracking and resumability pay off. |
 | **`superpowers:executing-plans`**                    | Sequential phases with explicit review/checkpoint language; dependent linear flow ("first do X, then do Y"); risky or high-uncertainty work the user would want to review phase-by-phase; TDD-with-review-gates.                |
 
@@ -144,7 +144,7 @@ Present the menu — recommended option first with a one-line reason, the others
 ```text
 `<filename>` is ready to execute. Here's how I can run it (recommended first):
 
-  1. harness:autonomous — [recommended] AFK, no human in the loop: implements,
+  1. autonomous:autonomous — [recommended] AFK, no human in the loop: implements,
      tests, runs an independent sub-agent review to convergence, opens a PR.
   2. harness:task-list-builder → task-list-runner — convert to a structured JSON
      task list, then dispatch each task to a sub-agent; resumable, best for many
@@ -173,7 +173,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set \
 
 **Handoff specifics per engine:**
 
-- **`harness:autonomous`** — the plan read in step 3 _is_ the Task. autonomous accepts an in-context plan as a task source (its input-resolution step 3), so no issue URL is needed — the plan content is the authoritative spec. You may also hand it the plan's file path (`~/plans/<repo>/<filename>`) explicitly. Do not look up or pass any `Ticket:` frontmatter field — the plan is the source of truth.
+- **`autonomous:autonomous`** — the plan read in step 3 _is_ the Task. autonomous accepts an in-context plan as a task source (its input-resolution step 3), so no issue URL is needed — the plan content is the authoritative spec. You may also hand it the plan's file path (`~/plans/<repo>/<filename>`) explicitly. Do not look up or pass any `Ticket:` frontmatter field — the plan is the source of truth.
 - **`harness:task-list-builder`** — invoke it to convert the plan into the structured JSON task list; it hands off to `harness:task-list-runner` to execute the tasks.
 - **`superpowers:executing-plans`** — invoke directly; the plan in context is the implementation plan it executes.
 - **`superpowers:brainstorming` / `superpowers:writing-plans`** — invoke directly (the idea / spec paths).
@@ -191,7 +191,7 @@ If the user wants to steer manually, just stop the skill here. The plan is read 
 - **Auto-invoking the next skill without confirmation.** Steps 5a/5b/5c require a check-in even when the classification feels obvious. The skill's job is to _offer_ the next stage, not jump to it.
 - **Collapsing the execution menu to a single suggestion.** For execution-ready plans, all three engines are always offered (step 5c). The shape classification only sets which one is _recommended first_ — it does not hide the others.
 - **Treating the recommendation as a decision.** The recommended engine is a best guess from plan shape; how hands-off to be is the user's call. Lead with the recommendation, but let them pick any engine.
-- **Passing a `Ticket:` URL to `harness:autonomous`.** The in-context plan is the Task — do not resolve or hand autonomous a frontmatter ticket URL.
+- **Passing a `Ticket:` URL to `autonomous:autonomous`.** The in-context plan is the Task — do not resolve or hand autonomous a frontmatter ticket URL.
 - **Silently falling back when the current repo has no plans.** Step 1 says: tell the user, run `list-repos`, wait for direction. Don't auto-route to another folder.
 
 ## Edge cases
@@ -209,5 +209,5 @@ If the user wants to steer manually, just stop the skill here. The plan is read 
 - Status is the link between the `plan-*` skills: `plan-save` writes `backlog`, `plan-do` lists `todo`/`backlog` and flips the started plan to `in-progress`, and `plan-done` lists `in-progress`/`todo` (in-progress first). A plan therefore flows `backlog → todo → in-progress → done` across the family.
 - Classification is two-tier. Tier 1 (readiness: idea / spec / execution-ready) gates _which path_ the plan takes — driven by the `Kind:` frontmatter when present (set by `plan-save`), falling back to content inference otherwise. Tier 2 (shape) runs only for execution-ready plans and only sets _which engine is recommended first_ in the menu — all three are always offered.
 - `Kind` is the persisted form of the tier-1 readiness call: `plan-save` records it once with full context, so `plan-do` reads it instead of re-inferring on every pickup. The mapping (idea→idea, prd/design/spec→spec, exec-plan→execution-ready) lives in [../../plan-kinds.md](../../plan-kinds.md).
-- The tier-2 discriminator between recommending `task-list-builder/runner` and `executing-plans` is task **independence** (parallel, dispatched vs. sequential, review-gated), not the words used — both use "phase" and "task" vocabulary. `harness:autonomous` sits above both on the autonomy axis: recommend it when the plan is specified enough to run with no human in the loop.
+- The tier-2 discriminator between recommending `task-list-builder/runner` and `executing-plans` is task **independence** (parallel, dispatched vs. sequential, review-gated), not the words used — both use "phase" and "task" vocabulary. `autonomous:autonomous` sits above both on the autonomy axis: recommend it when the plan is specified enough to run with no human in the loop.
 - Sibling skills in the `plan-` family (`plan-save`, `plan-done`) share the same CLI and the same `~/plans/<repo>/` tree.
