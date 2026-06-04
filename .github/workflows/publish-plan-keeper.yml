@@ -1,0 +1,134 @@
+# Auto-publish the plan-keeper Homebrew formula on a version bump.
+#
+# Fires when plugins/plan-keeper/.claude-plugin/plugin.json lands on main. An
+# idempotency guard turns this path-filtered "fires on file change" trigger into
+# a "publishes on version change" trigger: if the plan-keeper-v<version> tag
+# already exists, the run is a no-op. So editing the manifest's description
+# without bumping the version costs one short, harmless run and publishes nothing.
+#
+# End state per new version: a plan-keeper-v<version> tag on wild-horses and a
+# matching Formula/plan-keeper.rb commit on paulbaranowski/homebrew-tap — no
+# manual tag + update-formula.sh steps. See plugins/plan-keeper/RELEASING.md.
+name: Publish plan-keeper to Homebrew
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "plugins/plan-keeper/.claude-plugin/plugin.json"
+
+# Serialize publishes so two quick merges can't race to tag/push. Don't cancel an
+# in-flight run — a half-finished publish (tag pushed, formula not yet) is worse
+# than waiting.
+concurrency:
+  group: publish-plan-keeper
+  cancel-in-progress: false
+
+# The built-in GITHUB_TOKEN needs write to push the release tag to this repo.
+# The cross-repo tap push uses the separate HOMEBREW_TAP_TOKEN secret instead.
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    # macOS runner on purpose: the tap's update-formula.sh uses BSD `sed -i ''`
+    # (empty-suffix arg) and `shasum`, which fail under GNU sed on Linux. Running
+    # here lets us call that script VERBATIM, keeping the formula-rewrite logic
+    # single-sourced in the tap instead of forking a portable copy into this
+    # workflow. wild-horses is public, so macOS minutes are free; the job is tiny
+    # and only fires on a version bump.
+    runs-on: macos-latest
+    steps:
+      - name: Check out wild-horses (full history + tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read plugin version
+        id: ver
+        run: |
+          version="$(jq -r .version plugins/plan-keeper/.claude-plugin/plugin.json)"
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "could not read .version from plugin.json" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=plan-keeper-v$version" >> "$GITHUB_OUTPUT"
+          echo "plan-keeper version: $version"
+
+      - name: Skip if this version is already published
+        id: guard
+        run: |
+          tag="${{ steps.ver.outputs.tag }}"
+          if git ls-remote --exit-code --tags origin "$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists on origin — already published, nothing to do."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$tag not found on origin — proceeding to publish."
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.guard.outputs.published == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Gate the release on the suite. TestVersion fails if plan_keeper.__version__
+      # and plugin.json disagree, so a half-done bump can't ship. The tests are
+      # hermetic (they patch urllib), so no network or secrets are needed.
+      - name: Test gate
+        if: steps.guard.outputs.published == 'false'
+        run: python3 -m unittest discover -s plugins/plan-keeper/scripts/tests -q
+
+      - name: Tag the release commit
+        if: steps.guard.outputs.published == 'false'
+        run: |
+          tag="${{ steps.ver.outputs.tag }}"
+          version="${{ steps.ver.outputs.version }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "plan-keeper $version"
+          git push origin "$tag"
+
+      - name: Check out the Homebrew tap
+        if: steps.guard.outputs.published == 'false'
+        uses: actions/checkout@v4
+        with:
+          repository: paulbaranowski/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Re-point the formula and push to the tap
+        if: steps.guard.outputs.published == 'false'
+        working-directory: homebrew-tap
+        run: |
+          version="${{ steps.ver.outputs.version }}"
+          # update-formula.sh fetches the just-pushed tag's tarball to hash it.
+          # GitHub generates that archive on first request, so a brief ref/tarball
+          # propagation lag can 404 an early attempt. Retry up to 5 times with a 5s
+          # backoff (~20s of cover). set -euo pipefail in the script means a failed
+          # curl aborts BEFORE it rewrites the formula, so retrying is safe (no
+          # partial write to clean up). NB: the tag is already pushed by this point,
+          # so if every attempt fails the run leaves a published tag with a stale
+          # formula — the tag-keyed guard above will NOT re-point it on a re-run.
+          # Recover with the manual "Re-point the formula" step in RELEASING.md.
+          attempt=1
+          max_attempts=5
+          until ./update-formula.sh "$version"; do
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "update-formula.sh failed after $attempt attempts" >&2
+              exit 1
+            fi
+            echo "update-formula.sh attempt $attempt failed; retrying in 5s..."
+            attempt=$((attempt + 1))
+            sleep 5
+          done
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Formula already points at $version; nothing to commit."
+          else
+            git commit -am "plan-keeper $version"
+            git push
+          fi
