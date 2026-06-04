@@ -10,7 +10,8 @@ Edit the frontmatter of an existing plan in `~/plans/<repo>/`. The bundled `plan
 ## Quick reference
 
 - **Target:** `~/plans/<repo>/<filename>` (active state — not `done/` or `deferred/`).
-- **Field → flag:** `Agent` → `--agent`, `Status` → `--status`, `Kind` → `--kind`, `Completed on` → `--completed-on`, `Ticket System` → `--ticket-system`, `Ticket` → `--ticket-id`. (`--ticket` is **not** a value flag — it _locates_ a plan by its `Ticket:` frontmatter, like archive/push; write the `Ticket:` value with `--ticket-id`.)
+- **Field → flag:** `Agent` → `--agent`, `Status` → `--status`, `Kind` → `--kind`, `Completed on` → `--completed-on`, `Ticket System` → `--ticket-system`, `Ticket` → `--ticket-id`. (`--ticket` is **not** a value flag — it _locates_ a plan by its `Ticket:` frontmatter, like push; write the `Ticket:` value with `--ticket-id`.)
+- **`--status` is lifecycle-aware:** active states (`backlog`/`todo`/`in-progress`/`in-review`) rewrite in place, but `--status done`/`--status deferred` **relocate** the plan into `done/`/`deferred/` (and `done` stamps `Completed on`) — exactly what `plan-done` does. Prefer `plan-done` for completing a plan; reach here for `done`/`deferred` only when editing other fields in the same breath.
 - **Status vocabulary:** `backlog` (default; fetched but not dispatched — confirm via `crew status <id>`), `todo` (eligible for dispatch), `in-progress` (set by groundcrew's markInProgress hook), `in-review` (manual), `done` (set by plan-done when archiving). The middle values (`in-progress`, `done`) are normally written by the system — set them by hand only if you know why.
 - **Kind vocabulary:** `idea` / `prd` / `design` / `spec` / `exec-plan` — the document type, validated against this closed set (see [../../plan-kinds.md](../../plan-kinds.md)). Set by `plan-save`; correct it here if it was inferred wrong.
 - **Common edits:**

@@ -85,16 +85,16 @@ Wait for the user's response. Do not proceed without an answer.
 ### 3. Invoke the CLI
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" archive \
-  --file <filename>
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set --status done \
+  --file ~/plans/<repo>/<filename>
 ```
 
-Add `--override <name>` if step 1 found one. The CLI does: read source, write `Completed on: <today>` into the YAML frontmatter, atomic-write to `~/plans/<repo>/done/<filename>`, unlink the source. Today's date is in the user's local timezone.
+`--file` takes the **full path** (`~/plans/<repo>/<filename>`), where `<repo>` is the folder shown in step 1's listing. The CLI does: read source, write `Status: done` + `Completed on: <today>` into the YAML frontmatter, atomic-write to `~/plans/<repo>/done/<filename>`, unlink the source. Today's date is in the user's local timezone (override with `--completed-on YYYY-MM-DD`).
 
-When the user named the plan by its ticket id, pass `--ticket <id>` instead of `--file` (the two are mutually exclusive — supply exactly one). `--ticket` resolves the plan across all repos by its `Ticket:` frontmatter, so `--override` is irrelevant; the destination `done/` is derived from the plan's own repo:
+When the user named the plan by its ticket id, pass `--ticket <id>` instead of `--file` (the two are mutually exclusive — supply exactly one). `--ticket` resolves the plan across all repos by its `Ticket:` frontmatter; the destination `done/` is derived from the plan's own repo:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" archive \
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set --status done \
   --ticket <ticket-id>
 ```
 
