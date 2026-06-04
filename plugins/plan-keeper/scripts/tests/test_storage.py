@@ -424,10 +424,11 @@ class TestListIntraDayOrder(IsolatedHomeTestCase):
         self._write("2026-06-02-apple.md", "2026-06-02T15:00:00Z")
         self._write("2026-06-02-zebra.md", "2026-06-02T09:00:00Z")
         d = self.plans_root / "scratch"
-        run_cli(
+        mutate = run_cli(
             "file-meta", "set", "--file", str(d / "2026-06-02-zebra.md"),
             "--status", "in-progress", home=self.home,
         )
+        self.assertEqual(mutate.returncode, 0, mutate.stderr)
         r = run_cli("list", "--override", "scratch", home=self.home)
         self.assertEqual(
             r.stdout.strip().split("\n"),

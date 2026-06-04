@@ -508,10 +508,24 @@ def cmd_ticket_system_config_refresh(args) -> int:
     return 0
 
 
-def cmd_file_meta_get(args) -> int:
+def _resolve_file_meta_path(args) -> Path:
+    """Resolve and validate the target for a file-meta subcommand.
+
+    Locate by --ticket (cross-repo) or --file, then assert it's a regular
+    file *before* any read — a directory passes exists() but would crash
+    read_text() with IsADirectoryError. Mirrors archive's "not a file"
+    contract (exit 3) so every path-taking command fails the same clean way.
+    """
     path = resolve_ticket_to_path(args.ticket) if args.ticket else Path(args.file)
     if not path.exists():
         raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
+    if not path.is_file():
+        raise PlanKeeperCliError(f"not a file: {path}", code=3)
+    return path
+
+
+def cmd_file_meta_get(args) -> int:
+    path = _resolve_file_meta_path(args)
     text = path.read_text(encoding="utf-8")
     meta, _ = parse_frontmatter(text)
     print(json.dumps(meta))
@@ -519,9 +533,7 @@ def cmd_file_meta_get(args) -> int:
 
 
 def cmd_file_meta_strip(args) -> int:
-    path = resolve_ticket_to_path(args.ticket) if args.ticket else Path(args.file)
-    if not path.exists():
-        raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
+    path = _resolve_file_meta_path(args)
     text = path.read_text(encoding="utf-8")
     _, body = parse_frontmatter(text)
     sys.stdout.write(body)
@@ -563,9 +575,7 @@ def cmd_file_meta_set(args) -> int:
             "--completed-on, --agent, --status, --kind",
             code=2,
         )
-    path = resolve_ticket_to_path(args.ticket) if args.ticket else Path(args.file)
-    if not path.exists():
-        raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
+    path = _resolve_file_meta_path(args)
     text = path.read_text(encoding="utf-8")
     if not (text.startswith("---\n") or text.startswith("---\r\n")):
         raise PlanKeeperCliError(

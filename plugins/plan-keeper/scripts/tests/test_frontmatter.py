@@ -152,6 +152,17 @@ class TestFileMetaGet(IsolatedHomeTestCase):
         )
         self.assertEqual(result.returncode, 3)
 
+    def test_directory_exits_3_not_traceback(self) -> None:
+        # A directory passes exists() but must not reach read_text() (which
+        # would raise IsADirectoryError → unhandled traceback / exit 1).
+        d = self.cwd / "adir.md"
+        d.mkdir()
+        result = run_cli(
+            "file-meta", "get", "--file", str(d), home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("not a file", result.stderr)
+
 class TestFileMetaSet(IsolatedHomeTestCase):
     def _write_plan(self, content: str) -> Path:
         path = self.cwd / "plan.md"
@@ -317,6 +328,16 @@ class TestFileMetaSet(IsolatedHomeTestCase):
         )
         self.assertEqual(result.returncode, 2)
 
+    def test_directory_exits_3_not_traceback(self) -> None:
+        d = self.cwd / "adir.md"
+        d.mkdir()
+        result = run_cli(
+            "file-meta", "set", "--file", str(d), "--status", "todo",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("not a file", result.stderr)
+
 class TestFileMetaStrip(IsolatedHomeTestCase):
     def _write_plan(self, content: str) -> Path:
         path = self.cwd / "plan.md"
@@ -345,6 +366,15 @@ class TestFileMetaStrip(IsolatedHomeTestCase):
         )
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "# Bare\n\nNo frontmatter here.\n")
+
+    def test_directory_exits_3_not_traceback(self) -> None:
+        d = self.cwd / "adir.md"
+        d.mkdir()
+        result = run_cli(
+            "file-meta", "strip", "--file", str(d), home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("not a file", result.stderr)
 
 class TestCreatedStamp(IsolatedHomeTestCase):
     """`save` records a `Created:` ISO-8601 stamp, fill-if-absent."""
