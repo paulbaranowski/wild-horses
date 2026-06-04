@@ -62,6 +62,7 @@ from plan_keeper.naming import (
     derive_repo,
     derive_repo_full,
     normalize_override,
+    plan_filename,
     slugify_topic,
     validate_extension,
     validate_repo_name,
@@ -343,7 +344,7 @@ def cmd_save(args) -> int:
         date_str = (
             parse_date_arg(args.date) if args.date else date.today().isoformat()
         )
-        target = repo_dir(repo) / f"{date_str}-{slug}.{ext}"
+        target = repo_dir(repo) / plan_filename(date_str, slug, ext, kind)
 
     if target.exists():
         if args.on_collision == "fail":
