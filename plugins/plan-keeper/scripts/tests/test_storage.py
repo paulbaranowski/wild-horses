@@ -73,7 +73,8 @@ class TestList(IsolatedHomeTestCase):
             stdin="x\n", home=self.home,
         )
         fname = Path(r.stdout.strip()).name
-        run_cli("archive", "--override", "scratch", "--file", fname, home=self.home)
+        run_cli("file-meta", "set", "--status", "done",
+                "--file", str(self.plans_root / "scratch" / fname), home=self.home)
         active = run_cli("list", "--override", "scratch", home=self.home)
         done = run_cli("list", "--override", "scratch", "--state", "done", home=self.home)
         self.assertEqual(active.stdout, "")
@@ -86,7 +87,8 @@ class TestList(IsolatedHomeTestCase):
             stdin="x\n", home=self.home,
         )
         fname = Path(r.stdout.strip()).name
-        run_cli("archive", "--override", "scratch", "--file", fname, home=self.home)
+        run_cli("file-meta", "set", "--status", "done",
+                "--file", str(self.plans_root / "scratch" / fname), home=self.home)
         # Save a fresh active plan
         run_cli(
             "save", "--override", "scratch", "--topic", "still active",
@@ -299,7 +301,8 @@ class TestListCrossRepo(IsolatedHomeTestCase):
     def test_cross_repo_respects_state_done(self) -> None:
         res = run_cli("save", "--override", "alpha", "--topic", "to archive", stdin="x\n", home=self.home)
         fname = Path(res.stdout.strip()).name
-        run_cli("archive", "--override", "alpha", "--file", fname, home=self.home)
+        run_cli("file-meta", "set", "--status", "done",
+                "--file", str(self.plans_root / "alpha" / fname), home=self.home)
         run_cli("save", "--override", "beta", "--topic", "active one", stdin="x\n", home=self.home)
         done = run_cli("list", "--state", "done", home=self.home, cwd=self.cwd)
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -343,7 +346,7 @@ class TestListRepos(IsolatedHomeTestCase):
         run_cli("save", "--override", "alpha", "--topic", "a", stdin="x\n", home=self.home)
         run_cli("save", "--override", "alpha", "--topic", "b", stdin="x\n", home=self.home)
         r = run_cli("save", "--override", "beta", "--topic", "c", stdin="x\n", home=self.home)
-        run_cli("archive", "--override", "beta", "--file", Path(r.stdout.strip()).name, home=self.home)
+        run_cli("file-meta", "set", "--status", "done", "--file", r.stdout.strip(), home=self.home)
         out = run_cli("list-repos", home=self.home)
         self.assertEqual(out.returncode, 0, out.stderr)
         lines = out.stdout.strip().split("\n")
@@ -471,40 +474,44 @@ class TestResolveTicket(IsolatedHomeTestCase):
         self.assertEqual(u.returncode, 0, u.stderr)
         return path
 
-    def test_archive_by_groundcrew_ticket(self) -> None:
+    def test_set_done_by_groundcrew_ticket(self) -> None:
         src = self._save_with_ticket("scratch", "p1", "plan-195296912509085")
-        r = run_cli("archive", "--ticket", "plan-195296912509085", home=self.home)
+        r = run_cli("file-meta", "set", "--status", "done",
+                    "--ticket", "plan-195296912509085", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
         target = self.plans_root / "scratch" / "done" / src.name
         self.assertEqual(r.stdout.strip(), str(target))
         self.assertTrue(target.exists())
         self.assertFalse(src.exists())
 
-    def test_archive_by_linear_ticket(self) -> None:
+    def test_set_done_by_linear_ticket(self) -> None:
         src = self._save_with_ticket("scratch", "p2", "ENG-42")
-        r = run_cli("archive", "--ticket", "ENG-42", home=self.home)
+        r = run_cli("file-meta", "set", "--status", "done",
+                    "--ticket", "ENG-42", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue((self.plans_root / "scratch" / "done" / src.name).exists())
 
-    def test_archive_ticket_not_found_exits_3(self) -> None:
-        r = run_cli("archive", "--ticket", "plan-000", home=self.home)
+    def test_set_done_ticket_not_found_exits_3(self) -> None:
+        r = run_cli("file-meta", "set", "--status", "done",
+                    "--ticket", "plan-000", home=self.home)
         self.assertEqual(r.returncode, 3)
         self.assertIn("no active plan", r.stderr)
 
-    def test_archive_ticket_multi_match_exits_2(self) -> None:
+    def test_set_done_ticket_multi_match_exits_2(self) -> None:
         self._save_with_ticket("scratch", "a", "DUP-1")
         self._save_with_ticket("other", "b", "DUP-1")
-        r = run_cli("archive", "--ticket", "DUP-1", home=self.home)
+        r = run_cli("file-meta", "set", "--status", "done",
+                    "--ticket", "DUP-1", home=self.home)
         self.assertEqual(r.returncode, 2)
         self.assertIn("matches 2 plans", r.stderr)
 
-    def test_archive_both_file_and_ticket_exits_2(self) -> None:
-        r = run_cli("archive", "--override", "scratch",
+    def test_set_both_file_and_ticket_exits_2(self) -> None:
+        r = run_cli("file-meta", "set", "--status", "done",
                     "--file", "x.md", "--ticket", "plan-1", home=self.home)
         self.assertEqual(r.returncode, 2)
 
-    def test_archive_neither_file_nor_ticket_exits_2(self) -> None:
-        r = run_cli("archive", "--override", "scratch", home=self.home)
+    def test_set_neither_file_nor_ticket_exits_2(self) -> None:
+        r = run_cli("file-meta", "set", "--status", "done", home=self.home)
         self.assertEqual(r.returncode, 2)
 
     def test_file_meta_set_status_by_ticket(self) -> None:

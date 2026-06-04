@@ -409,51 +409,6 @@ def cmd_save(args) -> int:
     return 0
 
 
-def cmd_archive(args) -> int:
-    if args.ticket:
-        source = resolve_ticket_to_path(args.ticket)
-    else:
-        repo = derive_repo(args.override)
-        if "/" in args.file or "\\" in args.file or args.file in ("", ".", ".."):
-            raise PlanKeeperCliError(
-                f"--file must be a basename only (no path separators), got: {args.file!r}",
-                code=2,
-            )
-        source = repo_dir(repo) / args.file
-    if not source.exists():
-        raise PlanKeeperCliError(f"plan not found: {source}", code=3)
-    if not source.is_file():
-        raise PlanKeeperCliError(f"not a file: {source}", code=3)
-
-    # Destination is the plan's own repo's done/ — correct for both the
-    # repo-scoped --file path and the global --ticket path.
-    target = source.parent / "done" / source.name
-    if target.exists():
-        if args.on_collision == "fail":
-            emit_collision(target)
-            return 2
-        if args.on_collision == "suffix":
-            target = find_unused_suffix(target)
-        # "overwrite" → fall through
-
-    completed = (
-        parse_date_arg(args.completed_date)
-        if args.completed_date
-        else date.today().isoformat()
-    )
-    text = source.read_text(encoding="utf-8")
-    meta, body = parse_frontmatter(text)
-    meta["Completed on"] = completed
-    stamped = serialize_frontmatter(meta, body)
-    if not stamped.endswith("\n"):
-        stamped += "\n"
-
-    write_atomic(target, stamped)
-    source.unlink()
-    print(target)
-    return 0
-
-
 def cmd_ticket_system_config_get(args) -> int:
     repo = derive_repo(None)
     config = load_config(repo)
@@ -1069,32 +1024,6 @@ def build_parser() -> argparse.ArgumentParser:
         "(default: fail with exit 2; use suffix for next unused -N)",
     )
 
-    p_archive = sub.add_parser(
-        "archive",
-        help="append a completion stamp and move ~/plans/<repo>/<file> to done/",
-    )
-    p_archive.add_argument("--override", help="explicit override for <repo>")
-    archive_target = p_archive.add_mutually_exclusive_group(required=True)
-    archive_target.add_argument(
-        "--file",
-        help="filename (basename only, must live in ~/plans/<repo>/)",
-    )
-    archive_target.add_argument(
-        "--ticket",
-        help="ticket id (e.g. plan-195..., ENG-123); resolved across all "
-             "repos via Ticket: frontmatter. --override is ignored with --ticket.",
-    )
-    p_archive.add_argument(
-        "--on-collision",
-        choices=["fail", "suffix", "overwrite"],
-        default="fail",
-        help="what to do if a same-name file exists in done/ (default: fail)",
-    )
-    p_archive.add_argument(
-        "--completed-date",
-        help="YYYY-MM-DD date for the completion stamp (default: today)",
-    )
-
     p_file_meta = sub.add_parser("file-meta", help="read/write/strip plan-file frontmatter")
     file_meta_sub = p_file_meta.add_subparsers(
         dest="file_meta_cmd",
@@ -1319,7 +1248,6 @@ def main() -> int:
         "list-repos": cmd_list_repos,
         "backfill-created": cmd_backfill_created,
         "save": cmd_save,
-        "archive": cmd_archive,
         "file-meta": lambda a: _FILE_META_DISPATCH[a.file_meta_cmd](a),
         "ticket-system-config": lambda a: _TICKET_SYSTEM_CONFIG_DISPATCH[a.tsc_cmd](a),
         "ticket-api": cmd_ticket_api,

@@ -722,139 +722,14 @@ class TestFileMetaSetStatus(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("invalid choice", r.stderr)
 
-
-class TestArchive(IsolatedHomeTestCase):
-    def _save_one(self, topic: str = "plan to archive") -> Path:
-        r = run_cli(
-            "save", "--override", "scratch", "--topic", topic,
-            stdin="# Body\nsome text\n",
-            home=self.home,
-        )
-        self.assertEqual(r.returncode, 0, r.stderr)
-        return Path(r.stdout.strip())
-
-    def test_happy_path_moves_and_unlinks(self) -> None:
-        source = self._save_one()
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", source.name,
-            home=self.home,
-        )
-        self.assertEqual(r.returncode, 0, r.stderr)
-        target = self.plans_root / "scratch" / "done" / source.name
-        self.assertEqual(r.stdout.strip(), str(target))
-        self.assertTrue(target.exists())
-        self.assertFalse(source.exists(), "source should be unlinked")
-
-    def test_stamp_format(self) -> None:
-        source = self._save_one()
-        run_cli("archive", "--override", "scratch", "--file", source.name, home=self.home)
-        target = self.plans_root / "scratch" / "done" / source.name
-        text = target.read_text()
-        today = date.today().isoformat()
-        # NEW: completion date in frontmatter at the top.
-        self.assertTrue(text.startswith("---\n"), "file must start with frontmatter")
-        front = text.split("\n---\n", 1)[0]
-        self.assertIn(f"Completed on: {today}", front)
-        # OLD: bottom stamp must NOT be present.
-        self.assertNotIn("*Completed:", text)
-
-    def test_completed_date_override(self) -> None:
-        source = self._save_one()
-        run_cli(
-            "archive", "--override", "scratch", "--file", source.name,
-            "--completed-date", "2020-01-15",
-            home=self.home,
-        )
-        text = (self.plans_root / "scratch" / "done" / source.name).read_text()
-        # NEW: completion date in frontmatter.
-        self.assertTrue(text.startswith("---\n"), "file must start with frontmatter")
-        front = text.split("\n---\n", 1)[0]
-        self.assertIn("Completed on: 2020-01-15", front)
-        # OLD: bottom stamp must NOT be present.
-        self.assertNotIn("*Completed:", text)
-
-    def test_missing_source_exits_3(self) -> None:
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", "nonexistent.md",
-            home=self.home,
-        )
-        self.assertEqual(r.returncode, 3)
-        self.assertIn("plan not found", r.stderr)
-
-    def test_rejects_file_with_slash(self) -> None:
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", "../etc/passwd",
-            home=self.home,
-        )
+    def test_archive_subcommand_removed(self) -> None:
+        # archive was folded into `file-meta set --status done`; the old
+        # subcommand must no longer exist.
+        r = run_cli("archive", "--override", "scratch", "--file", "x.md",
+                    home=self.home)
         self.assertEqual(r.returncode, 2)
-        self.assertIn("basename only", r.stderr)
+        self.assertIn("invalid choice", r.stderr)
 
-    def test_rejects_file_with_backslash(self) -> None:
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", "foo\\bar.md",
-            home=self.home,
-        )
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("basename only", r.stderr)
-
-    def test_rejects_file_dot(self) -> None:
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", ".",
-            home=self.home,
-        )
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("basename only", r.stderr)
-
-    def test_rejects_file_dotdot(self) -> None:
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", "..",
-            home=self.home,
-        )
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("basename only", r.stderr)
-
-    def test_rejects_file_empty(self) -> None:
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", "",
-            home=self.home,
-        )
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("basename only", r.stderr)
-
-    def test_collision_fail(self) -> None:
-        # Make a victim plan in done/ first
-        source = self._save_one("collide me")
-        run_cli("archive", "--override", "scratch", "--file", source.name, home=self.home)
-        # Save same-name plan again
-        run_cli(
-            "save", "--override", "scratch", "--topic", "collide me",
-            stdin="x\n",
-            home=self.home,
-        )
-        # Second archive should collide in done/
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", source.name,
-            home=self.home,
-        )
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("existing:", r.stderr)
-        self.assertIn("suggestion:", r.stderr)
-
-    def test_collision_suffix(self) -> None:
-        source = self._save_one("collide me")
-        run_cli("archive", "--override", "scratch", "--file", source.name, home=self.home)
-        run_cli(
-            "save", "--override", "scratch", "--topic", "collide me",
-            stdin="x\n",
-            home=self.home,
-        )
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", source.name,
-            "--on-collision", "suffix",
-            home=self.home,
-        )
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertTrue(r.stdout.strip().endswith("-2.md"))
 
 class TestTicketApiArgValidation(IsolatedHomeTestCase):
     """Verify cmd_ticket_api rejects calls with missing required flags
