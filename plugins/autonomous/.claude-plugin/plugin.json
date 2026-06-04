@@ -1,0 +1,8 @@
+{
+  "name": "autonomous",
+  "description": "An autonomous skill that drives a single issue/ticket link or plan file all the way to an opened pull request with no human in the loop. Hand it a Linear/GitHub/other issue URL, a path to a plan/spec file, or a plan already in the conversation, and it decides everything itself: implements, tests, runs an independent sub-agent review to convergence, opens a PR following the target repo's own conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Paul Baranowski"
+  }
+}
