@@ -399,6 +399,7 @@ class TestCrewStart(IsolatedHomeTestCase):
         result = run_cli("crew", "start", "plan-999999",
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 3)
+        self.assertEqual(result.stdout, "")  # error goes to stderr
 
     def test_crew_start_rejects_path_separator(self):
         """An id can't contain '/' — defends against ../../-style inputs."""
