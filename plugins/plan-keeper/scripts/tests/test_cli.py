@@ -966,11 +966,10 @@ class TestSaveKindInFilename(IsolatedHomeTestCase):
         )
 
     def test_same_kind_same_topic_collision_suffixes_after_kind(self) -> None:
-        for _ in range(1):
-            run_cli(
-                "save", "--override", "scratch", "--topic", "dup", "--kind", "spec",
-                stdin="# Dup\none\n", home=self.home,
-            )
+        run_cli(
+            "save", "--override", "scratch", "--topic", "dup", "--kind", "spec",
+            stdin="# Dup\none\n", home=self.home,
+        )
         r2 = run_cli(
             "save", "--override", "scratch", "--topic", "dup", "--kind", "spec",
             "--on-collision", "suffix", stdin="# Dup\ntwo\n", home=self.home,

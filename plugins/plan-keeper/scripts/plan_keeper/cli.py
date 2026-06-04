@@ -128,30 +128,40 @@ def _render_grouped(items: list[tuple[str, Path]]) -> int:
 
     Group order = newest member first: `items` arrives newest-first
     (list_plans sorts by _plan_sort_key, reverse), so first-encounter order of
-    each slug is its newest member's position — preserved. Within a group,
+    each group is its newest member's position — preserved. Within a group,
     members sort along the Kind pipeline, then by filename. The stage column is
-    the frontmatter Kind ('-' when unclassified). Heading is the bare slug, so
-    the same slug in two repos (cross-repo mode) forms two groups that share a
-    heading but list distinct 'repo/filename' members beneath.
+    the frontmatter Kind ('-' when unclassified); Kind is read once per member
+    up front (a stable snapshot — no re-read mid-sort or at print time). Groups
+    print separated by a blank line.
+
+    Grouping key is repo-aware: in cross-repo mode the display name is
+    'repo/filename', so the heading is 'repo/slug' and two repos that happen to
+    share a slug stay distinct groups rather than merging. In single-repo mode
+    the display name is the bare filename, so the heading is the bare slug.
     """
-    groups: dict[str, list[tuple[str, Path]]] = {}
+    # (display_name, path, kind) — Kind snapshotted once here so the sort key and
+    # the print loop never re-read the file (and can't see a mid-list mutation).
+    groups: dict[str, list[tuple[str, Path, str]]] = {}
     order: list[str] = []
     for name, path in items:
-        key = plan_group_key(path.name)
+        # display name is 'repo/filename' (cross-repo) or 'filename' (single);
+        # the leading 'repo/' prefix, if any, namespaces the slug.
+        prefix = name[: len(name) - len(path.name)]
+        key = f"{prefix}{plan_group_key(path.name)}"
         if key not in groups:
             groups[key] = []
             order.append(key)
-        groups[key].append((name, path))
+        groups[key].append((name, path, _kind_of(path)))
 
-    out: list[str] = []
+    blocks: list[str] = []
     for key in order:
-        members = groups[key]
-        members.sort(key=lambda np: (_pipeline_index(_kind_of(np[1])), np[1].name))
-        out.append(key)
-        for name, path in members:
-            out.append(f"  {(_kind_of(path) or '-'):<10} {name}")
-    if out:
-        print("\n".join(out))
+        members = sorted(groups[key], key=lambda npk: (_pipeline_index(npk[2]), npk[1].name))
+        lines = [key]
+        for name, _path, kind in members:
+            lines.append(f"  {(kind or '-'):<10} {name}")
+        blocks.append("\n".join(lines))
+    if blocks:
+        print("\n\n".join(blocks))
     return 0
 
 

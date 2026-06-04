@@ -645,6 +645,23 @@ class TestListGrouped(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("not allowed with", r.stderr)
 
+    def test_cross_repo_same_slug_stays_in_separate_repo_groups(self) -> None:
+        # The same slug saved under two different repos must NOT merge into one
+        # group: cross-repo grouping keys on 'repo/slug', so unrelated projects
+        # that happen to share a slug stay distinct (and the heading is
+        # unambiguous about which repo it is).
+        for repo in ("alpha", "beta"):
+            r = run_cli(
+                "save", "--override", repo, "--topic", "shared topic", "--kind", "spec",
+                stdin="# Shared\nx\n", home=self.home,
+            )
+            self.assertEqual(r.returncode, 0, r.stderr)
+        r = run_cli("list", "--all-repos", "--group", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        headings = [l for l in r.stdout.split("\n") if l and not l.startswith("  ")]
+        self.assertIn("alpha/shared-topic", headings)
+        self.assertIn("beta/shared-topic", headings)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
