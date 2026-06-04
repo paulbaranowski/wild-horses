@@ -56,7 +56,7 @@ Add `--override <name>` if you found one. The CLI handles repo derivation. With 
 - **stderr is also empty** → the current repo has no active plans at all. List alternatives:
 
   ```bash
-  python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list-repos
+  python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" repo list
   ```
 
   Output is one repo per line with state counts (e.g., `herds: active=15 done=22 deferred=2`). Wait for the user to pick a different repo (re-run step 1 with `--override`) or steer manually.
@@ -192,13 +192,13 @@ If the user wants to steer manually, just stop the skill here. The plan is read 
 - **Collapsing the execution menu to a single suggestion.** For execution-ready plans, all three engines are always offered (step 5c). The shape classification only sets which one is _recommended first_ — it does not hide the others.
 - **Treating the recommendation as a decision.** The recommended engine is a best guess from plan shape; how hands-off to be is the user's call. Lead with the recommendation, but let them pick any engine.
 - **Passing a `Ticket:` URL to `autonomous:autonomous`.** The in-context plan is the Task — do not resolve or hand autonomous a frontmatter ticket URL.
-- **Silently falling back when the current repo has no plans.** Step 1 says: tell the user, run `list-repos`, wait for direction. Don't auto-route to another folder.
+- **Silently falling back when the current repo has no plans.** Step 1 says: tell the user, run `repo list`, wait for direction. Don't auto-route to another folder.
 
 ## Edge cases
 
 - **No _startable_ plans, but active plans exist** — `list --status todo,backlog` prints nothing on stdout but emits a hidden-plans note on stderr. Tell the user everything is already in progress (or in review), and offer `list` with no `--status` to see all of them.
-- **No plans for the current repo at all** — both stdout and stderr empty. Show `list-repos` output and let the user pick another repo. Do not silently fall back.
-- **`~/plans/` doesn't exist at all** — `list-repos` returns empty. Tell the user `plan-save` hasn't been used yet on this machine.
+- **No plans for the current repo at all** — both stdout and stderr empty. Show `repo list` output and let the user pick another repo. Do not silently fall back.
+- **`~/plans/` doesn't exist at all** — `repo list` returns empty. Tell the user `plan-save` hasn't been used yet on this machine.
 - **Plan fits no readiness bucket** — say so explicitly; offer to read into context and let the user steer.
 - **Plan is ambiguous between spec and execution-ready** — offer both the `superpowers:writing-plans` path and the execution menu; let the user choose.
 - **Filename fragment matches multiple plans** — ask the user to disambiguate; do not pick one arbitrarily.

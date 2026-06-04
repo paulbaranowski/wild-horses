@@ -95,7 +95,7 @@ Two top-level keys (`linear`, `jira`) are independently optional. Each section h
 
 ## Description format
 
-The push subcommand prepends a `Repo: <owner>/<name>` line to every ticket description, derived from the local git remote via `repo --full`.
+The push subcommand prepends a `Repo: <owner>/<name>` line to every ticket description, derived from the local git remote via `repo name --full`.
 
 - **Linear:** the description field is rendered as markdown natively — the plan's markdown body goes through unchanged.
 - **Jira:** the description field requires ADF (Atlassian Document Format) JSON. **V1 wraps the entire markdown body in a single ADF paragraph node** — the result is accurate but appears as one continuous block of plain text in Jira. Headings, lists, and code blocks all collapse to inline text with no formatting. Users who want richer formatting can edit the ticket in Jira after creation. V2 (not yet implemented) will convert markdown to structured ADF.

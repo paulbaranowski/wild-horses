@@ -59,7 +59,7 @@ Tiebreaker: autonomy-readiness first, then independence. `plan-do`'s only write 
 
 ## Empty-list behavior
 
-If no `todo`/`backlog` plans show but the stderr note reports active plans, everything is already in progress — `plan-do` says so and offers to list all of them. If there are no active plans at all, it runs `plan_keeper_cli.py list-repos` (one repo per line with active/done/deferred counts) and asks the user to pick another repo or steer manually. It does **not** silently fall back to a different folder.
+If no `todo`/`backlog` plans show but the stderr note reports active plans, everything is already in progress — `plan-do` says so and offers to list all of them. If there are no active plans at all, it runs `plan_keeper_cli.py repo list` (one repo per line with active/done/deferred counts) and asks the user to pick another repo or steer manually. It does **not** silently fall back to a different folder.
 
 ## Repo derivation
 
