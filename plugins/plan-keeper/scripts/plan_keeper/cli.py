@@ -90,7 +90,7 @@ PROG = Path(sys.argv[0]).stem or "plan_keeper_cli"
 # --- Subcommands ------------------------------------------------------------
 
 
-def cmd_repo(args) -> int:
+def cmd_repo_name(args) -> int:
     if args.full:
         print(derive_repo_full(args.cwd))
     else:
@@ -144,7 +144,7 @@ def _render_listing(items: list[tuple[str, Path]], raw_filter: Optional[str]) ->
 def _all_repos_items(state: str) -> list[tuple[str, Path]]:
     """Build the (display_name, path) list across every repo under ~/plans/.
 
-    Repos are iterated alphabetically (same enumeration as cmd_list_repos —
+    Repos are iterated alphabetically (same enumeration as cmd_repo_list —
     sorted, dotfiles/non-dirs skipped); plans within a repo stay newest-first
     (list_plans order). Display name is `repo/filename` so every line is
     self-labeling. Repos with no plans in `state` contribute nothing.
@@ -181,7 +181,7 @@ def cmd_list(args) -> int:
     return _render_listing(items, raw_filter)
 
 
-def cmd_list_repos(args) -> int:
+def cmd_repo_list(args) -> int:
     del args
     if not storage.PLAN_ROOT.exists():
         return 0
@@ -998,13 +998,31 @@ def build_parser() -> argparse.ArgumentParser:
         parser_class=HelpfulArgumentParser,
     )
 
-    p_repo = sub.add_parser("repo", help="print the resolved <repo> folder name")
-    p_repo.add_argument("--override", help="explicit override (normalized)")
-    p_repo.add_argument("--cwd", help="working dir (defaults to $PWD)")
-    p_repo.add_argument(
+    # `repo` is a pure parent (mirrors `crew`): a required subcommand selects
+    # between resolving the current repo's folder name (`name`) and listing
+    # every repo under ~/plans/ (`list`). Bare `repo` prints a usage error.
+    p_repo = sub.add_parser(
+        "repo",
+        help="resolve repo folder name (name) / list all repos (list)",
+    )
+    repo_sub = p_repo.add_subparsers(
+        dest="repo_cmd", required=True, metavar="<subcommand>",
+        parser_class=HelpfulArgumentParser,
+    )
+
+    p_repo_name = repo_sub.add_parser(
+        "name", help="print the resolved <repo> folder name"
+    )
+    p_repo_name.add_argument("--override", help="explicit override (normalized)")
+    p_repo_name.add_argument("--cwd", help="working dir (defaults to $PWD)")
+    p_repo_name.add_argument(
         "--full",
         action="store_true",
         help="emit owner/name (e.g., herds-social/herds) by parsing git remote origin URL",
+    )
+
+    repo_sub.add_parser(
+        "list", help="list all repos under ~/plans/ with per-state counts"
     )
 
     p_list = sub.add_parser(
@@ -1043,11 +1061,6 @@ def build_parser() -> argparse.ArgumentParser:
             "on stderr (aggregated across repos in cross-repo mode). Omit to "
             "list bare filenames as before."
         ),
-    )
-
-    sub.add_parser(
-        "list-repos",
-        help="list all repos under ~/plans/ with per-state counts",
     )
 
     p_backfill = sub.add_parser(
@@ -1280,14 +1293,18 @@ _CREW_DISPATCH = {
     "queue": lambda a: _QUEUE_DISPATCH[a.queue_cmd](a),
 }
 
+_REPO_DISPATCH = {
+    "name": cmd_repo_name,
+    "list": cmd_repo_list,
+}
+
 
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     dispatch = {
-        "repo": cmd_repo,
+        "repo": lambda a: _REPO_DISPATCH[a.repo_cmd](a),
         "list": cmd_list,
-        "list-repos": cmd_list_repos,
         "backfill-created": cmd_backfill_created,
         "save": cmd_save,
         "file-meta": lambda a: _FILE_META_DISPATCH[a.file_meta_cmd](a),

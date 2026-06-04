@@ -70,17 +70,17 @@ If stderr carried a `note: N other active plan(s) hidden (…)` line, mention it
 **If stdout is empty and stderr has no note**, the current repo has no active plans at all. List the alternatives so the user can pick another bucket:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list-repos
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" repo list
 ```
 
-Output is one repo per line with state counts (e.g., `herds: active=15 done=22 deferred=2`). Show it and let the user name a different repo (re-run step 2 with `--override`). If `list-repos` is also empty, `~/plans/` doesn't exist yet — tell the user `plan-save` hasn't been used on this machine.
+Output is one repo per line with state counts (e.g., `herds: active=15 done=22 deferred=2`). Show it and let the user name a different repo (re-run step 2 with `--override`). If `repo list` is also empty, `~/plans/` doesn't exist yet — tell the user `plan-save` hasn't been used on this machine.
 
 ## Common mistakes
 
 - **Don't reprint a previously shown list from memory.** Step 2's command must be re-run on every invocation; the plan set changes between turns, so the list you display must always come from the command you just ran.
 - **Don't read or summarize any plan body.** This skill lists filenames and status only. Opening a plan to describe it is `plan-do`'s job (it reads the _one_ plan the user picks).
 - **Don't write anything.** `plan-list` never flips `Status`, never archives, never edits frontmatter. If the user wants to act on a plan, hand off to the sibling that does that.
-- **Don't say "no plans" when stdout is empty but you haven't run `list-repos`.** An empty current repo doesn't mean an empty machine — show the other repos before concluding.
+- **Don't say "no plans" when stdout is empty but you haven't run `repo list`.** An empty current repo doesn't mean an empty machine — show the other repos before concluding.
 
 ## Notes
 

@@ -51,9 +51,9 @@ The override in step 1 doubles as an escape hatch. If `git remote get-url origin
 
 the user can bypass auto-derivation by naming the destination explicitly in their invocation.
 
-## Extended form: `repo --full`
+## Extended form: `repo name --full`
 
-`plan_keeper_cli.py repo --full` returns `owner/name` (e.g., `herds-social/herds`) by parsing the `origin` remote URL. Used by the `push` subcommand's "Repo: …" description line.
+`plan_keeper_cli.py repo name --full` returns `owner/name` (e.g., `herds-social/herds`) by parsing the `origin` remote URL. Used by the `push` subcommand's "Repo: …" description line.
 
 Supported URL forms:
 

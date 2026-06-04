@@ -26,7 +26,7 @@ Tokenize the invocation. Recognize `last` and `file` as the **mode arg**. Anythi
 ### 2. Resolve the repo and check Linear config
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" repo
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" repo name
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" linear config get
 ```
 

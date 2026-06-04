@@ -104,7 +104,7 @@ The I/O backend behind the plan-keeper skills — `plan_keeper_cli.py`, a zero-d
 brew install paulbaranowski/tap/plan-keeper
 
 plan-keeper list                     # active plans for the current repo
-plan-keeper list-repos               # every repo under ~/plans/ with counts
+plan-keeper repo list                # every repo under ~/plans/ with counts
 plan-keeper save --topic "spike notes" <<'EOF'
 ...plan body...
 EOF

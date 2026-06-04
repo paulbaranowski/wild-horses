@@ -347,7 +347,7 @@ class TestListRepos(IsolatedHomeTestCase):
         run_cli("save", "--override", "alpha", "--topic", "b", stdin="x\n", home=self.home)
         r = run_cli("save", "--override", "beta", "--topic", "c", stdin="x\n", home=self.home)
         run_cli("file-meta", "set", "--status", "done", "--file", r.stdout.strip(), home=self.home)
-        out = run_cli("list-repos", home=self.home)
+        out = run_cli("repo", "list", home=self.home)
         self.assertEqual(out.returncode, 0, out.stderr)
         lines = out.stdout.strip().split("\n")
         self.assertIn("alpha: active=2", lines)
@@ -357,7 +357,7 @@ class TestListRepos(IsolatedHomeTestCase):
         # Create an empty subdir under ~/plans/ — should not appear
         (self.plans_root / "ghost").mkdir(parents=True)
         run_cli("save", "--override", "real", "--topic", "x", stdin="x\n", home=self.home)
-        out = run_cli("list-repos", home=self.home)
+        out = run_cli("repo", "list", home=self.home)
         self.assertIn("real:", out.stdout)
         self.assertNotIn("ghost", out.stdout)
 
@@ -370,7 +370,7 @@ class TestListRepos(IsolatedHomeTestCase):
             "save", "--override", "alpha", "--topic", "b",
             stdin="x\n", home=self.home,
         )
-        out = run_cli("list-repos", home=self.home)
+        out = run_cli("repo", "list", home=self.home)
         self.assertIn("alpha: active=2", out.stdout)
 
 class TestListIntraDayOrder(IsolatedHomeTestCase):
