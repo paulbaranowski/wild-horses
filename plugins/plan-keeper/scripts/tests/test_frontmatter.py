@@ -322,11 +322,13 @@ class TestFileMetaSet(IsolatedHomeTestCase):
 
     def test_rejects_invalid_ticket_system(self) -> None:
         path = self._managed()
+        original = path.read_text(encoding="utf-8")
         result = run_cli(
             "file-meta", "set", "--file", str(path), "--ticket-system", "github",
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 2)
+        self.assertEqual(path.read_text(encoding="utf-8"), original)
 
     def test_directory_exits_3_not_traceback(self) -> None:
         d = self.cwd / "adir.md"
