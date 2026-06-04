@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI subcommand wiring: save, file-meta set (status lifecycle), backfill, ticket-api arg validation (cli.py).
+"""CLI subcommand wiring: save, file-meta set (status lifecycle), backfill, provider api arg validation (cli.py).
 
 Part of the plan_keeper test suite; shared harness lives in support.py.
 Run all: python3 -m unittest discover -s plugins/plan-keeper/scripts/tests
@@ -772,12 +772,12 @@ class TestFileMetaSetStatus(IsolatedHomeTestCase):
 
 
 class TestTicketApiArgValidation(IsolatedHomeTestCase):
-    """Verify cmd_ticket_api rejects calls with missing required flags
+    """Verify the api subcommand rejects calls with missing required flags
     before any network call is attempted."""
 
     def test_linear_viewer_without_api_key_exits_2(self) -> None:
         r = run_cli(
-            "ticket-api", "viewer", "--name", "linear",
+            "linear", "api", "viewer",
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 2)
@@ -785,7 +785,7 @@ class TestTicketApiArgValidation(IsolatedHomeTestCase):
 
     def test_jira_viewer_without_site_exits_2(self) -> None:
         r = run_cli(
-            "ticket-api", "viewer", "--name", "jira",
+            "jira", "api", "viewer",
             "--email", "p@x.com", "--api-key", "tok",
             home=self.home, cwd=self.cwd,
         )
@@ -794,7 +794,7 @@ class TestTicketApiArgValidation(IsolatedHomeTestCase):
 
     def test_jira_components_without_project_key_exits_2(self) -> None:
         r = run_cli(
-            "ticket-api", "components", "--name", "jira",
+            "jira", "api", "components",
             "--site", "x.atlassian.net",
             "--email", "p@x.com", "--api-key", "tok",
             home=self.home, cwd=self.cwd,
@@ -804,13 +804,22 @@ class TestTicketApiArgValidation(IsolatedHomeTestCase):
 
     def test_jira_invalid_site_exits_2(self) -> None:
         r = run_cli(
-            "ticket-api", "viewer", "--name", "jira",
+            "jira", "api", "viewer",
             "--site", "https://x.atlassian.net",  # scheme not allowed
             "--email", "p@x.com", "--api-key", "tok",
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 2)
         self.assertIn("bare hostname", r.stderr)
+
+    def test_linear_rejects_jira_only_kind_exits_2(self) -> None:
+        # 'components' is a jira kind; argparse choices must reject it for linear.
+        r = run_cli(
+            "linear", "api", "components", "--api-key", "k",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("invalid choice", r.stderr)
 
 class TestBackfillCreated(IsolatedHomeTestCase):
     """`backfill-created` stamps `Created` (from file birthtime) on plans

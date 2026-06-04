@@ -582,18 +582,18 @@ class TestResolveTicket(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 2)
 
     def test_push_ticket_not_found_exits_3(self) -> None:
-        r = run_cli("push", "--name", "linear", "--ticket", "plan-absent",
+        r = run_cli("linear", "push", "--ticket", "plan-absent",
                     home=self.home)
         self.assertEqual(r.returncode, 3)
         self.assertIn("no active plan", r.stderr)
 
     def test_push_both_file_and_ticket_exits_2(self) -> None:
-        r = run_cli("push", "--name", "linear", "--file", "x.md",
+        r = run_cli("linear", "push", "--file", "x.md",
                     "--ticket", "plan-1", home=self.home)
         self.assertEqual(r.returncode, 2)
 
     def test_push_neither_file_nor_ticket_exits_2(self) -> None:
-        r = run_cli("push", "--name", "linear", home=self.home)
+        r = run_cli("linear", "push", home=self.home)
         self.assertEqual(r.returncode, 2)
 
 
