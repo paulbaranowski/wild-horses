@@ -183,13 +183,50 @@ def _iso_mtime(path: Path) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# Active states a human owns once they pick a plan up outside the crew:
+# in-progress (work) and in-review (review). backlog/todo are never
+# locally-driven — they're either parked or queued-for-dispatch — so they
+# stay visible regardless of Agent.
+_LOCALLY_DRIVEN_STATES = frozenset({"in-progress", "in-review"})
+
+
+def _is_locally_driven(path: Path) -> bool:
+    """True for a plan a human is driving outside groundcrew: an active state
+    (``in-progress`` or ``in-review``) with no ``Agent``.
+
+    groundcrew claims the ``Agent`` at queue time (``crew queue`` / the
+    plan-crew skill), so an active plan that still has no Agent was never
+    queued — a human picked it up in their own session (e.g. via ``plan-do``).
+    Once they own it, every active state it passes through is theirs, so it
+    must stay invisible to ``crew fetch``: groundcrew would otherwise count an
+    in-progress plan against its slot cap (surfacing it under "In progress (no
+    local worktree)") or act on an in-review one, even though no crew worktree
+    will ever exist for it. Read from the raw frontmatter, not the issue dict,
+    because ``_plan_to_issue`` coerces an empty Agent to the ``claude`` default
+    and so can no longer tell the two apart. Best-effort: an
+    unreadable/unparseable file is not treated as locally driven (it's filtered
+    elsewhere anyway).
+    """
+    try:
+        meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+    except (OSError, PlanKeeperCliError):
+        return False
+    return (
+        meta.get("Status", "").strip() in _LOCALLY_DRIVEN_STATES
+        and not meta.get("Agent", "").strip()
+    )
+
+
 def _collect_crew_issues() -> list[dict]:
     """Every active plan under ``~/plans/<repo>/*.md`` as shell-adapter issues.
 
     One level deep — ``done/`` and ``deferred/`` are excluded (they're not
-    dispatchable). Shared by ``crew fetch`` (which then asserts no id
-    collisions and stamps the Ticket frontmatter) and ``crew install``'s
-    post-patch data-path check, so both see the exact same plan set.
+    dispatchable). Plans being driven locally (in-progress with no Agent — see
+    ``_is_locally_driven``) are excluded too, so groundcrew never tracks work a
+    human picked up in their own session. Shared by ``crew fetch`` (which then
+    asserts no id collisions and stamps the Ticket frontmatter) and ``crew
+    install``'s post-patch data-path check, so both see the exact same plan
+    set.
     """
     issues: list[dict] = []
     if not storage.PLAN_ROOT.exists():
@@ -199,6 +236,8 @@ def _collect_crew_issues() -> list[dict]:
             continue
         for plan in sorted(repo_entry.iterdir()):
             if not plan.is_file() or not plan.name.endswith(".md"):
+                continue
+            if _is_locally_driven(plan):
                 continue
             issue = _plan_to_issue(plan)
             if issue is not None:

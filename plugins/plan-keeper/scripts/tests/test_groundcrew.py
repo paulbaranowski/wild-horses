@@ -201,6 +201,70 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             self.assertEqual(result.returncode, 0)
             self.assertEqual(json.loads(result.stdout), [])
 
+    def test_groundcrew_fetch_hides_locally_driven_in_progress_plan(self):
+        """A plan a human is driving outside groundcrew — in-progress with no
+        Agent (groundcrew claims the Agent at queue time, so an empty Agent on
+        an in-progress plan means it was picked up locally, e.g. via plan-do) —
+        must not appear in fetch. Otherwise groundcrew counts it against its
+        in-progress slot cap and lists it under "In progress (no local
+        worktree)", even though no crew worktree will ever exist for it.
+
+        A queued in-progress plan keeps its Agent and stays visible — only the
+        agent-less one is hidden."""
+        with tempfile.TemporaryDirectory() as home:
+            d = Path(home) / "plans" / "r"
+            d.mkdir(parents=True)
+            (d / "2026-01-01-local.md").write_text(
+                "---\nStatus: in-progress\n---\n# Local\n"
+            )
+            (d / "2026-01-02-queued.md").write_text(
+                "---\nAgent: claude\nStatus: in-progress\n---\n# Queued\n"
+            )
+            result = run_cli("crew", "fetch", home=Path(home), cwd=self.cwd)
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            stems = {
+                Path(i["sourceRef"]["path"]).stem
+                for i in json.loads(result.stdout)
+            }
+            self.assertNotIn("2026-01-01-local", stems)
+            self.assertIn("2026-01-02-queued", stems)
+
+    def test_groundcrew_fetch_hides_locally_driven_in_review_plan(self):
+        """A locally-driven plan that has advanced to in-review (still no Agent)
+        stays hidden too — once a human owns the plan outside the crew, every
+        active state it passes through is theirs, not groundcrew's."""
+        with tempfile.TemporaryDirectory() as home:
+            d = Path(home) / "plans" / "r"
+            d.mkdir(parents=True)
+            (d / "2026-01-01-local.md").write_text(
+                "---\nStatus: in-review\n---\n# Local\n"
+            )
+            result = run_cli("crew", "fetch", home=Path(home), cwd=self.cwd)
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            stems = {
+                Path(i["sourceRef"]["path"]).stem
+                for i in json.loads(result.stdout)
+            }
+            self.assertNotIn("2026-01-01-local", stems)
+
+    def test_groundcrew_fetch_keeps_agent_less_plan_when_not_in_progress(self):
+        """The hide rule is scoped to in-progress: a todo/backlog plan with no
+        Agent is still dispatchable and must stay visible (the model defaults
+        to claude downstream)."""
+        with tempfile.TemporaryDirectory() as home:
+            d = Path(home) / "plans" / "r"
+            d.mkdir(parents=True)
+            (d / "2026-01-01-todo.md").write_text(
+                "---\nStatus: todo\n---\n# Todo\n"
+            )
+            result = run_cli("crew", "fetch", home=Path(home), cwd=self.cwd)
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            stems = {
+                Path(i["sourceRef"]["path"]).stem
+                for i in json.loads(result.stdout)
+            }
+            self.assertIn("2026-01-01-todo", stems)
+
 class TestGroundcrewId(IsolatedHomeTestCase):
     """Synthesized groundcrew ticket id (stateless deterministic hash)."""
 
@@ -290,6 +354,20 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         self.assertEqual(result.returncode, 0)
         issue = json.loads(result.stdout)
         self.assertEqual(issue["status"], "done")
+
+    def test_groundcrew_resolve_one_still_finds_locally_driven_plan(self):
+        """Boundary: a locally-driven plan (in-progress, no Agent) is hidden
+        from `crew fetch` but stays resolvable by `crew get`/`crew start`. The
+        hide rule lives at the fetch/collection layer, not in the resolver, so
+        a human can still inspect the plan by id."""
+        d = self.home / "plans" / "r"
+        d.mkdir(parents=True)
+        plan = d / "2026-01-01-local.md"
+        plan.write_text("---\nStatus: in-progress\n---\n# Local\n")
+        ticket = self.cli.groundcrew_id("r", "2026-01-01-local")
+        result = run_cli("crew", "get", ticket, home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(json.loads(result.stdout)["id"], ticket)
 
     def test_groundcrew_resolve_one_missing_returns_exit_3(self):
         """Spec: 'prints nothing for "not found", or exits 3.' We pick exit 3."""

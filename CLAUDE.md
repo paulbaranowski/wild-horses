@@ -39,6 +39,11 @@ plugins/marketplace/               -- plugin root (skills-based)
 
 - **Every change to a plugin's content (commands, skills, agents, hooks) requires a version bump in that plugin's `plugin.json`.** Bump patch for fixes, minor for new features/improvements, major for breaking changes.
 
+### plan-keeper (Homebrew binary)
+
+- **The plan-keeper CLI ships as an auto-built Homebrew binary — you don't rebuild or republish it by hand.** Edits to `plugins/plan-keeper/scripts/**` are picked up by the auto-build on merge and reach users' runtime through the version-stable brew binary (`crew install` wires `~/plans/*` into the groundcrew config, which invokes that binary). So a source fix lands for users via the auto-build; there is no manual rebuild step to remember.
+- **The CLI version lives in two files that must move together: `plugins/plan-keeper/.claude-plugin/plugin.json` AND `plugins/plan-keeper/scripts/plan_keeper/__init__.py` (`__version__`).** `pyproject.toml` reads `__version__` (so the brew package and `--version` agree), and `test_cli.py::TestVersion::test_version_matches_plugin_manifest` fails if the two drift. Bump both in the same change.
+
 ### plugin.json
 
 - Keep it minimal: `name`, `description`, `version`, `author`. That's it for most plugins.
