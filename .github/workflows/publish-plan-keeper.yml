@@ -40,7 +40,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Check out wild-horses (full history + tags)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -70,7 +70,7 @@ jobs:
 
       - name: Set up Python
         if: steps.guard.outputs.published == 'false'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -93,7 +93,7 @@ jobs:
 
       - name: Check out the Homebrew tap
         if: steps.guard.outputs.published == 'false'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: paulbaranowski/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
