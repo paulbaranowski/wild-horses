@@ -9,7 +9,6 @@ This is a Claude Code **plugin marketplace**.
 plugins/harness/                   -- plugin root (commands-based)
   .claude-plugin/plugin.json       -- plugin manifest
   commands/feedback-blockers.md    -- /harness:feedback-blockers
-  commands/setup.md                -- /harness:setup
   commands/reasoning-gaps.md       -- /harness:reasoning-gaps
 plugins/marketplace/               -- plugin root (skills-based)
   .claude-plugin/plugin.json       -- plugin manifest
