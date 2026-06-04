@@ -646,9 +646,15 @@ class TestFileMetaSetStatus(IsolatedHomeTestCase):
         front = text.split("\n---\n", 1)[0]
         self.assertIn("Completed on: 2020-01-15", front)
         # Supplied date must suppress the auto-stamp: exactly one Completed on,
-        # and today's date must not leak in.
+        # and today's date must not leak into that field. Scope the check to the
+        # Completed on line — the frontmatter's Created: stamp legitimately
+        # carries today's date, so asserting against the whole block is wrong.
         self.assertEqual(front.count("Completed on:"), 1)
-        self.assertNotIn(date.today().isoformat(), front)
+        completed_line = next(
+            line for line in front.splitlines()
+            if line.startswith("Completed on:")
+        )
+        self.assertNotIn(date.today().isoformat(), completed_line)
 
     def test_deferred_relocates_without_stamp(self) -> None:
         source = self._save_one()
