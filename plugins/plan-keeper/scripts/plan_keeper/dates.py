@@ -19,8 +19,8 @@ def _iso_from_stat(st: os.stat_result) -> str:
 
     Prefers `st_birthtime` (macOS/BSD); falls back to `st_mtime` where birthtime
     is unavailable (many Linux filesystems). The single home for the
-    birthtime→stamp format + fallback, shared by `backfill-created` and the `.md`
-    `--from-path` move path so both stamp a pre-existing file's age identically.
+    birthtime→stamp format + fallback, used by the `.md` `--from-path` move path
+    to stamp a pre-existing file's age.
     """
     ts = getattr(st, "st_birthtime", None)
     if ts is None:

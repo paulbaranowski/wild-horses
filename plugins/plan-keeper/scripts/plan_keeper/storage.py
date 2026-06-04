@@ -199,7 +199,7 @@ def _plan_sort_key(path: Path) -> tuple[str, str]:
     filename's leading YYYY-MM-DD, padded to midnight UTC, so day-level
     ordering still holds and same-day ties break on the filename (the prior
     behavior). Covers byte-verbatim --from-path saves and non-.md siblings,
-    which never get frontmatter. Run `backfill-created` to stamp old plans.
+    which never get frontmatter.
     """
     created = ""
     try:
