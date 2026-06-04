@@ -25,7 +25,7 @@ Pairs with [`plan-save`](../plan-save/) (which wrote the files this skill reads)
 idea  ──► superpowers:brainstorming    ──► spec
 spec  ──► superpowers:writing-plans    ──► impl plan
 execution-ready ──► menu (recommended first):
-        ├──► harness:autonomous                              (AFK, no human, ──► PR)
+        ├──► autonomous:autonomous                           (AFK, no human, ──► PR)
         ├──► harness:task-list-builder ──► task-list-runner  (dispatched tasks)
         └──► superpowers:executing-plans                     (sequential, review-gated)
 ```
@@ -35,7 +35,7 @@ execution-ready ──► menu (recommended first):
 3. **Classifies readiness (tier 1)** as **idea**, **spec**, or **execution-ready**.
 4. **For idea / spec** → suggests the single next pipeline stage (`brainstorming` / `writing-plans`) and confirms.
 5. **For execution-ready** → offers **all three execution engines at once**, recommended first. The recommendation comes from the plan's _shape_ (tier 2); the user picks how hands-off to be. All options are always listed, plus a manual escape hatch.
-6. **Marks the plan `in-progress`** (`file-meta update --field Status=in-progress`) when it hands off to any skill — not on manual-steer — so it leaves this list and enters `plan-done`'s finish list. **Then hands off** via the `Skill` tool. The plan content is already in conversation context, so no explicit payload is needed. For `harness:autonomous`, the in-context plan _is_ the Task — no issue URL or `Ticket:` lookup.
+6. **Marks the plan `in-progress`** (`file-meta set --status in-progress`) when it hands off to any skill — not on manual-steer — so it leaves this list and enters `plan-done`'s finish list. **Then hands off** via the `Skill` tool. The plan content is already in conversation context, so no explicit payload is needed. For `autonomous:autonomous`, the in-context plan _is_ the Task — no issue URL or `Ticket:` lookup.
 
 ## Classification cheatsheet
 
@@ -51,7 +51,7 @@ execution-ready ──► menu (recommended first):
 
 | Recommend                          | Signals                                                                                                       |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **`harness:autonomous`**           | Self-contained, well-specified, bounded; reads like a single ticket that ends in a PR; no mid-flight judgment |
+| **`autonomous:autonomous`**        | Self-contained, well-specified, bounded; reads like a single ticket that ends in a PR; no mid-flight judgment |
 | **`task-list-builder` → `runner`** | Independent tasks, per-task acceptance criteria, dependency notation, parallel/dispatch language, large scope |
 | **`executing-plans`**              | Sequential phases with review/checkpoint language; dependent linear flow; risky work to review phase-by-phase |
 
@@ -59,7 +59,7 @@ Tiebreaker: autonomy-readiness first, then independence. `plan-do`'s only write 
 
 ## Empty-list behavior
 
-If no `todo`/`backlog` plans show but the stderr note reports active plans, everything is already in progress — `plan-do` says so and offers to list all of them. If there are no active plans at all, it runs `plan_keeper_cli.py list-repos` (one repo per line with active/done/deferred counts) and asks the user to pick another repo or steer manually. It does **not** silently fall back to a different folder.
+If no `todo`/`backlog` plans show but the stderr note reports active plans, everything is already in progress — `plan-do` says so and offers to list all of them. If there are no active plans at all, it runs `plan_keeper_cli.py repo list` (one repo per line with active/done/deferred counts) and asks the user to pick another repo or steer manually. It does **not** silently fall back to a different folder.
 
 ## Repo derivation
 

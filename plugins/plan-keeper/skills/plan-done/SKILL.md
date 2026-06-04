@@ -5,7 +5,7 @@ description: Use when the user finishes a plan, marks a plan done, archives a pl
 
 # plan-done
 
-Archive a completed plan from `~/plans/<repo>/` into `~/plans/<repo>/done/`, with a `Completed on:` date written into the file's frontmatter. The bundled `plan_keeper_cli.py` handles the actual stamp-and-move (atomic write to `done/`, then unlink the source). This skill identifies which plan to archive, confirms with the user, and handles collisions.
+Archive a completed plan from `~/plans/<repo>/` into `~/plans/<repo>/done/`, with a `Completed on:` date written into the file's frontmatter. The bundled `plan_keeper_cli.py` handles the actual stamp-and-move (atomic write to `done/`, then unlink the source). This skill identifies which plan to archive, confirms only when it had to _infer_ the plan (rather than the user naming it), and handles collisions.
 
 ## Quick reference
 
@@ -14,7 +14,7 @@ Archive a completed plan from `~/plans/<repo>/` into `~/plans/<repo>/done/`, wit
 - **Identifier:** a filename (`--file`) or a ticket id (`--ticket`) — see step 1 and step 3.
 - **`<repo>`:** auto-derived or override — see [../../repo-derivation.md](../../repo-derivation.md).
 - **Collision in `done/`:** ask the user; never overwrite silently.
-- **Confirmation:** required before any file mutation.
+- **Confirmation:** skipped when the user names the plan (filename or ticket id) or picks it from the listing; required only when the skill inferred the plan from conversation context.
 
 ## Procedure
 
@@ -74,27 +74,29 @@ Plans to finish in ~/plans/wild-horses/:
 Which one did you finish?
 ```
 
-### 2. Confirm before mutating
+### 2. Confirm only when you inferred the plan
 
-Show the user the source and destination paths and the action:
+**Skip this step entirely when the user identified the plan themselves** — they named it by filename or ticket id in the invocation, or picked it from the step-1 listing. In those cases the user's identification _is_ the confirmation, so a second prompt is redundant: go straight to step 3 and archive. The CLI prints the resolved destination path on success (step 5), so the exact path is still surfaced — just after the move, not before.
 
-> Will move `~/plans/<repo>/<file>.md` → `~/plans/<repo>/done/<file>.md` and record today's date as `Completed on:` in the frontmatter. Proceed?
+**Confirm only when the skill inferred the plan from conversation context** — the "clear plan candidate from this session" path in step 1, where the skill (not the user) chose the file. In that case the step-1 proposal is the confirmation:
 
-Wait for the user's response. Do not proceed without an answer.
+> Mark `<filename>` done? (Y/n, or name a different one.)
+
+Wait for the user's response before step 3. Do not proceed without an answer. If they reject it, fall through to the listing flow in step 1.
 
 ### 3. Invoke the CLI
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" archive \
-  --file <filename>
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set --status done \
+  --file ~/plans/<repo>/<filename>
 ```
 
-Add `--override <name>` if step 1 found one. The CLI does: read source, write `Completed on: <today>` into the YAML frontmatter, atomic-write to `~/plans/<repo>/done/<filename>`, unlink the source. Today's date is in the user's local timezone.
+`--file` takes the **full path** (`~/plans/<repo>/<filename>`), where `<repo>` is the folder shown in step 1's listing. The CLI does: read source, write `Status: done` + `Completed on: <today>` into the YAML frontmatter, atomic-write to `~/plans/<repo>/done/<filename>`, unlink the source. Today's date is in the user's local timezone (override with `--completed-on YYYY-MM-DD`).
 
-When the user named the plan by its ticket id, pass `--ticket <id>` instead of `--file` (the two are mutually exclusive — supply exactly one). `--ticket` resolves the plan across all repos by its `Ticket:` frontmatter, so `--override` is irrelevant; the destination `done/` is derived from the plan's own repo:
+When the user named the plan by its ticket id, pass `--ticket <id>` instead of `--file` (the two are mutually exclusive — supply exactly one). `--ticket` resolves the plan across all repos by its `Ticket:` frontmatter; the destination `done/` is derived from the plan's own repo:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" archive \
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set --status done \
   --ticket <ticket-id>
 ```
 
@@ -122,7 +124,8 @@ Tell the user the archived path that the CLI returned in step 3. One line is eno
 
 ## Common mistakes
 
-- **Auto-archiving without confirmation.** Step 2 requires showing source/destination paths and asking before invoking the CLI. The skill is destructive (file moves), not read-only.
+- **Re-prompting a plan the user already named.** When the user gives a filename or ticket id, or picks from the step-1 listing, archive directly — the explicit identification is the confirmation. The step-2 gate was deliberately scoped to the inferred-candidate case only; a second prompt there is friction, not safety.
+- **Archiving an inferred plan without confirmation.** The flip side: when the skill chose the candidate from conversation context (the user did not name it), the step-1 `Mark <filename> done? (Y/n)` proposal must be answered before you mutate. The skill is destructive (file moves), so a plan it guessed at still needs a yes.
 - **Reading the CLI's stderr as a fatal error.** Exit 2 is a structured collision signal, not a failure to act on. Parse it and ask the user (step 4) — do not abort.
 - **Falling back to a different repo's plans when the current one is empty.** Step 1 says: tell the user, stop. Don't archive someone else's plan because the current repo has none.
 - **Re-archiving an already-archived plan.** The CLI errors with `plan not found` (exit 3) when the source isn't in the repo's top level. If you see that, the plan is likely already in `done/` — check with `list --state done`.
@@ -136,7 +139,7 @@ Tell the user the archived path that the CLI returned in step 3. One line is eno
 
 ## Notes
 
-- This skill is the only `plan-*` skill that mutates the `~/plans/` tree by **moving files**. `plan-save` creates; `plan-do` only flips a started plan's `Status` to `in-progress` (no move). The status field is what makes this skill's `--status in-progress,todo` list surface the plan you were just working on first.
+- This skill is the dedicated flow for **moving** a completed plan into `done/` (via `file-meta set --status done`). `plan-update` can also relocate when explicitly told `--status done`/`--status deferred`; `plan-save` creates; `plan-do` only flips a started plan's `Status` to `in-progress` (no move). The status field is what makes this skill's `--status in-progress,todo` list surface the plan you were just working on first.
 - The completion date is stored as `Completed on: YYYY-MM-DD` in the YAML frontmatter, keeping the plan body intact and making the date machine-readable without disturbing markdown rendering.
 - Archived plans live in `~/plans/<repo>/done/`. `plan-do`'s `list` only enumerates direct children of the repo dir — `done/` files are excluded from the active-plans list automatically.
 - Sibling skills in the `plan-` family (`plan-save`, `plan-do`) share the same CLI and the same `~/plans/<repo>/` tree.

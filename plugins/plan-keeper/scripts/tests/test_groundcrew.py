@@ -39,7 +39,7 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
                 "---\nAgent: claude\nStatus: done\n---\n# Done\n"
             )
 
-            result = run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
+            result = run_cli("crew", "fetch", home=Path(home), cwd=self.cwd)
             self.assertEqual(result.returncode, 0, msg=result.stderr)
             issues = json.loads(result.stdout)
             self.assertEqual(len(issues), 3)  # done/ excluded
@@ -64,7 +64,7 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             (d / "2026-01-01-x.md").write_text(
                 "---\nAgent: claude\nStatus: todo\n---\n# The Real Title\nbody\n"
             )
-            result = run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
+            result = run_cli("crew", "fetch", home=Path(home), cwd=self.cwd)
             self.assertEqual(result.returncode, 0)
             issues = json.loads(result.stdout)
             self.assertEqual(issues[0]["title"], "The Real Title")
@@ -76,7 +76,7 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             d.mkdir(parents=True)
             plan = d / "2026-01-01-x.md"
             plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# T\n")
-            result = run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
+            result = run_cli("crew", "fetch", home=Path(home), cwd=self.cwd)
             issues = json.loads(result.stdout)
             self.assertEqual(issues[0]["sourceRef"]["path"], str(plan.resolve()))
 
@@ -89,7 +89,7 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             plan = d / "2026-04-30-typed-models.md"
             plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# Typed\n")
             issues = json.loads(
-                run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd).stdout
+                run_cli("crew", "fetch", home=Path(home), cwd=self.cwd).stdout
             )
             text = plan.read_text()
             self.assertIn(f"Ticket: {issues[0]['id']}", text)
@@ -102,9 +102,9 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             d.mkdir(parents=True)
             plan = d / "2026-01-01-x.md"
             plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# T\n")
-            run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
+            run_cli("crew", "fetch", home=Path(home), cwd=self.cwd)
             after_first = plan.read_text()
-            run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
+            run_cli("crew", "fetch", home=Path(home), cwd=self.cwd)
             self.assertEqual(plan.read_text(), after_first)
 
     def test_groundcrew_fetch_stamp_preserves_foreign_fields(self):
@@ -117,7 +117,7 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
                 "---\ntags: [infra]\nAgent: claude\nStatus: todo\n---\n# T\n"
             )
             issues = json.loads(
-                run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd).stdout
+                run_cli("crew", "fetch", home=Path(home), cwd=self.cwd).stdout
             )
             text = plan.read_text()
             self.assertIn("tags: [infra]", text)
@@ -135,7 +135,7 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
                 "Agent: claude\nStatus: todo\n---\n# T\n"
             )
             issues = json.loads(
-                run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd).stdout
+                run_cli("crew", "fetch", home=Path(home), cwd=self.cwd).stdout
             )
             self.assertNotEqual(issues[0]["id"], "plan-999999")
             self.assertIn(f"Ticket: {issues[0]['id']}", plan.read_text())
@@ -153,14 +153,14 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
                 "Agent: claude\nStatus: todo\n---\n# T\n"
             )
             issues = json.loads(
-                run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd).stdout
+                run_cli("crew", "fetch", home=Path(home), cwd=self.cwd).stdout
             )
             text = plan.read_text()
             self.assertIn("Ticket: ENG-1", text)
             self.assertIn("Ticket System: linear", text)
             self.assertRegex(issues[0]["id"], r"^plan-\d+$")
             # The recomputed id still resolves the plan.
-            r = run_cli("groundcrew-resolve-one", issues[0]["id"],
+            r = run_cli("crew", "get", issues[0]["id"],
                         home=Path(home), cwd=self.cwd)
             self.assertEqual(r.returncode, 0, msg=r.stderr)
 
@@ -171,7 +171,7 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             d.mkdir(parents=True)
             (d / "good.md").write_text("---\nAgent: claude\nStatus: todo\n---\n# G\n")
             (d / "bare.md").write_text("# Just a body\n")
-            result = run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
+            result = run_cli("crew", "fetch", home=Path(home), cwd=self.cwd)
             self.assertEqual(result.returncode, 0)
             issues = json.loads(result.stdout)
             stems = {Path(i["sourceRef"]["path"]).stem for i in issues}
@@ -187,7 +187,7 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             (d / "2026-01-01-tagged.md").write_text(
                 "---\ntags: [infra]\nAgent: claude\nStatus: todo\n---\n# Tagged\n"
             )
-            result = run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
+            result = run_cli("crew", "fetch", home=Path(home), cwd=self.cwd)
             self.assertEqual(result.returncode, 0, msg=result.stderr)
             issues = json.loads(result.stdout)
             self.assertEqual(len(issues), 1)
@@ -197,7 +197,7 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
     def test_groundcrew_fetch_empty_when_no_plans(self):
         """`[]` (not error) when ~/plans/ is empty or missing."""
         with tempfile.TemporaryDirectory() as home:
-            result = run_cli("groundcrew-fetch", home=Path(home), cwd=self.cwd)
+            result = run_cli("crew", "fetch", home=Path(home), cwd=self.cwd)
             self.assertEqual(result.returncode, 0)
             self.assertEqual(json.loads(result.stdout), [])
 
@@ -267,7 +267,7 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         plan = d / "2026-01-01-x.md"
         plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# Title\n")
         ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
-        result = run_cli("groundcrew-resolve-one", ticket,
+        result = run_cli("crew", "get", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         issue = json.loads(result.stdout)
@@ -285,7 +285,7 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         # Archived plan's repo is the grandparent dir ("r"), so its id is
         # keyed on ("r", stem) — same as when it was active.
         ticket = self.cli.groundcrew_id("r", "2025-12-31-old")
-        result = run_cli("groundcrew-resolve-one", ticket,
+        result = run_cli("crew", "get", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0)
         issue = json.loads(result.stdout)
@@ -294,14 +294,14 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
     def test_groundcrew_resolve_one_missing_returns_exit_3(self):
         """Spec: 'prints nothing for "not found", or exits 3.' We pick exit 3."""
         (self.home / "plans" / "r").mkdir(parents=True)
-        result = run_cli("groundcrew-resolve-one", "does-not-exist",
+        result = run_cli("crew", "get", "does-not-exist",
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 3)
         self.assertEqual(result.stdout, "")  # nothing on stdout
 
     def test_groundcrew_resolve_one_rejects_path_separator(self):
         """ID can't contain '/' — defends against ../../etc/passwd-style inputs."""
-        result = run_cli("groundcrew-resolve-one", "../escape",
+        result = run_cli("crew", "get", "../escape",
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 2)
         self.assertIn("invalid id", result.stderr)
@@ -314,7 +314,7 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
             "---\nAgent: claude\nStatus: done\n---\n# Old\n"
         )
         ticket = self.cli.groundcrew_id("myrepo", "2025-12-31-old")
-        result = run_cli("groundcrew-resolve-one", ticket,
+        result = run_cli("crew", "get", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         issue = json.loads(result.stdout)
@@ -328,7 +328,7 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
             "---\nAgent: claude\nStatus: backlog\n---\n# Paused\n"
         )
         ticket = self.cli.groundcrew_id("myrepo", "2025-06-15-paused")
-        result = run_cli("groundcrew-resolve-one", ticket,
+        result = run_cli("crew", "get", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         issue = json.loads(result.stdout)
@@ -342,111 +342,87 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# Typed models\n")
 
         issues = json.loads(
-            run_cli("groundcrew-fetch", home=self.home, cwd=self.cwd).stdout
+            run_cli("crew", "fetch", home=self.home, cwd=self.cwd).stdout
         )
         ticket = issues[0]["id"]
-        result = run_cli("groundcrew-resolve-one", ticket,
+        result = run_cli("crew", "get", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         issue = json.loads(result.stdout)
         self.assertEqual(issue["id"], ticket)
         self.assertEqual(issue["sourceRef"]["path"], str(plan.resolve()))
 
-class TestGroundcrewMarkInProgress(IsolatedHomeTestCase):
-    """Tests for the groundcrew-mark-in-progress subcommand."""
+class TestCrewStart(IsolatedHomeTestCase):
+    """`crew start ${id}` resolves the synthesized id (reusing `crew get`'s
+    resolver) and flips that plan's Status to in-progress.
 
-    def test_groundcrew_mark_in_progress_flips_status(self):
+    The interface is an `${id}` positional, not the old stdin `{path}` JSON:
+    an id can only ever name a plan inside PLAN_ROOT (resolution globs only
+    PLAN_ROOT), so the path-validation guard the JSON form needed is gone."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        # A real caller passes start an id it got from a prior fetch. Tests
+        # reproduce that by computing the same id via the module fn.
+        self.cli = _import_cli_module()
+
+    def test_crew_start_flips_status_for_resolved_id(self):
         d = self.home / "plans" / "r"
         d.mkdir(parents=True)
         plan = d / "2026-01-01-x.md"
-        plan.write_text(
-            "---\nAgent: claude\nStatus: todo\n---\n# Title\n"
-        )
-        result = run_cli(
-            "groundcrew-mark-in-progress",
-            home=self.home, cwd=self.cwd,
-            stdin=json.dumps({"path": str(plan)}),
-        )
+        plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# Title\n")
+        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        result = run_cli("crew", "start", ticket, home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("Status: in-progress", plan.read_text())
         self.assertNotIn("Status: todo", plan.read_text())
+        # Echoes the resolved path (mirrors the old interface's stdout).
+        self.assertEqual(result.stdout.strip(), str(plan.resolve()))
 
-    def test_groundcrew_mark_in_progress_rejects_missing_path(self):
-        """Path inside PLAN_ROOT but file doesn't exist → exit 3 (not-found)."""
-        (self.home / "plans" / "r").mkdir(parents=True)
-        missing = self.home / "plans" / "r" / "nonexistent.md"
-        result = run_cli(
-            "groundcrew-mark-in-progress",
-            home=self.home, cwd=self.cwd,
-            stdin=json.dumps({"path": str(missing)}),
-        )
-        self.assertEqual(result.returncode, 3)
-
-    def test_groundcrew_mark_in_progress_rejects_path_outside_plan_root(self):
-        """Path outside PLAN_ROOT → exit 2 (validation), even if file exists."""
-        outside = self.home / "outside.md"
-        outside.write_text("---\nStatus: todo\n---\n# Outside\n")
-        result = run_cli(
-            "groundcrew-mark-in-progress",
-            home=self.home, cwd=self.cwd,
-            stdin=json.dumps({"path": str(outside)}),
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("outside PLAN_ROOT", result.stderr)
-        # File must NOT have been mutated.
-        self.assertIn("Status: todo", outside.read_text())
-
-    def test_groundcrew_mark_in_progress_rejects_non_absolute_path(self):
-        """Relative path → exit 2 (validation) — never resolved against cwd."""
-        result = run_cli(
-            "groundcrew-mark-in-progress",
-            home=self.home, cwd=self.cwd,
-            stdin=json.dumps({"path": "relative/file.md"}),
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("must be absolute", result.stderr)
-
-    def test_groundcrew_mark_in_progress_rejects_non_md_suffix(self):
-        """Path inside PLAN_ROOT but not .md → exit 2."""
-        d = self.home / "plans" / "r"
+    def test_crew_start_round_trips_fetched_id(self):
+        """The id fetch emits is the id start consumes — same plan, both ends."""
+        d = self.home / "plans" / "herds"
         d.mkdir(parents=True)
-        not_md = d / "config.json"
-        not_md.write_text("{}")
-        result = run_cli(
-            "groundcrew-mark-in-progress",
-            home=self.home, cwd=self.cwd,
-            stdin=json.dumps({"path": str(not_md)}),
+        plan = d / "2026-04-30-typed-models.md"
+        plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# Typed\n")
+        issues = json.loads(
+            run_cli("crew", "fetch", home=self.home, cwd=self.cwd).stdout
         )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn(".md plan file", result.stderr)
+        ticket = issues[0]["id"]
+        result = run_cli("crew", "start", ticket, home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Status: in-progress", plan.read_text())
 
-    def test_groundcrew_mark_in_progress_rejects_non_string_path(self):
-        """path JSON field of wrong type → exit 2."""
-        result = run_cli(
-            "groundcrew-mark-in-progress",
-            home=self.home, cwd=self.cwd,
-            stdin=json.dumps({"path": 42}),
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("non-empty string", result.stderr)
+    def test_crew_start_missing_id_exits_3(self):
+        """An id no plan maps to → exit 3 (mirrors `crew get`)."""
+        (self.home / "plans" / "r").mkdir(parents=True)
+        result = run_cli("crew", "start", "plan-999999",
+                         home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 3)
+        self.assertEqual(result.stdout, "")  # error goes to stderr
 
-    def test_groundcrew_mark_in_progress_rejects_bad_json(self):
-        result = run_cli(
-            "groundcrew-mark-in-progress",
-            home=self.home, cwd=self.cwd,
-            stdin="not json",
-        )
+    def test_crew_start_rejects_path_separator(self):
+        """An id can't contain '/' — defends against ../../-style inputs."""
+        result = run_cli("crew", "start", "../escape",
+                         home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 2)
-        self.assertIn("not valid JSON", result.stderr)
+        self.assertIn("invalid id", result.stderr)
 
-    def test_groundcrew_mark_in_progress_rejects_missing_path_key(self):
-        result = run_cli(
-            "groundcrew-mark-in-progress",
-            home=self.home, cwd=self.cwd,
-            stdin=json.dumps({"other": "value"}),
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("'path' field required", result.stderr)
+    def test_crew_start_active_wins_over_archived_same_stem(self):
+        """Active and done/ share a stem → same synthesized id. start flips the
+        active plan (resolver's first-match: active before done) and leaves the
+        archived one untouched."""
+        repo = self.home / "plans" / "r"
+        done = repo / "done" / "2026-01-01-x.md"
+        done.parent.mkdir(parents=True)
+        active = repo / "2026-01-01-x.md"
+        active.write_text("---\nStatus: todo\n---\n# X\n")
+        done.write_text("---\nStatus: done\n---\n# X\n")
+        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        result = run_cli("crew", "start", ticket, home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Status: in-progress", active.read_text())
+        self.assertIn("Status: done", done.read_text())  # archived untouched
 
 class TestQueue(IsolatedHomeTestCase):
     """Cross-repo `queue list` / `queue set` for the plan-crew skill."""
@@ -468,14 +444,14 @@ class TestQueue(IsolatedHomeTestCase):
         return p
 
     def test_queue_list_empty_when_no_plans(self) -> None:
-        r = run_cli("queue", "list", home=self.home, cwd=self.cwd)
+        r = run_cli("crew", "queue", "list", home=self.home, cwd=self.cwd)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads(r.stdout), [])
 
     def test_queue_list_reports_status_and_agent_across_repos(self) -> None:
         self._make_plan("alpha", "2026-05-01-a.md", status="todo", agent="codex")
         self._make_plan("beta", "2026-05-02-b.md", status="backlog")
-        r = run_cli("queue", "list", home=self.home, cwd=self.cwd)
+        r = run_cli("crew", "queue", "list", home=self.home, cwd=self.cwd)
         self.assertEqual(r.returncode, 0, r.stderr)
         rows = json.loads(r.stdout)
         by_file = {row["file"]: row for row in rows}
@@ -505,7 +481,7 @@ class TestQueue(IsolatedHomeTestCase):
         (self.plans_root / "alpha" / "README.md").write_text(
             "# not a plan\n", encoding="utf-8"
         )
-        r = run_cli("queue", "list", home=self.home, cwd=self.cwd)
+        r = run_cli("crew", "queue", "list", home=self.home, cwd=self.cwd)
         self.assertEqual(r.returncode, 0, r.stderr)
         files = sorted(row["file"] for row in json.loads(r.stdout))
         self.assertEqual(files, ["2026-05-01-active.md"])
@@ -513,7 +489,7 @@ class TestQueue(IsolatedHomeTestCase):
     def test_queue_list_surfaces_in_progress_and_in_review(self) -> None:
         self._make_plan("alpha", "2026-05-01-a.md", status="in-progress", agent="claude")
         self._make_plan("alpha", "2026-05-02-b.md", status="in-review")
-        r = run_cli("queue", "list", home=self.home, cwd=self.cwd)
+        r = run_cli("crew", "queue", "list", home=self.home, cwd=self.cwd)
         self.assertEqual(r.returncode, 0, r.stderr)
         by_file = {row["file"]: row["status"] for row in json.loads(r.stdout)}
         self.assertEqual(by_file["2026-05-01-a.md"], "in-progress")
@@ -521,7 +497,7 @@ class TestQueue(IsolatedHomeTestCase):
 
     def test_queue_list_empty_status_plan(self) -> None:
         self._make_plan("alpha", "2026-05-01-a.md", agent="codex")  # no Status line
-        r = run_cli("queue", "list", home=self.home, cwd=self.cwd)
+        r = run_cli("crew", "queue", "list", home=self.home, cwd=self.cwd)
         self.assertEqual(r.returncode, 0, r.stderr)
         rows = json.loads(r.stdout)
         self.assertEqual(len(rows), 1)
@@ -531,7 +507,7 @@ class TestQueue(IsolatedHomeTestCase):
     def test_queue_set_promotes_backlog_to_todo(self) -> None:
         p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog", agent="codex")
         r = run_cli(
-            "queue", "set", "--status", "todo",
+            "crew", "queue", "set", "--status", "todo",
             stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -545,7 +521,7 @@ class TestQueue(IsolatedHomeTestCase):
         # visible the moment it's queued.
         p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")
         r = run_cli(
-            "queue", "set", "--status", "todo",
+            "crew", "queue", "set", "--status", "todo",
             stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -563,7 +539,7 @@ class TestQueue(IsolatedHomeTestCase):
             encoding="utf-8",
         )
         r = run_cli(
-            "queue", "set", "--status", "todo",
+            "crew", "queue", "set", "--status", "todo",
             stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -575,7 +551,7 @@ class TestQueue(IsolatedHomeTestCase):
     def test_queue_set_dequeue_does_not_stamp_groundcrew(self) -> None:
         p = self._make_plan("alpha", "2026-05-01-a.md", status="todo")
         r = run_cli(
-            "queue", "set", "--status", "backlog",
+            "crew", "queue", "set", "--status", "backlog",
             stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -584,7 +560,7 @@ class TestQueue(IsolatedHomeTestCase):
     def test_queue_set_promote_fills_missing_agent_with_default(self) -> None:
         p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")  # no Agent
         r = run_cli(
-            "queue", "set", "--status", "todo", "--default-agent", "claude",
+            "crew", "queue", "set", "--status", "todo", "--default-agent", "claude",
             stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -595,7 +571,7 @@ class TestQueue(IsolatedHomeTestCase):
     def test_queue_set_promote_keeps_existing_agent_over_default(self) -> None:
         p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog", agent="codex")
         r = run_cli(
-            "queue", "set", "--status", "todo", "--default-agent", "claude",
+            "crew", "queue", "set", "--status", "todo", "--default-agent", "claude",
             stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -606,7 +582,7 @@ class TestQueue(IsolatedHomeTestCase):
     def test_queue_set_dequeues_todo_to_backlog_without_touching_agent(self) -> None:
         p = self._make_plan("alpha", "2026-05-01-a.md", status="todo")  # no Agent
         r = run_cli(
-            "queue", "set", "--status", "backlog", "--default-agent", "claude",
+            "crew", "queue", "set", "--status", "backlog", "--default-agent", "claude",
             stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -618,7 +594,7 @@ class TestQueue(IsolatedHomeTestCase):
         p1 = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")
         p2 = self._make_plan("beta", "2026-05-02-b.md", status="backlog")
         r = run_cli(
-            "queue", "set", "--status", "todo", "--default-agent", "claude",
+            "crew", "queue", "set", "--status", "todo", "--default-agent", "claude",
             stdin=f"{p1}\n{p2}\n", home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -629,7 +605,7 @@ class TestQueue(IsolatedHomeTestCase):
         outside = self.home / "evil.md"
         outside.write_text("---\nStatus: backlog\n---\n\n# evil\n", encoding="utf-8")
         r = run_cli(
-            "queue", "set", "--status", "todo",
+            "crew", "queue", "set", "--status", "todo",
             stdin=str(outside) + "\n", home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 2)
@@ -642,7 +618,7 @@ class TestQueue(IsolatedHomeTestCase):
         p = d / "2026-05-01-a.md"
         p.write_text("# no frontmatter\n", encoding="utf-8")
         r = run_cli(
-            "queue", "set", "--status", "todo",
+            "crew", "queue", "set", "--status", "todo",
             stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 2)
@@ -650,7 +626,7 @@ class TestQueue(IsolatedHomeTestCase):
 
     def test_queue_set_errors_on_empty_stdin(self) -> None:
         r = run_cli(
-            "queue", "set", "--status", "todo",
+            "crew", "queue", "set", "--status", "todo",
             stdin="\n  \n", home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 2)
@@ -660,7 +636,7 @@ class TestQueue(IsolatedHomeTestCase):
         good = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")
         bad = self.plans_root / "alpha" / "missing.md"  # does not exist
         r = run_cli(
-            "queue", "set", "--status", "todo",
+            "crew", "queue", "set", "--status", "todo",
             stdin=f"{good}\n{bad}\n", home=self.home, cwd=self.cwd,
         )
         self.assertNotEqual(r.returncode, 0)

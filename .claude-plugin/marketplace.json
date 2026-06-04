@@ -18,6 +18,16 @@
       "license": "MIT"
     },
     {
+      "name": "autonomous",
+      "source": "./plugins/autonomous",
+      "description": "An autonomous skill that drives a single issue/ticket link or plan file all the way to an opened pull request with no human in the loop: implements, tests, runs an independent sub-agent review to convergence, opens a PR following the target repo's conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
       "name": "linting-hooks",
       "source": "./plugins/linting-hooks",
       "description": "PostToolUse hooks that auto-format .md files with Prettier + markdownlint and type-check .py files with pyright on every edit. Hooks self-guard when tools are missing; /linting-hooks:install sets up the dependencies per machine.",
@@ -60,7 +70,7 @@
     {
       "name": "plan-keeper",
       "source": "./plugins/plan-keeper",
-      "description": "Organize markdown plans in ~/plans/<repo>/. plan-save captures the latest plan from a conversation; plan-do lists and routes a saved plan to the right next superpowers/harness skill based on its shape (idea / spec / impl plan / task-list); plan-done archives a completed plan into ~/plans/<repo>/done/ with a completion stamp.",
+      "description": "Organize markdown plans in ~/plans/<repo>/. plan-save captures the latest plan from a conversation; plan-do lists and routes a saved plan to the right next superpowers/harness skill based on its shape (idea / spec / impl plan / task-list); plan-done archives a completed plan into ~/plans/<repo>/done/ with a completion stamp; plan-linear and plan-jira file a plan as a Linear or Jira ticket.",
       "author": {
         "name": "Paul Baranowski"
       },
@@ -68,9 +78,19 @@
       "license": "MIT"
     },
     {
-      "name": "wrangle",
-      "source": "./plugins/wrangle",
-      "description": "Personal git/PR tooling. Currently ships one skill, `update-git-repos`: pull every configured git repo from origin/<branch> in one shot. Maintains a repo list at ~/.config/wild-horses/wrangle/repos.json, supports bootstrap auto-discovery under a root directory, manual add/remove, and prompts per repo when working trees are dirty (skip vs stash-pull-pop). Uses `git pull --ff-only` so diverged histories never auto-merge silently.",
+      "name": "update-git-repos",
+      "source": "./plugins/update-git-repos",
+      "description": "Personal git/PR tooling. Currently ships one skill, `update-git-repos`: pull every configured git repo from origin/<branch> in one shot. Maintains a repo list at ~/.config/wild-horses/update-git-repos/repos.json, supports bootstrap auto-discovery under a root directory, manual add/remove, and prompts per repo when working trees are dirty (skip vs stash-pull-pop). Uses `git pull --ff-only` so diverged histories never auto-merge silently.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "groundcrew-setup",
+      "source": "./plugins/groundcrew-setup",
+      "description": "Interactive first-run wizard for groundcrew. Walks first-run users through scaffolding `~/.config/groundcrew/config.ts` conversationally, with GitHub repo discovery, best-effort seeding from any existing config, and an optional `@clipboard-health/clearance` egress-allowlist setup step. Ships one skill: `config`.",
       "author": {
         "name": "Paul Baranowski"
       },
@@ -81,6 +101,16 @@
       "name": "yes-no-questions-hook",
       "source": "./plugins/yes-no-questions-hook",
       "description": "Per-turn UserPromptSubmit hook that reminds Claude to pose decision questions as numbered yes/no questions, collapsing either/or choices into single yes/no items.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "pr-status-hook",
+      "source": "./plugins/pr-status-hook",
+      "description": "Stop hook that reports, at every turn-end, whether an open PR exists for the current branch (with its link), whether the last commits were actually pushed, and whether the working tree is dirty — all computed from real git/gh state, never from memory. Stays silent unless there is something worth reporting.",
       "author": {
         "name": "Paul Baranowski"
       },

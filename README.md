@@ -10,7 +10,7 @@ Three questions an AI agent has to be able to answer before it can edit your cod
 2. _If an AI agent read this code, what would it get wrong?_ — answered by `/harness:reasoning-gaps`.
 3. _Can an AI edit this code and know whether it got it right?_ — answered by `/harness:feedback-blockers`.
 
-Run them in that order on a PR or feature branch. Each step asks a harder question than the last: types, then comprehension, then verification. A prerequisite step — does the repo have a map for the agent to read at all? — is handled by `/harness:setup`.
+Run them in that order on a PR or feature branch. Each step asks a harder question than the last: types, then comprehension, then verification.
 
 ## Plugins
 
@@ -30,12 +30,11 @@ See **[plugins/pyright/README.md](plugins/pyright/README.md)** for fix-intent se
 
 ### [harness](plugins/harness/README.md)
 
-Three commands plus a task-list pipeline for making code agent-friendly. The commands diagnose reasoning gaps, feedback-loop blockers, and missing orientation docs; the task-list skills (`task-list-builder`, `task-list-runner`, `task-list-viewer`) produce, execute, and inspect the resulting remediation plans.
+Two commands plus a task-list pipeline for making code agent-friendly. The commands diagnose reasoning gaps and feedback-loop blockers; the task-list skills (`task-list-builder`, `task-list-runner`, `task-list-viewer`) produce, execute, and inspect the resulting remediation plans.
 
 ```text
 /plugin install harness@wild-horses
 
-/harness:setup                       # once per project
 /harness:reasoning-gaps              # comprehension review
 /harness:feedback-blockers           # observability review
 /task-list-builder                   # build an implementation plan
@@ -105,7 +104,7 @@ The I/O backend behind the plan-keeper skills — `plan_keeper_cli.py`, a zero-d
 brew install paulbaranowski/tap/plan-keeper
 
 plan-keeper list                     # active plans for the current repo
-plan-keeper list-repos               # every repo under ~/plans/ with counts
+plan-keeper repo list                # every repo under ~/plans/ with counts
 plan-keeper save --topic "spike notes" <<'EOF'
 ...plan body...
 EOF

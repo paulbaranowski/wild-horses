@@ -7,3 +7,8 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+
+# Generated/working exec-plans and task-list state. These are scratch
+# artifacts for in-flight work, never committed (the shipped plans live in
+# the user's local ~/plans/<repo>/ tree, not in the repo).
+docs/exec-plans/

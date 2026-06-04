@@ -9,7 +9,7 @@ Save one or more files from the current conversation to `~/plans/<repo>/<YYYY-MM
 
 ## Quick reference
 
-- **Target:** `~/plans/<repo>/<YYYY-MM-DD>-<topic>.<ext>`
+- **Target:** `~/plans/<repo>/<YYYY-MM-DD>-<topic>.<ext>` (a classified `.md` save with `--kind` becomes `<YYYY-MM-DD>-<topic>--<kind>.md` — see **Kind in filename** below).
 - **`<repo>`:** auto-derived from `git remote`/`pwd`, or override from the user's invocation — see [../../repo-derivation.md](../../repo-derivation.md).
 - **`<topic>`:** first H1/H2 of the plan, used as the CLI's `--topic` (CLI slugifies). For non-markdown content with no heading, use a short phrase from the user's invocation.
 - **`<ext>`:** defaults to `md`. Set via `--extension` when the content is not markdown — see [Choosing the extension](#choosing-the-extension).
@@ -17,6 +17,7 @@ Save one or more files from the current conversation to `~/plans/<repo>/<YYYY-MM
 - **Collision:** ask the user; never overwrite silently.
 - **Content:** file body verbatim — no preamble, footer, or commentary. (For `.md` saves — heredoc **and** `--from-path` moves — the CLI injects a `Status: backlog\nCreated: <iso>\n` frontmatter block if one isn't present, and fills missing Status/Created fields if a partial block is; `Kind` is filled only when `--kind` is passed. Save never injects an `Agent` tag — that field is the groundcrew dispatch signal, written automatically only by `plan-crew` on promote (`plan-update` can still set it on explicit user request); a body that hand-declares `Agent` is preserved as-is. Non-`.md` saves stay byte-exact. On a `--from-path` `.md` move, `Created` comes from the source file's birthtime, not the move time, since the plan pre-existed.)
 - **`--kind`:** the document type — one of `idea` / `prd` / `design` / `spec` / `exec-plan` (see [../../plan-kinds.md](../../plan-kinds.md)). Infer it from the content and pass it on `.md` heredoc saves; `plan-do` later reads it to route the plan. Fill-if-absent, `.md`-only. See [Classifying the Kind](#classifying-the-kind).
+- **Kind in filename:** a markdown save with `--kind` lands at `<date>-<slug>--<kind>.md` (double-hyphen separator). Without `--kind` (or for non-`.md` saves) the name stays `<date>-<slug>.<ext>`. The `--` is the sole, unambiguous Kind boundary — `slugify` can never emit `--` inside the slug, so the stages of one project (which share a slug) group cleanly in `plan-list`/`plan-do`.
 - **Multiple files:** when the user has produced a paired/grouped artifact (most commonly task-list-builder's `.json` + `.md`), save each file with one `save` invocation, sharing `--topic` (and `--date` if you set it) so the resulting filenames pair on the base name.
 
 ## Procedure
@@ -77,7 +78,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" save \
 
 Use this whenever the source filename is already a good final name — most notably **task-list-builder** output at `docs/exec-plans/active/<date>-<runid>-<short>.<slug>.{json,md}`. If the source needs renaming, rename it on disk first, then pass that path; the CLI deliberately does not rename, because reconstructing date/topic/extension from a well-named source is what produced the original `-json.md` bug this shape exists to prevent.
 
-`--from-path` reads the body from the named file instead of stdin (no shell-quoting hazards for JSON bodies). A non-`.md` source is relocated byte-for-byte via an atomic same-FS rename — no trailing-newline normalization, no rewrite (this is the verbatim guarantee the paired `.json` sibling relies on). A `.md` source is treated like a heredoc `.md` save: the CLI fills any missing `Agent`/`Status`/`Created` frontmatter (fill-if-absent — a block already carrying those keeps its own values, with `Created` sourced from the source file's birthtime), `write_atomic`s the stamped result to the target, then unlinks the source — a write-then-delete move, not an atomic rename. Either way the source is **only** deleted once the target write succeeded — a malformed-frontmatter `.md` or a collision (exit 2) leaves the source untouched, so retrying is safe.
+`--from-path` reads the body from the named file instead of stdin (no shell-quoting hazards for JSON bodies). A non-`.md` source is relocated byte-for-byte via an atomic same-FS rename — no trailing-newline normalization, no rewrite (this is the verbatim guarantee the paired `.json` sibling relies on). A `.md` source is treated like a heredoc `.md` save: the CLI fills any missing `Status`/`Created` frontmatter (fill-if-absent — a block already carrying those keeps its own values, with `Created` sourced from the source file's birthtime; it never adds an `Agent` tag — see the **Content** note above), `write_atomic`s the stamped result to the target, then unlinks the source — a write-then-delete move, not an atomic rename. Either way the source is **only** deleted once the target write succeeded — a malformed-frontmatter `.md` or a collision (exit 2) leaves the source untouched, so retrying is safe.
 
 Common to both shapes (3a and 3b):
 
@@ -119,8 +120,8 @@ Tell the user the absolute path(s) the CLI returned, and — for `.md` saves —
 If the user corrects the Kind, apply it without re-saving the body:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta update \
-  --file "<path the CLI returned>" --field Kind=<corrected value>
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set \
+  --file "<path the CLI returned>" --kind <corrected value>
 ```
 
 For paired saves, list both paths on consecutive lines.
@@ -186,7 +187,7 @@ Created: 2026-06-02T14:30:00Z
 Body.
 ```
 
-The defaults are a floor, not an override: if the user pipes in a body that already declares `Status:`, `Created:`, or `Kind:` in its own frontmatter, those values are kept untouched. Save never adds an `Agent:` tag — a freshly saved plan has none, and only `plan-crew` automatically writes one when it promotes the plan to the groundcrew queue (`plan-update` can still set it on explicit user request; a body that hand-declares `Agent:` is preserved). `Status: backlog` means the plan is fetched but not dispatched (confirm via `crew status <id>`) — promote via `/plan-update` (or `file-meta update --field Status=todo`) when the plan is ready for groundcrew to pick up. `Created` is an ISO-8601 UTC save-time stamp that gives `plan-do`'s newest-first listing precise _intra-day_ ordering (filenames carry only a `YYYY-MM-DD` date, so without it same-day plans fell back to slug-alphabetical). It's persisted in frontmatter so status mutations — which rewrite the file and reset its OS timestamps — never disturb the order. `Kind` (omitted entirely if you don't pass `--kind`) records the document type — see [Classifying the Kind](#classifying-the-kind) and [../../plan-kinds.md](../../plan-kinds.md).
+The defaults are a floor, not an override: if the user pipes in a body that already declares `Status:`, `Created:`, or `Kind:` in its own frontmatter, those values are kept untouched. Save never adds an `Agent:` tag — a freshly saved plan has none, and only `plan-crew` automatically writes one when it promotes the plan to the groundcrew queue (`plan-update` can still set it on explicit user request; a body that hand-declares `Agent:` is preserved). `Status: backlog` means the plan is fetched but not dispatched (confirm via `crew status <id>`) — promote via `/plan-update` (or `file-meta set --status todo`) when the plan is ready for groundcrew to pick up. `Created` is an ISO-8601 UTC save-time stamp that gives `plan-do`'s newest-first listing precise _intra-day_ ordering (filenames carry only a `YYYY-MM-DD` date, so without it same-day plans fell back to slug-alphabetical). It's persisted in frontmatter so status mutations — which rewrite the file and reset its OS timestamps — never disturb the order. `Kind` (omitted entirely if you don't pass `--kind`) records the document type — see [Classifying the Kind](#classifying-the-kind) and [../../plan-kinds.md](../../plan-kinds.md).
 
 The injection happens for every `.md` save — both heredoc and `--from-path` moves. JSON and other extensions are written byte-for-byte, including via `--from-path` (that byte-verbatim guarantee now applies only to non-`.md` artifacts, the paired `.json` it exists to protect). On a `--from-path` `.md` move the only difference from a heredoc save is `Created`'s source: it comes from the source file's birthtime (best-effort, falling back to mtime), because the moved-in plan pre-existed the move rather than being authored now.
 
@@ -254,6 +255,6 @@ The CLI writes stdin verbatim (it only appends a trailing newline if missing).
 
 - The `~/plans/` tree is local to the user's machine. This skill never commits anything to any repo.
 - The `Kind` this skill assigns is what `plan-do` reads to route the plan (idea → brainstorming, prd/design/spec → writing-plans, exec-plan → execution menu). Classifying it here, with full conversation context, saves `plan-do` from re-inferring it later — see [../../plan-kinds.md](../../plan-kinds.md).
-- `--from-path` moves never carry a `Kind` (the CLI rejects `--kind` on `--from-path`): a non-`.md` source stays byte-exact, and a moved-in `.md` gets the managed `Agent`/`Status`/`Created` block but no `Kind`. If you want one on the relocated `.md`, add it afterward with `file-meta update --field Kind=exec-plan`.
-- A `.md` dropped into `~/plans/<repo>/` by a manual `mv`/`cp` (the CLI never ran) carries no `Created`, so it falls back to day-granularity filename ordering. Running `plan_keeper_cli.py backfill-created` stamps any such unstamped `.md` from its birthtime, restoring intra-day ordering. `list`/`plan-do` deliberately do **not** stamp on read — those stay read-only queries; stamping lives only in the write paths (`save`, `backfill-created`).
+- `--from-path` moves never carry a `Kind` (the CLI rejects `--kind` on `--from-path`): a non-`.md` source stays byte-exact, and a moved-in `.md` gets the managed `Status`/`Created` block (no `Agent`, no `Kind`). If you want one on the relocated `.md`, add it afterward with `file-meta set --kind exec-plan`.
+- A `.md` dropped into `~/plans/<repo>/` by a manual `mv`/`cp` (the CLI never ran) carries no `Created`, so it falls back to day-granularity filename ordering. To get an exact stamp (and intra-day ordering), bring the file in with `save --from-path` instead — it stamps `Created` from the source's birthtime. `list`/`plan-do` deliberately do **not** stamp on read — those stay read-only queries; stamping lives only in the write path (`save`).
 - Sibling skills in the `plan-` family (`plan-do`, `plan-done`) share the same CLI and the same `~/plans/<repo>/` tree.

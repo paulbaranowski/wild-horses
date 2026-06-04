@@ -1,8 +1,0 @@
-{
-  "name": "wrangle",
-  "description": "Personal git/PR tooling. Currently ships one skill, `update-git-repos`: pull every configured git repo from origin/<branch> in one shot. Maintains a repo list at ~/.config/wild-horses/wrangle/repos.json, supports bootstrap auto-discovery under a root dir, manual add/remove, and a configurable default action for dirty working trees (ask/skip/stash) set via `set-action`, with optional per-repo overrides. Backed by a bundled update_repos_cli.py that does atomic config writes, status checks (current branch, dirty state, divergence), and `git pull --ff-only` per repo. Includes a PreToolUse hook that auto-approves invocations of the bundled CLI.",
-  "version": "0.11.0",
-  "author": {
-    "name": "Paul Baranowski"
-  }
-}

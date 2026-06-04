@@ -1,23 +1,20 @@
 #!/usr/bin/env python3
-"""CLI subcommand wiring: save, archive, backfill, ticket-api arg validation (cli.py).
+"""CLI subcommand wiring: save, file-meta set (status lifecycle), provider api arg validation (cli.py).
 
 Part of the plan_keeper test suite; shared harness lives in support.py.
 Run all: python3 -m unittest discover -s plugins/plan-keeper/scripts/tests
 """
 import json
 import os
-import tempfile
 import unittest
 from datetime import date, datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 from support import (
     CLI,
     IsolatedHomeTestCase,
     _import_cli_module,
     run_cli,
-    storage,
 )
 
 
@@ -608,8 +605,12 @@ class TestSaveKind(IsolatedHomeTestCase):
         self.assertIn("Kind: design", text)
         self.assertNotIn("Kind: prd", text)
 
-class TestArchive(IsolatedHomeTestCase):
-    def _save_one(self, topic: str = "plan to archive") -> Path:
+class TestFileMetaSetStatus(IsolatedHomeTestCase):
+    """`file-meta set --status` is lifecycle-aware: terminal statuses relocate
+    the plan into done/ or deferred/ (done stamps Completed on); active
+    statuses rewrite in place."""
+
+    def _save_one(self, topic: str = "lifecycle plan") -> Path:
         r = run_cli(
             "save", "--override", "scratch", "--topic", topic,
             stdin="# Body\nsome text\n",
@@ -618,136 +619,165 @@ class TestArchive(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return Path(r.stdout.strip())
 
-    def test_happy_path_moves_and_unlinks(self) -> None:
+    def test_done_relocates_and_unlinks(self) -> None:
         source = self._save_one()
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", source.name,
-            home=self.home,
-        )
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                    home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
         target = self.plans_root / "scratch" / "done" / source.name
         self.assertEqual(r.stdout.strip(), str(target))
         self.assertTrue(target.exists())
-        self.assertFalse(source.exists(), "source should be unlinked")
+        self.assertFalse(source.exists(), "source should be unlinked after relocate")
 
-    def test_stamp_format(self) -> None:
+    def test_done_sets_status_and_stamps_today(self) -> None:
         source = self._save_one()
-        run_cli("archive", "--override", "scratch", "--file", source.name, home=self.home)
-        target = self.plans_root / "scratch" / "done" / source.name
-        text = target.read_text()
-        today = date.today().isoformat()
-        # NEW: completion date in frontmatter at the top.
-        self.assertTrue(text.startswith("---\n"), "file must start with frontmatter")
-        front = text.split("\n---\n", 1)[0]
-        self.assertIn(f"Completed on: {today}", front)
-        # OLD: bottom stamp must NOT be present.
-        self.assertNotIn("*Completed:", text)
-
-    def test_completed_date_override(self) -> None:
-        source = self._save_one()
-        run_cli(
-            "archive", "--override", "scratch", "--file", source.name,
-            "--completed-date", "2020-01-15",
-            home=self.home,
-        )
+        run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                home=self.home)
         text = (self.plans_root / "scratch" / "done" / source.name).read_text()
-        # NEW: completion date in frontmatter.
-        self.assertTrue(text.startswith("---\n"), "file must start with frontmatter")
+        front = text.split("\n---\n", 1)[0]
+        self.assertIn("Status: done", front)
+        self.assertIn(f"Completed on: {date.today().isoformat()}", front)
+
+    def test_done_completed_on_override(self) -> None:
+        source = self._save_one()
+        run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                "--completed-on", "2020-01-15", home=self.home)
+        text = (self.plans_root / "scratch" / "done" / source.name).read_text()
         front = text.split("\n---\n", 1)[0]
         self.assertIn("Completed on: 2020-01-15", front)
-        # OLD: bottom stamp must NOT be present.
-        self.assertNotIn("*Completed:", text)
-
-    def test_missing_source_exits_3(self) -> None:
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", "nonexistent.md",
-            home=self.home,
+        # Supplied date must suppress the auto-stamp: exactly one Completed on,
+        # and today's date must not leak into that field. Scope the check to the
+        # Completed on line — the frontmatter's Created: stamp legitimately
+        # carries today's date, so asserting against the whole block is wrong.
+        self.assertEqual(front.count("Completed on:"), 1)
+        completed_line = next(
+            line for line in front.splitlines()
+            if line.startswith("Completed on:")
         )
-        self.assertEqual(r.returncode, 3)
-        self.assertIn("plan not found", r.stderr)
+        self.assertNotIn(date.today().isoformat(), completed_line)
 
-    def test_rejects_file_with_slash(self) -> None:
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", "../etc/passwd",
-            home=self.home,
-        )
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("basename only", r.stderr)
+    def test_deferred_relocates_without_stamp(self) -> None:
+        source = self._save_one()
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "deferred",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        target = self.plans_root / "scratch" / "deferred" / source.name
+        self.assertTrue(target.exists())
+        self.assertFalse(source.exists())
+        text = target.read_text()
+        self.assertIn("Status: deferred", text.split("\n---\n", 1)[0])
+        self.assertNotIn("Completed on", text)
 
-    def test_rejects_file_with_backslash(self) -> None:
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", "foo\\bar.md",
-            home=self.home,
-        )
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("basename only", r.stderr)
+    def test_active_status_stays_in_place(self) -> None:
+        source = self._save_one()
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "in-progress",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), str(source), "active status must not relocate")
+        self.assertTrue(source.exists())
+        self.assertFalse((self.plans_root / "scratch" / "done" / source.name).exists())
+        self.assertIn("Status: in-progress", source.read_text().split("\n---\n", 1)[0])
 
-    def test_rejects_file_dot(self) -> None:
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", ".",
-            home=self.home,
-        )
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("basename only", r.stderr)
+    def test_multi_field_relocate_is_atomic(self) -> None:
+        source = self._save_one()
+        run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                "--agent", "codex", home=self.home)
+        text = (self.plans_root / "scratch" / "done" / source.name).read_text()
+        front = text.split("\n---\n", 1)[0]
+        self.assertIn("Status: done", front)
+        self.assertIn("Agent: codex", front)
 
-    def test_rejects_file_dotdot(self) -> None:
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", "..",
-            home=self.home,
-        )
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("basename only", r.stderr)
-
-    def test_rejects_file_empty(self) -> None:
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", "",
-            home=self.home,
-        )
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("basename only", r.stderr)
-
-    def test_collision_fail(self) -> None:
-        # Make a victim plan in done/ first
+    def test_collision_fail_is_default(self) -> None:
         source = self._save_one("collide me")
-        run_cli("archive", "--override", "scratch", "--file", source.name, home=self.home)
-        # Save same-name plan again
-        run_cli(
-            "save", "--override", "scratch", "--topic", "collide me",
-            stdin="x\n",
-            home=self.home,
-        )
-        # Second archive should collide in done/
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", source.name,
-            home=self.home,
-        )
+        run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                home=self.home)
+        # Re-save the same name into the active dir, then relocate again.
+        run_cli("save", "--override", "scratch", "--topic", "collide me",
+                stdin="x\n", home=self.home)
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                    home=self.home)
         self.assertEqual(r.returncode, 2)
         self.assertIn("existing:", r.stderr)
         self.assertIn("suggestion:", r.stderr)
 
     def test_collision_suffix(self) -> None:
         source = self._save_one("collide me")
-        run_cli("archive", "--override", "scratch", "--file", source.name, home=self.home)
-        run_cli(
-            "save", "--override", "scratch", "--topic", "collide me",
-            stdin="x\n",
-            home=self.home,
-        )
-        r = run_cli(
-            "archive", "--override", "scratch", "--file", source.name,
-            "--on-collision", "suffix",
-            home=self.home,
-        )
+        run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                home=self.home)
+        run_cli("save", "--override", "scratch", "--topic", "collide me",
+                stdin="x\n", home=self.home)
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                    "--on-collision", "suffix", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue(r.stdout.strip().endswith("-2.md"))
 
+    def test_collision_overwrite(self) -> None:
+        source = self._save_one("collide me")
+        run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                home=self.home)
+        run_cli("save", "--override", "scratch", "--topic", "collide me",
+                stdin="x\n", home=self.home)
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                    "--on-collision", "overwrite", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        done_dir = self.plans_root / "scratch" / "done"
+        self.assertEqual(
+            sorted(p.name for p in done_dir.iterdir()), [source.name],
+            "overwrite must not create a -2 variant",
+        )
+
+    def test_invalid_status_rejected(self) -> None:
+        source = self._save_one()
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "bogus",
+                    home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("invalid choice", r.stderr)
+
+    def test_active_status_on_terminal_source_refused(self) -> None:
+        # Reactivating a done/deferred plan (back to the active dir) is out of
+        # scope; the CLI must refuse loudly rather than park an active-status
+        # plan in done/.
+        source = self._save_one("reactivate me")
+        run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                home=self.home)
+        done_path = self.plans_root / "scratch" / "done" / source.name
+        r = run_cli("file-meta", "set", "--file", str(done_path), "--status", "todo",
+                    home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("reactivating", r.stderr)
+        # The plan stays put with its terminal status untouched.
+        self.assertTrue(done_path.exists())
+        self.assertIn("Status: done", done_path.read_text().split("\n---\n", 1)[0])
+
+    def test_non_status_edit_on_terminal_plan_in_place(self) -> None:
+        # Editing a non-status field (e.g. Kind) on a done plan is still a
+        # legal in-place edit — only an active --status is refused.
+        source = self._save_one("edit done plan")
+        run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                home=self.home)
+        done_path = self.plans_root / "scratch" / "done" / source.name
+        r = run_cli("file-meta", "set", "--file", str(done_path), "--kind", "spec",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(done_path.exists())
+        self.assertIn("Kind: spec", done_path.read_text().split("\n---\n", 1)[0])
+
+    def test_archive_subcommand_removed(self) -> None:
+        # archive was folded into `file-meta set --status done`; the old
+        # subcommand must no longer exist.
+        r = run_cli("archive", "--override", "scratch", "--file", "x.md",
+                    home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("invalid choice", r.stderr)
+
+
 class TestTicketApiArgValidation(IsolatedHomeTestCase):
-    """Verify cmd_ticket_api rejects calls with missing required flags
+    """Verify the api subcommand rejects calls with missing required flags
     before any network call is attempted."""
 
     def test_linear_viewer_without_api_key_exits_2(self) -> None:
         r = run_cli(
-            "ticket-api", "viewer", "--name", "linear",
+            "linear", "api", "viewer",
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 2)
@@ -755,7 +785,7 @@ class TestTicketApiArgValidation(IsolatedHomeTestCase):
 
     def test_jira_viewer_without_site_exits_2(self) -> None:
         r = run_cli(
-            "ticket-api", "viewer", "--name", "jira",
+            "jira", "api", "viewer",
             "--email", "p@x.com", "--api-key", "tok",
             home=self.home, cwd=self.cwd,
         )
@@ -764,7 +794,7 @@ class TestTicketApiArgValidation(IsolatedHomeTestCase):
 
     def test_jira_components_without_project_key_exits_2(self) -> None:
         r = run_cli(
-            "ticket-api", "components", "--name", "jira",
+            "jira", "api", "components",
             "--site", "x.atlassian.net",
             "--email", "p@x.com", "--api-key", "tok",
             home=self.home, cwd=self.cwd,
@@ -774,7 +804,7 @@ class TestTicketApiArgValidation(IsolatedHomeTestCase):
 
     def test_jira_invalid_site_exits_2(self) -> None:
         r = run_cli(
-            "ticket-api", "viewer", "--name", "jira",
+            "jira", "api", "viewer",
             "--site", "https://x.atlassian.net",  # scheme not allowed
             "--email", "p@x.com", "--api-key", "tok",
             home=self.home, cwd=self.cwd,
@@ -782,97 +812,14 @@ class TestTicketApiArgValidation(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("bare hostname", r.stderr)
 
-class TestBackfillCreated(IsolatedHomeTestCase):
-    """`backfill-created` stamps `Created` (from file birthtime) on plans
-    missing it, idempotently, skipping files it can't or shouldn't touch."""
-
-    def _write(self, name: str, body: str) -> Path:
-        d = self.plans_root / "scratch"
-        d.mkdir(parents=True, exist_ok=True)
-        path = d / name
-        path.write_text(body, encoding="utf-8")
-        return path
-
-    def test_stamps_plan_missing_created(self) -> None:
-        path = self._write("2026-06-01-a.md", "---\nStatus: todo\n---\n\n# A\n")
-        r = run_cli("backfill-created", "--override", "scratch", home=self.home)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("backfilled Created on 1 plan(s)", r.stdout)
-        self.assertRegex(
-            path.read_text(), r"Created: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
+    def test_linear_rejects_jira_only_kind_exits_2(self) -> None:
+        # 'components' is a jira kind; argparse choices must reject it for linear.
+        r = run_cli(
+            "linear", "api", "components", "--api-key", "k",
+            home=self.home, cwd=self.cwd,
         )
-
-    def test_idempotent_skips_already_stamped(self) -> None:
-        self._write(
-            "2026-06-01-a.md",
-            "---\nStatus: todo\nCreated: 2026-06-01T08:00:00Z\n---\n\n# A\n",
-        )
-        r = run_cli("backfill-created", "--override", "scratch", home=self.home)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("backfilled Created on 0 plan(s)", r.stdout)
-        # Existing value preserved.
-        self.assertIn(
-            "Created: 2026-06-01T08:00:00Z",
-            (self.plans_root / "scratch" / "2026-06-01-a.md").read_text(),
-        )
-
-    def test_skips_non_md_and_no_frontmatter(self) -> None:
-        self._write("2026-06-01-data.json", '{"a": 1}\n')
-        bare = self._write("2026-06-01-bare.md", "# No frontmatter\n")
-        r = run_cli("backfill-created", "--override", "scratch", home=self.home)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("backfilled Created on 0 plan(s)", r.stdout)
-        self.assertNotIn("Created:", bare.read_text())
-
-    def test_covers_done_subdir(self) -> None:
-        d = self.plans_root / "scratch" / "done"
-        d.mkdir(parents=True, exist_ok=True)
-        path = d / "2026-06-01-archived.md"
-        path.write_text("---\nStatus: done\n---\n\n# Archived\n", encoding="utf-8")
-        r = run_cli("backfill-created", "--override", "scratch", home=self.home)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("Created:", path.read_text())
-
-class TestBackfillCreatedBestEffort(unittest.TestCase):
-    """A stat/write failure on one file must not abort the whole run.
-
-    In-process (patches write_atomic) because the subprocess harness can't
-    inject a filesystem error.
-    """
-
-    def setUp(self) -> None:
-        self.cli = _import_cli_module()
-        self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name) / "plans"
-        (self.root / "scratch").mkdir(parents=True)
-
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
-
-    def _write(self, name: str) -> Path:
-        path = self.root / "scratch" / name
-        path.write_text("---\nStatus: todo\n---\n\n# x\n", encoding="utf-8")
-        return path
-
-    def test_write_failure_on_one_file_does_not_abort(self) -> None:
-        bad = self._write("2026-06-01-bad.md")
-        good = self._write("2026-06-02-good.md")
-        real_write = self.cli.write_atomic
-
-        def flaky_write(path: Path, content: str) -> None:
-            if path == bad:
-                raise OSError("disk gone")
-            real_write(path, content)
-
-        args = MagicMock()
-        args.override = "scratch"
-        with patch.object(storage, "PLAN_ROOT", self.root), \
-             patch.object(self.cli, "write_atomic", side_effect=flaky_write):
-            rc = self.cli.cmd_backfill_created(args)
-        self.assertEqual(rc, 0)
-        # The healthy file is still stamped even though the other file errored.
-        self.assertIn("Created:", good.read_text())
-        self.assertNotIn("Created:", bad.read_text())
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("invalid choice", r.stderr)
 
 
 class TestVersion(IsolatedHomeTestCase):
@@ -898,6 +845,45 @@ class TestVersion(IsolatedHomeTestCase):
             "plan_keeper.__version__ must match plugin.json version "
             "(bump both together when releasing)",
         )
+
+
+class TestSaveKindInFilename(IsolatedHomeTestCase):
+    def test_kind_adds_double_hyphen_suffix(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "noun first provider commands",
+            "--kind", "design", stdin="# Noun first\nbody\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(
+            r.stdout.strip().endswith("-noun-first-provider-commands--design.md"),
+            r.stdout,
+        )
+        text = Path(r.stdout.strip()).read_text()
+        self.assertIn("Kind: design", text)
+
+    def test_no_kind_keeps_bare_name(self) -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "plain topic",
+            stdin="# Plain\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        today = date.today().isoformat()
+        self.assertEqual(
+            r.stdout.strip(),
+            str(self.plans_root / "scratch" / f"{today}-plain-topic.md"),
+        )
+
+    def test_same_kind_same_topic_collision_suffixes_after_kind(self) -> None:
+        run_cli(
+            "save", "--override", "scratch", "--topic", "dup", "--kind", "spec",
+            stdin="# Dup\none\n", home=self.home,
+        )
+        r2 = run_cli(
+            "save", "--override", "scratch", "--topic", "dup", "--kind", "spec",
+            "--on-collision", "suffix", stdin="# Dup\ntwo\n", home=self.home,
+        )
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        self.assertTrue(r2.stdout.strip().endswith("-dup--spec-2.md"), r2.stdout)
 
 
 if __name__ == "__main__":

@@ -7,8 +7,8 @@ description: Use when the user asks to see or manage the groundcrew queue across
 
 Show the groundcrew dispatch queue across **all** repos under `~/plans/`, and manage it both
 directions in bulk: promote `backlog → todo` (add to the queue) and dequeue `todo → backlog`
-(pull out). Backed by two `plan_keeper_cli.py` subcommands: `queue list` (cross-repo read) and
-`queue set` (bulk atomic `Status` write).
+(pull out). Backed by two `plan_keeper_cli.py` subcommands: `crew queue list` (cross-repo read) and
+`crew queue set` (bulk atomic `Status` write).
 
 ## Quick reference
 
@@ -33,10 +33,10 @@ Follow these steps in order. Do not skip the confirmation step.
 ### 1. Show the queue
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" queue list
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue list
 ```
 
-**Run `queue list` fresh every time you reach this step — including on a re-invocation later in the same conversation, and again whenever step 5 sends you back here.** Never reprint an earlier queue from memory: plans get promoted, dequeued, or dispatched between turns, so a cached queue can be stale — and the user picks actions by the row numbers, so stale numbers target the wrong plan. The numbered queue you show must come from the output you just ran.
+**Run `crew queue list` fresh every time you reach this step — including on a re-invocation later in the same conversation, and again whenever step 5 sends you back here.** Never reprint an earlier queue from memory: plans get promoted, dequeued, or dispatched between turns, so a cached queue can be stale — and the user picks actions by the row numbers, so stale numbers target the wrong plan. The numbered queue you show must come from the output you just ran.
 
 Output is a JSON array of `{repo, file, status, agent}` objects (one per active plan). Group them for
 the user by `status` and present each ACTIONABLE plan with a global number:
@@ -65,12 +65,12 @@ In flight (in-progress): herds/2026-05-18-billing.md (read-only)
 Reply with what to change, e.g. "promote 3, 4" or "dequeue 1".
 ```
 
-If `queue list` returns `[]`, tell the user there are no plans under `~/plans/` yet and stop.
+If `crew queue list` returns `[]`, tell the user there are no plans under `~/plans/` yet and stop.
 
 ### 2. Parse the user's actions
 
 The user replies with `promote <numbers>` and/or `dequeue <numbers>` (either or both, any order). Map
-each number back to its `{repo, file}` from the `queue list` output. Build the absolute path for each
+each number back to its `{repo, file}` from the `crew queue list` output. Build the absolute path for each
 selected plan as `$HOME/plans/<repo>/<file>`.
 
 - `promote` targets must currently be **Available** (backlog/empty). If the user numbers a `todo` row for promote, point it out and ask.
@@ -98,13 +98,13 @@ confirmation. Do not write anything until the user agrees.
 
 ### 4. Apply
 
-Run one `queue set` per direction selected. Each call takes the newline-delimited absolute paths on
+Run one `crew queue set` per direction selected. Each call takes the newline-delimited absolute paths on
 stdin via a quoted heredoc (one auto-approved Bash call each).
 
 Promote (writes `Agent: claude` where missing):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" queue set --status todo --default-agent claude <<'EOF'
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue set --status todo --default-agent claude <<'EOF'
 /Users/<you>/plans/<repo>/<file>.md
 /Users/<you>/plans/<repo2>/<file2>.md
 EOF
@@ -113,7 +113,7 @@ EOF
 Dequeue (never touches Agent):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" queue set --status backlog <<'EOF'
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue set --status backlog <<'EOF'
 /Users/<you>/plans/<repo>/<file>.md
 EOF
 ```
@@ -129,12 +129,12 @@ Re-run step 1 and show the updated queue so the user sees the result.
 - **Numbering in-progress or in-review plans for action.** They are read-only context. Only `backlog`/empty (promote) and `todo` (dequeue) rows get action numbers.
 - **Writing before confirming.** Step 3 is mandatory even for a single obvious promote.
 - **Passing `--default-agent` on a dequeue.** Dequeue is `--status backlog` with no `--default-agent`; the CLI ignores a default agent on backlog, but omit it to keep intent clear.
-- **Building paths from the display string instead of the JSON.** Always map the chosen number back to the `{repo, file}` fields from `queue list`, then form `$HOME/plans/<repo>/<file>`.
+- **Building paths from the display string instead of the JSON.** Always map the chosen number back to the `{repo, file}` fields from `crew queue list`, then form `$HOME/plans/<repo>/<file>`.
 
 ## Edge cases
 
-- **`queue list` returns `[]`** — no plans anywhere; tell the user and stop.
-- **A chosen plan's frontmatter is malformed** — `queue set` exits non-zero with a message and writes nothing (all-or-nothing). Surface the error; the user can fix that plan via plan-save/plan-update and retry.
+- **`crew queue list` returns `[]`** — no plans anywhere; tell the user and stop.
+- **A chosen plan's frontmatter is malformed** — `crew queue set` exits non-zero with a message and writes nothing (all-or-nothing). Surface the error; the user can fix that plan via plan-save/plan-update and retry.
 - **User selects a `todo` plan to promote (or a `backlog` plan to dequeue)** — it's already in/out of the queue; point it out and skip it rather than writing a no-op.
 
 ## Notes
