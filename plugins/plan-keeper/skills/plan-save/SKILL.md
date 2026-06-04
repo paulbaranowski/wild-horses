@@ -9,7 +9,7 @@ Save one or more files from the current conversation to `~/plans/<repo>/<YYYY-MM
 
 ## Quick reference
 
-- **Target:** `~/plans/<repo>/<YYYY-MM-DD>-<topic>.<ext>`
+- **Target:** `~/plans/<repo>/<YYYY-MM-DD>-<topic>.<ext>` (a classified `.md` save with `--kind` becomes `<YYYY-MM-DD>-<topic>--<kind>.md` — see **Kind in filename** below).
 - **`<repo>`:** auto-derived from `git remote`/`pwd`, or override from the user's invocation — see [../../repo-derivation.md](../../repo-derivation.md).
 - **`<topic>`:** first H1/H2 of the plan, used as the CLI's `--topic` (CLI slugifies). For non-markdown content with no heading, use a short phrase from the user's invocation.
 - **`<ext>`:** defaults to `md`. Set via `--extension` when the content is not markdown — see [Choosing the extension](#choosing-the-extension).
@@ -18,6 +18,7 @@ Save one or more files from the current conversation to `~/plans/<repo>/<YYYY-MM
 - **Content:** file body verbatim — no preamble, footer, or commentary. (For `.md` saves — heredoc **and** `--from-path` moves — the CLI injects an `Agent: claude\nStatus: backlog\nCreated: <iso>\n` frontmatter block if one isn't present, and fills missing Agent/Status/Created fields if a partial block is; `Kind` is filled only when `--kind` is passed. Non-`.md` saves stay byte-exact. On a `--from-path` `.md` move, `Created` comes from the source file's birthtime, not the move time, since the plan pre-existed.)
 - **`--agent`:** override the default `claude` (e.g., `--agent codex`); affects `.md` saves on both the heredoc and `--from-path` move paths.
 - **`--kind`:** the document type — one of `idea` / `prd` / `design` / `spec` / `exec-plan` (see [../../plan-kinds.md](../../plan-kinds.md)). Infer it from the content and pass it on `.md` heredoc saves; `plan-do` later reads it to route the plan. Fill-if-absent, `.md`-only. See [Classifying the Kind](#classifying-the-kind).
+- **Kind in filename:** a markdown save with `--kind` lands at `<date>-<slug>--<kind>.md` (double-hyphen separator). Without `--kind` (or for non-`.md` saves) the name stays `<date>-<slug>.<ext>`. The `--` is the sole, unambiguous Kind boundary — `slugify` can never emit `--` inside the slug, so the stages of one project (which share a slug) group cleanly in `plan-list`/`plan-do`.
 - **Multiple files:** when the user has produced a paired/grouped artifact (most commonly task-list-builder's `.json` + `.md`), save each file with one `save` invocation, sharing `--topic` (and `--date` if you set it) so the resulting filenames pair on the base name.
 
 ## Procedure

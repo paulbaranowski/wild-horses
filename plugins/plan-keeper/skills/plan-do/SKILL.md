@@ -19,7 +19,8 @@ For plans that aren't execution-ready yet (idea, spec), the skill suggests the s
 
 ## Quick reference
 
-- **Lists:** the **not-yet-started** plans only — `Status: todo` and `Status: backlog` (`list --status todo,backlog`). In-progress / in-review / done plans are excluded (you're picking something to _start_).
+- **Lists:** the **not-yet-started** plans only — `Status: todo` and `Status: backlog` (`list --status todo,backlog`). In-progress / in-review / done plans are excluded (you're picking something to _start_). Classified `.md` plans carry a `--<kind>` suffix in their filename (e.g. `…-noun-first-provider-commands--design.md`); this is expected — the picker still resolves the whole filename (the part after the tab) verbatim, the `--status` machine contract is unchanged.
+- **Human view:** to show a project's stages clustered (design → exec-plan) rather than the flat startable list, run `list --group` (mutually exclusive with `--status`). That's a presentation aid; the `--status todo,backlog` form below is what this skill parses to pick from.
 - **Writes:** exactly one thing — flips the picked plan's `Status` to `in-progress` when it starts one (step 6). It never moves, deletes, or rewrites the body.
 - **`<repo>`:** auto-derived or override — see [../../repo-derivation.md](../../repo-derivation.md).
 - **Classification (tier 1, readiness):** idea / spec / execution-ready. Read the plan's `Kind:` frontmatter first (authoritative — see [../../plan-kinds.md](../../plan-kinds.md)); infer from content only when `Kind` is absent.

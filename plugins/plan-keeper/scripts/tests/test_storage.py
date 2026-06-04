@@ -597,5 +597,88 @@ class TestResolveTicket(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 2)
 
 
+class TestListGrouped(IsolatedHomeTestCase):
+    def _save(self, topic: str, kind: str, body: str = "x\n") -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", topic, "--kind", kind,
+            stdin=f"# {topic}\n{body}", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_groups_stages_of_one_slug_in_pipeline_order(self) -> None:
+        self._save("noun first provider commands", "exec-plan")
+        self._save("noun first provider commands", "design")
+        r = run_cli("list", "--override", "scratch", "--group", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = [ln for ln in r.stdout.split("\n") if ln]
+        # Heading line for the project, then design before exec-plan (pipeline order).
+        self.assertEqual(lines[0], "noun-first-provider-commands")
+        self.assertIn("design", lines[1])
+        self.assertIn("exec-plan", lines[2])
+        self.assertLess(
+            next(i for i, line in enumerate(lines) if "design" in line),
+            next(i for i, line in enumerate(lines) if "exec-plan" in line),
+        )
+
+    def test_separate_slugs_form_separate_groups(self) -> None:
+        self._save("alpha topic", "spec")
+        self._save("beta topic", "spec")
+        r = run_cli("list", "--override", "scratch", "--group", home=self.home)
+        headings = [line for line in r.stdout.split("\n") if line and not line.startswith("  ")]
+        self.assertIn("alpha-topic", headings)
+        self.assertIn("beta-topic", headings)
+
+    def test_legacy_unclassified_file_still_appears(self) -> None:
+        # A bare save (no --kind) groups under its slug with a "-" stage marker.
+        run_cli(
+            "save", "--override", "scratch", "--topic", "legacy plan",
+            stdin="# Legacy\n", home=self.home,
+        )
+        r = run_cli("list", "--override", "scratch", "--group", home=self.home)
+        self.assertIn("legacy-plan", r.stdout)
+
+    def test_group_and_status_are_mutually_exclusive(self) -> None:
+        r = run_cli(
+            "list", "--override", "scratch", "--group", "--status", "todo",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not allowed with", r.stderr)
+
+    def test_collision_suffixed_resave_groups_under_one_heading(self) -> None:
+        # Two saves of the same topic+kind: the second collides and lands at
+        # `…--spec-2.md`. Both must group under the single `dup` heading, not
+        # split into `dup` and `dup--spec-2`.
+        self._save("dup", "spec")
+        r2 = run_cli(
+            "save", "--override", "scratch", "--topic", "dup", "--kind", "spec",
+            "--on-collision", "suffix", stdin="# Dup\ntwo\n", home=self.home,
+        )
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        r = run_cli("list", "--override", "scratch", "--group", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        headings = [line for line in r.stdout.split("\n") if line and not line.startswith("  ")]
+        self.assertEqual(headings, ["dup"], r.stdout)
+        members = [line for line in r.stdout.split("\n") if line.startswith("  ")]
+        self.assertEqual(len(members), 2, r.stdout)
+
+    def test_cross_repo_same_slug_stays_in_separate_repo_groups(self) -> None:
+        # The same slug saved under two different repos must NOT merge into one
+        # group: cross-repo grouping keys on 'repo/slug', so unrelated projects
+        # that happen to share a slug stay distinct (and the heading is
+        # unambiguous about which repo it is).
+        for repo in ("alpha", "beta"):
+            r = run_cli(
+                "save", "--override", repo, "--topic", "shared topic", "--kind", "spec",
+                stdin="# Shared\nx\n", home=self.home,
+            )
+            self.assertEqual(r.returncode, 0, r.stderr)
+        r = run_cli("list", "--all-repos", "--group", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        headings = [line for line in r.stdout.split("\n") if line and not line.startswith("  ")]
+        self.assertIn("alpha/shared-topic", headings)
+        self.assertIn("beta/shared-topic", headings)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

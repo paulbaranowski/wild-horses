@@ -30,7 +30,7 @@ Pairs with [`plan-do`](../plan-do/) (which reads what `plan-save` wrote) and [`p
 3. **Chooses the extension.** Honors explicit user phrasing ("save the json file" → `--extension json`), otherwise sniffs the content (starts with `{` or `[` → `.json`, etc.), and defaults to `.md`.
 4. **Classifies the Kind** (`.md` saves). Infers the document type — `idea` / `prd` / `design` / `spec` / `exec-plan` (see [`../../plan-kinds.md`](../../plan-kinds.md)) — and passes it as `--kind`, surfacing it in the confirmation for one-step correction. This is the field `plan-do` later reads to route the plan, so it's recorded once here with full conversation context rather than re-inferred on every pickup.
 5. **Saves via CLI.** Two shapes, chosen by where the content lives:
-   - **Heredoc** — `save --topic "<heading>" --extension <ext>` with the body on stdin via a quoted heredoc, for content that lives only in conversation. The CLI constructs `<date>-<slug>.<ext>` for the target name.
+   - **Heredoc** — `save --topic "<heading>" --extension <ext>` with the body on stdin via a quoted heredoc, for content that lives only in conversation. The CLI constructs `<date>-<slug>.<ext>` for the target name (or `<date>-<slug>--<kind>.<ext>` when `--kind` is given on a `.md` save).
    - **`--from-path`** — for files already on disk (e.g., task-list-builder's `<date>-<runid>-<short>.<slug>.{json,md}`). The target keeps the source's basename verbatim and the source is unlinked after a successful write (atomic same-FS rename). `--topic`/`--extension`/`--date` are rejected.
 
    For paired output, calls the CLI once per file. The disk shape keeps pairs together automatically because both sources share a base name.

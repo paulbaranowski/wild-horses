@@ -9,6 +9,7 @@ import subprocess
 from typing import Optional
 
 from plan_keeper.errors import PlanKeeperCliError
+from plan_keeper.frontmatter import VALID_KINDS
 from plan_keeper.storage import MAX_SLUG_LEN
 
 
@@ -52,6 +53,57 @@ def slugify_topic(text: str) -> str:
     if kept:
         return "-".join(kept)
     return slug[:MAX_SLUG_LEN].rstrip("-")
+
+
+# The Kind separator. `slugify_topic` collapses every run of `-` (and every
+# disallowed char) to a single `-`, and the date prefix is single-hyphen, so
+# `--` can never occur inside a date or slug. That makes it the one
+# unambiguous Kind boundary in a plan filename — `plan_group_key` recovers the
+# project slug with a single rpartition, no enum-stripping guesswork.
+KIND_SEP = "--"
+
+_NAME_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+# A `-N` collision suffix that `find_unused_suffix` appends after the Kind.
+_NAME_COLLISION_SUFFIX_RE = re.compile(r"-\d+$")
+
+
+def plan_filename(date_str: str, slug: str, ext: str, kind: Optional[str]) -> str:
+    """Build a plan's filename.
+
+    `<date>-<slug>--<kind>.<ext>` on a markdown save that carries a Kind, else
+    `<date>-<slug>.<ext>`. Single source of truth for the on-disk name shape;
+    `cmd_save` builds every target through here. Non-markdown saves never get a
+    Kind suffix (frontmatter — and therefore Kind — lives only in markdown).
+    """
+    base = f"{date_str}-{slug}"
+    if kind and ext == "md":
+        base = f"{base}{KIND_SEP}{kind}"
+    return f"{base}.{ext}"
+
+
+def plan_group_key(name: str) -> str:
+    """Recover the project slug (grouping key) from a plan filename.
+
+    Inverse of `plan_filename`: strips the leading `YYYY-MM-DD-` date prefix,
+    the extension, and a trailing `--<kind>` segment when that segment is a
+    valid Kind. Files with no date prefix fall back to their stem. The grouped
+    listing clusters by this key so the stages of one project (which share a
+    slug) appear together.
+    """
+    stem = name.rsplit(".", 1)[0] if "." in name else name
+    m = _NAME_DATE_PREFIX_RE.match(stem)
+    rest = stem[m.end():] if m else stem
+    head, sep, tail = rest.rpartition(KIND_SEP)
+    # `tail` is the trailing Kind. A same-kind/same-day/same-topic re-save makes
+    # `find_unused_suffix` append `-N` to the whole stem, so the on-disk form is
+    # `…--<kind>-N`; strip that numeric collision suffix before the Kind check so
+    # a copy still groups with its original rather than as its own project. Gate
+    # on `m` (a real date prefix): the `--<kind>` recovery applies only to dated
+    # plan filenames, so a hand-named no-date `README--spec.md` falls back to its
+    # whole stem rather than being read as a `spec` stage of project `README`.
+    if m and sep and _NAME_COLLISION_SUFFIX_RE.sub("", tail) in VALID_KINDS:
+        return head
+    return rest
 
 
 def normalize_override(name: str) -> str:

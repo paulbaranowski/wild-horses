@@ -36,3 +36,4 @@ When `Kind` is present it is the authoritative signal (still confirmable by the 
 - **Written by:** `plan_keeper_cli.py save --kind <value>` (fill-if-absent on `.md` saves only) and `file-meta set --kind <value>` (validated).
 - **Set / inferred by:** the `plan-save` skill (infer-and-confirm at save time).
 - **Read by:** the `plan-do` skill (routing) and `plan-update` (editing).
+- **Surfaced in the filename:** a classified `.md` save is named `<date>-<slug>--<kind>.md` (`plan_filename` in `scripts/plan_keeper/naming.py`); the grouped listing (`list --group`) recovers the project slug via `plan_group_key`.

@@ -62,6 +62,8 @@ from plan_keeper.naming import (
     derive_repo,
     derive_repo_full,
     normalize_override,
+    plan_filename,
+    plan_group_key,
     slugify_topic,
     validate_extension,
     validate_repo_name,
@@ -95,6 +97,74 @@ def cmd_repo_name(args) -> int:
         print(derive_repo_full(args.cwd))
     else:
         print(derive_repo(args.override, args.cwd))
+    return 0
+
+
+def _kind_of(path: Path) -> str:
+    """Return a plan's lowercased `Kind` frontmatter, or '' if absent/unreadable.
+
+    The filename's `--<kind>` segment is a display/sort convenience; frontmatter
+    is the source of truth for the label, so a hand-renamed file still labels
+    correctly. A parse/read failure degrades to '' (unclassified) rather than
+    breaking the whole listing — same resilience contract as plan_status.
+    """
+    try:
+        meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+    except (PlanKeeperCliError, OSError, UnicodeDecodeError):
+        return ""
+    return (meta.get("Kind") or "").strip().lower()
+
+
+def _pipeline_index(kind: str) -> int:
+    """Sort rank for within-group ordering: idea->exec-plan, unclassified last."""
+    try:
+        return VALID_KINDS.index(kind)
+    except ValueError:
+        return len(VALID_KINDS)
+
+
+def _render_grouped(items: list[tuple[str, Path]]) -> int:
+    """Render (display_name, path) items clustered by project slug.
+
+    Group order follows `items`' incoming order via first-encounter: a group is
+    placed where its first (newest) member appears. So single-repo input
+    (list_plans, newest-first) yields newest-project-first; cross-repo input
+    (_all_repos_items, alphabetical-by-repo then newest-within) yields
+    repo-alphabetical then newest-within — matching the flat `--all-repos`
+    listing's own ordering, not a global recency sort. Within a group, members
+    sort along the Kind pipeline, then by filename. The stage column is the
+    frontmatter Kind ('-' when unclassified); Kind is read once per member up
+    front (a stable snapshot — no re-read mid-sort or at print time). Groups
+    print separated by a blank line.
+
+    Grouping key is repo-aware: in cross-repo mode the display name is
+    'repo/filename', so the heading is 'repo/slug' and two repos that happen to
+    share a slug stay distinct groups rather than merging. In single-repo mode
+    the display name is the bare filename, so the heading is the bare slug.
+    """
+    # (display_name, path, kind) — Kind snapshotted once here so the sort key and
+    # the print loop never re-read the file (and can't see a mid-list mutation).
+    groups: dict[str, list[tuple[str, Path, str]]] = {}
+    order: list[str] = []
+    for name, path in items:
+        # display name is 'repo/filename' (cross-repo) or 'filename' (single);
+        # the leading 'repo/' prefix, if any, namespaces the slug.
+        prefix = name[: len(name) - len(path.name)]
+        key = f"{prefix}{plan_group_key(path.name)}"
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append((name, path, _kind_of(path)))
+
+    blocks: list[str] = []
+    for key in order:
+        members = sorted(groups[key], key=lambda npk: (_pipeline_index(npk[2]), npk[1].name))
+        lines = [key]
+        for name, _path, kind in members:
+            lines.append(f"  {(kind or '-'):<10} {name}")
+        blocks.append("\n".join(lines))
+    if blocks:
+        print("\n\n".join(blocks))
     return 0
 
 
@@ -178,6 +248,8 @@ def cmd_list(args) -> int:
         items = _all_repos_items(args.state)
     else:
         items = [(p.name, p) for p in list_plans(explicit, args.state)]
+    if getattr(args, "group", False):
+        return _render_grouped(items)
     return _render_listing(items, raw_filter)
 
 
@@ -343,7 +415,7 @@ def cmd_save(args) -> int:
         date_str = (
             parse_date_arg(args.date) if args.date else date.today().isoformat()
         )
-        target = repo_dir(repo) / f"{date_str}-{slug}.{ext}"
+        target = repo_dir(repo) / plan_filename(date_str, slug, ext, kind)
 
     if target.exists():
         if args.on_collision == "fail":
@@ -1050,7 +1122,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="active",
         help="which subset to list (default: active)",
     )
-    p_list.add_argument(
+    list_view = p_list.add_mutually_exclusive_group()
+    list_view.add_argument(
         "--status",
         help=(
             "comma-separated Status values to keep (e.g. 'in-progress,todo'). "
@@ -1062,6 +1135,16 @@ def build_parser() -> argparse.ArgumentParser:
             "list bare filenames as before."
         ),
     )
+    list_view.add_argument(
+        "--group",
+        action="store_true",
+        help=(
+            "cluster plans by project (shared slug), each stage labelled by its "
+            "Kind and ordered along the idea->exec-plan pipeline. Groups appear "
+            "most-recently-touched first. Human-readable view; mutually "
+            "exclusive with --status."
+        ),
+    )
 
     p_backfill = sub.add_parser(
         "backfill-created",
@@ -1071,7 +1154,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_save = sub.add_parser(
         "save",
-        help="write body (stdin) to ~/plans/<repo>/<date>-<slug>.<ext>",
+        help="write body (stdin) to ~/plans/<repo>/<date>-<slug>.<ext> "
+        "(or <date>-<slug>--<kind>.<ext> with --kind)",
     )
     p_save.add_argument("--override", help="explicit override for <repo>")
     p_save.add_argument(
