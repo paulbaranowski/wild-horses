@@ -424,6 +424,73 @@ class TestCrewStart(IsolatedHomeTestCase):
         self.assertIn("Status: in-progress", active.read_text())
         self.assertIn("Status: done", done.read_text())  # archived untouched
 
+class TestCrewReview(IsolatedHomeTestCase):
+    """`crew review ${id}` resolves the synthesized id (reusing `crew get`'s
+    resolver) and flips that plan's Status to in-review — the markInReview leg
+    of the groundcrew TicketSource adapter (auto-advance on PR open).
+
+    Same id-based interface and resolver as `crew start`: an id can only ever
+    name a plan inside PLAN_ROOT, so no path-traversal guard is needed."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.cli = _import_cli_module()
+
+    def test_crew_review_flips_status_for_resolved_id(self):
+        d = self.home / "plans" / "r"
+        d.mkdir(parents=True)
+        plan = d / "2026-01-01-x.md"
+        plan.write_text("---\nAgent: claude\nStatus: in-progress\n---\n# Title\n")
+        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        result = run_cli("crew", "review", ticket, home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Status: in-review", plan.read_text())
+        self.assertNotIn("Status: in-progress", plan.read_text())
+        # Echoes the resolved path (mirrors `crew start`).
+        self.assertEqual(result.stdout.strip(), str(plan.resolve()))
+
+    def test_crew_review_round_trips_fetched_id(self):
+        """The id fetch emits is the id review consumes — same plan, both ends."""
+        d = self.home / "plans" / "herds"
+        d.mkdir(parents=True)
+        plan = d / "2026-04-30-typed-models.md"
+        plan.write_text("---\nAgent: claude\nStatus: in-progress\n---\n# Typed\n")
+        issues = json.loads(
+            run_cli("crew", "fetch", home=self.home, cwd=self.cwd).stdout
+        )
+        ticket = issues[0]["id"]
+        result = run_cli("crew", "review", ticket, home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Status: in-review", plan.read_text())
+
+    def test_crew_review_missing_id_exits_3(self):
+        """An id no plan maps to → exit 3 (mirrors `crew get`/`crew start`)."""
+        (self.home / "plans" / "r").mkdir(parents=True)
+        result = run_cli("crew", "review", "plan-999999",
+                         home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 3)
+        self.assertEqual(result.stdout, "")  # error goes to stderr
+
+    def test_crew_review_rejects_path_separator(self):
+        """An id can't contain '/' — defends against ../../-style inputs."""
+        result = run_cli("crew", "review", "../escape",
+                         home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("invalid id", result.stderr)
+
+    def test_crew_review_resolves_archived_plan_like_start(self):
+        """The shared resolver finds done/ plans too: `crew review` on a plan
+        that fetch would skip still flips it (resolution globs done/ + active),
+        matching `crew start`'s resolve-anything behavior."""
+        repo = self.home / "plans" / "r"
+        done = repo / "done" / "2026-01-01-x.md"
+        done.parent.mkdir(parents=True)
+        done.write_text("---\nStatus: done\n---\n# X\n")
+        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        result = run_cli("crew", "review", ticket, home=self.home, cwd=self.cwd)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Status: in-review", done.read_text())
+
 class TestQueue(IsolatedHomeTestCase):
     """Cross-repo `queue list` / `queue set` for the plan-crew skill."""
 
