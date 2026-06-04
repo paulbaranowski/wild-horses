@@ -63,6 +63,7 @@ from plan_keeper.naming import (
     derive_repo_full,
     normalize_override,
     plan_filename,
+    plan_group_key,
     slugify_topic,
     validate_extension,
     validate_repo_name,
@@ -96,6 +97,61 @@ def cmd_repo_name(args) -> int:
         print(derive_repo_full(args.cwd))
     else:
         print(derive_repo(args.override, args.cwd))
+    return 0
+
+
+def _kind_of(path: Path) -> str:
+    """Return a plan's lowercased `Kind` frontmatter, or '' if absent/unreadable.
+
+    The filename's `--<kind>` segment is a display/sort convenience; frontmatter
+    is the source of truth for the label, so a hand-renamed file still labels
+    correctly. A parse/read failure degrades to '' (unclassified) rather than
+    breaking the whole listing — same resilience contract as plan_status.
+    """
+    try:
+        meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+    except (PlanKeeperCliError, OSError, UnicodeDecodeError):
+        return ""
+    return (meta.get("Kind") or "").strip().lower()
+
+
+def _pipeline_index(kind: str) -> int:
+    """Sort rank for within-group ordering: idea->exec-plan, unclassified last."""
+    try:
+        return VALID_KINDS.index(kind)
+    except ValueError:
+        return len(VALID_KINDS)
+
+
+def _render_grouped(items: list[tuple[str, Path]]) -> int:
+    """Render (display_name, path) items clustered by project slug.
+
+    Group order = newest member first: `items` arrives newest-first
+    (list_plans sorts by _plan_sort_key, reverse), so first-encounter order of
+    each slug is its newest member's position — preserved. Within a group,
+    members sort along the Kind pipeline, then by filename. The stage column is
+    the frontmatter Kind ('-' when unclassified). Heading is the bare slug, so
+    the same slug in two repos (cross-repo mode) forms two groups that share a
+    heading but list distinct 'repo/filename' members beneath.
+    """
+    groups: dict[str, list[tuple[str, Path]]] = {}
+    order: list[str] = []
+    for name, path in items:
+        key = plan_group_key(path.name)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append((name, path))
+
+    out: list[str] = []
+    for key in order:
+        members = groups[key]
+        members.sort(key=lambda np: (_pipeline_index(_kind_of(np[1])), np[1].name))
+        out.append(key)
+        for name, path in members:
+            out.append(f"  {(_kind_of(path) or '-'):<10} {name}")
+    if out:
+        print("\n".join(out))
     return 0
 
 
@@ -179,6 +235,8 @@ def cmd_list(args) -> int:
         items = _all_repos_items(args.state)
     else:
         items = [(p.name, p) for p in list_plans(explicit, args.state)]
+    if getattr(args, "group", False):
+        return _render_grouped(items)
     return _render_listing(items, raw_filter)
 
 
@@ -1051,7 +1109,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="active",
         help="which subset to list (default: active)",
     )
-    p_list.add_argument(
+    list_view = p_list.add_mutually_exclusive_group()
+    list_view.add_argument(
         "--status",
         help=(
             "comma-separated Status values to keep (e.g. 'in-progress,todo'). "
@@ -1061,6 +1120,16 @@ def build_parser() -> argparse.ArgumentParser:
             "Status counts as 'backlog'. Excluded active plans are summarized "
             "on stderr (aggregated across repos in cross-repo mode). Omit to "
             "list bare filenames as before."
+        ),
+    )
+    list_view.add_argument(
+        "--group",
+        action="store_true",
+        help=(
+            "cluster plans by project (shared slug), each stage labelled by its "
+            "Kind and ordered along the idea->exec-plan pipeline. Groups appear "
+            "most-recently-touched first. Human-readable view; mutually "
+            "exclusive with --status."
         ),
     )
 

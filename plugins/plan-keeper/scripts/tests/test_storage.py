@@ -597,5 +597,54 @@ class TestResolveTicket(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 2)
 
 
+class TestListGrouped(IsolatedHomeTestCase):
+    def _save(self, topic: str, kind: str, body: str = "x\n") -> None:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", topic, "--kind", kind,
+            stdin=f"# {topic}\n{body}", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_groups_stages_of_one_slug_in_pipeline_order(self) -> None:
+        self._save("noun first provider commands", "exec-plan")
+        self._save("noun first provider commands", "design")
+        r = run_cli("list", "--override", "scratch", "--group", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = [ln for ln in r.stdout.split("\n") if ln]
+        # Heading line for the project, then design before exec-plan (pipeline order).
+        self.assertEqual(lines[0], "noun-first-provider-commands")
+        self.assertIn("design", lines[1])
+        self.assertIn("exec-plan", lines[2])
+        self.assertLess(
+            next(i for i, l in enumerate(lines) if "design" in l),
+            next(i for i, l in enumerate(lines) if "exec-plan" in l),
+        )
+
+    def test_separate_slugs_form_separate_groups(self) -> None:
+        self._save("alpha topic", "spec")
+        self._save("beta topic", "spec")
+        r = run_cli("list", "--override", "scratch", "--group", home=self.home)
+        headings = [l for l in r.stdout.split("\n") if l and not l.startswith("  ")]
+        self.assertIn("alpha-topic", headings)
+        self.assertIn("beta-topic", headings)
+
+    def test_legacy_unclassified_file_still_appears(self) -> None:
+        # A bare save (no --kind) groups under its slug with a "-" stage marker.
+        run_cli(
+            "save", "--override", "scratch", "--topic", "legacy plan",
+            stdin="# Legacy\n", home=self.home,
+        )
+        r = run_cli("list", "--override", "scratch", "--group", home=self.home)
+        self.assertIn("legacy-plan", r.stdout)
+
+    def test_group_and_status_are_mutually_exclusive(self) -> None:
+        r = run_cli(
+            "list", "--override", "scratch", "--group", "--status", "todo",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not allowed with", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
