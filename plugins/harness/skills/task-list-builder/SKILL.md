@@ -120,7 +120,7 @@ docs/exec-plans/active/<DATE>-<RUN_ID>-<short-description>.<slug>.json
 docs/exec-plans/active/<DATE>-<RUN_ID>-<short-description>.<slug>.md
 ```
 
-If `docs/exec-plans/active/` does not exist, create it. (Normally `/harness:setup` has already created it.)
+If `docs/exec-plans/active/` does not exist, create it.
 
 ### Rewrite mode
 
