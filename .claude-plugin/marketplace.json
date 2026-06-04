@@ -18,6 +18,16 @@
       "license": "MIT"
     },
     {
+      "name": "autonomous",
+      "source": "./plugins/autonomous",
+      "description": "An autonomous skill that drives a single issue/ticket link or plan file all the way to an opened pull request with no human in the loop: implements, tests, runs an independent sub-agent review to convergence, opens a PR following the target repo's conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
       "name": "linting-hooks",
       "source": "./plugins/linting-hooks",
       "description": "PostToolUse hooks that auto-format .md files with Prettier + markdownlint and type-check .py files with pyright on every edit. Hooks self-guard when tools are missing; /linting-hooks:install sets up the dependencies per machine.",
