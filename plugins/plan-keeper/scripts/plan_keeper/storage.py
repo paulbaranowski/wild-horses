@@ -67,6 +67,33 @@ def find_unused_suffix(target: Path) -> Path:
     )
 
 
+# Lifecycle states and their on-disk home. Active states (backlog/todo/
+# in-progress/in-review) share the repo's top-level directory and are
+# distinguished only by their `Status:` frontmatter; done/deferred are
+# physical subdirectories. The boundary is load-bearing: crew fetch, queue
+# list, and find_plans_by_ticket scan only the active dir (one level deep) to
+# exclude terminal plans without parsing every file's frontmatter.
+ACTIVE_STATES = ("backlog", "todo", "in-progress", "in-review")
+TERMINAL_DIRS = {"done": "done", "deferred": "deferred"}
+LIFECYCLE_STATES = (*ACTIVE_STATES, *TERMINAL_DIRS)
+
+
+def state_subdir(repo_root: Path, state: str) -> Path:
+    """Map a lifecycle state to its directory under `repo_root`.
+
+    Active states (backlog/todo/in-progress/in-review) resolve to `repo_root`
+    itself — they live at the top level and differ only by `Status:`. Terminal
+    states resolve to their named subdirectory (`done/`, `deferred/`). Raises
+    on an unknown state so a typo can't silently land a plan at the root.
+    """
+    if state in ACTIVE_STATES:
+        return repo_root
+    subdir = TERMINAL_DIRS.get(state)
+    if subdir is None:
+        raise PlanKeeperCliError(f"unknown state: {state}", code=2)
+    return repo_root / subdir
+
+
 def list_plans(repo: str, state: str) -> list[Path]:
     """Return sorted plans for a repo in a given state, newest-first.
 
@@ -78,10 +105,8 @@ def list_plans(repo: str, state: str) -> list[Path]:
     base = repo_dir(repo)
     if state == "active":
         d = base
-    elif state == "done":
-        d = base / "done"
-    elif state == "deferred":
-        d = base / "deferred"
+    elif state in TERMINAL_DIRS:
+        d = base / TERMINAL_DIRS[state]
     else:
         raise PlanKeeperCliError(f"unknown state: {state}", code=2)
     if not d.exists():

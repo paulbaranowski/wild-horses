@@ -26,7 +26,6 @@ from plan_keeper.dates import _iso_from_stat, parse_date_arg
 from plan_keeper.errors import HelpfulArgumentParser, PlanKeeperCliError
 from plan_keeper.frontmatter import (
     VALID_KINDS,
-    _FRONTMATTER_FIELDS,
     _inject_default_frontmatter,
     parse_frontmatter,
     serialize_frontmatter,
@@ -69,12 +68,15 @@ from plan_keeper.naming import (
 )
 from plan_keeper.push import push_subcommand
 from plan_keeper.storage import (
+    LIFECYCLE_STATES,
+    TERMINAL_DIRS,
     emit_collision,
     find_unused_suffix,
     list_plans,
     plan_status,
     repo_dir,
     resolve_ticket_to_path,
+    state_subdir,
     write_atomic,
 )
 
@@ -308,7 +310,7 @@ def cmd_save(args) -> int:
                     f"{flag} is incompatible with --from-path "
                     "(--from-path preserves the source bytes verbatim); "
                     f"drop {flag} or drop --from-path "
-                    "(set Kind afterward via `file-meta update --field Kind=...`)",
+                    "(set Kind afterward via `file-meta set --kind ...`)",
                     code=2,
                 )
         source = Path(args.from_path)
@@ -407,51 +409,6 @@ def cmd_save(args) -> int:
     return 0
 
 
-def cmd_archive(args) -> int:
-    if args.ticket:
-        source = resolve_ticket_to_path(args.ticket)
-    else:
-        repo = derive_repo(args.override)
-        if "/" in args.file or "\\" in args.file or args.file in ("", ".", ".."):
-            raise PlanKeeperCliError(
-                f"--file must be a basename only (no path separators), got: {args.file!r}",
-                code=2,
-            )
-        source = repo_dir(repo) / args.file
-    if not source.exists():
-        raise PlanKeeperCliError(f"plan not found: {source}", code=3)
-    if not source.is_file():
-        raise PlanKeeperCliError(f"not a file: {source}", code=3)
-
-    # Destination is the plan's own repo's done/ — correct for both the
-    # repo-scoped --file path and the global --ticket path.
-    target = source.parent / "done" / source.name
-    if target.exists():
-        if args.on_collision == "fail":
-            emit_collision(target)
-            return 2
-        if args.on_collision == "suffix":
-            target = find_unused_suffix(target)
-        # "overwrite" → fall through
-
-    completed = (
-        parse_date_arg(args.completed_date)
-        if args.completed_date
-        else date.today().isoformat()
-    )
-    text = source.read_text(encoding="utf-8")
-    meta, body = parse_frontmatter(text)
-    meta["Completed on"] = completed
-    stamped = serialize_frontmatter(meta, body)
-    if not stamped.endswith("\n"):
-        stamped += "\n"
-
-    write_atomic(target, stamped)
-    source.unlink()
-    print(target)
-    return 0
-
-
 def cmd_ticket_system_config_get(args) -> int:
     repo = derive_repo(None)
     config = load_config(repo)
@@ -509,10 +466,24 @@ def cmd_ticket_system_config_refresh(args) -> int:
     return 0
 
 
-def cmd_file_meta_get(args) -> int:
-    path = Path(args.file)
+def _resolve_file_meta_path(args) -> Path:
+    """Resolve and validate the target for a file-meta subcommand.
+
+    Locate by --ticket (cross-repo) or --file, then assert it's a regular
+    file *before* any read — a directory passes exists() but would crash
+    read_text() with IsADirectoryError. The "not a file" contract (exit 3)
+    keeps every path-taking command failing the same clean way.
+    """
+    path = resolve_ticket_to_path(args.ticket) if args.ticket else Path(args.file)
     if not path.exists():
         raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
+    if not path.is_file():
+        raise PlanKeeperCliError(f"not a file: {path}", code=3)
+    return path
+
+
+def cmd_file_meta_get(args) -> int:
+    path = _resolve_file_meta_path(args)
     text = path.read_text(encoding="utf-8")
     meta, _ = parse_frontmatter(text)
     print(json.dumps(meta))
@@ -520,9 +491,7 @@ def cmd_file_meta_get(args) -> int:
 
 
 def cmd_file_meta_strip(args) -> int:
-    path = Path(args.file)
-    if not path.exists():
-        raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
+    path = _resolve_file_meta_path(args)
     text = path.read_text(encoding="utf-8")
     _, body = parse_frontmatter(text)
     sys.stdout.write(body)
@@ -530,80 +499,41 @@ def cmd_file_meta_strip(args) -> int:
 
 
 def cmd_file_meta_set(args) -> int:
-    # At least one of the set flags must be provided.
-    if (
-        args.ticket is None
-        and args.ticket_system is None
-        and args.completed_on is None
-    ):
+    """Edit plan frontmatter via one self-documenting flag per field.
+
+    The plan is located by `--file` or `--ticket` (the cross-repo locator,
+    consistent with push). `--ticket` is *never* a value — the
+    `Ticket:` frontmatter value is written with `--ticket-id`, so the word
+    "ticket" means the same thing (locate) on every subcommand.
+
+    Inputs are validated (Kind enum, Completed-on date) BEFORE the file is
+    located or read, so a typo fails with exit 2 and never touches the file.
+    The file must already have frontmatter — a bare file is rejected (exit 2)
+    so a half-managed plan can't be created out from under plan-save's
+    Agent/Status/Created defaults.
+    """
+    # Map each value flag to its frontmatter key, in canonical order. Building
+    # this first means validate_kind/parse_date_arg run before any file I/O.
+    updates: list[tuple[str, str]] = []
+    if args.ticket_id is not None:
+        updates.append(("Ticket", args.ticket_id))
+    if args.ticket_system is not None:
+        updates.append(("Ticket System", args.ticket_system))
+    if args.completed_on is not None:
+        updates.append(("Completed on", parse_date_arg(args.completed_on)))
+    if args.agent is not None:
+        updates.append(("Agent", args.agent))
+    if args.status is not None:
+        updates.append(("Status", args.status))
+    if args.kind is not None:
+        updates.append(("Kind", validate_kind(args.kind)))
+    if not updates:
         raise PlanKeeperCliError(
-            "file-meta set requires at least one of --ticket, --ticket-system, --completed-on",
+            "file-meta set requires at least one of --ticket-id, --ticket-system, "
+            "--completed-on, --agent, --status, --kind",
             code=2,
         )
-    path = Path(args.file)
-    if not path.exists():
-        raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
-    text = path.read_text(encoding="utf-8")
-    meta, body = parse_frontmatter(text)  # may raise PlanKeeperCliError(5)
-    if args.ticket is not None:
-        meta["Ticket"] = args.ticket
-    if args.ticket_system is not None:
-        meta["Ticket System"] = args.ticket_system
-    if args.completed_on is not None:
-        # Validate the date format up front to catch typos.
-        meta["Completed on"] = parse_date_arg(args.completed_on)
-    new_text = serialize_frontmatter(meta, body)
-    if not new_text.endswith("\n"):
-        new_text += "\n"
-    write_atomic(path, new_text)
-    print(path)
-    return 0
-
-
-def cmd_file_meta_update(args) -> int:
-    """Generic frontmatter editor. Each --field is 'Key=value'.
-
-    Unlike cmd_file_meta_set (which has per-field flags), this accepts any
-    whitelisted key via a single --field shape. Used by the plan-update
-    skill and by the groundcrew markInProgress wrapper.
-
-    Whitelist semantics: unknown keys are rejected with code 2 before any
-    write. The file must already have frontmatter (no auto-creation) — if
-    it doesn't, the user must re-save via plan-save first so they go
-    through the agent/status defaults path.
-    """
-    if not args.field:
-        raise PlanKeeperCliError(
-            "file-meta update requires at least one --field key=value", code=2,
-        )
-    updates: list[tuple[str, str]] = []
-    for raw in args.field:
-        if "=" not in raw:
-            raise PlanKeeperCliError(
-                f"--field must be key=value (got {raw!r}); add an '=' or quote the value",
-                code=2,
-            )
-        key, _, value = raw.partition("=")
-        key = key.strip()
-        if not key:
-            raise PlanKeeperCliError(
-                f"--field {raw!r}: empty key", code=2,
-            )
-        if key not in _FRONTMATTER_FIELDS:
-            raise PlanKeeperCliError(
-                f"unknown frontmatter field {key!r}: must be one of "
-                + ", ".join(repr(k) for k in _FRONTMATTER_FIELDS),
-                code=2,
-            )
-        if key == "Kind" and value.strip():
-            value = validate_kind(value)
-        updates.append((key, value))
-    if args.ticket:
-        path = resolve_ticket_to_path(args.ticket)
-    else:
-        path = Path(args.file)
-    if not path.exists():
-        raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
+    path = _resolve_file_meta_path(args)
     text = path.read_text(encoding="utf-8")
     if not (text.startswith("---\n") or text.startswith("---\r\n")):
         raise PlanKeeperCliError(
@@ -613,12 +543,58 @@ def cmd_file_meta_update(args) -> int:
     meta, body = parse_frontmatter(text)  # may raise PlanKeeperCliError(5)
     for key, value in updates:
         meta[key] = value
+
+    # A terminal status (done/deferred) is also a location: relocate the plan
+    # into the matching subdir so Status and directory never disagree. Active
+    # statuses are a pure in-place rewrite. `done` stamps Completed on (today,
+    # unless the caller already supplied --completed-on).
+    if args.status in TERMINAL_DIRS:
+        if args.status == "done" and args.completed_on is None:
+            meta["Completed on"] = date.today().isoformat()
+        target = _terminal_target(path, args.status)
+        if target != path and target.exists():
+            if args.on_collision == "fail":
+                emit_collision(target)
+                return 2
+            if args.on_collision == "suffix":
+                target = find_unused_suffix(target)
+            # "overwrite" → write_atomic replaces it below
+    elif args.status is not None and path.parent.name in TERMINAL_DIRS:
+        # Reactivating a terminal plan (moving it back to the active root) is
+        # out of scope. Refuse loudly rather than rewrite in place and leave an
+        # active-status plan parked in done/ or deferred/, where active list,
+        # push --ticket, and ticket resolution would never find it.
+        raise PlanKeeperCliError(
+            f"cannot set active status {args.status!r} on a plan in "
+            f"{path.parent.name}/ — reactivating a {path.parent.name} plan is "
+            f"not supported; move the file back to the active dir first",
+            code=2,
+        )
+    else:
+        target = path
+
     new_text = serialize_frontmatter(meta, body)
     if not new_text.endswith("\n"):
         new_text += "\n"
-    write_atomic(path, new_text)
-    print(path)
+    write_atomic(target, new_text)
+    if target.resolve() != path.resolve():
+        path.unlink()  # relocation: drop the source only after the dest write
+    print(target)
     return 0
+
+
+def _terminal_target(source: Path, status: str) -> Path:
+    """Destination path for relocating `source` to a terminal `status`.
+
+    The repo root is `source`'s parent, unless `source` already sits in a
+    terminal subdir (a caller can pass an explicit `done/x.md` path) — then
+    strip that component so done→deferred relocates to a sibling, never a
+    nested `done/done/`.
+    """
+    repo_root = source.parent
+    if repo_root.name in TERMINAL_DIRS:
+        repo_root = repo_root.parent
+    return state_subdir(repo_root, status) / source.name
 
 
 def cmd_push(args) -> int:
@@ -708,7 +684,7 @@ def cmd_ticket_api(args) -> int:
 # --- groundcrew shell adapter ----------------------------------------------
 
 
-def cmd_groundcrew_fetch(args) -> int:
+def cmd_crew_fetch(args) -> int:
     """Emit a JSON array of issues for groundcrew's shell adapter to consume.
 
     Scans ~/plans/*/*.md (one level deep — skips done/ and deferred/).
@@ -737,7 +713,7 @@ def cmd_groundcrew_fetch(args) -> int:
 _GROUNDCREW_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
-def cmd_groundcrew_resolve_one(args) -> int:
+def cmd_crew_get(args) -> int:
     """Print one issue JSON for `${id}`, exit 3 if not found."""
     if not _GROUNDCREW_ID_RE.match(args.id):
         raise PlanKeeperCliError(
@@ -766,7 +742,7 @@ def cmd_groundcrew_resolve_one(args) -> int:
     return 3
 
 
-def cmd_groundcrew_mark_in_progress(args) -> int:
+def cmd_crew_start(args) -> int:
     """Read {'path': ...} from stdin, flip that plan's Status to in-progress.
 
     Validates the path is a string, absolute, points to a .md file, and
@@ -832,7 +808,7 @@ def cmd_queue_set(args) -> int:
     already names an Agent keeps it. Dequeue (--status backlog) never
     touches Agent.
 
-    Path validation mirrors groundcrew-mark-in-progress: every path must be
+    Path validation mirrors `crew start`: every path must be
     absolute, end in .md, resolve inside PLAN_ROOT, exist, and have
     frontmatter. The whole batch is validated FIRST — if any path is
     invalid, nothing is written (all-or-nothing), so a typo can't leave the
@@ -841,7 +817,7 @@ def cmd_queue_set(args) -> int:
     raw = sys.stdin.read()
     paths = [line.strip() for line in raw.splitlines() if line.strip()]
     if not paths:
-        raise PlanKeeperCliError("queue set: no plan paths on stdin", code=2)
+        raise PlanKeeperCliError("crew queue set: no plan paths on stdin", code=2)
     plan_root = storage.PLAN_ROOT.resolve()
     resolved_paths: list[Path] = []
     for raw_path in paths:
@@ -1048,7 +1024,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="document kind to inject as 'Kind: <value>' frontmatter on "
              "markdown saves. One of: " + ", ".join(VALID_KINDS) + ". "
              "Heredoc + .md shape only — rejected for non-md extensions and "
-             "for --from-path (set Kind afterward via `file-meta update`). "
+             "for --from-path (set Kind afterward via `file-meta set --kind`). "
              "Fill-if-absent: a Kind already in the body is preserved.",
     )
     p_save.add_argument(
@@ -1059,32 +1035,6 @@ def build_parser() -> argparse.ArgumentParser:
         "(default: fail with exit 2; use suffix for next unused -N)",
     )
 
-    p_archive = sub.add_parser(
-        "archive",
-        help="append a completion stamp and move ~/plans/<repo>/<file> to done/",
-    )
-    p_archive.add_argument("--override", help="explicit override for <repo>")
-    archive_target = p_archive.add_mutually_exclusive_group(required=True)
-    archive_target.add_argument(
-        "--file",
-        help="filename (basename only, must live in ~/plans/<repo>/)",
-    )
-    archive_target.add_argument(
-        "--ticket",
-        help="ticket id (e.g. plan-195..., ENG-123); resolved across all "
-             "repos via Ticket: frontmatter. --override is ignored with --ticket.",
-    )
-    p_archive.add_argument(
-        "--on-collision",
-        choices=["fail", "suffix", "overwrite"],
-        default="fail",
-        help="what to do if a same-name file exists in done/ (default: fail)",
-    )
-    p_archive.add_argument(
-        "--completed-date",
-        help="YYYY-MM-DD date for the completion stamp (default: today)",
-    )
-
     p_file_meta = sub.add_parser("file-meta", help="read/write/strip plan-file frontmatter")
     file_meta_sub = p_file_meta.add_subparsers(
         dest="file_meta_cmd",
@@ -1093,37 +1043,59 @@ def build_parser() -> argparse.ArgumentParser:
         parser_class=HelpfulArgumentParser,
     )
 
-    p_fm_get = file_meta_sub.add_parser("get", help="print frontmatter as JSON")
-    p_fm_get.add_argument("--file", required=True, help="path to a plan .md file")
+    def _add_locator(p) -> None:
+        """Add the shared `--file | --ticket` locator group (exactly one).
 
-    p_fm_set = file_meta_sub.add_parser("set", help="write or update plan frontmatter")
-    p_fm_set.add_argument("--file", required=True)
-    p_fm_set.add_argument("--ticket", help="ticket identifier (e.g., ENG-123)")
-    p_fm_set.add_argument("--ticket-system", choices=["linear", "jira"], help="ticket system")
-    p_fm_set.add_argument("--completed-on", help="completion date YYYY-MM-DD")
+        `--ticket` locates a plan by its Ticket: frontmatter across all repos
+        — the same meaning it has on push, so the flag never doubles
+        as a value setter (set writes the Ticket value via --ticket-id).
+        """
+        g = p.add_mutually_exclusive_group(required=True)
+        g.add_argument("--file", help="path to a plan .md file")
+        g.add_argument(
+            "--ticket",
+            help="locate the plan by its Ticket: frontmatter across all repos "
+                 "(alternative to --file)",
+        )
+
+    p_fm_get = file_meta_sub.add_parser("get", help="print frontmatter as JSON")
+    _add_locator(p_fm_get)
+
+    p_fm_set = file_meta_sub.add_parser(
+        "set", help="edit plan frontmatter (one flag per field)"
+    )
+    _add_locator(p_fm_set)
+    p_fm_set.add_argument("--agent", help="set Agent")
+    p_fm_set.add_argument(
+        "--status",
+        choices=list(LIFECYCLE_STATES),
+        help="set Status. Active states (backlog/todo/in-progress/in-review) "
+             "rewrite in place; 'done'/'deferred' relocate the plan into "
+             "done/ or deferred/ ('done' also stamps Completed on).",
+    )
+    p_fm_set.add_argument(
+        "--on-collision",
+        choices=["fail", "suffix", "overwrite"],
+        default="fail",
+        help="when --status relocates to done/ or deferred/ and a same-name "
+             "file already exists there: fail (default), suffix (-N), or overwrite",
+    )
+    p_fm_set.add_argument(
+        "--kind",
+        help="set Kind; one of: " + ", ".join(VALID_KINDS),
+    )
+    p_fm_set.add_argument("--completed-on", help="set Completed on (YYYY-MM-DD)")
+    p_fm_set.add_argument(
+        "--ticket-system", choices=["linear", "jira"], help="set Ticket System"
+    )
+    p_fm_set.add_argument(
+        "--ticket-id",
+        help="set the Ticket: value (distinct from --ticket, which locates a "
+             "plan; use --ticket-id to record an issue id like ENG-123)",
+    )
 
     p_fm_strip = file_meta_sub.add_parser("strip", help="print body without frontmatter")
-    p_fm_strip.add_argument("--file", required=True)
-
-    p_fm_update = file_meta_sub.add_parser(
-        "update",
-        help="apply --field Key=value updates to plan frontmatter "
-             "(any whitelisted field)",
-    )
-    fm_update_target = p_fm_update.add_mutually_exclusive_group(required=True)
-    fm_update_target.add_argument("--file", help="path to a plan file")
-    fm_update_target.add_argument(
-        "--ticket",
-        help="locate the plan by its Ticket: frontmatter across all repos "
-             "(alternative to --file)",
-    )
-    p_fm_update.add_argument(
-        "--field",
-        action="append",
-        metavar="Key=value",
-        help="frontmatter field to set (repeat for multiple fields); "
-             "Key must be one of: " + ", ".join(_FRONTMATTER_FIELDS),
-    )
+    _add_locator(p_fm_strip)
 
     p_tsc = sub.add_parser(
         "ticket-system-config",
@@ -1185,38 +1157,54 @@ def build_parser() -> argparse.ArgumentParser:
         help="ignore existing Ticket frontmatter and create a fresh ticket",
     )
 
-    sub.add_parser(
-        "groundcrew-fetch",
+    # `crew` groups the groundcrew dispatch adapter (fetch/get/start — the
+    # machine protocol the crew.config.ts shell wrappers call) with the
+    # cross-repo `queue` manager the plan-crew skill drives. fetch/get/start
+    # deliberately avoid list/get/set naming: fetch and start both mutate
+    # (fetch stamps the groundcrew Ticket; start flips Status), so a read-only
+    # `list`/`get` label would mislead — and `crew queue list`/`crew queue set` are the
+    # genuinely read-only / general-write pair.
+    p_crew = sub.add_parser(
+        "crew",
+        help="groundcrew dispatch adapter (fetch/get/start) + cross-repo queue",
+    )
+    crew_sub = p_crew.add_subparsers(
+        dest="crew_cmd", required=True, metavar="<subcommand>",
+        parser_class=HelpfulArgumentParser,
+    )
+
+    crew_sub.add_parser(
+        "fetch",
         help="emit shell-adapter JSON array of active plans (for crew.config.ts fetch)",
     )
 
-    p_gc_one = sub.add_parser(
-        "groundcrew-resolve-one",
+    p_crew_get = crew_sub.add_parser(
+        "get",
         help="emit one shell-adapter issue JSON for ${id}, or exit 3 if missing",
     )
-    p_gc_one.add_argument("id", help="synthesized plan id (plan-<digits>, from fetch)")
+    p_crew_get.add_argument("id", help="synthesized plan id (plan-<digits>, from fetch)")
 
-    sub.add_parser(
-        "groundcrew-mark-in-progress",
+    crew_sub.add_parser(
+        "start",
         help="flip Status to in-progress on a plan named by stdin sourceRef JSON",
     )
 
-    p_queue = sub.add_parser(
+    p_crew_queue = crew_sub.add_parser(
         "queue",
         help="cross-repo groundcrew queue: list active plans / set Status in bulk",
     )
-    queue_sub = p_queue.add_subparsers(
+    crew_queue_sub = p_crew_queue.add_subparsers(
         dest="queue_cmd", required=True, metavar="<subcommand>",
         parser_class=HelpfulArgumentParser,
     )
 
-    _ = queue_sub.add_parser(
+    crew_queue_sub.add_parser(
         "list",
         help="emit JSON array of active plans across all repos "
              "(repo/file/status/agent)",
     )
 
-    p_queue_set = queue_sub.add_parser(
+    p_queue_set = crew_queue_sub.add_parser(
         "set",
         help="set Status on plans named by newline-delimited stdin paths",
     )
@@ -1240,7 +1228,6 @@ _FILE_META_DISPATCH = {
     "get": cmd_file_meta_get,
     "set": cmd_file_meta_set,
     "strip": cmd_file_meta_strip,
-    "update": cmd_file_meta_update,
 }
 
 _TICKET_SYSTEM_CONFIG_DISPATCH = {
@@ -1255,6 +1242,13 @@ _QUEUE_DISPATCH = {
     "set": cmd_queue_set,
 }
 
+_CREW_DISPATCH = {
+    "fetch": cmd_crew_fetch,
+    "get": cmd_crew_get,
+    "start": cmd_crew_start,
+    "queue": lambda a: _QUEUE_DISPATCH[a.queue_cmd](a),
+}
+
 
 def main() -> int:
     parser = build_parser()
@@ -1265,15 +1259,11 @@ def main() -> int:
         "list-repos": cmd_list_repos,
         "backfill-created": cmd_backfill_created,
         "save": cmd_save,
-        "archive": cmd_archive,
         "file-meta": lambda a: _FILE_META_DISPATCH[a.file_meta_cmd](a),
         "ticket-system-config": lambda a: _TICKET_SYSTEM_CONFIG_DISPATCH[a.tsc_cmd](a),
         "ticket-api": cmd_ticket_api,
         "push": cmd_push,
-        "groundcrew-fetch": cmd_groundcrew_fetch,
-        "groundcrew-resolve-one": cmd_groundcrew_resolve_one,
-        "groundcrew-mark-in-progress": cmd_groundcrew_mark_in_progress,
-        "queue": lambda a: _QUEUE_DISPATCH[a.queue_cmd](a),
+        "crew": lambda a: _CREW_DISPATCH[a.crew_cmd](a),
     }
     try:
         return dispatch[args.cmd](args)

@@ -141,7 +141,7 @@ def _plan_to_issue(path: Path) -> Optional[dict]:
     adapter_status = _GROUNDCREW_STATUS_MAP.get(raw_status, "other")
     title = _extract_h1_safe(body) or path.stem
     # repo is the grandparent for archived/paused plans (done/, deferred/), so
-    # groundcrew-resolve-one reports the real repo, not "done"/"deferred".
+    # `crew get` reports the real repo, not "done"/"deferred".
     repo_name = _repo_for_plan(path)
     return {
         "id": groundcrew_id(repo_name, path.stem),

@@ -36,7 +36,7 @@ class TestAllowScript(unittest.TestCase):
 
     def test_dev_path_single_quoted(self) -> None:
         self.assert_match(
-            "python3 '/repo/plugins/plan-keeper/scripts/plan_keeper_cli.py' archive --file foo.md"
+            "python3 '/repo/plugins/plan-keeper/scripts/plan_keeper_cli.py' file-meta set --status done --file foo.md"
         )
 
     def test_installed_cache_path(self) -> None:

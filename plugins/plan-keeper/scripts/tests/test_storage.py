@@ -8,10 +8,35 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from support import (
+from support import (  # noqa: F401 — also inserts scripts/ onto sys.path
     IsolatedHomeTestCase,
     run_cli,
 )
+
+from plan_keeper import storage  # noqa: E402 — after support's path insert
+from plan_keeper.errors import PlanKeeperCliError  # noqa: E402
+
+
+class TestStateSubdir(unittest.TestCase):
+    """state_subdir maps a lifecycle state to its on-disk directory."""
+
+    def test_active_states_resolve_to_repo_root(self) -> None:
+        root = Path("/plans/myrepo")
+        for state in ("backlog", "todo", "in-progress", "in-review"):
+            self.assertEqual(storage.state_subdir(root, state), root)
+
+    def test_done_resolves_to_done_subdir(self) -> None:
+        root = Path("/plans/myrepo")
+        self.assertEqual(storage.state_subdir(root, "done"), root / "done")
+
+    def test_deferred_resolves_to_deferred_subdir(self) -> None:
+        root = Path("/plans/myrepo")
+        self.assertEqual(storage.state_subdir(root, "deferred"), root / "deferred")
+
+    def test_unknown_state_raises_code_2(self) -> None:
+        with self.assertRaises(PlanKeeperCliError) as ctx:
+            storage.state_subdir(Path("/plans/myrepo"), "bogus")
+        self.assertEqual(ctx.exception.code, 2)
 
 
 class TestList(IsolatedHomeTestCase):
@@ -48,7 +73,8 @@ class TestList(IsolatedHomeTestCase):
             stdin="x\n", home=self.home,
         )
         fname = Path(r.stdout.strip()).name
-        run_cli("archive", "--override", "scratch", "--file", fname, home=self.home)
+        run_cli("file-meta", "set", "--status", "done",
+                "--file", str(self.plans_root / "scratch" / fname), home=self.home)
         active = run_cli("list", "--override", "scratch", home=self.home)
         done = run_cli("list", "--override", "scratch", "--state", "done", home=self.home)
         self.assertEqual(active.stdout, "")
@@ -61,7 +87,8 @@ class TestList(IsolatedHomeTestCase):
             stdin="x\n", home=self.home,
         )
         fname = Path(r.stdout.strip()).name
-        run_cli("archive", "--override", "scratch", "--file", fname, home=self.home)
+        run_cli("file-meta", "set", "--status", "done",
+                "--file", str(self.plans_root / "scratch" / fname), home=self.home)
         # Save a fresh active plan
         run_cli(
             "save", "--override", "scratch", "--topic", "still active",
@@ -274,7 +301,8 @@ class TestListCrossRepo(IsolatedHomeTestCase):
     def test_cross_repo_respects_state_done(self) -> None:
         res = run_cli("save", "--override", "alpha", "--topic", "to archive", stdin="x\n", home=self.home)
         fname = Path(res.stdout.strip()).name
-        run_cli("archive", "--override", "alpha", "--file", fname, home=self.home)
+        run_cli("file-meta", "set", "--status", "done",
+                "--file", str(self.plans_root / "alpha" / fname), home=self.home)
         run_cli("save", "--override", "beta", "--topic", "active one", stdin="x\n", home=self.home)
         done = run_cli("list", "--state", "done", home=self.home, cwd=self.cwd)
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -318,7 +346,7 @@ class TestListRepos(IsolatedHomeTestCase):
         run_cli("save", "--override", "alpha", "--topic", "a", stdin="x\n", home=self.home)
         run_cli("save", "--override", "alpha", "--topic", "b", stdin="x\n", home=self.home)
         r = run_cli("save", "--override", "beta", "--topic", "c", stdin="x\n", home=self.home)
-        run_cli("archive", "--override", "beta", "--file", Path(r.stdout.strip()).name, home=self.home)
+        run_cli("file-meta", "set", "--status", "done", "--file", r.stdout.strip(), home=self.home)
         out = run_cli("list-repos", home=self.home)
         self.assertEqual(out.returncode, 0, out.stderr)
         lines = out.stdout.strip().split("\n")
@@ -424,10 +452,11 @@ class TestListIntraDayOrder(IsolatedHomeTestCase):
         self._write("2026-06-02-apple.md", "2026-06-02T15:00:00Z")
         self._write("2026-06-02-zebra.md", "2026-06-02T09:00:00Z")
         d = self.plans_root / "scratch"
-        run_cli(
-            "file-meta", "update", "--file", str(d / "2026-06-02-zebra.md"),
-            "--field", "Status=in-progress", home=self.home,
+        mutate = run_cli(
+            "file-meta", "set", "--file", str(d / "2026-06-02-zebra.md"),
+            "--status", "in-progress", home=self.home,
         )
+        self.assertEqual(mutate.returncode, 0, mutate.stderr)
         r = run_cli("list", "--override", "scratch", home=self.home)
         self.assertEqual(
             r.stdout.strip().split("\n"),
@@ -440,67 +469,116 @@ class TestResolveTicket(IsolatedHomeTestCase):
                     stdin="# Body\ntext\n", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
         path = Path(r.stdout.strip())
-        u = run_cli("file-meta", "update", "--file", str(path),
-                    "--field", f"Ticket={ticket}", home=self.home)
+        u = run_cli("file-meta", "set", "--file", str(path),
+                    "--ticket-id", ticket, home=self.home)
         self.assertEqual(u.returncode, 0, u.stderr)
         return path
 
-    def test_archive_by_groundcrew_ticket(self) -> None:
+    def test_set_done_by_groundcrew_ticket(self) -> None:
         src = self._save_with_ticket("scratch", "p1", "plan-195296912509085")
-        r = run_cli("archive", "--ticket", "plan-195296912509085", home=self.home)
+        r = run_cli("file-meta", "set", "--status", "done",
+                    "--ticket", "plan-195296912509085", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
         target = self.plans_root / "scratch" / "done" / src.name
         self.assertEqual(r.stdout.strip(), str(target))
         self.assertTrue(target.exists())
         self.assertFalse(src.exists())
 
-    def test_archive_by_linear_ticket(self) -> None:
+    def test_set_done_by_linear_ticket(self) -> None:
         src = self._save_with_ticket("scratch", "p2", "ENG-42")
-        r = run_cli("archive", "--ticket", "ENG-42", home=self.home)
+        r = run_cli("file-meta", "set", "--status", "done",
+                    "--ticket", "ENG-42", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue((self.plans_root / "scratch" / "done" / src.name).exists())
 
-    def test_archive_ticket_not_found_exits_3(self) -> None:
-        r = run_cli("archive", "--ticket", "plan-000", home=self.home)
+    def test_set_done_ticket_not_found_exits_3(self) -> None:
+        r = run_cli("file-meta", "set", "--status", "done",
+                    "--ticket", "plan-000", home=self.home)
         self.assertEqual(r.returncode, 3)
         self.assertIn("no active plan", r.stderr)
 
-    def test_archive_ticket_multi_match_exits_2(self) -> None:
+    def test_set_done_ticket_multi_match_exits_2(self) -> None:
         self._save_with_ticket("scratch", "a", "DUP-1")
         self._save_with_ticket("other", "b", "DUP-1")
-        r = run_cli("archive", "--ticket", "DUP-1", home=self.home)
+        r = run_cli("file-meta", "set", "--status", "done",
+                    "--ticket", "DUP-1", home=self.home)
         self.assertEqual(r.returncode, 2)
         self.assertIn("matches 2 plans", r.stderr)
 
-    def test_archive_both_file_and_ticket_exits_2(self) -> None:
-        r = run_cli("archive", "--override", "scratch",
+    def test_set_both_file_and_ticket_exits_2(self) -> None:
+        r = run_cli("file-meta", "set", "--status", "done",
                     "--file", "x.md", "--ticket", "plan-1", home=self.home)
         self.assertEqual(r.returncode, 2)
 
-    def test_archive_neither_file_nor_ticket_exits_2(self) -> None:
-        r = run_cli("archive", "--override", "scratch", home=self.home)
+    def test_set_neither_file_nor_ticket_exits_2(self) -> None:
+        r = run_cli("file-meta", "set", "--status", "done", home=self.home)
         self.assertEqual(r.returncode, 2)
 
-    def test_file_meta_update_by_ticket(self) -> None:
+    def test_file_meta_set_status_by_ticket(self) -> None:
         src = self._save_with_ticket("scratch", "u", "plan-77")
-        r = run_cli("file-meta", "update", "--ticket", "plan-77",
-                    "--field", "Status=todo", home=self.home)
+        r = run_cli("file-meta", "set", "--ticket", "plan-77",
+                    "--status", "todo", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
         meta = run_cli("file-meta", "get", "--file", str(src), home=self.home)
         self.assertIn('"Status": "todo"', meta.stdout)
 
-    def test_file_meta_update_ticket_not_found_exits_3(self) -> None:
-        r = run_cli("file-meta", "update", "--ticket", "plan-nope",
-                    "--field", "Status=todo", home=self.home)
-        self.assertEqual(r.returncode, 3)
-
-    def test_file_meta_update_both_file_and_ticket_exits_2(self) -> None:
-        r = run_cli("file-meta", "update", "--file", "x.md",
-                    "--ticket", "plan-1", "--field", "Status=todo", home=self.home)
+    def test_file_meta_set_both_file_and_ticket_exits_2(self) -> None:
+        r = run_cli("file-meta", "set", "--file", "x.md",
+                    "--ticket", "plan-1", "--status", "todo", home=self.home)
         self.assertEqual(r.returncode, 2)
 
-    def test_file_meta_update_neither_file_nor_ticket_exits_2(self) -> None:
-        r = run_cli("file-meta", "update", "--field", "Status=todo", home=self.home)
+    def test_file_meta_get_by_ticket(self) -> None:
+        self._save_with_ticket("scratch", "g", "plan-88")
+        r = run_cli("file-meta", "get", "--ticket", "plan-88", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('"Ticket": "plan-88"', r.stdout)
+
+    def test_file_meta_get_ticket_not_found_exits_3(self) -> None:
+        r = run_cli("file-meta", "get", "--ticket", "plan-nope", home=self.home)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("no active plan", r.stderr)
+
+    def test_file_meta_get_both_file_and_ticket_exits_2(self) -> None:
+        r = run_cli("file-meta", "get", "--file", "x.md",
+                    "--ticket", "plan-1", home=self.home)
+        self.assertEqual(r.returncode, 2)
+
+    def test_file_meta_get_neither_file_nor_ticket_exits_2(self) -> None:
+        r = run_cli("file-meta", "get", home=self.home)
+        self.assertEqual(r.returncode, 2)
+
+    def test_file_meta_strip_by_ticket(self) -> None:
+        self._save_with_ticket("scratch", "s", "plan-99")
+        r = run_cli("file-meta", "strip", "--ticket", "plan-99", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "# Body\ntext\n")
+
+    def test_file_meta_strip_ticket_not_found_exits_3(self) -> None:
+        r = run_cli("file-meta", "strip", "--ticket", "plan-nope", home=self.home)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("no active plan", r.stderr)
+
+    def test_file_meta_strip_neither_file_nor_ticket_exits_2(self) -> None:
+        r = run_cli("file-meta", "strip", home=self.home)
+        self.assertEqual(r.returncode, 2)
+
+    def test_file_meta_set_by_ticket(self) -> None:
+        src = self._save_with_ticket("scratch", "se", "plan-66")
+        r = run_cli("file-meta", "set", "--ticket", "plan-66",
+                    "--completed-on", "2026-06-02", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        meta = run_cli("file-meta", "get", "--file", str(src), home=self.home)
+        self.assertIn('"Completed on": "2026-06-02"', meta.stdout)
+
+    def test_file_meta_set_ticket_not_found_exits_3(self) -> None:
+        r = run_cli("file-meta", "set", "--ticket", "plan-nope",
+                    "--completed-on", "2026-06-02", home=self.home)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("no active plan", r.stderr)
+
+    def test_file_meta_set_neither_file_nor_ticket_exits_2(self) -> None:
+        r = run_cli("file-meta", "set", "--completed-on", "2026-06-02",
+                    home=self.home)
         self.assertEqual(r.returncode, 2)
 
     def test_push_ticket_not_found_exits_3(self) -> None:

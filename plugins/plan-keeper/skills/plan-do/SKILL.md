@@ -163,8 +163,8 @@ Reorder 1–3 so the recommended engine is first; keep its `[recommended]` tag a
 Once the user has confirmed a route (any next skill — `brainstorming`, `writing-plans`, or an execution engine), **first** flip the plan's status so it stops showing up as "to start" and starts showing up in `plan-done`'s finish list:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta update \
-  --file ~/plans/<repo>/<filename> --field Status=in-progress
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set \
+  --file ~/plans/<repo>/<filename> --status in-progress
 ```
 
 `--file` takes the **full path** (no `--override` here — `file-meta` resolves the path directly). `--ticket <id>` is an alternative to `--file`: it locates the plan by its `Ticket:` frontmatter across all repos (exactly one of the two is required). Do this only when you are about to hand off to a skill. **Do not** mark in-progress on the manual-steer path (the user hasn't committed to working it through a skill yet) or before the user has confirmed.
