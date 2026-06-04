@@ -60,7 +60,7 @@
     {
       "name": "plan-keeper",
       "source": "./plugins/plan-keeper",
-      "description": "Organize markdown plans in ~/plans/<repo>/. plan-save captures the latest plan from a conversation; plan-do lists and routes a saved plan to the right next superpowers/harness skill based on its shape (idea / spec / impl plan / task-list); plan-done archives a completed plan into ~/plans/<repo>/done/ with a completion stamp.",
+      "description": "Organize markdown plans in ~/plans/<repo>/. plan-save captures the latest plan from a conversation; plan-do lists and routes a saved plan to the right next superpowers/harness skill based on its shape (idea / spec / impl plan / task-list); plan-done archives a completed plan into ~/plans/<repo>/done/ with a completion stamp; plan-linear and plan-jira file a plan as a Linear or Jira ticket.",
       "author": {
         "name": "Paul Baranowski"
       },

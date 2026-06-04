@@ -1,6 +1,6 @@
 # Ticket systems
 
-`/plan-push` supports pushing plans as tickets to either **Linear** or **Jira**. Per-repo configuration lives at `~/plans/<repo>/.plankeeper.json`. This doc describes the schema, the field meanings, and the API surface plan-keeper actually uses.
+`/plan-linear` and `/plan-jira` push plans as tickets to **Linear** and **Jira** respectively. Per-repo configuration lives at `~/plans/<repo>/.plankeeper.json`. This doc describes the schema, the field meanings, and the API surface plan-keeper actually uses.
 
 ## Config schema
 
@@ -8,7 +8,7 @@ Two top-level keys (`linear`, `jira`) are independently optional. Each section h
 
 - **Credentials** — the keys to talk to the API.
 - **`defaults`** — the IDs that get sent to the API on `push`.
-- **`cache`** — the available teams/projects/labels/users, populated by `ticket-system-config refresh`. Used as the picker's data source during setup.
+- **`cache`** — the available teams/projects/labels/users, populated by `<provider> config refresh`. Used as the picker's data source during setup.
 
 ### Linear
 
@@ -63,11 +63,11 @@ Two top-level keys (`linear`, `jira`) are independently optional. Each section h
 
 ## File permission
 
-`ticket-system-config save` enforces `chmod 600` on `.plankeeper.json` after every write. If the chmod fails (e.g., on a filesystem that doesn't support POSIX modes), the write still succeeds but a warning is printed to stderr.
+`<provider> config save` enforces `chmod 600` on `.plankeeper.json` after every write. If the chmod fails (e.g., on a filesystem that doesn't support POSIX modes), the write still succeeds but a warning is printed to stderr.
 
 ## Cache staleness
 
-`cache.refreshedAt` is ISO 8601 UTC. The `plan-push` SKILL.md surfaces "cache is N days old; refresh?" in setup re-runs if the value is older than 14 days. Plain push does not check staleness — it trusts that `defaults` are still valid until the API tells it otherwise.
+`cache.refreshedAt` is ISO 8601 UTC. The `plan-linear` / `plan-jira` SKILL.md surfaces "cache is N days old; refresh?" in setup re-runs if the value is older than 14 days. Plain push does not check staleness — it trusts that `defaults` are still valid until the API tells it otherwise.
 
 ## API surface plan-keeper uses
 

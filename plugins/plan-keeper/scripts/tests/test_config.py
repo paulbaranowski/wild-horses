@@ -14,14 +14,6 @@ from support import (
 
 
 class TestTicketSystemConfig(IsolatedHomeTestCase):
-    def test_list_no_config(self) -> None:
-        result = run_cli(
-            "ticket-system-config", "list",
-            home=self.home, cwd=self.cwd,
-        )
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(json.loads(result.stdout), [])
-
     def test_save_then_get_redacts_secrets_by_default(self) -> None:
         # Linear: apiKey masked.
         linear_payload = (
@@ -29,12 +21,12 @@ class TestTicketSystemConfig(IsolatedHomeTestCase):
             '"cache": {"teams": [{"id": "t", "name": "Eng"}]}}'
         )
         result = run_cli(
-            "ticket-system-config", "save", "--name", "linear",
+            "linear", "config", "save",
             stdin=linear_payload, home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         result = run_cli(
-            "ticket-system-config", "get", "--name", "linear",
+            "linear", "config", "get",
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 0)
@@ -48,12 +40,12 @@ class TestTicketSystemConfig(IsolatedHomeTestCase):
             '"defaults": {"projectKey": "HERDS"}}'
         )
         result = run_cli(
-            "ticket-system-config", "save", "--name", "jira",
+            "jira", "config", "save",
             stdin=jira_payload, home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         result = run_cli(
-            "ticket-system-config", "get", "--name", "jira",
+            "jira", "config", "get",
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 0)
@@ -64,12 +56,12 @@ class TestTicketSystemConfig(IsolatedHomeTestCase):
     def test_get_show_secrets_reveals_credentials(self) -> None:
         # Linear: apiKey visible with --show-secrets.
         run_cli(
-            "ticket-system-config", "save", "--name", "linear",
+            "linear", "config", "save",
             stdin='{"apiKey": "k", "defaults": {"teamId": "t"}}',
             home=self.home, cwd=self.cwd,
         )
         result = run_cli(
-            "ticket-system-config", "get", "--name", "linear", "--show-secrets",
+            "linear", "config", "get", "--show-secrets",
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 0)
@@ -78,12 +70,12 @@ class TestTicketSystemConfig(IsolatedHomeTestCase):
 
         # Jira: apiToken visible with --show-secrets.
         run_cli(
-            "ticket-system-config", "save", "--name", "jira",
+            "jira", "config", "save",
             stdin='{"site": "x.atlassian.net", "email": "p@x.com", "apiToken": "j"}',
             home=self.home, cwd=self.cwd,
         )
         result = run_cli(
-            "ticket-system-config", "get", "--name", "jira", "--show-secrets",
+            "jira", "config", "get", "--show-secrets",
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 0)
@@ -92,38 +84,13 @@ class TestTicketSystemConfig(IsolatedHomeTestCase):
 
     def test_get_missing_system_exits_3(self) -> None:
         result = run_cli(
-            "ticket-system-config", "get", "--name", "linear",
+            "linear", "config", "get",
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 3)
 
-    def test_list_after_save_returns_configured(self) -> None:
-        run_cli(
-            "ticket-system-config", "save", "--name", "linear",
-            stdin='{"apiKey": "k"}',
-            home=self.home, cwd=self.cwd,
-        )
-        result = run_cli(
-            "ticket-system-config", "list",
-            home=self.home, cwd=self.cwd,
-        )
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(json.loads(result.stdout), ["linear"])
-
-    def test_save_then_list_two_systems(self) -> None:
-        run_cli("ticket-system-config", "save", "--name", "linear",
-                stdin='{"apiKey": "k1"}', home=self.home, cwd=self.cwd)
-        run_cli("ticket-system-config", "save", "--name", "jira",
-                stdin='{"apiToken": "t"}', home=self.home, cwd=self.cwd)
-        result = run_cli(
-            "ticket-system-config", "list",
-            home=self.home, cwd=self.cwd,
-        )
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(sorted(json.loads(result.stdout)), ["jira", "linear"])
-
     def test_save_sets_chmod_600(self) -> None:
-        run_cli("ticket-system-config", "save", "--name", "linear",
+        run_cli("linear", "config", "save",
                 stdin='{"apiKey": "k"}', home=self.home, cwd=self.cwd)
         repo_dir = self.plans_root / "workdir"
         config = repo_dir / ".plankeeper.json"
@@ -133,7 +100,7 @@ class TestTicketSystemConfig(IsolatedHomeTestCase):
 
     def test_save_rejects_invalid_json(self) -> None:
         result = run_cli(
-            "ticket-system-config", "save", "--name", "linear",
+            "linear", "config", "save",
             stdin="not json",
             home=self.home, cwd=self.cwd,
         )

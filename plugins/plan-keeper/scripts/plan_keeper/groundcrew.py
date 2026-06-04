@@ -87,7 +87,7 @@ def _apply_groundcrew_ticket(meta: dict[str, str], ticket: str) -> bool:
     meta dict, returning True iff it changed.
 
     Claims the pair only when it's empty or already ``groundcrew``; a
-    ``linear``/``jira`` reference (written by plan-push) — or an orphan
+    ``linear``/``jira`` reference (written by plan-linear/plan-jira) — or an orphan
     ``Ticket`` under no system — is left untouched, so a tracked plan keeps
     its real reference and still dispatches via the recomputed id.
     """
@@ -104,7 +104,7 @@ def _apply_groundcrew_ticket(meta: dict[str, str], ticket: str) -> bool:
 
 def _stamp_groundcrew_ticket(path: Path, ticket: str) -> None:
     """Mirror the synthesized id into the plan's `Ticket` / `Ticket System`
-    frontmatter (the same pair plan-push uses), so a human can see which plan
+    frontmatter (the same pair plan-linear/plan-jira use), so a human can see which plan
     a ``plan-<n>`` id maps to.
 
     Display-only and self-healing: ``groundcrew_id()`` stays the canonical id,

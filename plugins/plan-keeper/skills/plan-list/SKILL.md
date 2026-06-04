@@ -84,5 +84,5 @@ Output is one repo per line with state counts (e.g., `herds: active=15 done=22 d
 
 ## Notes
 
-- `plan-list` is the read-only inventory view; the rest of the family acts on plans: `plan-do` starts one, `plan-crew` manages the groundcrew queue, `plan-update` edits frontmatter, `plan-done` archives, `plan-save` creates, `plan-push` files a ticket. All share the same CLI and the same `~/plans/<repo>/` tree.
+- `plan-list` is the read-only inventory view; the rest of the family acts on plans: `plan-do` starts one, `plan-crew` manages the groundcrew queue, `plan-update` edits frontmatter, `plan-done` archives, `plan-save` creates, `plan-linear`/`plan-jira` file a ticket. All share the same CLI and the same `~/plans/<repo>/` tree.
 - The `<repo>` derivation works correctly inside git worktrees — all worktrees of a project share the `origin` remote and resolve to the same `~/plans/<repo>/` folder.
