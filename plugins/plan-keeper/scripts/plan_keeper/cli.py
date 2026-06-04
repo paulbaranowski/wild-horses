@@ -26,7 +26,6 @@ from plan_keeper.dates import _iso_from_stat, parse_date_arg
 from plan_keeper.errors import HelpfulArgumentParser, PlanKeeperCliError
 from plan_keeper.frontmatter import (
     VALID_KINDS,
-    _FRONTMATTER_FIELDS,
     _inject_default_frontmatter,
     parse_frontmatter,
     serialize_frontmatter,
@@ -308,7 +307,7 @@ def cmd_save(args) -> int:
                     f"{flag} is incompatible with --from-path "
                     "(--from-path preserves the source bytes verbatim); "
                     f"drop {flag} or drop --from-path "
-                    "(set Kind afterward via `file-meta update --field Kind=...`)",
+                    "(set Kind afterward via `file-meta set --kind ...`)",
                     code=2,
                 )
         source = Path(args.from_path)
@@ -510,7 +509,7 @@ def cmd_ticket_system_config_refresh(args) -> int:
 
 
 def cmd_file_meta_get(args) -> int:
-    path = Path(args.file)
+    path = resolve_ticket_to_path(args.ticket) if args.ticket else Path(args.file)
     if not path.exists():
         raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
     text = path.read_text(encoding="utf-8")
@@ -520,7 +519,7 @@ def cmd_file_meta_get(args) -> int:
 
 
 def cmd_file_meta_strip(args) -> int:
-    path = Path(args.file)
+    path = resolve_ticket_to_path(args.ticket) if args.ticket else Path(args.file)
     if not path.exists():
         raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
     text = path.read_text(encoding="utf-8")
@@ -530,78 +529,41 @@ def cmd_file_meta_strip(args) -> int:
 
 
 def cmd_file_meta_set(args) -> int:
-    # At least one of the set flags must be provided.
-    if (
-        args.ticket is None
-        and args.ticket_system is None
-        and args.completed_on is None
-    ):
+    """Edit plan frontmatter via one self-documenting flag per field.
+
+    The plan is located by `--file` or `--ticket` (the cross-repo locator,
+    consistent with archive/push). `--ticket` is *never* a value — the
+    `Ticket:` frontmatter value is written with `--ticket-id`, so the word
+    "ticket" means the same thing (locate) on every subcommand.
+
+    Inputs are validated (Kind enum, Completed-on date) BEFORE the file is
+    located or read, so a typo fails with exit 2 and never touches the file.
+    The file must already have frontmatter — a bare file is rejected (exit 2)
+    so a half-managed plan can't be created out from under plan-save's
+    Agent/Status/Created defaults.
+    """
+    # Map each value flag to its frontmatter key, in canonical order. Building
+    # this first means validate_kind/parse_date_arg run before any file I/O.
+    updates: list[tuple[str, str]] = []
+    if args.ticket_id is not None:
+        updates.append(("Ticket", args.ticket_id))
+    if args.ticket_system is not None:
+        updates.append(("Ticket System", args.ticket_system))
+    if args.completed_on is not None:
+        updates.append(("Completed on", parse_date_arg(args.completed_on)))
+    if args.agent is not None:
+        updates.append(("Agent", args.agent))
+    if args.status is not None:
+        updates.append(("Status", args.status))
+    if args.kind is not None:
+        updates.append(("Kind", validate_kind(args.kind)))
+    if not updates:
         raise PlanKeeperCliError(
-            "file-meta set requires at least one of --ticket, --ticket-system, --completed-on",
+            "file-meta set requires at least one of --ticket-id, --ticket-system, "
+            "--completed-on, --agent, --status, --kind",
             code=2,
         )
-    path = Path(args.file)
-    if not path.exists():
-        raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
-    text = path.read_text(encoding="utf-8")
-    meta, body = parse_frontmatter(text)  # may raise PlanKeeperCliError(5)
-    if args.ticket is not None:
-        meta["Ticket"] = args.ticket
-    if args.ticket_system is not None:
-        meta["Ticket System"] = args.ticket_system
-    if args.completed_on is not None:
-        # Validate the date format up front to catch typos.
-        meta["Completed on"] = parse_date_arg(args.completed_on)
-    new_text = serialize_frontmatter(meta, body)
-    if not new_text.endswith("\n"):
-        new_text += "\n"
-    write_atomic(path, new_text)
-    print(path)
-    return 0
-
-
-def cmd_file_meta_update(args) -> int:
-    """Generic frontmatter editor. Each --field is 'Key=value'.
-
-    Unlike cmd_file_meta_set (which has per-field flags), this accepts any
-    whitelisted key via a single --field shape. Used by the plan-update
-    skill and by the groundcrew markInProgress wrapper.
-
-    Whitelist semantics: unknown keys are rejected with code 2 before any
-    write. The file must already have frontmatter (no auto-creation) — if
-    it doesn't, the user must re-save via plan-save first so they go
-    through the agent/status defaults path.
-    """
-    if not args.field:
-        raise PlanKeeperCliError(
-            "file-meta update requires at least one --field key=value", code=2,
-        )
-    updates: list[tuple[str, str]] = []
-    for raw in args.field:
-        if "=" not in raw:
-            raise PlanKeeperCliError(
-                f"--field must be key=value (got {raw!r}); add an '=' or quote the value",
-                code=2,
-            )
-        key, _, value = raw.partition("=")
-        key = key.strip()
-        if not key:
-            raise PlanKeeperCliError(
-                f"--field {raw!r}: empty key", code=2,
-            )
-        if key not in _FRONTMATTER_FIELDS:
-            raise PlanKeeperCliError(
-                f"unknown frontmatter field {key!r}: must be one of "
-                + ", ".join(repr(k) for k in _FRONTMATTER_FIELDS),
-                code=2,
-            )
-        if key == "Kind" and value.strip():
-            value = validate_kind(value)
-        updates.append((key, value))
-    if args.ticket:
-        path = resolve_ticket_to_path(args.ticket)
-    else:
-        path = Path(args.file)
+    path = resolve_ticket_to_path(args.ticket) if args.ticket else Path(args.file)
     if not path.exists():
         raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
     text = path.read_text(encoding="utf-8")
@@ -1048,7 +1010,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="document kind to inject as 'Kind: <value>' frontmatter on "
              "markdown saves. One of: " + ", ".join(VALID_KINDS) + ". "
              "Heredoc + .md shape only — rejected for non-md extensions and "
-             "for --from-path (set Kind afterward via `file-meta update`). "
+             "for --from-path (set Kind afterward via `file-meta set --kind`). "
              "Fill-if-absent: a Kind already in the body is preserved.",
     )
     p_save.add_argument(
@@ -1093,37 +1055,46 @@ def build_parser() -> argparse.ArgumentParser:
         parser_class=HelpfulArgumentParser,
     )
 
-    p_fm_get = file_meta_sub.add_parser("get", help="print frontmatter as JSON")
-    p_fm_get.add_argument("--file", required=True, help="path to a plan .md file")
+    def _add_locator(p) -> None:
+        """Add the shared `--file | --ticket` locator group (exactly one).
 
-    p_fm_set = file_meta_sub.add_parser("set", help="write or update plan frontmatter")
-    p_fm_set.add_argument("--file", required=True)
-    p_fm_set.add_argument("--ticket", help="ticket identifier (e.g., ENG-123)")
-    p_fm_set.add_argument("--ticket-system", choices=["linear", "jira"], help="ticket system")
-    p_fm_set.add_argument("--completed-on", help="completion date YYYY-MM-DD")
+        `--ticket` locates a plan by its Ticket: frontmatter across all repos
+        — the same meaning it has on archive/push, so the flag never doubles
+        as a value setter (set writes the Ticket value via --ticket-id).
+        """
+        g = p.add_mutually_exclusive_group(required=True)
+        g.add_argument("--file", help="path to a plan .md file")
+        g.add_argument(
+            "--ticket",
+            help="locate the plan by its Ticket: frontmatter across all repos "
+                 "(alternative to --file)",
+        )
+
+    p_fm_get = file_meta_sub.add_parser("get", help="print frontmatter as JSON")
+    _add_locator(p_fm_get)
+
+    p_fm_set = file_meta_sub.add_parser(
+        "set", help="edit plan frontmatter (one flag per field)"
+    )
+    _add_locator(p_fm_set)
+    p_fm_set.add_argument("--agent", help="set Agent")
+    p_fm_set.add_argument("--status", help="set Status (e.g. backlog, todo, in-progress)")
+    p_fm_set.add_argument(
+        "--kind",
+        help="set Kind; one of: " + ", ".join(VALID_KINDS),
+    )
+    p_fm_set.add_argument("--completed-on", help="set Completed on (YYYY-MM-DD)")
+    p_fm_set.add_argument(
+        "--ticket-system", choices=["linear", "jira"], help="set Ticket System"
+    )
+    p_fm_set.add_argument(
+        "--ticket-id",
+        help="set the Ticket: value (distinct from --ticket, which locates a "
+             "plan; use --ticket-id to record an issue id like ENG-123)",
+    )
 
     p_fm_strip = file_meta_sub.add_parser("strip", help="print body without frontmatter")
-    p_fm_strip.add_argument("--file", required=True)
-
-    p_fm_update = file_meta_sub.add_parser(
-        "update",
-        help="apply --field Key=value updates to plan frontmatter "
-             "(any whitelisted field)",
-    )
-    fm_update_target = p_fm_update.add_mutually_exclusive_group(required=True)
-    fm_update_target.add_argument("--file", help="path to a plan file")
-    fm_update_target.add_argument(
-        "--ticket",
-        help="locate the plan by its Ticket: frontmatter across all repos "
-             "(alternative to --file)",
-    )
-    p_fm_update.add_argument(
-        "--field",
-        action="append",
-        metavar="Key=value",
-        help="frontmatter field to set (repeat for multiple fields); "
-             "Key must be one of: " + ", ".join(_FRONTMATTER_FIELDS),
-    )
+    _add_locator(p_fm_strip)
 
     p_tsc = sub.add_parser(
         "ticket-system-config",
@@ -1240,7 +1211,6 @@ _FILE_META_DISPATCH = {
     "get": cmd_file_meta_get,
     "set": cmd_file_meta_set,
     "strip": cmd_file_meta_strip,
-    "update": cmd_file_meta_update,
 }
 
 _TICKET_SYSTEM_CONFIG_DISPATCH = {

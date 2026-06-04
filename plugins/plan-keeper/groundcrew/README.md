@@ -51,9 +51,9 @@ sources: [
 ```bash
 # Save a plan via plan-save (defaults to Status: backlog).
 # Then promote to todo via plan-update or directly:
-python3 /path/to/plan_keeper_cli.py file-meta update \
+python3 /path/to/plan_keeper_cli.py file-meta set \
   --file ~/plans/<repo>/<file>.md \
-  --field Status=todo
+  --status todo
 ```
 
 Or, to promote (and dequeue) plans across all repos interactively, use the `plan-crew` skill, which wraps the `queue list` / `queue set` CLI subcommands.

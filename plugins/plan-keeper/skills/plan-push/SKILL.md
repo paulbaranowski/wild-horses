@@ -202,7 +202,7 @@ Only on `action == "create"` (updates don't change frontmatter):
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set \
-  --file <path> --ticket <result.id> --ticket-system <sys>
+  --file <path> --ticket-id <result.id> --ticket-system <sys>
 ```
 
 If this fails (extremely rare — atomic local write): show the ticket URL from step 8's stdout and warn:
