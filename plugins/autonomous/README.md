@@ -14,7 +14,7 @@ Install:
 | -------------------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **[`autonomous`](skills/autonomous/)** | Ships | Resolves a task from an issue URL, a plan-file path, or an in-context plan, then implements, tests, runs an independent sub-agent review to convergence, opens a PR, and tends it through CI — making every design and implementation call itself. |
 
-The skill is model-invoked by description and also available as `/autonomous:autonomous`. Trigger phrases: "work this issue autonomously", "take this ticket end-to-end", "do this AFK", or pointing it at a plan file and asking it to just build it.
+The skill is model-invoked by description and also available as `/autonomous` in the slash menu (skills aren't shown with their plugin namespace; the fully-qualified `autonomous:autonomous` is only for internal routing/tooling). Trigger phrases: "work this issue autonomously", "take this ticket end-to-end", "do this AFK", or pointing it at a plan file and asking it to just build it.
 
 ## Input resolution
 
