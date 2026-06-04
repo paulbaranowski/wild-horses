@@ -605,6 +605,124 @@ class TestSaveKind(IsolatedHomeTestCase):
         self.assertIn("Kind: design", text)
         self.assertNotIn("Kind: prd", text)
 
+class TestFileMetaSetStatus(IsolatedHomeTestCase):
+    """`file-meta set --status` is lifecycle-aware: terminal statuses relocate
+    the plan into done/ or deferred/ (done stamps Completed on); active
+    statuses rewrite in place."""
+
+    def _save_one(self, topic: str = "lifecycle plan") -> Path:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", topic,
+            stdin="# Body\nsome text\n",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return Path(r.stdout.strip())
+
+    def test_done_relocates_and_unlinks(self) -> None:
+        source = self._save_one()
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        target = self.plans_root / "scratch" / "done" / source.name
+        self.assertEqual(r.stdout.strip(), str(target))
+        self.assertTrue(target.exists())
+        self.assertFalse(source.exists(), "source should be unlinked after relocate")
+
+    def test_done_sets_status_and_stamps_today(self) -> None:
+        source = self._save_one()
+        run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                home=self.home)
+        text = (self.plans_root / "scratch" / "done" / source.name).read_text()
+        front = text.split("\n---\n", 1)[0]
+        self.assertIn("Status: done", front)
+        self.assertIn(f"Completed on: {date.today().isoformat()}", front)
+
+    def test_done_completed_on_override(self) -> None:
+        source = self._save_one()
+        run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                "--completed-on", "2020-01-15", home=self.home)
+        text = (self.plans_root / "scratch" / "done" / source.name).read_text()
+        self.assertIn("Completed on: 2020-01-15", text.split("\n---\n", 1)[0])
+
+    def test_deferred_relocates_without_stamp(self) -> None:
+        source = self._save_one()
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "deferred",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        target = self.plans_root / "scratch" / "deferred" / source.name
+        self.assertTrue(target.exists())
+        self.assertFalse(source.exists())
+        text = target.read_text()
+        self.assertIn("Status: deferred", text.split("\n---\n", 1)[0])
+        self.assertNotIn("Completed on", text)
+
+    def test_active_status_stays_in_place(self) -> None:
+        source = self._save_one()
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "in-progress",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), str(source), "active status must not relocate")
+        self.assertTrue(source.exists())
+        self.assertFalse((self.plans_root / "scratch" / "done" / source.name).exists())
+        self.assertIn("Status: in-progress", source.read_text().split("\n---\n", 1)[0])
+
+    def test_multi_field_relocate_is_atomic(self) -> None:
+        source = self._save_one()
+        run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                "--agent", "codex", home=self.home)
+        text = (self.plans_root / "scratch" / "done" / source.name).read_text()
+        front = text.split("\n---\n", 1)[0]
+        self.assertIn("Status: done", front)
+        self.assertIn("Agent: codex", front)
+
+    def test_collision_fail_is_default(self) -> None:
+        source = self._save_one("collide me")
+        run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                home=self.home)
+        # Re-save the same name into the active dir, then relocate again.
+        run_cli("save", "--override", "scratch", "--topic", "collide me",
+                stdin="x\n", home=self.home)
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                    home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("existing:", r.stderr)
+        self.assertIn("suggestion:", r.stderr)
+
+    def test_collision_suffix(self) -> None:
+        source = self._save_one("collide me")
+        run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                home=self.home)
+        run_cli("save", "--override", "scratch", "--topic", "collide me",
+                stdin="x\n", home=self.home)
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                    "--on-collision", "suffix", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.strip().endswith("-2.md"))
+
+    def test_collision_overwrite(self) -> None:
+        source = self._save_one("collide me")
+        run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                home=self.home)
+        run_cli("save", "--override", "scratch", "--topic", "collide me",
+                stdin="x\n", home=self.home)
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                    "--on-collision", "overwrite", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        done_dir = self.plans_root / "scratch" / "done"
+        self.assertEqual(
+            sorted(p.name for p in done_dir.iterdir()), [source.name],
+            "overwrite must not create a -2 variant",
+        )
+
+    def test_invalid_status_rejected(self) -> None:
+        source = self._save_one()
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "bogus",
+                    home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("invalid choice", r.stderr)
+
+
 class TestArchive(IsolatedHomeTestCase):
     def _save_one(self, topic: str = "plan to archive") -> Path:
         r = run_cli(

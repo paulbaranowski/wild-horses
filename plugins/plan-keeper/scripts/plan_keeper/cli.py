@@ -68,12 +68,15 @@ from plan_keeper.naming import (
 )
 from plan_keeper.push import push_subcommand
 from plan_keeper.storage import (
+    LIFECYCLE_STATES,
+    TERMINAL_DIRS,
     emit_collision,
     find_unused_suffix,
     list_plans,
     plan_status,
     repo_dir,
     resolve_ticket_to_path,
+    state_subdir,
     write_atomic,
 )
 
@@ -585,12 +588,47 @@ def cmd_file_meta_set(args) -> int:
     meta, body = parse_frontmatter(text)  # may raise PlanKeeperCliError(5)
     for key, value in updates:
         meta[key] = value
+
+    # A terminal status (done/deferred) is also a location: relocate the plan
+    # into the matching subdir so Status and directory never disagree. Active
+    # statuses are a pure in-place rewrite. `done` stamps Completed on (today,
+    # unless the caller already supplied --completed-on).
+    if args.status in TERMINAL_DIRS:
+        if args.status == "done" and args.completed_on is None:
+            meta["Completed on"] = date.today().isoformat()
+        target = _terminal_target(path, args.status)
+        if target != path and target.exists():
+            if args.on_collision == "fail":
+                emit_collision(target)
+                return 2
+            if args.on_collision == "suffix":
+                target = find_unused_suffix(target)
+            # "overwrite" → write_atomic replaces it below
+    else:
+        target = path
+
     new_text = serialize_frontmatter(meta, body)
     if not new_text.endswith("\n"):
         new_text += "\n"
-    write_atomic(path, new_text)
-    print(path)
+    write_atomic(target, new_text)
+    if target.resolve() != path.resolve():
+        path.unlink()  # relocation: drop the source only after the dest write
+    print(target)
     return 0
+
+
+def _terminal_target(source: Path, status: str) -> Path:
+    """Destination path for relocating `source` to a terminal `status`.
+
+    The repo root is `source`'s parent, unless `source` already sits in a
+    terminal subdir (a caller can pass an explicit `done/x.md` path) — then
+    strip that component so done→deferred relocates to a sibling, never a
+    nested `done/done/`.
+    """
+    repo_root = source.parent
+    if repo_root.name in TERMINAL_DIRS:
+        repo_root = repo_root.parent
+    return state_subdir(repo_root, status) / source.name
 
 
 def cmd_push(args) -> int:
@@ -1088,7 +1126,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_locator(p_fm_set)
     p_fm_set.add_argument("--agent", help="set Agent")
-    p_fm_set.add_argument("--status", help="set Status (e.g. backlog, todo, in-progress)")
+    p_fm_set.add_argument(
+        "--status",
+        choices=list(LIFECYCLE_STATES),
+        help="set Status. Active states (backlog/todo/in-progress/in-review) "
+             "rewrite in place; 'done'/'deferred' relocate the plan into "
+             "done/ or deferred/ ('done' also stamps Completed on).",
+    )
+    p_fm_set.add_argument(
+        "--on-collision",
+        choices=["fail", "suffix", "overwrite"],
+        default="fail",
+        help="when --status relocates to done/ or deferred/ and a same-name "
+             "file already exists there: fail (default), suffix (-N), or overwrite",
+    )
     p_fm_set.add_argument(
         "--kind",
         help="set Kind; one of: " + ", ".join(VALID_KINDS),
