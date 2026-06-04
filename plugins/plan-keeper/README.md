@@ -56,7 +56,7 @@ A PreToolUse hook (`hooks/hooks.json`) auto-approves `python3 .../plan_keeper_cl
 - **Local-only.** `~/plans/` lives on your machine. Nothing is staged, committed, or pushed to any repo.
 - **No silent overwrites.** Collisions on save or archive surface as a structured exit-2 error; the skill asks whether to overwrite, suffix `-2`, or pick a new name.
 - **`plan-list` is read-only**, and `plan-do` only ever flips a started plan's `Status` to `in-progress`. The tree is mutated by `plan-save` (creates), `plan-done` (moves), and the frontmatter editors (`plan-update`, `plan-crew`).
-- **Confirmation before mutating.** `plan-done` always shows source/destination paths and asks before invoking the CLI.
+- **Confirmation before mutating.** `plan-done` asks before invoking the CLI only when it had to _infer_ which plan you meant; when you name the plan (filename or ticket id) or pick it from the listing, it archives directly.
 - **Empty-repo isolation.** When the current repo has no active plans, `plan-do` and `plan-done` say so and stop — they do not silently fall back to a different repo's folder.
 
 ## Files in this plugin
