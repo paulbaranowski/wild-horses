@@ -1141,7 +1141,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_save = sub.add_parser(
         "save",
-        help="write body (stdin) to ~/plans/<repo>/<date>-<slug>.<ext>",
+        help="write body (stdin) to ~/plans/<repo>/<date>-<slug>.<ext> "
+        "(or <date>-<slug>--<kind>.<ext> with --kind)",
     )
     p_save.add_argument("--override", help="explicit override for <repo>")
     p_save.add_argument(

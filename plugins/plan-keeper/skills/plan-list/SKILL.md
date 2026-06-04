@@ -16,6 +16,7 @@ The bundled `plan_keeper_cli.py` does all the work (repo derivation, newest-firs
 - **`<repo>`:** auto-derived from the current repo, or an explicit override — see [../../repo-derivation.md](../../repo-derivation.md).
 - **Default view:** active plans (`in-progress`, `in-review`, `todo`, `backlog`), grouped in that order, newest-first within each group.
 - **Other states:** `--state done` and `--state deferred` list the archived / shelved plans on request.
+- **Grouped view:** `list --group` clusters a project's stages (shared slug) together, each labelled by its Kind and ordered along the `idea → exec-plan` pipeline. Use it when the user wants to see how one project's plans relate. Mutually exclusive with `--status`.
 - **Sibling boundary:** `plan-list` only _shows_. The moment the user wants to act on a plan — start it, queue it, edit frontmatter, archive it — hand off to `plan-do` / `plan-crew` / `plan-update` / `plan-done`.
 
 ## Procedure
@@ -74,6 +75,27 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" repo list
 ```
 
 Output is one repo per line with state counts (e.g., `herds: active=15 done=22 deferred=2`). Show it and let the user name a different repo (re-run step 2 with `--override`). If `repo list` is also empty, `~/plans/` doesn't exist yet — tell the user `plan-save` hasn't been used on this machine.
+
+### 4. Optional: group a project's stages
+
+When the user wants to see how the plans for one project relate (its `design`, then its `exec-plan`, etc.) rather than a flat status-grouped list, run the grouped view:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --override <name> --group
+```
+
+It clusters by project slug, labels each member by its frontmatter `Kind`, orders stages along the `idea → exec-plan` pipeline, and puts the most-recently-touched project first:
+
+```text
+noun-first-provider-commands
+  design      2026-06-03-noun-first-provider-commands--design.md
+  exec-plan   2026-06-04-noun-first-provider-commands--exec-plan.md
+
+some-other-project
+  spec        2026-06-02-some-other-project--spec.md
+```
+
+`--group` is mutually exclusive with `--status` (the CLI exits 2 if both are passed). The flat `list` (no flag) stays the machine-readable form the picker parses — `--group` is purely a human-readable convenience.
 
 ## Common mistakes
 
