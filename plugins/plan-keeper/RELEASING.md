@@ -16,19 +16,21 @@ There is **no PyPI**. The release is entirely tag-driven across two repos:
   refuses to build if the hash doesn't match, so it must be recomputed every release.
   The repo ships `update-formula.sh` to automate that.
 
-The CLI is **dual-home**: the same source file is invoked in-place by the plugin
-(`python3 .../plan_keeper_cli.py`) and packaged into the `plan-keeper` binary by
-the formula. One physical source, two delivery vehicles — no second copy to drift.
+The CLI is **dual-home**: the same `plan_keeper/` package is invoked in-place by
+the plugin (via the `plan_keeper_cli.py` shim — `python3 .../plan_keeper_cli.py`)
+and packaged into the `plan-keeper` binary by the formula. One source package,
+two delivery vehicles — no second copy to drift.
 
 ## Version: one source of truth
 
-The version lives in exactly one place — `__version__` in `plan_keeper_cli.py`:
+The version lives in exactly one place — `__version__` in
+`plan_keeper/__init__.py`:
 
 - `pyproject.toml` reads it dynamically (`dynamic = ["version"]` +
-  `[tool.setuptools.dynamic] version = { attr = "plan_keeper_cli.__version__" }`),
+  `[tool.setuptools.dynamic] version = { attr = "plan_keeper.__version__" }`),
   so the built wheel/`--version` output always agrees with the module.
 - It is kept **in lockstep with `plugin.json`'s `version`**. `TestVersion` in
-  `test_plan_keeper_cli.py` fails the suite if the two diverge.
+  `tests/test_cli.py` fails the suite if the two diverge.
 
 So a release bumps two numbers that must be equal: `__version__` and the
 plugin.json `version`. Use the plugin bump rule (patch = fix, minor = feature,
@@ -38,12 +40,12 @@ major = breaking).
 
 ### 1. Bump + merge (in `wild-horses`)
 
-1. Edit `__version__` in `plugins/plan-keeper/scripts/plan_keeper_cli.py`.
+1. Edit `__version__` in `plugins/plan-keeper/scripts/plan_keeper/__init__.py`.
 2. Set the matching `version` in `plugins/plan-keeper/.claude-plugin/plugin.json`.
 3. Run the tests — `TestVersion` enforces the lockstep:
 
    ```bash
-   python3 plugins/plan-keeper/scripts/test_plan_keeper_cli.py
+   python3 -m unittest discover -s plugins/plan-keeper/scripts/tests -q
    ```
 
 4. Open a PR and **merge it to `main`** before tagging.
