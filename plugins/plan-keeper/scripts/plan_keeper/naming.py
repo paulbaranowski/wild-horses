@@ -97,8 +97,11 @@ def plan_group_key(name: str) -> str:
     # `tail` is the trailing Kind. A same-kind/same-day/same-topic re-save makes
     # `find_unused_suffix` append `-N` to the whole stem, so the on-disk form is
     # `…--<kind>-N`; strip that numeric collision suffix before the Kind check so
-    # a copy still groups with its original rather than as its own project.
-    if sep and _NAME_COLLISION_SUFFIX_RE.sub("", tail) in VALID_KINDS:
+    # a copy still groups with its original rather than as its own project. Gate
+    # on `m` (a real date prefix): the `--<kind>` recovery applies only to dated
+    # plan filenames, so a hand-named no-date `README--spec.md` falls back to its
+    # whole stem rather than being read as a `spec` stage of project `README`.
+    if m and sep and _NAME_COLLISION_SUFFIX_RE.sub("", tail) in VALID_KINDS:
         return head
     return rest
 

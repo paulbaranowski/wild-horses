@@ -616,15 +616,15 @@ class TestListGrouped(IsolatedHomeTestCase):
         self.assertIn("design", lines[1])
         self.assertIn("exec-plan", lines[2])
         self.assertLess(
-            next(i for i, l in enumerate(lines) if "design" in l),
-            next(i for i, l in enumerate(lines) if "exec-plan" in l),
+            next(i for i, line in enumerate(lines) if "design" in line),
+            next(i for i, line in enumerate(lines) if "exec-plan" in line),
         )
 
     def test_separate_slugs_form_separate_groups(self) -> None:
         self._save("alpha topic", "spec")
         self._save("beta topic", "spec")
         r = run_cli("list", "--override", "scratch", "--group", home=self.home)
-        headings = [l for l in r.stdout.split("\n") if l and not l.startswith("  ")]
+        headings = [line for line in r.stdout.split("\n") if line and not line.startswith("  ")]
         self.assertIn("alpha-topic", headings)
         self.assertIn("beta-topic", headings)
 
@@ -657,9 +657,9 @@ class TestListGrouped(IsolatedHomeTestCase):
         self.assertEqual(r2.returncode, 0, r2.stderr)
         r = run_cli("list", "--override", "scratch", "--group", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
-        headings = [l for l in r.stdout.split("\n") if l and not l.startswith("  ")]
+        headings = [line for line in r.stdout.split("\n") if line and not line.startswith("  ")]
         self.assertEqual(headings, ["dup"], r.stdout)
-        members = [l for l in r.stdout.split("\n") if l.startswith("  ")]
+        members = [line for line in r.stdout.split("\n") if line.startswith("  ")]
         self.assertEqual(len(members), 2, r.stdout)
 
     def test_cross_repo_same_slug_stays_in_separate_repo_groups(self) -> None:
@@ -675,7 +675,7 @@ class TestListGrouped(IsolatedHomeTestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
         r = run_cli("list", "--all-repos", "--group", home=self.home, cwd=self.cwd)
         self.assertEqual(r.returncode, 0, r.stderr)
-        headings = [l for l in r.stdout.split("\n") if l and not l.startswith("  ")]
+        headings = [line for line in r.stdout.split("\n") if line and not line.startswith("  ")]
         self.assertIn("alpha/shared-topic", headings)
         self.assertIn("beta/shared-topic", headings)
 

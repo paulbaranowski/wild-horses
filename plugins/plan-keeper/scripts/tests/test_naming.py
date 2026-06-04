@@ -173,6 +173,13 @@ class TestPlanGroupKey(unittest.TestCase):
     def test_no_date_prefix_falls_back_to_stem(self) -> None:
         self.assertEqual(plan_group_key("README.md"), "README")
 
+    def test_no_date_prefix_with_kind_suffix_is_not_stripped(self) -> None:
+        # The --<kind> recovery applies only to dated plan filenames (the only
+        # shape plan_filename produces). A no-date name falls back to its whole
+        # stem, so a hand-named `README--spec.md` is NOT mistaken for a `spec`
+        # stage of project `README`.
+        self.assertEqual(plan_group_key("README--spec.md"), "README--spec")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
