@@ -292,6 +292,36 @@ class TestFileMetaSet(IsolatedHomeTestCase):
         self.assertIn("Agent: codex", text)
         self.assertIn("Status: in-progress", text)
 
+    def test_clears_agent_with_empty_value(self) -> None:
+        """`--agent ''` removes the Agent tag entirely — this is how plan-do
+        strips the groundcrew dispatch signal when it starts a plan locally.
+        An empty managed field is omitted on serialize."""
+        path = self._managed()
+        result = run_cli(
+            "file-meta", "set", "--file", str(path), "--agent", "",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = path.read_text(encoding="utf-8")
+        self.assertNotIn("Agent:", text)
+        self.assertIn("Status: backlog", text)  # other fields untouched
+
+    def test_plan_do_start_clears_agent_and_sets_status(self) -> None:
+        """The exact mutation plan-do step 6 makes: flip Status to in-progress
+        and clear Agent in one call, so a plan being driven locally drops out
+        of the groundcrew queue."""
+        path = self._managed("Ticket: plan-123\n")
+        result = run_cli(
+            "file-meta", "set", "--file", str(path),
+            "--status", "in-progress", "--agent", "",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = path.read_text(encoding="utf-8")
+        self.assertNotIn("Agent:", text)
+        self.assertIn("Status: in-progress", text)
+        self.assertIn("Ticket: plan-123", text)  # unrelated fields survive
+
     def test_kind_normalized_lowercase(self) -> None:
         path = self._managed()
         result = run_cli(

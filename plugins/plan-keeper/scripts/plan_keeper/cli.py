@@ -369,7 +369,7 @@ def cmd_save(args) -> int:
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.suffix.lower() == ".md":
             # A moved-in .md becomes a fully managed plan: fill the same
-            # Agent/Status/Created block a heredoc .md save gets (fill-if-absent —
+            # Status/Created block a heredoc .md save gets (fill-if-absent —
             # a .md already carrying them keeps its own values), so
             # plan-do/plan-done see it by Status and list orders it with intra-day
             # precision. Created comes from the source file's birthtime (via
@@ -385,7 +385,6 @@ def cmd_save(args) -> int:
             # byte-verbatim path gets from shutil.move.
             injected = _inject_default_frontmatter(
                 source.read_text(encoding="utf-8"),
-                args.agent,
                 created=_iso_from_stat(source.stat()),
             )
             write_atomic(target, injected)
@@ -413,7 +412,7 @@ def cmd_save(args) -> int:
         # so JSON/YAML siblings of paired saves remain byte-exact). Merges
         # into user-supplied frontmatter rather than duplicating.
         if ext == "md":
-            content = _inject_default_frontmatter(content, args.agent, kind)
+            content = _inject_default_frontmatter(content, kind)
         write_atomic(target, content)
     print(target)
     return 0
@@ -1082,13 +1081,6 @@ def build_parser() -> argparse.ArgumentParser:
         "only unlinked if the target write succeeded (collisions leave it in "
         "place, so retrying is safe). Used for task-list-builder output in "
         "docs/exec-plans/active/.",
-    )
-    p_save.add_argument(
-        "--agent",
-        default="claude",
-        help="agent name to inject as 'Agent: <name>' frontmatter on "
-             "markdown saves (default: claude). Heredoc + .md shape only; "
-             "ignored for --extension other than md and for --from-path.",
     )
     p_save.add_argument(
         "--kind",

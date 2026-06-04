@@ -21,7 +21,7 @@ For plans that aren't execution-ready yet (idea, spec), the skill suggests the s
 
 - **Lists:** the **not-yet-started** plans only — `Status: todo` and `Status: backlog` (`list --status todo,backlog`). In-progress / in-review / done plans are excluded (you're picking something to _start_). Classified `.md` plans carry a `--<kind>` suffix in their filename (e.g. `…-noun-first-provider-commands--design.md`); this is expected — the picker still resolves the whole filename (the part after the tab) verbatim, the `--status` machine contract is unchanged.
 - **Human view:** to show a project's stages clustered (design → exec-plan) rather than the flat startable list, run `list --group` (mutually exclusive with `--status`). That's a presentation aid; the `--status todo,backlog` form below is what this skill parses to pick from.
-- **Writes:** exactly one thing — flips the picked plan's `Status` to `in-progress` when it starts one (step 6). It never moves, deletes, or rewrites the body.
+- **Writes:** one frontmatter update when it starts a plan (step 6) — flips `Status` to `in-progress` and clears the `Agent` tag (so groundcrew won't claim a plan you're driving). It never moves, deletes, or rewrites the body.
 - **`<repo>`:** auto-derived or override — see [../../repo-derivation.md](../../repo-derivation.md).
 - **Classification (tier 1, readiness):** idea / spec / execution-ready. Read the plan's `Kind:` frontmatter first (authoritative — see [../../plan-kinds.md](../../plan-kinds.md)); infer from content only when `Kind` is absent.
 - **Classification (tier 2, shape — only for execution-ready):** picks which of the three execution engines to recommend first; all three are always offered.
@@ -161,14 +161,14 @@ Reorder 1–3 so the recommended engine is first; keep its `[recommended]` tag a
 
 ### 6. Mark the plan in-progress, then invoke the chosen skill
 
-Once the user has confirmed a route (any next skill — `brainstorming`, `writing-plans`, or an execution engine), **first** flip the plan's status so it stops showing up as "to start" and starts showing up in `plan-done`'s finish list:
+Once the user has confirmed a route (any next skill — `brainstorming`, `writing-plans`, or an execution engine), **first** flip the plan's status so it stops showing up as "to start" and starts showing up in `plan-done`'s finish list — and in the same call clear the `Agent` field so groundcrew won't also claim a plan you're now driving yourself:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set \
-  --file ~/plans/<repo>/<filename> --status in-progress
+  --file ~/plans/<repo>/<filename> --status in-progress --agent ''
 ```
 
-`--file` takes the **full path** (no `--override` here — `file-meta` resolves the path directly). `--ticket <id>` is an alternative to `--file`: it locates the plan by its `Ticket:` frontmatter across all repos (exactly one of the two is required). Do this only when you are about to hand off to a skill. **Do not** mark in-progress on the manual-steer path (the user hasn't committed to working it through a skill yet) or before the user has confirmed.
+`--agent ''` (empty value) removes the `Agent: <name>` tag entirely. The `Agent` tag is the groundcrew dispatch signal; once you start a plan locally, you are the one working it, so the tag is cleared unconditionally — even if it named a non-`claude` agent. `plan-crew` is the only path that _automatically writes_ the tag (on promote to the queue); plan-do only ever removes it (`plan-update` can still set it on explicit user request). `--file` takes the **full path** (no `--override` here — `file-meta` resolves the path directly). `--ticket <id>` is an alternative to `--file`: it locates the plan by its `Ticket:` frontmatter across all repos (exactly one of the two is required). Do this only when you are about to hand off to a skill. **Do not** mark in-progress (or clear Agent) on the manual-steer path (the user hasn't committed to working it through a skill yet) or before the user has confirmed.
 
 **Then** use the `Skill` tool to invoke the chosen skill. The plan content is already in conversation context from step 3, so the invoked skill has full access — no explicit handoff payload is needed.
 
@@ -187,7 +187,7 @@ If the user wants to steer manually, just stop the skill here. The plan is read 
 
 - **Don't re-display a previously shown plan list from memory.** Step 1's `list` command must be re-run on every invocation — even a re-invocation moments later. The plan set changes between turns (a plan saved mid-conversation won't appear if you reprint a cached list), so the numbered list you show must always come from the output of the command you just ran, never from recall.
 - **Reading and classifying multiple plans before the user picks.** Step 1 lists `status<TAB>filename` lines only. Reading multiple plans wastes context and biases classification toward whatever was read last.
-- **Marking in-progress too early (or on manual-steer).** Step 6 flips `Status` to `in-progress` only _after_ the user confirms a skill handoff. Don't mark it on the manual-steer path, and don't mark it before confirmation — a plan the user hasn't committed to should stay in plan-do's not-yet-started list.
+- **Marking in-progress too early (or on manual-steer).** Step 6 flips `Status` to `in-progress` and clears `Agent` only _after_ the user confirms a skill handoff. Don't mark it on the manual-steer path, and don't mark it before confirmation — a plan the user hasn't committed to should stay in plan-do's not-yet-started list with its queue tag intact.
 - **Saying "no plans" when stdout is empty but stderr has a hidden-plans note.** Empty stdout with a `note: N other active plan(s) hidden` line means everything is already in-progress/in-review — surface that, don't claim the repo is empty.
 - **Auto-invoking the next skill without confirmation.** Steps 5a/5b/5c require a check-in even when the classification feels obvious. The skill's job is to _offer_ the next stage, not jump to it.
 - **Collapsing the execution menu to a single suggestion.** For execution-ready plans, all three engines are always offered (step 5c). The shape classification only sets which one is _recommended first_ — it does not hide the others.

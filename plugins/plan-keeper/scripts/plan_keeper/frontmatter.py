@@ -116,21 +116,27 @@ def serialize_frontmatter(meta: dict[str, str], body: str) -> str:
 
 def _inject_default_frontmatter(
     body_text: str,
-    agent: str,
     kind: Optional[str] = None,
     created: Optional[str] = None,
 ) -> str:
-    """Ensure body_text starts with frontmatter containing Agent, Status, and
-    Created (and Kind, when a kind is supplied).
+    """Ensure body_text starts with frontmatter containing Status and Created
+    (and Kind, when a kind is supplied).
 
     Three cases:
-      1. body has no frontmatter → prepend a fresh '---\\nAgent: <agent>\\nStatus: backlog\\nCreated: <iso>\\n---\\n\\n' block.
+      1. body has no frontmatter → prepend a fresh '---\\nStatus: backlog\\nCreated: <iso>\\n---\\n\\n' block.
       2. body has frontmatter with the fields already set → return unchanged
          (user-supplied values win over defaults).
       3. body has frontmatter missing some → fill in the missing fields,
          re-serialize, return.
 
-    Why agent/status/created/kind are 'fill if absent' rather than 'overwrite':
+    Note: save does NOT inject an `Agent` field. The `Agent: <name>` tag is the
+    groundcrew dispatch signal, and plan-crew (`queue set --default-agent`) is
+    the sole writer of it — a plan is born with no Agent and only acquires one
+    when promoted to the groundcrew queue. A body that hand-declares `Agent` is
+    still preserved verbatim (parse_frontmatter round-trips foreign/managed
+    fields); save just never adds one on its own.
+
+    Why status/created/kind are 'fill if absent' rather than 'overwrite':
     a user who hand-wrote `Status: todo` (or `Kind: prd`) in the body shouldn't
     have it stomped by the save invocation. The CLI default is a floor, not an
     override. `kind` is only written when the caller passed one — there is no
@@ -144,15 +150,13 @@ def _inject_default_frontmatter(
     fill-if-absent — a body that already carries a valid `Created` keeps it.
     """
     meta, body = parse_frontmatter(body_text)
-    if not meta.get("Agent"):
-        meta["Agent"] = agent
     if not meta.get("Status"):
         meta["Status"] = "backlog"
     if kind and not meta.get("Kind"):
         meta["Kind"] = kind
     # Save-time stamp that powers list's newest-first sort with intra-day
     # precision. Fill-if-absent (a hand-written Created in the body wins),
-    # matching Agent/Status/Kind. See _plan_sort_key for why it lives in
+    # matching Status/Kind. See _plan_sort_key for why it lives in
     # frontmatter rather than relying on file timestamps.
     if not meta.get("Created"):
         meta["Created"] = created if created is not None else _iso_utc_now()
