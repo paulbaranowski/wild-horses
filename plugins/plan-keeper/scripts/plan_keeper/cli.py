@@ -859,21 +859,33 @@ def cmd_queue_set(args) -> int:
 
 
 def cmd_queue_list(args) -> int:
-    """Emit a JSON array of active plans across all repos, for plan-crew.
+    """Emit a JSON array of active plans, for plan-crew.
 
     Each element is {repo, file, status, agent} where status/agent are the
     raw frontmatter values ("" when unset). Scans ~/plans/<repo>/*.md one
     level deep — skips done/ and deferred/ (those are not dispatchable) and
     skips files without frontmatter (not plan-keeper plans). This is the
     read side of the groundcrew queue the plan-crew skill renders.
+
+    Scope: by default only the current repo's plans (``derive_repo`` from the
+    cwd). ``--all`` lists every repo under ~/plans/; ``--repo NAME`` lists one
+    named repo (normalized like any repo override). The two flags are mutually
+    exclusive at the parser, so at most one of ``args.all``/``args.repo`` is set.
     """
-    del args
+    if args.all:
+        scope: Optional[str] = None
+    elif args.repo:
+        scope = validate_repo_name(normalize_override(args.repo))
+    else:
+        scope = derive_repo(None)
     rows: list[dict] = []
     if not storage.PLAN_ROOT.exists():
         print("[]")
         return 0
     for repo_entry in sorted(storage.PLAN_ROOT.iterdir()):
         if not repo_entry.is_dir() or repo_entry.name.startswith("."):
+            continue
+        if scope is not None and repo_entry.name != scope:
             continue
         for plan in sorted(repo_entry.iterdir()):
             if not plan.is_file() or not plan.name.endswith(".md"):
@@ -1269,10 +1281,21 @@ def build_parser() -> argparse.ArgumentParser:
         parser_class=HelpfulArgumentParser,
     )
 
-    crew_queue_sub.add_parser(
+    p_queue_list = crew_queue_sub.add_parser(
         "list",
-        help="emit JSON array of active plans across all repos "
-             "(repo/file/status/agent)",
+        help="emit JSON array of active plans (repo/file/status/agent); "
+             "current repo by default, --all for every repo",
+    )
+    queue_list_scope = p_queue_list.add_mutually_exclusive_group()
+    queue_list_scope.add_argument(
+        "--all", action="store_true",
+        help="list plans across every repo under ~/plans/ "
+             "(default: only the current repo)",
+    )
+    queue_list_scope.add_argument(
+        "--repo",
+        help="list plans for this repo instead of the current one "
+             "(normalized like any repo override)",
     )
 
     p_queue_set = crew_queue_sub.add_parser(

@@ -2,11 +2,23 @@
 
 Organize markdown plans on disk across repos. Eight skills cover the lifecycle: list a repo's plans read-only (`plan-list`), capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), archive with a completion stamp (`plan-done`), edit frontmatter (`plan-update`), manage the cross-repo dispatch queue (`plan-crew`), and file plans as Linear or Jira tickets (`plan-linear`, `plan-jira`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine — nothing is committed to any repo.
 
-Install:
+## Install
+
+Two install paths — pick by what you need:
+
+**Plugin** — the eight skills plus the bundled CLI script, loaded into Claude Code:
 
 ```text
 /plugin install plan-keeper@wild-horses
 ```
+
+**Homebrew CLI** — the version-stable standalone `plan-keeper` binary on your `$PATH`:
+
+```bash
+brew install paulbaranowski/tap/plan-keeper
+```
+
+The binary is the same tool the plugin's bundled CLI script provides, just delivered as a version-locked executable from the `paulbaranowski/tap` tap (see [The bundled CLI](#the-bundled-cli)). It exists because `plan-keeper crew install` wires it into your groundcrew config, and groundcrew then invokes it — outside Claude Code, where the in-plugin script isn't reachable — to dispatch plans straight from `~/plans/<repo>/*.md`. Details in [the groundcrew connection](groundcrew/README.md).
 
 ## Skills
 
@@ -47,7 +59,7 @@ The override and auto-derive paths normalize differently: auto-derived names are
 
 ## The bundled CLI
 
-`scripts/plan_keeper_cli.py` is the canonical interface for all the skills — the skills never write to `~/plans/` directly. Key subcommands include `repo` (`name`/`list`), `list`, `save`, `file-meta` (get/set/strip), `crew`, the per-provider `linear`/`jira` subtrees (`api`/`push`/`config`), and `upgrade` (self-update the Homebrew binary in place — `brew update && brew upgrade plan-keeper`, then re-run `crew install`; refuses when plan-keeper isn't a brew install) (run `--help` for the full set). Completing a plan is `file-meta set --status done`, which relocates it into `done/` and stamps `Completed on`. Mutations are atomic (tmp file + `fsync` + `os.replace`), and collisions surface as a structured exit-2 signal that the skills present to the user rather than treating as a fatal error.
+`scripts/plan_keeper_cli.py` is the canonical interface for all the skills — the skills never write to `~/plans/` directly. The same source file ships two ways: the plugin invokes `plan_keeper_cli.py` in place, while `brew install paulbaranowski/tap/plan-keeper` packages that exact source into the version-stable standalone `plan-keeper` binary (one source, two delivery vehicles — no second copy to drift). The skills call the in-tree script; groundcrew, which runs outside Claude Code and so can't reach it, calls the brew binary instead. Key subcommands include `repo` (`name`/`list`), `list`, `save`, `file-meta` (get/set/strip), `crew`, the per-provider `linear`/`jira` subtrees (`api`/`push`/`config`), and `upgrade` (self-update the Homebrew binary in place — `brew update && brew upgrade plan-keeper`, then re-run `crew install`; refuses when plan-keeper isn't a brew install) (run `--help` for the full set). Completing a plan is `file-meta set --status done`, which relocates it into `done/` and stamps `Completed on`. Mutations are atomic (tmp file + `fsync` + `os.replace`), and collisions surface as a structured exit-2 signal that the skills present to the user rather than treating as a fatal error.
 
 A PreToolUse hook (`hooks/hooks.json`) auto-approves `python3 .../plan_keeper_cli.py` Bash invocations so each skill's flow runs without per-call permission prompts. The allow script anchors on the plugin-specific path so a stray `plan_keeper_cli.py` elsewhere in the workspace won't be auto-approved.
 

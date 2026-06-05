@@ -596,7 +596,7 @@ class TestQueue(IsolatedHomeTestCase):
     def test_queue_list_reports_status_and_agent_across_repos(self) -> None:
         self._make_plan("alpha", "2026-05-01-a.md", status="todo", agent="codex")
         self._make_plan("beta", "2026-05-02-b.md", status="backlog")
-        r = run_cli("crew", "queue", "list", home=self.home, cwd=self.cwd)
+        r = run_cli("crew", "queue", "list", "--all", home=self.home, cwd=self.cwd)
         self.assertEqual(r.returncode, 0, r.stderr)
         rows = json.loads(r.stdout)
         by_file = {row["file"]: row for row in rows}
@@ -626,7 +626,7 @@ class TestQueue(IsolatedHomeTestCase):
         (self.plans_root / "alpha" / "README.md").write_text(
             "# not a plan\n", encoding="utf-8"
         )
-        r = run_cli("crew", "queue", "list", home=self.home, cwd=self.cwd)
+        r = run_cli("crew", "queue", "list", "--all", home=self.home, cwd=self.cwd)
         self.assertEqual(r.returncode, 0, r.stderr)
         files = sorted(row["file"] for row in json.loads(r.stdout))
         self.assertEqual(files, ["2026-05-01-active.md"])
@@ -634,7 +634,7 @@ class TestQueue(IsolatedHomeTestCase):
     def test_queue_list_surfaces_in_progress_and_in_review(self) -> None:
         self._make_plan("alpha", "2026-05-01-a.md", status="in-progress", agent="claude")
         self._make_plan("alpha", "2026-05-02-b.md", status="in-review")
-        r = run_cli("crew", "queue", "list", home=self.home, cwd=self.cwd)
+        r = run_cli("crew", "queue", "list", "--all", home=self.home, cwd=self.cwd)
         self.assertEqual(r.returncode, 0, r.stderr)
         by_file = {row["file"]: row["status"] for row in json.loads(r.stdout)}
         self.assertEqual(by_file["2026-05-01-a.md"], "in-progress")
@@ -642,12 +642,50 @@ class TestQueue(IsolatedHomeTestCase):
 
     def test_queue_list_empty_status_plan(self) -> None:
         self._make_plan("alpha", "2026-05-01-a.md", agent="codex")  # no Status line
-        r = run_cli("crew", "queue", "list", home=self.home, cwd=self.cwd)
+        r = run_cli("crew", "queue", "list", "--all", home=self.home, cwd=self.cwd)
         self.assertEqual(r.returncode, 0, r.stderr)
         rows = json.loads(r.stdout)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["status"], "")
         self.assertEqual(rows[0]["agent"], "codex")
+
+    def test_queue_list_defaults_to_current_repo(self) -> None:
+        # cwd basename is "workdir" (see IsolatedHomeTestCase), so the bare
+        # `list` scopes to the ~/plans/workdir/ folder and ignores other repos.
+        self._make_plan("workdir", "2026-05-01-here.md", status="backlog")
+        self._make_plan("elsewhere", "2026-05-02-there.md", status="backlog")
+        r = run_cli("crew", "queue", "list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = json.loads(r.stdout)
+        self.assertEqual([row["file"] for row in rows], ["2026-05-01-here.md"])
+        self.assertEqual(rows[0]["repo"], "workdir")
+
+    def test_queue_list_all_overrides_current_repo_default(self) -> None:
+        self._make_plan("workdir", "2026-05-01-here.md", status="backlog")
+        self._make_plan("elsewhere", "2026-05-02-there.md", status="backlog")
+        r = run_cli("crew", "queue", "list", "--all", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        repos = sorted(row["repo"] for row in json.loads(r.stdout))
+        self.assertEqual(repos, ["elsewhere", "workdir"])
+
+    def test_queue_list_repo_flag_scopes_to_named_repo(self) -> None:
+        self._make_plan("workdir", "2026-05-01-here.md", status="backlog")
+        self._make_plan("elsewhere", "2026-05-02-there.md", status="backlog")
+        r = run_cli(
+            "crew", "queue", "list", "--repo", "elsewhere",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = json.loads(r.stdout)
+        self.assertEqual([row["repo"] for row in rows], ["elsewhere"])
+
+    def test_queue_list_all_and_repo_are_mutually_exclusive(self) -> None:
+        r = run_cli(
+            "crew", "queue", "list", "--all", "--repo", "x",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("not allowed with", r.stderr)
 
     def test_queue_set_promotes_backlog_to_todo(self) -> None:
         p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog", agent="codex")
