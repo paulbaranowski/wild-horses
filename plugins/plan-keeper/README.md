@@ -47,7 +47,7 @@ The override and auto-derive paths normalize differently: auto-derived names are
 
 ## The bundled CLI
 
-`scripts/plan_keeper_cli.py` is the canonical interface for all the skills — the skills never write to `~/plans/` directly. Key subcommands include `repo` (`name`/`list`), `list`, `save`, `file-meta` (get/set/strip), `crew`, and the per-provider `linear`/`jira` subtrees (`api`/`push`/`config`) (run `--help` for the full set). Completing a plan is `file-meta set --status done`, which relocates it into `done/` and stamps `Completed on`. Mutations are atomic (tmp file + `fsync` + `os.replace`), and collisions surface as a structured exit-2 signal that the skills present to the user rather than treating as a fatal error.
+`scripts/plan_keeper_cli.py` is the canonical interface for all the skills — the skills never write to `~/plans/` directly. Key subcommands include `repo` (`name`/`list`), `list`, `save`, `file-meta` (get/set/strip), `crew`, the per-provider `linear`/`jira` subtrees (`api`/`push`/`config`), and `upgrade` (self-update the Homebrew binary in place — `brew update && brew upgrade plan-keeper`, then re-run `crew install`; refuses when plan-keeper isn't a brew install) (run `--help` for the full set). Completing a plan is `file-meta set --status done`, which relocates it into `done/` and stamps `Completed on`. Mutations are atomic (tmp file + `fsync` + `os.replace`), and collisions surface as a structured exit-2 signal that the skills present to the user rather than treating as a fatal error.
 
 A PreToolUse hook (`hooks/hooks.json`) auto-approves `python3 .../plan_keeper_cli.py` Bash invocations so each skill's flow runs without per-call permission prompts. The allow script anchors on the plugin-specific path so a stray `plan_keeper_cli.py` elsewhere in the workspace won't be auto-approved.
 
@@ -61,18 +61,18 @@ A PreToolUse hook (`hooks/hooks.json`) auto-approves `python3 .../plan_keeper_cl
 
 ## Files in this plugin
 
-| Path                               | Purpose                                                                                                              |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `skills/plan-list/SKILL.md`        | Instructions for the read-only listing flow                                                                          |
-| `skills/plan-save/SKILL.md`        | Instructions for the save flow                                                                                       |
-| `skills/plan-do/SKILL.md`          | Instructions for the list-and-route flow                                                                             |
-| `skills/plan-done/SKILL.md`        | Instructions for the archive flow                                                                                    |
-| `scripts/plan_keeper_cli.py`       | Bundled CLI entry shim — the only sanctioned mutator for `~/plans/`                                                  |
-| `scripts/plan_keeper/`             | CLI implementation package (errors, naming, storage, frontmatter, config, http, linear, jira, push, groundcrew, cli) |
-| `scripts/tests/`                   | Stdlib `unittest` suite — one `test_<module>.py` per package module, shared harness in `support.py`                  |
-| `scripts/plan-keeper-cli-allow.sh` | PreToolUse hook script — auto-approves CLI Bash invocations                                                          |
-| `hooks/hooks.json`                 | PreToolUse hook registration                                                                                         |
-| `repo-derivation.md`               | Shared algorithm — auto-derive + override normalization rules                                                        |
+| Path                               | Purpose                                                                                                                       |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `skills/plan-list/SKILL.md`        | Instructions for the read-only listing flow                                                                                   |
+| `skills/plan-save/SKILL.md`        | Instructions for the save flow                                                                                                |
+| `skills/plan-do/SKILL.md`          | Instructions for the list-and-route flow                                                                                      |
+| `skills/plan-done/SKILL.md`        | Instructions for the archive flow                                                                                             |
+| `scripts/plan_keeper_cli.py`       | Bundled CLI entry shim — the only sanctioned mutator for `~/plans/`                                                           |
+| `scripts/plan_keeper/`             | CLI implementation package (errors, naming, storage, frontmatter, config, http, linear, jira, push, groundcrew, upgrade, cli) |
+| `scripts/tests/`                   | Stdlib `unittest` suite — one `test_<module>.py` per package module, shared harness in `support.py`                           |
+| `scripts/plan-keeper-cli-allow.sh` | PreToolUse hook script — auto-approves CLI Bash invocations                                                                   |
+| `hooks/hooks.json`                 | PreToolUse hook registration                                                                                                  |
+| `repo-derivation.md`               | Shared algorithm — auto-derive + override normalization rules                                                                 |
 
 Run the CLI tests from the repo root (stdlib only — no pytest/uv needed):
 

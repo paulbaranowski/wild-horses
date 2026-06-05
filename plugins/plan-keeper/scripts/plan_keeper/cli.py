@@ -76,6 +76,7 @@ from plan_keeper.naming import (
     validate_repo_name,
 )
 from plan_keeper.push import push_subcommand
+from plan_keeper.upgrade import default_capture, default_stream, run_upgrade
 from plan_keeper.storage import (
     LIFECYCLE_STATES,
     TERMINAL_DIRS,
@@ -775,6 +776,22 @@ def cmd_crew_install(args) -> int:
     )
 
 
+def cmd_upgrade(args) -> int:
+    """Update the plan-keeper Homebrew binary in place (brew upgrade +
+    groundcrew re-wire).
+
+    Composition root: hands the running binary's ``__version__`` and the real
+    process runners to the testable orchestration in ``upgrade``.
+    """
+    return run_upgrade(
+        old_version=__version__,
+        which=shutil.which,
+        stream=default_stream,
+        capture=default_capture,
+        out=sys.stdout,
+    )
+
+
 def cmd_queue_set(args) -> int:
     """Bulk-set Status on plans named by newline-delimited stdin paths.
 
@@ -1272,6 +1289,12 @@ def build_parser() -> argparse.ArgumentParser:
              "set (ignored for --status backlog)",
     )
 
+    sub.add_parser(
+        "upgrade",
+        help="update the plan-keeper Homebrew binary in place "
+             "(brew upgrade + groundcrew re-wire)",
+    )
+
     return parser
 
 
@@ -1329,6 +1352,7 @@ def main() -> int:
         "linear": lambda a: _PROVIDER_DISPATCH[a.provider_cmd](a),
         "jira": lambda a: _PROVIDER_DISPATCH[a.provider_cmd](a),
         "crew": lambda a: _CREW_DISPATCH[a.crew_cmd](a),
+        "upgrade": cmd_upgrade,
     }
     try:
         return dispatch[args.cmd](args)
