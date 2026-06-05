@@ -1,11 +1,25 @@
 ---
-name: config
-description: Set up groundcrew end-to-end interactively. Installs @clipboard-health/groundcrew via npm if missing, installs eugene1g/agent-safehouse via Homebrew if missing, scaffolds ~/.config/groundcrew/config.ts conversationally, writes the clearance allowlist + env sidecar, writes the safehouse env sidecar, and runs crew doctor at the end. Use when the user wants to scaffold a new groundcrew config, configure crew on a fresh machine, or replace an existing config with a wizard-driven one. Triggers on phrases like "set up groundcrew", "configure crew", "first-run config", "crew setup config".
+description: Set up the full groundcrew stack end-to-end. Installs @clipboard-health/groundcrew via npm if missing, installs eugene1g/agent-safehouse via Homebrew if missing, scaffolds ~/.config/groundcrew/config.ts conversationally, writes the clearance allowlist + env sidecar, writes the safehouse env sidecar, and runs crew doctor at the end. Pass `clearance` or `safehouse` as the argument to (re)run just that slice when groundcrew is already configured.
+argument-hint: [clearance | safehouse]
+allowed-tools: Bash, AskUserQuestion
 ---
 
-# config
+# setup
 
 Walk the user through installing and configuring the full groundcrew stack — the `@clipboard-health/groundcrew` npm package, the `eugene1g/agent-safehouse` Homebrew formula, the clearance allowlist + env sidecar, the safehouse env sidecar, and `~/.config/groundcrew/config.ts` itself — conversationally. Thirteen bundled scripts do the discovery, install, and file rendering; you are the orchestrator: run them, ask the questions, build a JSON `Answers` object, pipe it to the renderer, and finish with `crew doctor`.
+
+## Scope dispatch
+
+Read the first argument (`$1`) and route accordingly — do this before anything else:
+
+- **empty** (no argument) → run the **full wizard** (Phases 0–9 below) in order.
+- **`clearance`** → run only the [Clearance-only flow](#clearance-only-scope) — skip the full wizard.
+- **`safehouse`** → run only the [Safehouse-only flow](#safehouse-only-scope) — skip the full wizard.
+- **anything else** → print one line — "Unknown scope `<arg>`. Valid scopes: `clearance`, `safehouse` (or no argument for the full wizard)." — and stop.
+
+The full wizard already covers clearance (Phase 6) and safehouse (Phase 7); the two scopes exist so a user with a working `config.ts` can (re)set up just one component without re-running everything.
+
+## Full wizard
 
 The whole flow is Phases 0–9 below. Run them in order. Phase 0 runs silently up front; Phases 1, 2, 6, 7, and parts of 8 are conditional. The user answers Yes/No to a small set of questions and types one workspace dir + (optionally) one repo-picker reply. Everything else is mechanical: file writes, atomic and idempotent, into XDG dirs only. Shell rc files are never edited.
 
@@ -40,7 +54,7 @@ All scripts live at `${CLAUDE_PLUGIN_ROOT}/scripts/`. Reference them via that en
 - `targetPath` = the verbatim `existingConfigPath` returned by `discover_existing_config.py` IF the user chose to overwrite in Phase 2; else `$HOME/.config/groundcrew/config.ts` (fresh-install default).
 - `configDir` = `$(dirname "$targetPath")` — this is where `initial-prompt.md` lands (as a sibling of the config file).
 
-## Procedure
+## Procedure (full wizard)
 
 ### Phase 0 — Pre-flight discovery (silent; no prompts)
 
@@ -263,15 +277,63 @@ Track what happened (sidecar written, conflicts count, overrides stub created) f
 
    If Phase 6 or 7 reported `rcConflicts > 0`, append one line: "(N of the sidecars' exports were left commented because they're already in your rc — see the sidecars' inline notes.)"
 
+## Clearance-only scope
+
+Reached when the argument is `clearance`. Only the clearance bits — probe, then the two atomic file renders and the daemon-stale check. Use this when groundcrew is already configured but clearance isn't.
+
+1. **Probe (silent)** — run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover_clearance_setup.py"` and capture the JSON. Don't narrate it. If both `personalFileHasClaudeHosts: true` AND `envExported: true`, print one line — "Clearance is already set up." — and stop.
+2. **Run Phase 6's mechanical steps 1–3** ([Allowlist file](#phase-6--clearance-egress-allowlist-recommended), Env sidecar, Daemon-stale prompt) exactly as written, keyed off this scope's probe JSON. **Skip Phase 6's top-level "Set up clearance?" Yes/No question** — invoking the `clearance` scope is the user's yes.
+3. **Summary** — print the paths written and the one-line rc snippet:
+
+   ```text
+   Clearance configured. Files written:
+     ~/.config/clearance/personal-allow-hosts
+     ~/.config/clearance/env.sh
+
+   Add this one line to your shell rc (~/.zshrc or ~/.bashrc), then start
+   a new shell:
+
+     for f in ~/.config/clearance/env.sh ~/.config/agent-safehouse/env.sh; do
+       [ -f "$f" ] && . "$f"
+     done
+   ```
+
+   If the env-sidecar render reported conflicts, append: "(N of the sidecar's exports were left commented because they're already in your rc — see the sidecar's inline notes.)"
+
+## Safehouse-only scope
+
+Reached when the argument is `safehouse`. Only the safehouse bits — probe, install if missing, then write the env sidecar. macOS only. Use this when groundcrew + clearance are already configured but safehouse isn't.
+
+1. **Probe (silent)** — run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/discover_safehouse_setup.py"` and capture the JSON. Don't narrate it.
+2. **Install if missing** — only if `brewFormulaInstalled: false`, run Phase 1's safehouse install prompt: **AskUserQuestion** "Install `eugene1g/agent-safehouse` via Homebrew? It's the macOS sandbox-exec wrapper groundcrew uses for unattended runs." **Yes** (Recommended) / **No**. On Yes run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/install_safehouse.py"`; if `action: "failed"`, surface `details` and stop (don't write the sidecar without a working binary). On No, print one line — "Skipping safehouse install. Run `brew install eugene1g/safehouse/agent-safehouse` later, then re-run `/groundcrew-setup:setup safehouse`." — and stop. If `brewFormulaInstalled: true`, skip this step.
+3. **Run Phase 7's env-sidecar render** ([Phase 7](#phase-7--safehouse-env-sidecar-recommended-on-macos)) exactly as written. Parse the JSON; remember `rcConflicts` and any `overridesStub` for the summary.
+4. **Summary** — print the paths written and the one-line rc snippet:
+
+   ```text
+   Safehouse configured. Files written:
+     ~/.config/agent-safehouse/env.sh
+     ~/.config/agent-safehouse/local-overrides.sb  (empty stub; add machine-local rules here)
+
+   Add this one line to your shell rc (~/.zshrc or ~/.bashrc), then start
+   a new shell:
+
+     for f in ~/.config/clearance/env.sh ~/.config/agent-safehouse/env.sh; do
+       [ -f "$f" ] && . "$f"
+     done
+   ```
+
+   If the sidecar render reported conflicts, append: "(N of the sidecar's items were left commented because they're already in your rc — see the sidecar's inline notes.)" If safehouse was actually installed (not already-installed), append "Installed agent-safehouse `<version>` via Homebrew."
+
 ## Common mistakes
 
 - **Don't use AskUserQuestion for the repo picker or the Phase 5 feature picker.** Both are multi-select over lists that can exceed AskUserQuestion's 4-option cap. Always render them as numbered chat lists and parse the comma-separated reply.
 - **Don't hardcode `~/.claude/plugins/cache/...` paths to the scripts.** Always invoke them through `${CLAUDE_PLUGIN_ROOT}/scripts/<name>` — that env var resolves to the installed plugin dir at runtime and survives version bumps.
 - **Don't edit the user's shell rc files.** Always write the sidecars and print the one-line source snippet. Auto-appending to `~/.zshrc` / `~/.bash_profile` breaks dotfile managers (chezmoi, yadm, stow) that would clobber or duplicate the entry.
 - **Don't offer to kill the clearance daemon unless `daemonAgeSeconds > 3600`.** A fresh daemon already has current config; killing it is pointless churn.
+- **Don't ask Phase 6's "Set up clearance?" / offer the Phase 7 decline-skip when running the `clearance` / `safehouse` scope.** Invoking a scope is the user's yes; the scope flows run the mechanical steps directly.
 - **Don't treat a non-zero `load_existing.py` exit as fatal.** It means "no seeding available" — print the one-line fallback note and continue with static defaults. The user can always re-enter values.
 - **Don't run `render_clearance_hosts.py` without `--append` against a file that already exists.** Create mode exits 1 (refuses overwrite). When `personalFileExists: true`, only the `--append` path is safe.
-- **Don't render the safehouse sidecar when the user declined the safehouse install in Phase 1.** The sidecar's `safe()` wrapper would just fail on every shell start without `safehouse` on PATH.
+- **Don't render the safehouse sidecar when the user declined the safehouse install in Phase 1 (full wizard) or the `safehouse` scope's install prompt.** The sidecar's `safe()` wrapper would just fail on every shell start without `safehouse` on PATH.
 - **Don't proceed past a failed `install_groundcrew.py`.** Without groundcrew installed, the rendered `config.ts` is unusable and `crew doctor` at the end will fail.
 - **Don't send `null` for unset optional keys in the `Answers` object.** Omit them entirely — the renderer treats absent keys as "use the shipped default," but a `null` value can trip type validation and exit 2.
 - **Don't forget that `workspaceProjectDir` and `knownRepositories` are required.** The renderer exits 2 without them. `knownRepositories` may be an empty array, but it must be present.
@@ -286,4 +348,4 @@ Track what happened (sidecar written, conflicts count, overrides stub created) f
 - **Phases 6 and 7 never touch `config.ts`.** Clearance and safehouse setup are separate runtime concerns. They only affect the Phase 9 summary text, not the rendered config.
 - **The `clearanceSetup` / `safehouseSetup` keys in `Answers` are ignored by the renderer.** If you include them for your own bookkeeping, that's harmless — `render_config.py` ignores any key it doesn't recognize, so neither reaches `config.ts`.
 - **One Bash call per render.** Pipe the `Answers` JSON via a quoted heredoc rather than writing a temp file and reading it back; it's one auto-approvable invocation instead of two.
-- **`/groundcrew-setup:clearance` and `/groundcrew-setup:safehouse` exist as standalone commands.** Users who already have a working `config.ts` but want to set up clearance or safehouse on its own can invoke those directly without re-running the full wizard.
+- **The `clearance` and `safehouse` scopes are slices of the full wizard.** Users who already have a working `config.ts` but want to set up clearance or safehouse on its own can pass that scope to `/groundcrew-setup:setup` without re-running everything. The mechanical steps are single-sourced from Phases 6 and 7.

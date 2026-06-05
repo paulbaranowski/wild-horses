@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""End-to-end sandboxed dry-run of the v1.1.0 wizard flow.
+"""End-to-end sandboxed dry-run of the v2.0.0 wizard flow.
 
-Drives every script in the order the `config` skill orchestrates them,
+Drives every script in the order the `setup` command orchestrates them,
 under an isolated HOME + XDG_CONFIG_HOME + PATH so the user's real
 ~/.config, ~/.zshrc, /opt/homebrew/bin/safehouse, and the global
 @clipboard-health/groundcrew install are NEVER observed.

@@ -90,7 +90,7 @@
     {
       "name": "groundcrew-setup",
       "source": "./plugins/groundcrew-setup",
-      "description": "Interactive first-run wizard for groundcrew. Walks first-run users through scaffolding `~/.config/groundcrew/config.ts` conversationally, with GitHub repo discovery, best-effort seeding from any existing config, and an optional `@clipboard-health/clearance` egress-allowlist setup step. Ships one skill: `config`.",
+      "description": "Interactive first-run wizard for groundcrew. Walks first-run users through scaffolding `~/.config/groundcrew/config.ts` conversationally, with GitHub repo discovery, best-effort seeding from any existing config, plus `@clipboard-health/clearance` egress-allowlist and `eugene1g/agent-safehouse` sidecar setup. Ships one command, `/groundcrew-setup:setup`; pass the `clearance` or `safehouse` argument to (re)run just that slice.",
       "author": {
         "name": "Paul Baranowski"
       },
