@@ -86,6 +86,7 @@ class TestBuildPatchedConfig(unittest.TestCase):
         # ${id} is groundcrew's literal token, not interpolated by us.
         self.assertIn(f'resolveOne: "{PK} crew get ${{id}}"', out)
         self.assertIn(f'markInProgress: "{PK} crew start ${{id}}"', out)
+        self.assertIn(f'markInReview: "{PK} crew review ${{id}}"', out)
 
     def test_discovered_repos_are_listed(self):
         out = build_patched_config(BASE_CONFIG, PK, ["alpha", "beta"])

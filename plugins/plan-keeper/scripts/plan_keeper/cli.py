@@ -712,9 +712,10 @@ def cmd_crew_get(args) -> int:
     return 0
 
 
-def cmd_crew_start(args) -> int:
-    """Flip the plan named by `${id}` to Status: in-progress, exit 3 if no
-    plan maps to that id.
+def _crew_set_status(plan_id: str, status: str) -> int:
+    """Flip the plan named by `${id}` to `Status: <status>`, exit 3 if no plan
+    maps to that id. Shared body of `crew start` (in-progress) and `crew review`
+    (in-review) — the two markIn* legs of the groundcrew TicketSource adapter.
 
     Resolution reuses `crew get`'s resolver (recompute each plan's synthesized
     id and match), so the two agree by construction. The id can only ever name
@@ -722,25 +723,38 @@ def cmd_crew_start(args) -> int:
     guard the old stdin-`{path}` interface needed is gone by construction: an
     id has no way to express a path outside the plan tree.
     """
-    if not _GROUNDCREW_ID_RE.match(args.id):
+    if not _GROUNDCREW_ID_RE.match(plan_id):
         raise PlanKeeperCliError(
-            f"invalid id {args.id!r}: must match [A-Za-z0-9._-]+ (no path separators)",
+            f"invalid id {plan_id!r}: must match [A-Za-z0-9._-]+ (no path separators)",
             code=2,
         )
-    issue = _resolve_crew_id(args.id)
+    issue = _resolve_crew_id(plan_id)
     if issue is None:
-        raise PlanKeeperCliError(f"no plan maps to id {args.id!r}", code=3)
+        raise PlanKeeperCliError(f"no plan maps to id {plan_id!r}", code=3)
     path = Path(issue["sourceRef"]["path"])
     # _resolve_crew_id only returns plans that parsed as frontmatter, so the
     # read+parse below is safe without re-checking for a frontmatter header.
     meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
-    meta["Status"] = "in-progress"
+    meta["Status"] = status
     new_text = serialize_frontmatter(meta, body)
     if not new_text.endswith("\n"):
         new_text += "\n"
     write_atomic(path, new_text)
     print(path)
     return 0
+
+
+def cmd_crew_start(args) -> int:
+    """Flip the plan named by `${id}` to Status: in-progress (groundcrew's
+    markInProgress leg). See `_crew_set_status` for the resolve-and-write body."""
+    return _crew_set_status(args.id, "in-progress")
+
+
+def cmd_crew_review(args) -> int:
+    """Flip the plan named by `${id}` to Status: in-review (groundcrew's
+    markInReview leg — auto-advance an in-progress ticket once its PR opens).
+    See `_crew_set_status` for the resolve-and-write body."""
+    return _crew_set_status(args.id, "in-review")
 
 
 def cmd_crew_install(args) -> int:
@@ -1170,17 +1184,17 @@ def build_parser() -> argparse.ArgumentParser:
     _add_provider_parser(sub, "linear")
     _add_provider_parser(sub, "jira")
 
-    # `crew` groups the groundcrew dispatch adapter (fetch/get/start — the
-    # machine protocol the crew.config.ts source calls directly) with `install`
-    # (one-shot config wiring) and the cross-repo `queue` manager the plan-crew
-    # skill drives. fetch/get/start deliberately avoid list/get/set naming:
-    # fetch and start both mutate (fetch stamps the groundcrew Ticket; start
-    # flips Status), so a read-only `list`/`get` label would mislead — and
-    # `crew queue list`/`crew queue set` are the genuinely read-only /
-    # general-write pair.
+    # `crew` groups the groundcrew dispatch adapter (fetch/get/start/review —
+    # the machine protocol the crew.config.ts source calls directly) with
+    # `install` (one-shot config wiring) and the cross-repo `queue` manager the
+    # plan-crew skill drives. These deliberately avoid list/get/set naming:
+    # fetch/start/review all mutate (fetch stamps the groundcrew Ticket;
+    # start/review flip Status), so a read-only `list`/`get` label would
+    # mislead — and `crew queue list`/`crew queue set` are the genuinely
+    # read-only / general-write pair.
     p_crew = sub.add_parser(
         "crew",
-        help="groundcrew dispatch adapter (fetch/get/start) + install + queue",
+        help="groundcrew dispatch adapter (fetch/get/start/review) + install + queue",
     )
     crew_sub = p_crew.add_subparsers(
         dest="crew_cmd", required=True, metavar="<subcommand>",
@@ -1203,6 +1217,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="flip Status to in-progress on the plan named by ${id}",
     )
     p_crew_start.add_argument(
+        "id", help="synthesized plan id (plan-<digits>, from fetch)"
+    )
+
+    p_crew_review = crew_sub.add_parser(
+        "review",
+        help="flip Status to in-review on the plan named by ${id}",
+    )
+    p_crew_review.add_argument(
         "id", help="synthesized plan id (plan-<digits>, from fetch)"
     )
 
@@ -1285,6 +1307,7 @@ _CREW_DISPATCH = {
     "fetch": cmd_crew_fetch,
     "get": cmd_crew_get,
     "start": cmd_crew_start,
+    "review": cmd_crew_review,
     "install": cmd_crew_install,
     "queue": lambda a: _QUEUE_DISPATCH[a.queue_cmd](a),
 }

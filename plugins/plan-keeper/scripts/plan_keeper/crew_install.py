@@ -67,7 +67,8 @@ def _render_source_region(pk: str) -> str:
         f'          verify: "{pk} crew fetch >/dev/null",\n'
         f'          fetch: "{pk} crew fetch",\n'
         f'          resolveOne: "{pk} crew get ${{id}}",\n'
-        f'          markInProgress: "{pk} crew start ${{id}}" }} }},'
+        f'          markInProgress: "{pk} crew start ${{id}}",\n'
+        f'          markInReview: "{pk} crew review ${{id}}" }} }},'
     )
 
 
