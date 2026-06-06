@@ -1,10 +1,10 @@
 # groundcrew-setup
 
-An interactive setup wizard for `@clipboard-health/groundcrew` that installs the npm package + the `eugene1g/agent-safehouse` Homebrew formula, writes the clearance allowlist + env sidecar, writes the safehouse env sidecar, scaffolds `~/.config/groundcrew/config.ts`, and finishes by running `crew doctor` — as a Claude Code skill.
+An interactive setup wizard for `@clipboard-health/groundcrew` that installs the npm package + the `eugene1g/agent-safehouse` Homebrew formula, writes the clearance allowlist + env sidecar, writes the safehouse env sidecar, scaffolds `~/.config/groundcrew/config.ts`, and finishes by running `crew doctor` — as a single Claude Code command.
 
 ## What it does
 
-Replaces the "install groundcrew, copy `crew.config.example.ts`, edit by hand, paste exports into `~/.zshrc`, install safehouse, configure clearance" first-run friction. The `config` skill walks you through every prerequisite conversationally and atomically writes every file. The user answers Yes/No to a small handful of questions (install-if-missing, overwrite-existing, set-session-cap, etc.) and types one workspace dir + one repo-picker reply. Everything else is mechanical: scripts that probe state, install missing prereqs, and render config files into XDG dirs. Shell rc files are never edited.
+Replaces the "install groundcrew, copy `crew.config.example.ts`, edit by hand, paste exports into `~/.zshrc`, install safehouse, configure clearance" first-run friction. The `/groundcrew-setup:setup` command walks you through every prerequisite conversationally and atomically writes every file. The user answers Yes/No to a small handful of questions (install-if-missing, overwrite-existing, set-session-cap, etc.) and types one workspace dir + one repo-picker reply. Everything else is mechanical: scripts that probe state, install missing prereqs, and render config files into XDG dirs. Shell rc files are never edited.
 
 It seeds defaults from any existing config it finds via groundcrew's own `loadConfig()`, so re-running on an already-configured machine pre-fills your answers.
 
@@ -17,15 +17,19 @@ It seeds defaults from any existing config it finds via groundcrew's own `loadCo
 
 ## Usage
 
-Three entry points:
+One command, with an optional scope argument:
 
-- **`/groundcrew-setup:config`** (or the natural-language phrases "set up groundcrew", "configure crew", "first-run config") — the full ten-phase wizard. Use this on a fresh machine.
-- **`/groundcrew-setup:clearance`** — only the clearance bits: probe → write `personal-allow-hosts` → write `env.sh` sidecar → daemon-stale prompt. Use this when groundcrew is already configured but clearance isn't.
-- **`/groundcrew-setup:safehouse`** — only the safehouse bits: probe → install if missing → write `env.sh` sidecar. Use this when groundcrew + clearance are already configured but safehouse isn't.
+| Invocation                          | What runs                                                                                                                                                                         |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/groundcrew-setup:setup`           | The full ten-phase wizard. Use this on a fresh machine.                                                                                                                           |
+| `/groundcrew-setup:setup clearance` | Only the clearance bits: probe → write `personal-allow-hosts` → write `env.sh` sidecar → daemon-stale prompt. Use this when groundcrew is already configured but clearance isn't. |
+| `/groundcrew-setup:setup safehouse` | Only the safehouse bits: probe → install if missing → write `env.sh` sidecar. Use this when groundcrew + clearance are already configured but safehouse isn't.                    |
+
+The two scopes are slices of the full wizard — their mechanical steps are single-sourced from Phases 6 (clearance) and 7 (safehouse), so there's no second copy to drift.
 
 ## What the full wizard does
 
-Ten phases (0–9), matching `skills/config/SKILL.md`. Phase 0 silently runs seven discovery / install-check scripts in parallel before any prompt is shown.
+Ten phases (0–9), matching `commands/setup.md`. Phase 0 silently runs seven discovery / install-check scripts in parallel before any prompt is shown.
 
 - **Phase 0 — Pre-flight discovery** — existing-config scan, repo discovery, installed-skill detection, clearance probe, safehouse probe, groundcrew install-check, safehouse install-check.
 - **Phase 1 — Install prerequisites** — `npm install -g @clipboard-health/groundcrew` (brings clearance along) and `brew install eugene1g/safehouse/agent-safehouse`, one Yes/No question each on missing.
