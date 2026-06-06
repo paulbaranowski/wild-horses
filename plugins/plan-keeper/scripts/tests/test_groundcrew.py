@@ -573,9 +573,14 @@ class TestQueue(IsolatedHomeTestCase):
     """Cross-repo `queue list` / `queue set` for the plan-crew skill."""
 
     def _make_plan(
-        self, repo: str, name: str, status: str = "", agent: str = ""
+        self,
+        repo: str,
+        name: str,
+        status: str = "",
+        agent: str = "",
+        created: str = "",
     ) -> Path:
-        """Create ~/<home>/plans/<repo>/<name> with optional Status/Agent."""
+        """Create ~/<home>/plans/<repo>/<name> with optional Status/Agent/Created."""
         d = self.plans_root / repo
         d.mkdir(parents=True, exist_ok=True)
         fm = ["---"]
@@ -583,6 +588,8 @@ class TestQueue(IsolatedHomeTestCase):
             fm.append(f"Agent: {agent}")
         if status:
             fm.append(f"Status: {status}")
+        if created:
+            fm.append(f"Created: {created}")
         fm.append("---")
         p = d / name
         p.write_text("\n".join(fm) + f"\n\n# {name}\n", encoding="utf-8")
@@ -607,6 +614,46 @@ class TestQueue(IsolatedHomeTestCase):
         self.assertEqual(
             by_file["2026-05-02-b.md"],
             {"repo": "beta", "file": "2026-05-02-b.md", "status": "backlog", "agent": ""},
+        )
+
+    def test_queue_list_groups_repos_and_orders_newest_first_within_each(self) -> None:
+        # Repos stay grouped in their outer alphabetical order (alpha before
+        # beta); within a repo, plans come back newest-first by the leading
+        # YYYY-MM-DD — even when beta's plan is globally the newest.
+        self._make_plan("alpha", "2026-05-01-oldest.md", status="backlog")
+        self._make_plan("alpha", "2026-05-10-middle.md", status="backlog")
+        self._make_plan("beta", "2026-05-20-newest.md", status="todo")
+        r = run_cli("crew", "queue", "list", "--all", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = json.loads(r.stdout)
+        self.assertEqual(
+            [(row["repo"], row["file"]) for row in rows],
+            [
+                ("alpha", "2026-05-10-middle.md"),
+                ("alpha", "2026-05-01-oldest.md"),
+                ("beta", "2026-05-20-newest.md"),
+            ],
+        )
+
+    def test_queue_list_orders_same_day_by_created_stamp(self) -> None:
+        # Same filename date → the Created stamp's time component breaks the
+        # tie, still newest-first.
+        self._make_plan(
+            "alpha", "2026-05-01-morning.md", status="backlog",
+            created="2026-05-01T09:00:00Z",
+        )
+        self._make_plan(
+            "alpha", "2026-05-01-evening.md", status="backlog",
+            created="2026-05-01T21:00:00Z",
+        )
+        r = run_cli(
+            "crew", "queue", "list", "--repo", "alpha",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        files = [row["file"] for row in json.loads(r.stdout)]
+        self.assertEqual(
+            files, ["2026-05-01-evening.md", "2026-05-01-morning.md"]
         )
 
     def test_queue_list_skips_done_and_deferred_and_no_frontmatter(self) -> None:
