@@ -178,8 +178,9 @@ _DATE_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
 _CREATED_STAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 
-def _plan_sort_key(path: Path) -> tuple[str, str]:
-    """Return (timestamp, filename) for a newest-first ordering.
+def plan_recency_key(meta: dict, filename: str) -> tuple[str, str]:
+    """Return (timestamp, filename) for a newest-first ordering, from
+    already-parsed frontmatter.
 
     The primary key is the plan's `Created:` frontmatter — an ISO-8601 UTC
     stamp written once at save time (e.g. "2026-06-02T14:30:00Z"). Because
@@ -200,19 +201,30 @@ def _plan_sort_key(path: Path) -> tuple[str, str]:
     ordering still holds and same-day ties break on the filename (the prior
     behavior). Covers byte-verbatim --from-path saves and non-.md siblings,
     which never get frontmatter.
+
+    Takes the parsed `meta` so callers that already parsed the frontmatter
+    (e.g. `crew queue list`) don't re-read the file; `_plan_sort_key` is the
+    path-reading wrapper for callers that only hold a Path. Both share this
+    one definition of "newest-first" so the queue and per-repo listings can't
+    drift apart.
     """
-    created = ""
+    candidate = (meta.get("Created") or "").strip()
+    created = candidate if _CREATED_STAMP_RE.match(candidate) else ""
+    if not created:
+        m = _DATE_PREFIX_RE.match(filename)
+        created = f"{m.group(1)}T00:00:00Z" if m else ""
+    return (created, filename)
+
+
+def _plan_sort_key(path: Path) -> tuple[str, str]:
+    """Path-reading wrapper around `plan_recency_key`: parse the file's
+    frontmatter (empty on any read/parse failure, so the filename-date
+    fallback still applies) and key off it."""
     try:
         meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
-        candidate = (meta.get("Created") or "").strip()
-        if _CREATED_STAMP_RE.match(candidate):
-            created = candidate
     except (PlanKeeperCliError, OSError, UnicodeDecodeError):
-        pass
-    if not created:
-        m = _DATE_PREFIX_RE.match(path.name)
-        created = f"{m.group(1)}T00:00:00Z" if m else ""
-    return (created, path.name)
+        meta = {}
+    return plan_recency_key(meta, path.name)
 
 
 def plan_status(path: Path) -> str:

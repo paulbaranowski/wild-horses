@@ -1,7 +1,7 @@
 {
   "name": "plan-keeper",
   "description": "Organize markdown plans in a local ~/plans/<repo>/ tree: capture from conversation, route to the next step, archive, file to Linear/Jira, and dispatch via groundcrew.",
-  "version": "5.4.0",
+  "version": "5.5.0",
   "author": {
     "name": "Paul Baranowski"
   }

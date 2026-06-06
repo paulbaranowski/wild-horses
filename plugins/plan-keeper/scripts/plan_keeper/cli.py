@@ -83,6 +83,7 @@ from plan_keeper.storage import (
     emit_collision,
     find_unused_suffix,
     list_plans,
+    plan_recency_key,
     plan_status,
     repo_dir,
     resolve_ticket_to_path,
@@ -867,6 +868,11 @@ def cmd_queue_list(args) -> int:
     skips files without frontmatter (not plan-keeper plans). This is the
     read side of the groundcrew queue the plan-crew skill renders.
 
+    Ordering: repos stay grouped in their outer alphabetical order, and the
+    plans *within* each repo are sorted newest-first by `plan_recency_key`
+    (the plan's `Created:` stamp, falling back to the filename date). So the
+    queue reads most-recent-to-least-recent inside each repo block.
+
     Scope: by default only the current repo's plans (``derive_repo`` from the
     cwd). ``--all`` lists every repo under ~/plans/; ``--repo NAME`` lists one
     named repo (normalized like any repo override). The two flags are mutually
@@ -887,6 +893,10 @@ def cmd_queue_list(args) -> int:
             continue
         if scope is not None and repo_entry.name != scope:
             continue
+        # (recency_key, row) within this repo so plans sort newest-first per
+        # repo. Repos stay grouped in their outer alphabetical order; only the
+        # plans inside each one are ordered most-recent-to-least-recent.
+        keyed: list[tuple[tuple[str, str], dict]] = []
         for plan in sorted(repo_entry.iterdir()):
             if not plan.is_file() or not plan.name.endswith(".md"):
                 continue
@@ -900,12 +910,14 @@ def cmd_queue_list(args) -> int:
                 meta, _ = parse_frontmatter(text)
             except PlanKeeperCliError:
                 continue
-            rows.append({
+            keyed.append((plan_recency_key(meta, plan.name), {
                 "repo": repo_entry.name,
                 "file": plan.name,
                 "status": meta.get("Status", "").strip(),
                 "agent": meta.get("Agent", "").strip(),
-            })
+            }))
+        keyed.sort(key=lambda kr: kr[0], reverse=True)
+        rows.extend(row for _, row in keyed)
     print(json.dumps(rows))
     return 0
 
