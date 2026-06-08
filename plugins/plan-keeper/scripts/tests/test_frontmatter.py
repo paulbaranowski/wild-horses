@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 from plan_keeper.frontmatter import (
+    _FRONTMATTER_FIELDS,
     _inject_default_frontmatter,
     parse_frontmatter,
     serialize_frontmatter,
@@ -33,7 +34,7 @@ class TestFileMetaGet(IsolatedHomeTestCase):
         )
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
-        self.assertEqual(data, {"Plan-keeper Ticket": "", "Linear Ticket": "", "Jira Ticket": "", "Completed on": "", "Agent": "", "Status": "", "Kind": "", "Created": ""})
+        self.assertEqual(data, {"Plan-keeper Ticket": "", "Linear Ticket": "", "Jira Ticket": "", "Completed on": "", "Agent": "", "Status": "", "Kind": "", "Created": "", "Blocked-by": ""})
 
     def test_full_frontmatter_parses(self) -> None:
         path = self._write_plan(
@@ -59,6 +60,7 @@ class TestFileMetaGet(IsolatedHomeTestCase):
             "Status": "",
             "Kind": "",
             "Created": "",
+            "Blocked-by": "",
         })
 
     def test_partial_frontmatter_returns_present_fields(self) -> None:
@@ -530,6 +532,21 @@ class TestMultiTrackerSchema(unittest.TestCase):
         )
         self.assertIn("Plan-keeper Ticket: plan-keep", out)
         self.assertNotIn("plan-other", out)
+
+
+class TestBlockedByField(IsolatedHomeTestCase):
+    def test_blocked_by_is_managed_and_roundtrips(self) -> None:
+        self.assertIn("Blocked-by", _FRONTMATTER_FIELDS)
+        meta, body = parse_frontmatter(
+            "---\nStatus: todo\nBlocked-by: plan-1 (auth), ENG-2\n---\n# T\n"
+        )
+        self.assertEqual(meta["Blocked-by"], "plan-1 (auth), ENG-2")
+        out = serialize_frontmatter(meta, body)
+        self.assertIn("Blocked-by: plan-1 (auth), ENG-2", out)
+
+    def test_blocked_by_absent_is_empty_string(self) -> None:
+        meta, _ = parse_frontmatter("---\nStatus: todo\n---\n# T\n")
+        self.assertEqual(meta["Blocked-by"], "")
 
 
 if __name__ == "__main__":

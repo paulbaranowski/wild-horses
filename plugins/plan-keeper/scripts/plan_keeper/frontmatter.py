@@ -12,7 +12,7 @@ from plan_keeper.errors import PlanKeeperCliError
 # replaced the single `Ticket` / `Ticket System` pair (see _migrate_legacy_ticket_fields).
 _FRONTMATTER_FIELDS = (
     "Plan-keeper Ticket", "Linear Ticket", "Jira Ticket",
-    "Completed on", "Agent", "Status", "Kind", "Created",
+    "Completed on", "Agent", "Status", "Kind", "Created", "Blocked-by",
 )
 
 # Historical single-tracker schema: one `Ticket` value qualified by a
