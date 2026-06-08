@@ -8,12 +8,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from support import (
+from support import (  # noqa: E402  (inserts scripts dir on sys.path)
     IsolatedHomeTestCase,
     _import_cli_module,
     run_cli,
 )
+from plan_keeper import groundcrew, storage  # noqa: E402
 
 
 class TestGroundcrewFetch(IsolatedHomeTestCase):
@@ -344,6 +346,22 @@ class TestGroundcrewId(IsolatedHomeTestCase):
             {"id": "", "sourceRef": {"path": "/b.md"}},
         ]
         self.cli._assert_no_plankeeper_id_collisions(issues)  # no raise
+
+
+class TestFetchMintFailure(IsolatedHomeTestCase):
+    """fetch must never ship an issue with an empty id (the id is groundcrew's
+    worktree/branch/run-state key). If minting can't persist, skip the plan."""
+
+    def test_fetch_excludes_plan_when_mint_cannot_persist(self):
+        d = self.plans_root / "r"
+        d.mkdir(parents=True)
+        (d / "2026-01-01-x.md").write_text("---\nStatus: todo\n---\n# X\n")
+        with patch.object(storage, "PLAN_ROOT", self.plans_root), \
+                patch.object(groundcrew, "write_atomic", side_effect=OSError("disk full")):
+            issues = groundcrew._collect_crew_issues()
+        # The plan couldn't get a frozen id, so it must not ship at all — never
+        # with an empty id.
+        self.assertEqual(issues, [])
 
 class TestGroundcrewResolveOne(IsolatedHomeTestCase):
     """Tests for the groundcrew-resolve-one subcommand."""

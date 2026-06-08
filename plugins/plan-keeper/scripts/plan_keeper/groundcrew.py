@@ -240,7 +240,10 @@ def _collect_crew_issues() -> list[dict]:
                 continue
             _mint_plankeeper_ticket_if_absent(plan)
             issue = _plan_to_issue(plan)
-            if issue is not None:
+            # Skip a plan whose id couldn't be minted/persisted (empty id) — an
+            # empty id is groundcrew's worktree/branch/run-state key and would
+            # corrupt the adapter. It'll be retried on the next fetch.
+            if issue is not None and issue["id"]:
                 issues.append(issue)
     return issues
 

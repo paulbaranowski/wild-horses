@@ -141,11 +141,13 @@ def find_plans_by_ticket(ticket_id: str) -> list[Path]:
             except (PlanKeeperCliError, OSError, UnicodeDecodeError):
                 continue
             stored = {
-                (meta.get("Plan-keeper Ticket") or "").strip(),
-                (meta.get("Linear Ticket") or "").strip(),
-                (meta.get("Jira Ticket") or "").strip(),
+                val for val in (
+                    (meta.get("Plan-keeper Ticket") or "").strip(),
+                    (meta.get("Linear Ticket") or "").strip(),
+                    (meta.get("Jira Ticket") or "").strip(),
+                ) if val
             }
-            if ticket_id and ticket_id in stored:
+            if ticket_id in stored:
                 matches.append(path)
     return matches
 

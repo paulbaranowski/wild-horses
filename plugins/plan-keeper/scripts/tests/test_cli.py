@@ -905,43 +905,45 @@ class TestSaveMintsPlankeeperTicket(IsolatedHomeTestCase):
             "save", "--override", "scratch", "--topic", "rename me",
             stdin="# Rename me\nbody\n", home=self.home,
         )
+        self.assertEqual(r.returncode, 0, r.stderr)
         saved = Path(r.stdout.strip())
-        pk_before = json.loads(
-            run_cli("file-meta", "get", "--file", str(saved), home=self.home).stdout
-        )["Plan-keeper Ticket"]
+        before = run_cli("file-meta", "get", "--file", str(saved), home=self.home)
+        self.assertEqual(before.returncode, 0, before.stderr)
+        pk_before = json.loads(before.stdout)["Plan-keeper Ticket"]
         renamed = saved.with_name("2026-06-07-renamed.md")
         saved.rename(renamed)
-        pk_after = json.loads(
-            run_cli("file-meta", "get", "--file", str(renamed), home=self.home).stdout
-        )["Plan-keeper Ticket"]
+        after = run_cli("file-meta", "get", "--file", str(renamed), home=self.home)
+        self.assertEqual(after.returncode, 0, after.stderr)
+        pk_after = json.loads(after.stdout)["Plan-keeper Ticket"]
         self.assertEqual(pk_before, pk_after)
         self.assertTrue(pk_before.startswith("plan-"))
 
 
 class TestMultiTrackerCoexistence(IsolatedHomeTestCase):
+    def _save(self, topic: str, body: str) -> Path:
+        r = run_cli("save", "--override", "scratch", "--topic", topic,
+                    stdin=body, home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return Path(r.stdout.strip())
+
+    def _set(self, path: Path, *flags: str) -> None:
+        r = run_cli("file-meta", "set", "--file", str(path), *flags, home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
     def test_plan_carries_all_three_ids_at_once(self) -> None:
-        saved = Path(run_cli(
-            "save", "--override", "scratch", "--topic", "tri tracker",
-            stdin="# Tri tracker\nbody\n", home=self.home,
-        ).stdout.strip())
-        run_cli("file-meta", "set", "--file", str(saved),
-                "--linear-ticket", "ENG-1", home=self.home)
-        run_cli("file-meta", "set", "--file", str(saved),
-                "--jira-ticket", "PROJ-2", home=self.home)
-        meta = json.loads(
-            run_cli("file-meta", "get", "--file", str(saved), home=self.home).stdout
-        )
+        saved = self._save("tri tracker", "# Tri tracker\nbody\n")
+        self._set(saved, "--linear-ticket", "ENG-1")
+        self._set(saved, "--jira-ticket", "PROJ-2")
+        got = run_cli("file-meta", "get", "--file", str(saved), home=self.home)
+        self.assertEqual(got.returncode, 0, got.stderr)
+        meta = json.loads(got.stdout)
         self.assertRegex(meta["Plan-keeper Ticket"], r"plan-\d+")
         self.assertEqual(meta["Linear Ticket"], "ENG-1")
         self.assertEqual(meta["Jira Ticket"], "PROJ-2")
 
     def test_locator_resolves_by_any_id_field(self) -> None:
-        saved = Path(run_cli(
-            "save", "--override", "scratch", "--topic", "find by linear",
-            stdin="# Find by linear\nbody\n", home=self.home,
-        ).stdout.strip())
-        run_cli("file-meta", "set", "--file", str(saved),
-                "--linear-ticket", "ENG-42", home=self.home)
+        saved = self._save("find by linear", "# Find by linear\nbody\n")
+        self._set(saved, "--linear-ticket", "ENG-42")
         # Locate the same plan via --ticket using the Linear id.
         got = run_cli("file-meta", "get", "--ticket", "ENG-42", home=self.home)
         self.assertEqual(got.returncode, 0, got.stderr)

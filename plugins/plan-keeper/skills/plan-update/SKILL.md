@@ -91,4 +91,4 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta get \
 - Setting an active status (`backlog`/`todo`/`in-progress`/`in-review`) only rewrites frontmatter in place. Setting `--status done`/`--status deferred` relocates the file into `done/`/`deferred/` (the CLI's lifecycle behavior) — same as `plan-done`. Always confirm before invoking, since that move is destructive; prefer `plan-done` for completing a plan.
 - This skill never creates files — that's plan-save's job.
 - The mutation is atomic (tmp file + fsync + os.replace) so a crash mid-update can't corrupt the plan.
-- For promoting many plans at once, or browsing the queue across all repos, use the `plan-crew` skill — it's the cross-repo, multi-select counterpart. plan-update stays the targeted single-plan / current-repo editor (and the way to set `Agent`, `Ticket`, etc.).
+- For promoting many plans at once, or browsing the queue across all repos, use the `plan-crew` skill — it's the cross-repo, multi-select counterpart. plan-update stays the targeted single-plan / current-repo editor (and the way to set `Agent` and the per-system ticket fields, etc.).
