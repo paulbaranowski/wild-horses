@@ -5,7 +5,7 @@ description: Use when the user asks to push a plan to Jira, file a Jira ticket/i
 
 # plan-jira
 
-Push a saved plan markdown file as a Jira ticket description. On first push, write `Ticket` and `Ticket System` into the file's frontmatter so the same plan can be re-pushed (updates the existing ticket instead of creating a new one). Per-repo config — including the API token — lives at `~/plans/<repo>/.plankeeper.json` (see [`../../ticket-systems.md`](../../ticket-systems.md)).
+Push a saved plan markdown file as a Jira ticket description. On first push, write the `Jira Ticket` id into the file's frontmatter so the same plan can be re-pushed (updates the existing ticket instead of creating a new one). Per-repo config — including the API token — lives at `~/plans/<repo>/.plankeeper.json` (see [`../../ticket-systems.md`](../../ticket-systems.md)).
 
 The bundled `plan_keeper_cli.py` does every mutation: config CRUD, metadata fetch, frontmatter read/write, and the actual Jira API calls. This skill's job is the user-facing orchestration: arg parsing, file selection, setup wizard prompts, and final confirmation.
 
@@ -134,7 +134,7 @@ Print the result as a numbered list (1-indexed). Ask the user "Which one? (1-N, 
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta get --file <path>
 ```
 
-Returns JSON with `Ticket`, `Ticket System`, `Completed on`. Empty strings if not present.
+Returns JSON with `Plan-keeper Ticket`, `Linear Ticket`, `Jira Ticket`, `Completed on`, etc. Empty strings if not present.
 
 ### 6. Confirm the push
 
@@ -156,7 +156,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" jira push \
   --file <path> [--force-new if step 6 chose option 1]
 ```
 
-`--ticket <id>` is an alternative to `--file`: it locates the plan by its `Ticket:` frontmatter across all repos (exactly one of the two is required).
+`--ticket <id>` is an alternative to `--file`: it locates the plan by any of its id fields (`Plan-keeper Ticket` / `Linear Ticket` / `Jira Ticket`) across all repos (exactly one of the two is required).
 
 Returns JSON on stdout: `{"action": "create"|"update", "id": "...", "url": "...", "title": "...", "system": "jira"}`.
 
@@ -172,7 +172,7 @@ Only on `action == "create"` (updates don't change frontmatter):
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set \
-  --file <path> --ticket-id <result.id> --ticket-system jira
+  --file <path> --jira-ticket <result.id>
 ```
 
 If this fails (extremely rare — atomic local write): show the ticket URL from step 7's stdout and warn:
@@ -181,8 +181,7 @@ If this fails (extremely rare — atomic local write): show the ticket URL from 
 >
 > ```yaml
 > ---
-> Ticket: <ID>
-> Ticket System: jira
+> Jira Ticket: <ID>
 > ---
 > ```
 

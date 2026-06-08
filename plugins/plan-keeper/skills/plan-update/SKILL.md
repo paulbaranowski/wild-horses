@@ -10,7 +10,7 @@ Edit the frontmatter of an existing plan in `~/plans/<repo>/`. The bundled `plan
 ## Quick reference
 
 - **Target:** `~/plans/<repo>/<filename>` (active state — not `done/` or `deferred/`).
-- **Field → flag:** `Agent` → `--agent`, `Status` → `--status`, `Kind` → `--kind`, `Completed on` → `--completed-on`, `Ticket System` → `--ticket-system`, `Ticket` → `--ticket-id`. (`--ticket` is **not** a value flag — it _locates_ a plan by its `Ticket:` frontmatter, like push; write the `Ticket:` value with `--ticket-id`.)
+- **Field → flag:** `Agent` → `--agent`, `Status` → `--status`, `Kind` → `--kind`, `Completed on` → `--completed-on`, `Plan-keeper Ticket` → `--plankeeper-ticket`, `Linear Ticket` → `--linear-ticket`, `Jira Ticket` → `--jira-ticket`. (`--ticket` is **not** a value flag — it _locates_ a plan by any of its id fields, like push; write an id with the matching per-system flag.)
 - **`--status` is lifecycle-aware:** active states (`backlog`/`todo`/`in-progress`/`in-review`) rewrite in place, but `--status done`/`--status deferred` **relocate** the plan into `done/`/`deferred/` (and `done` stamps `Completed on`) — exactly what `plan-done` does. Prefer `plan-done` for completing a plan; reach here for `done`/`deferred` only when editing other fields in the same breath.
 - **Status vocabulary:** `backlog` (default; fetched but not dispatched — confirm via `crew status <id>`), `todo` (eligible for dispatch), `in-progress` (set by groundcrew's markInProgress hook), `in-review` (manual), `done` (set by plan-done when archiving). The middle values (`in-progress`, `done`) are normally written by the system — set them by hand only if you know why.
 - **Kind vocabulary:** `idea` / `prd` / `design` / `spec` / `exec-plan` — the document type, validated against this closed set (see [../../plan-kinds.md](../../plan-kinds.md)). Set by `plan-save`; correct it here if it was inferred wrong.
@@ -45,7 +45,7 @@ Match the user's invocation:
 - "change agent to codex" / "use codex" → `--agent codex`
 - "back to backlog" / "reset" → `--status backlog`
 - "it's actually a spec/design/prd/idea/exec-plan" / "reclassify" → `--kind <value>`
-- "set the ticket to ENG-123" → `--ticket-id ENG-123`
+- "set the linear ticket to ENG-123" → `--linear-ticket ENG-123` (use `--jira-ticket` / `--plankeeper-ticket` for the other systems)
 - Anything else: ask which field, which value.
 
 Multiple fields → pass multiple flags in one call.
@@ -69,7 +69,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set \
   --<flag> <value>
 ```
 
-Pass additional field flags in the same call as needed (e.g. `--status todo --agent codex`). `--ticket <id>` is an alternative to `--file` for **locating** the plan — it finds the plan by its `Ticket:` frontmatter across all repos (exactly one of `--file`/`--ticket` is required); don't confuse it with `--ticket-id`, which _writes_ the `Ticket:` value.
+Pass additional field flags in the same call as needed (e.g. `--status todo --agent codex`). `--ticket <id>` is an alternative to `--file` for **locating** the plan — it finds the plan by any of its id fields (`Plan-keeper Ticket` / `Linear Ticket` / `Jira Ticket`) across all repos (exactly one of `--file`/`--ticket` is required); don't confuse it with the per-system value flags (`--plankeeper-ticket` / `--linear-ticket` / `--jira-ticket`), which _write_ an id.
 
 ### 5. Confirm the result
 
