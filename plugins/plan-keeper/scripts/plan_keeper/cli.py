@@ -44,7 +44,7 @@ from plan_keeper.groundcrew import (
     _repo_for_plan,
     _resolve_crew_id,
     _stamp_groundcrew_ticket,
-    groundcrew_id,
+    plankeeper_id,
 )
 from plan_keeper.jira import (
     _resolve_jira_project_id,
@@ -849,7 +849,7 @@ def cmd_queue_set(args) -> int:
             if args.default_agent and not meta.get("Agent", "").strip():
                 meta["Agent"] = args.default_agent
             _apply_groundcrew_ticket(
-                meta, groundcrew_id(_repo_for_plan(resolved), resolved.stem)
+                meta, plankeeper_id(_repo_for_plan(resolved), resolved.stem)
             )
         new_text = serialize_frontmatter(meta, body)
         if not new_text.endswith("\n"):

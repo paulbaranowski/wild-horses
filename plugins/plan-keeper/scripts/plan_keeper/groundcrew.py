@@ -28,25 +28,22 @@ _GROUNDCREW_STATUS_MAP = {
 GROUNDCREW_TICKET_SYSTEM = "groundcrew"
 
 
-def groundcrew_id(repo: str, stem: str) -> str:
-    """Synthesize a groundcrew ticket id for a plan: ``plan-<digits>``.
+def plankeeper_id(repo: str, stem: str) -> str:
+    """Mint a plan-keeper ticket id for a plan: ``plan-<digits>``.
 
-    groundcrew requires every ticket id to match ``/^[a-z][\\da-z]*-\\d+$/``
-    and reuses the bare id as a permanent key — the worktree dir
-    (``<repo>-<id>``), the git branch (``<user>-<id>``), and the run-state
-    filename all derive from it. Plan filenames (e.g.
-    ``2026-04-30-notification-service-typed-models``) don't fit that shape,
-    so we hash a stable identity into a conforming id.
-
-    Stateless by design: the id is a pure function of ``(repo, stem)``, so
-    ``fetch`` and ``resolve-one`` agree with no stored mapping, and the id
-    stays stable across a plan's lifecycle (status flip, move to ``done/``,
-    which change neither the repo nor the stem). The repo is part of the key
-    because the id carries no repo qualifier downstream — two same-named
-    plans in different repos must not collide. Uses a 48-bit BLAKE2 digest:
-    plenty of headroom for a personal plan set, and ``cmd_groundcrew_fetch``
-    fails loudly on the astronomically-unlikely collision rather than
-    silently merging two plans onto one worktree.
+    Used as a **one-time seed generator**: plan-save (and, for legacy plans,
+    the first ``crew fetch``) calls this once, stores the result in the plan's
+    ``Plan-keeper Ticket`` frontmatter, and thereafter the id is only ever read
+    back — never recomputed. groundcrew requires every ticket id to match
+    ``/^[a-z][\\da-z]*-\\d+$/`` and reuses the bare id as a permanent key — the
+    worktree dir (``<repo>-<id>``), the git branch (``<user>-<id>``), and the
+    run-state filename all derive from it — so the minted value must conform;
+    the 48-bit BLAKE2 digest of ``<repo>/<stem>`` does. The repo is part of the
+    seed because the id carries no repo qualifier downstream — two same-named
+    plans in different repos must mint distinct ids on first save. A mint-time
+    collision is astronomically unlikely (and ``crew fetch`` fails loudly on a
+    duplicate stored id rather than silently merging two plans onto one
+    worktree).
     """
     digest = hashlib.blake2b(f"{repo}/{stem}".encode("utf-8"), digest_size=6).digest()
     return f"plan-{int.from_bytes(digest, 'big')}"
@@ -108,7 +105,7 @@ def _stamp_groundcrew_ticket(path: Path, ticket: str) -> None:
     frontmatter (the same pair plan-linear/plan-jira use), so a human can see which plan
     a ``plan-<n>`` id maps to.
 
-    Display-only and self-healing: ``groundcrew_id()`` stays the canonical id,
+    Display-only and self-healing: ``plankeeper_id()`` stays the canonical id,
     so ``resolve-one`` never trusts these fields — it recomputes the hash.
     Rewrites only when absent or stale (see _apply_groundcrew_ticket), so
     steady-state fetches don't churn the file. Best-effort: a read/parse error
@@ -145,7 +142,7 @@ def _plan_to_issue(path: Path) -> Optional[dict]:
     # `crew get` reports the real repo, not "done"/"deferred".
     repo_name = _repo_for_plan(path)
     return {
-        "id": groundcrew_id(repo_name, path.stem),
+        "id": plankeeper_id(repo_name, path.stem),
         "title": title,
         "description": body.rstrip(),
         "status": adapter_status,

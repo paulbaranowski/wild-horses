@@ -275,28 +275,28 @@ class TestGroundcrewId(IsolatedHomeTestCase):
     def test_id_matches_groundcrew_ticket_shape(self):
         # groundcrew enforces TICKET_RE = /^[a-z][\\da-z]*-\\d+$/.
         self.assertRegex(
-            self.cli.groundcrew_id("herds", "2026-04-30-foo"),
+            self.cli.plankeeper_id("herds", "2026-04-30-foo"),
             r"^[a-z][\da-z]*-\d+$",
         )
 
     def test_id_is_stable_across_calls(self):
         self.assertEqual(
-            self.cli.groundcrew_id("herds", "2026-04-30-foo"),
-            self.cli.groundcrew_id("herds", "2026-04-30-foo"),
+            self.cli.plankeeper_id("herds", "2026-04-30-foo"),
+            self.cli.plankeeper_id("herds", "2026-04-30-foo"),
         )
 
     def test_id_differs_by_repo(self):
         # Same stem in two repos must not collide: groundcrew uses the bare
         # id as a git branch and run-state filename, with no repo qualifier.
         self.assertNotEqual(
-            self.cli.groundcrew_id("r1", "2026-01-01-x"),
-            self.cli.groundcrew_id("r2", "2026-01-01-x"),
+            self.cli.plankeeper_id("r1", "2026-01-01-x"),
+            self.cli.plankeeper_id("r2", "2026-01-01-x"),
         )
 
     def test_id_differs_by_stem(self):
         self.assertNotEqual(
-            self.cli.groundcrew_id("r", "2026-01-01-x"),
-            self.cli.groundcrew_id("r", "2026-01-02-y"),
+            self.cli.plankeeper_id("r", "2026-01-01-x"),
+            self.cli.plankeeper_id("r", "2026-01-02-y"),
         )
 
     def test_collision_guard_raises_with_both_paths(self):
@@ -330,7 +330,7 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         d.mkdir(parents=True)
         plan = d / "2026-01-01-x.md"
         plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# Title\n")
-        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        ticket = self.cli.plankeeper_id("r", "2026-01-01-x")
         result = run_cli("crew", "get", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
@@ -348,7 +348,7 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         )
         # Archived plan's repo is the grandparent dir ("r"), so its id is
         # keyed on ("r", stem) — same as when it was active.
-        ticket = self.cli.groundcrew_id("r", "2025-12-31-old")
+        ticket = self.cli.plankeeper_id("r", "2025-12-31-old")
         result = run_cli("crew", "get", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0)
@@ -364,7 +364,7 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         d.mkdir(parents=True)
         plan = d / "2026-01-01-local.md"
         plan.write_text("---\nStatus: in-progress\n---\n# Local\n")
-        ticket = self.cli.groundcrew_id("r", "2026-01-01-local")
+        ticket = self.cli.plankeeper_id("r", "2026-01-01-local")
         result = run_cli("crew", "get", ticket, home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertEqual(json.loads(result.stdout)["id"], ticket)
@@ -391,7 +391,7 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         (d / "2025-12-31-old.md").write_text(
             "---\nAgent: claude\nStatus: done\n---\n# Old\n"
         )
-        ticket = self.cli.groundcrew_id("myrepo", "2025-12-31-old")
+        ticket = self.cli.plankeeper_id("myrepo", "2025-12-31-old")
         result = run_cli("crew", "get", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
@@ -405,7 +405,7 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         (d / "2025-06-15-paused.md").write_text(
             "---\nAgent: claude\nStatus: backlog\n---\n# Paused\n"
         )
-        ticket = self.cli.groundcrew_id("myrepo", "2025-06-15-paused")
+        ticket = self.cli.plankeeper_id("myrepo", "2025-06-15-paused")
         result = run_cli("crew", "get", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
@@ -449,7 +449,7 @@ class TestCrewStart(IsolatedHomeTestCase):
         d.mkdir(parents=True)
         plan = d / "2026-01-01-x.md"
         plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# Title\n")
-        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        ticket = self.cli.plankeeper_id("r", "2026-01-01-x")
         result = run_cli("crew", "start", ticket, home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("Status: in-progress", plan.read_text())
@@ -496,7 +496,7 @@ class TestCrewStart(IsolatedHomeTestCase):
         active = repo / "2026-01-01-x.md"
         active.write_text("---\nStatus: todo\n---\n# X\n")
         done.write_text("---\nStatus: done\n---\n# X\n")
-        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        ticket = self.cli.plankeeper_id("r", "2026-01-01-x")
         result = run_cli("crew", "start", ticket, home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("Status: in-progress", active.read_text())
@@ -519,7 +519,7 @@ class TestCrewReview(IsolatedHomeTestCase):
         d.mkdir(parents=True)
         plan = d / "2026-01-01-x.md"
         plan.write_text("---\nAgent: claude\nStatus: in-progress\n---\n# Title\n")
-        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        ticket = self.cli.plankeeper_id("r", "2026-01-01-x")
         result = run_cli("crew", "review", ticket, home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("Status: in-review", plan.read_text())
@@ -564,7 +564,7 @@ class TestCrewReview(IsolatedHomeTestCase):
         done = repo / "done" / "2026-01-01-x.md"
         done.parent.mkdir(parents=True)
         done.write_text("---\nStatus: done\n---\n# X\n")
-        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        ticket = self.cli.plankeeper_id("r", "2026-01-01-x")
         result = run_cli("crew", "review", ticket, home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("Status: in-review", done.read_text())
