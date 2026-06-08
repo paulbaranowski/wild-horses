@@ -1,6 +1,22 @@
 # plan-keeper
 
-Organize markdown plans on disk across repos. Eight skills cover the lifecycle: list a repo's plans read-only (`plan-list`), capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), archive with a completion stamp (`plan-done`), edit frontmatter (`plan-update`), manage the groundcrew dispatch queue (`plan-crew`), and file plans as Linear or Jira tickets (`plan-linear`, `plan-jira`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine — nothing is committed to any repo.
+plan-keeper is a local **task-management system** built around plans. A task _is_ a plan file in `~/plans/<repo>/`, and it takes one of two shapes: a **planning task**, whose output is more plans (an idea you brainstorm into a spec; a PRD you turn into an executable plan), or an **implementation task** — an executable plan that gets built into code. The same tool captures both, routes each to its next step, and archives it when done. Everything is tracked locally in markdown on your machine, never committed to any repo; filing a plan out to Linear or Jira is an occasional export, not the system of record.
+
+Eight skills cover the lifecycle: list a repo's plans read-only (`plan-list`), capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), archive with a completion stamp (`plan-done`), edit frontmatter (`plan-update`), manage the groundcrew dispatch queue (`plan-crew`), and file plans as Linear or Jira tickets (`plan-linear`, `plan-jira`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine — nothing is committed to any repo.
+
+## The model
+
+The unit of work is a **task**, and every task is a plan file. Tasks come in two shapes:
+
+- **Planning tasks produce more plans.** An `idea` brainstormed into a `spec`, a `prd` turned into an `exec-plan` — the deliverable of the task is the next, more-developed plan. `plan-do` routes these into the planning skills.
+- **Implementation tasks produce code.** An `exec-plan` dispatched to `autonomous`, `task-list-runner`, or `executing-plans` — the deliverable is a PR. `plan-do` routes these into the execution menu.
+
+Two orthogonal frontmatter fields track where a task sits:
+
+- **`Kind`** (`idea → prd → design → spec → exec-plan`) — the document type: how far the _thinking_ has progressed. A planning task advances a plan along this axis, each step's output being a higher `Kind`. See [`plan-kinds.md`](plan-kinds.md).
+- **`Status`** (`backlog → todo → in-progress → in-review → done`) — the lifecycle: how far the _work_ has progressed.
+
+plan-keeper is the system of record for these tasks — they live in `~/plans/<repo>/` on your machine and are never committed to any repo. Filing a plan to **Linear or Jira** (`plan-linear` / `plan-jira`) is an optional export for the occasions a task needs a shared tracker; by default the task is tracked here.
 
 ## Install
 

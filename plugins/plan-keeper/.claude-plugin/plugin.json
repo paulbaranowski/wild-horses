@@ -1,6 +1,6 @@
 {
   "name": "plan-keeper",
-  "description": "Organize markdown plans in a local ~/plans/<repo>/ tree: capture from conversation, route to the next step, archive, file to Linear/Jira, and dispatch via groundcrew.",
+  "description": "A local task-management system built around plans in a ~/plans/<repo>/ tree: a task is a plan that either spawns more plans or gets built into code. Capture from conversation, route to the next step, archive, dispatch via groundcrew, and optionally export to Linear/Jira.",
   "version": "5.5.0",
   "author": {
     "name": "Paul Baranowski"
