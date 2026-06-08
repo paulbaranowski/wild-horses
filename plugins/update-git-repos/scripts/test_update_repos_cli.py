@@ -707,6 +707,100 @@ class TestSignalKillsInflightGroups(IsolatedHomeTestCase):
         self._assert_signal_kills_grandchildren(signal.SIGINT)
 
 
+class TestSignalGatesNewSpawnsDuringTeardown(IsolatedHomeTestCase):
+    """Regression coverage for the teardown TOCTOU race: the fatal-signal
+    handler snapshots the in-flight git set, then SIGKILLs that snapshot after a
+    grace sleep. A worker that starts a *new* `git pull` (its own detached
+    session) AFTER the snapshot but BEFORE os._exit would not be in the snapshot
+    and would survive — the very orphan the teardown exists to prevent. The CLI
+    must gate new spawns once teardown begins. This test pins a worker inside
+    repo_status() (so it's between status-check and `git pull`), SIGTERMs the
+    CLI, and asserts the pull spawned afterward never escapes (no continued
+    background writes)."""
+
+    def _install_shim(self, status_marker: Path, writer_marker: Path) -> dict[str, str]:
+        """`git` shim that blocks (killably) on `status` so a worker parks in
+        repo_status, and on `pull` backgrounds a forever-writer grandchild. The
+        status block is how we deterministically place a worker "between
+        repo_status and git pull" at the instant we signal the CLI."""
+        real_git = shutil.which("git")
+        assert real_git, "git must be on PATH for this test"
+        shim_dir = self.home / "bin"
+        shim_dir.mkdir()
+        shim = shim_dir / "git"
+        shim.write_text(
+            "#!/bin/sh\n"
+            'for a in "$@"; do\n'
+            '  if [ "$a" = "status" ]; then\n'
+            f"    echo s > '{status_marker}'\n"   # tell the test the worker is parked
+            "    exec sleep 30\n"                  # killable; teardown SIGTERM frees the worker
+            "  fi\n"
+            '  if [ "$a" = "pull" ]; then\n'
+            f"    ( while true; do echo x >> '{writer_marker}'; sleep 0.1; done ) &\n"
+            "    sleep 30\n"
+            "    exit 0\n"
+            "  fi\n"
+            "done\n"
+            f'exec "{real_git}" "$@"\n'
+        )
+        shim.chmod(0o755)
+        return {
+            "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}",
+            "UPDATE_GIT_REPOS_TIMEOUT": "60",       # don't let the per-call timeout fire
+            "UPDATE_GIT_REPOS_MIN_FREE_GB": "0",    # don't let the low-disk gate intervene
+        }
+
+    def test_pull_started_during_teardown_does_not_escape(self) -> None:
+        bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        commit_to_bare(bare, self.scratch, "main")
+        self.write_config([{"path": str(repo), "branch": "main"}])
+
+        status_marker = self.home / "status-reached"
+        writer_marker = self.home / "pull-writer-heartbeat"
+        writer_marker.write_text("")
+        env = {**os.environ, "HOME": str(self.home), **self._install_shim(status_marker, writer_marker)}
+
+        proc = subprocess.Popen(
+            ["python3", str(CLI), "pull-all"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+        )
+        try:
+            # Wait until the worker is parked in repo_status (status shim ran) —
+            # i.e. it has NOT yet reached `git pull`. Signaling now means the
+            # pull will be spawned during teardown, which is the race we test.
+            deadline = time.monotonic() + 10
+            while not status_marker.exists():
+                if time.monotonic() > deadline:
+                    proc.kill()
+                    self.fail("worker never reached repo_status — shim/setup broken")
+                time.sleep(0.05)
+
+            proc.terminate()  # SIGTERM the CLI -> teardown begins
+            try:
+                proc.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                self.fail("CLI did not exit after SIGTERM")
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            for pipe in (proc.stdout, proc.stderr):
+                if pipe:
+                    pipe.close()
+
+        # The pull that the worker started during teardown must have been
+        # refused/killed. If it slipped past the gate, its grandchild writer is
+        # an orphan still appending after the CLI exited.
+        size_after_exit = writer_marker.stat().st_size
+        time.sleep(1.5)
+        size_later = writer_marker.stat().st_size
+        self.assertEqual(
+            size_after_exit, size_later,
+            "a git pull started after teardown began kept writing once the CLI "
+            "exited — a new detached git session slipped past the teardown gate",
+        )
+
+
 class TestLowDiskPreflight(IsolatedHomeTestCase):
     """A near-full disk is where a giant fetch can't finish, gets killed, and
     leaves a tmp_pack_* behind — so pull refuses to even start when free space
