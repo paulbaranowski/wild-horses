@@ -132,6 +132,14 @@ class IsolatedHomeTestCase(unittest.TestCase):
     """Each test gets a fresh $HOME pointing at a tempdir."""
 
     def setUp(self) -> None:
+        # Pin the low-disk floor to 0 for the whole suite so pull-exercising
+        # tests stay deterministic regardless of the dev machine's free space —
+        # otherwise a host under the 5 GB default floor makes every real pull
+        # return `low-disk` before it runs. The dedicated TestLowDiskPreflight
+        # tests override this per-call (env_extra) to assert the floor itself.
+        self._saved_min_free = os.environ.get("UPDATE_GIT_REPOS_MIN_FREE_GB")
+        os.environ["UPDATE_GIT_REPOS_MIN_FREE_GB"] = "0"
+
         self._tmp = tempfile.TemporaryDirectory()
         self.home = Path(self._tmp.name)
         self.config_path = self.home / ".config" / "wild-horses" / "update-git-repos" / "repos.json"
@@ -144,6 +152,12 @@ class IsolatedHomeTestCase(unittest.TestCase):
         self.scratch.mkdir()
 
     def tearDown(self) -> None:
+        # Restore the pre-test value of the low-disk floor so the "0" pinned in
+        # setUp doesn't leak into the parent process for the rest of the session.
+        if self._saved_min_free is None:
+            os.environ.pop("UPDATE_GIT_REPOS_MIN_FREE_GB", None)
+        else:
+            os.environ["UPDATE_GIT_REPOS_MIN_FREE_GB"] = self._saved_min_free
         self._tmp.cleanup()
 
     def write_config(self, repos: list) -> None:
@@ -505,6 +519,74 @@ class TestPullAll(IsolatedHomeTestCase):
         self.assertEqual([x["path"] for x in results], [str(gamma), str(beta)])
         self.assertEqual([x["status"] for x in results], ["pulled", "wrong-branch"])
         self.assertEqual(payload["up_to_date"], 1)
+
+
+class TestPullAllProgress(IsolatedHomeTestCase):
+    """pull-all streams a per-repo progress line to stderr as each repo
+    finishes, so a long sync isn't a silent spinner. The lines are flushed
+    and live on stderr only — the stdout JSON contract is untouched, and
+    --quiet opts out for scripted/cron callers."""
+
+    def test_progress_lines_on_stderr_by_default(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        self.write_config([{"path": str(repo), "branch": "main"}])
+        r = run_cli("pull-all", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # Header + one completion line for the single repo.
+        self.assertIn("Pulling 1 repo (", r.stderr)  # singular noun, not "1 repos"
+        self.assertIn("[1/1]", r.stderr)
+        self.assertIn("up-to-date", r.stderr)
+
+    def test_progress_does_not_pollute_stdout(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        self.write_config([{"path": str(repo), "branch": "main"}])
+        r = run_cli("pull-all", home=self.home)
+        # stdout must remain pure JSON — no progress text leaked across streams.
+        self.assertNotIn("[1/1]", r.stdout)
+        self.assertNotIn("Pulling", r.stdout)
+        json.loads(r.stdout)  # parses cleanly or the test fails
+
+    def test_quiet_suppresses_progress(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        self.write_config([{"path": str(repo), "branch": "main"}])
+        r = run_cli("pull-all", "--quiet", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("[1/1]", r.stderr)
+        self.assertNotIn("Pulling", r.stderr)
+        # stdout JSON is still produced as normal.
+        self.assertIn("results", json.loads(r.stdout))
+
+    def test_progress_emits_a_line_per_repo(self) -> None:
+        # Three clean, already-current repos: each still gets its own
+        # completion line, so the count of "[i/3]" markers equals the repo count
+        # even though up-to-date repos are collapsed out of the stdout JSON.
+        for name in ("alpha", "beta", "gamma"):
+            _, repo = make_remote_and_clone(self.work, self.scratch, name)
+            run_cli("add", str(repo), home=self.home)
+        r = run_cli("pull-all", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Pulling 3 repos", r.stderr)
+        self.assertEqual(r.stderr.count("/3]"), 3)
+
+    def test_progress_shows_stat_for_pulled_repo(self) -> None:
+        bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        commit_to_bare(bare, self.scratch, "main")  # fast-forwardable
+        self.write_config([{"path": str(repo), "branch": "main"}])
+        r = run_cli("pull-all", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # The pulled line carries the one-line diffstat for live watching.
+        self.assertIn("[1/1]", r.stderr)
+        self.assertIn("pulled", r.stderr)
+        self.assertIn("changed", r.stderr)
+
+    def test_progress_collapses_home_to_tilde(self) -> None:
+        # $HOME is the tmpdir here, so a repo under it should render as ~/work/…
+        # rather than the full absolute path, keeping the live lines short.
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        self.write_config([{"path": str(repo), "branch": "main"}])
+        r = run_cli("pull-all", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("~/work/alpha", r.stderr)
 
 
 class TestPullTimeout(IsolatedHomeTestCase):

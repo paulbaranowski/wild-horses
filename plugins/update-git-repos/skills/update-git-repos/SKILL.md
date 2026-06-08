@@ -11,7 +11,7 @@ Pull every repo in the config from `origin/<branch>` in one shot. When a working
 
 - **Config:** `~/.config/wild-horses/update-git-repos/repos.json` — `{"default_dirty_action": "ask|skip|stash", "repos": [{"path": "...", "branch": "main", "dirty_action": "ask|skip|stash"}, ...]}`. Both action keys are optional; `default_dirty_action` defaults to `ask`, and a per-repo `dirty_action` overrides it. **Resolution:** per-repo `dirty_action` → top-level `default_dirty_action` → `ask`.
 - **CLI:** `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" <subcommand>`
-- **Subcommands:** `bootstrap-discover --root DIR`, `add PATH [--branch B]`, `remove PATH`, `set-action <ask|skip|stash|inherit> [--repo PATH]`, `list`, `pull-all`, `pull-one PATH [--stash]`
+- **Subcommands:** `bootstrap-discover --root DIR`, `add PATH [--branch B]`, `remove PATH`, `set-action <ask|skip|stash|inherit> [--repo PATH]`, `list`, `pull-all [--quiet]`, `pull-one PATH [--stash]`
 - **Every subcommand prints JSON on stdout.** Parse it; do not screen-scrape.
 - **Exit codes:** 0 means the command itself succeeded (per-repo errors live inside the JSON's `status` field); non-zero means the command itself failed (bad path, corrupt config, etc).
 
@@ -53,7 +53,17 @@ Run:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" pull-all
 ```
 
-The CLI inspects every repo, pulls the clean+on-branch ones with `git pull --ff-only`, and applies each dirty repo's configured action inline (`stash` does a stash-pull-pop, `skip` leaves it untouched, `ask` defers to step 4); the remaining repos are reported without mutation. The output is `{"results": [...], "up_to_date": N}`. **`up_to_date` is the count of already-current repos — they are deliberately omitted from `results` to save tokens; just report the number in step 5.** Parse the `results` array for everything else. Each entry has a `status` field:
+The CLI inspects every repo, pulls the clean+on-branch ones with `git pull --ff-only`, and applies each dirty repo's configured action inline (`stash` does a stash-pull-pop, `skip` leaves it untouched, `ask` defers to step 4); the remaining repos are reported without mutation. The output is `{"results": [...], "up_to_date": N}`.
+
+**Live progress.** As each repo finishes, the CLI emits a flushed `[i/N] status path` line to **stderr**; the machine-readable JSON stays on stdout, untouched.
+
+For a large or slow sync, surface that heartbeat so the run isn't a silent spinner — this skill exists precisely for slow/large fetches, exactly when a heartbeat matters most:
+
+- Run `pull-all` with `run_in_background: true`, then poll its output every ~2s and relay new stderr lines to the user.
+- When the process exits, parse the final stdout JSON for the steps below. (Foreground also live-tails stderr, but background-and-poll is the robust choice for a long-running sync.)
+- Pass `--quiet` to suppress the progress lines for scripted/non-interactive callers.
+
+**`up_to_date` is the count of already-current repos** — they are deliberately omitted from `results` to save tokens; just report the number in step 5. Parse the `results` array for everything else. Each entry has a `status` field:
 
 | `status`                   | meaning                                                                                                                                                                                                   | next action                                                                                             |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |

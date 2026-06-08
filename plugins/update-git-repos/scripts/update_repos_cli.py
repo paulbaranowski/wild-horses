@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import itertools
 import json
 import os
 import shutil
@@ -592,6 +593,80 @@ def resolve_dirty_action(cfg: dict, entry: dict) -> str:
     return d if d in VALID_DIRTY_ACTIONS else "ask"
 
 
+# --- live progress (pull-all) ---
+#
+# pull-all is otherwise a black box: the agent calls it through Bash, which only
+# returns output when the process exits, so a 21-repo sync is a silent spinner
+# followed by one JSON blob. These helpers emit a flushed, human-readable line to
+# *stderr* as each repo finishes — visible live while it runs — leaving the
+# stdout JSON contract (parsed by the skill and the tests) completely untouched.
+
+def _collapse_home(path: str) -> str:
+    """Shorten an absolute path by replacing the home-dir prefix with `~`.
+
+    Matches against both the literal $HOME and its symlink-resolved form so it
+    still collapses on macOS, where a repo path is `.resolve()`d through
+    /var -> /private/var while $HOME often isn't.
+    """
+    # Check BOTH the literal $HOME and its symlink-resolved form: on macOS a repo
+    # path resolves through /var -> /private/var while $HOME often doesn't, so the
+    # two strings differ but both must collapse to `~`. Don't "simplify" by
+    # dropping either form. rstrip(os.sep) guards a home dir with a trailing
+    # separator; `or os.sep` keeps a root-like "/" home behaving as before.
+    for home in {str(Path.home()), str(Path.home().resolve())}:
+        home = home.rstrip(os.sep) or os.sep
+        if path == home:
+            return "~"
+        if path.startswith(home + os.sep):
+            return "~" + path[len(home):]
+    return path
+
+
+def _progress_detail(result: dict) -> str:
+    """One short, human-facing detail for a completed repo's progress line.
+
+    Just enough to make the live line actionable; the authoritative, full data
+    (errors, conflict text) always rides in the stdout JSON, so this stays terse
+    and single-line. Returns "" when there's nothing useful to add.
+    """
+    status = result.get("status")
+    if status == "pulled":
+        return result.get("stat", "")
+    if status == "dirty":
+        return "(needs your decision)"
+    if status == "wrong-branch":
+        cur = result.get("current_branch")
+        return f"(on {cur})" if cur else ""
+    if status == "low-disk":
+        free = result.get("free_gb")
+        return f"{free} GB free" if free is not None else ""
+    if status in ("pull-failed", "stash-failed", "timed-out", "pulled-with-pop-conflict"):
+        text = (result.get("error") or result.get("pop_error") or "").strip()
+        if not text:
+            return ""
+        first = text.splitlines()[0]
+        return first if len(first) <= 60 else first[:59] + "…"
+    return ""
+
+
+def _print_progress(i: int, total: int, result: dict) -> None:
+    """Emit one completion line to stderr, flushed so it surfaces live.
+
+    `flush=True` is essential: Python block-buffers stderr when it's a pipe (the
+    Bash-tool case), so without the flush every line stays trapped until exit —
+    defeating the whole point.
+    """
+    width = len(str(total))
+    idx = f"[{i:>{width}}/{total}]"
+    status = str(result.get("status", "?"))
+    path = _collapse_home(str(result.get("path", "?")))
+    line = f"{idx} {status:<12} {path}"
+    detail = _progress_detail(result)
+    if detail:
+        line += f"   {detail}"
+    print(line, file=sys.stderr, flush=True)
+
+
 def _status_then_pull(work: tuple[dict, str]) -> dict:
     """One repo's pull-all unit of work: status-check, then act per resolved action.
 
@@ -618,7 +693,6 @@ def _status_then_pull(work: tuple[dict, str]) -> dict:
 
 
 def cmd_pull_all(args: argparse.Namespace) -> None:
-    del args
     cfg = load_config()
     repos = cfg["repos"]
     if not repos:
@@ -634,8 +708,29 @@ def cmd_pull_all(args: argparse.Namespace) -> None:
     # stays in config order regardless of which pull finishes first — the
     # step-5 summary relies on that ordering.
     work = [(r, resolve_dirty_action(cfg, r)) for r in repos]
-    with ThreadPoolExecutor(max_workers=min(MAX_PULL_WORKERS, len(repos))) as ex:
-        results = list(ex.map(_status_then_pull, work))
+    total = len(work)
+    workers = min(MAX_PULL_WORKERS, total)
+
+    # Live progress is on by default (--quiet opts out for cron/scripted callers).
+    # Lines go to stderr completion-ordered as each repo finishes; the lock keeps
+    # concurrent workers' lines and the [i/N] counter from interleaving. The
+    # final stdout JSON below stays config-ordered via executor.map.
+    progress = not args.quiet
+    if progress:
+        noun = "repo" if total == 1 else "repos"
+        print(f"Pulling {total} {noun} (up to {workers} at a time)…", file=sys.stderr, flush=True)
+    lock = threading.Lock()
+    counter = itertools.count(1)
+
+    def run_one(w: tuple[dict, str]) -> dict:
+        result = _status_then_pull(w)
+        if progress:
+            with lock:
+                _print_progress(next(counter), total, result)
+        return result
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        results = list(ex.map(run_one, work))
 
     # Collapse already-current repos into a bare count rather than a full entry
     # each. They need no per-repo action in the skill flow, so emitting one
@@ -695,6 +790,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_ls.set_defaults(func=cmd_list)
 
     p_pa = sp.add_parser("pull-all", help="Pull every clean+on-branch repo; report the rest.")
+    p_pa.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress the live per-repo progress lines on stderr (for cron/scripted callers).",
+    )
     p_pa.set_defaults(func=cmd_pull_all)
 
     p_po = sp.add_parser("pull-one", help="Pull a single repo, optionally stash-pull-pop.")
