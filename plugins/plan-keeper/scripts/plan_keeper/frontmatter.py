@@ -7,7 +7,25 @@ from plan_keeper.dates import _iso_utc_now
 from plan_keeper.errors import PlanKeeperCliError
 
 # Order matters in the output — keep this canonical so callers see a stable shape.
-_FRONTMATTER_FIELDS = ("Ticket", "Ticket System", "Completed on", "Agent", "Status", "Kind", "Created")
+# Each tracker gets its own id field: a plan can carry a plan-keeper id (always,
+# minted once and frozen), a Linear id, and a Jira id simultaneously. This
+# replaced the single `Ticket` / `Ticket System` pair (see _migrate_legacy_ticket_fields).
+_FRONTMATTER_FIELDS = (
+    "Plan-keeper Ticket", "Linear Ticket", "Jira Ticket",
+    "Completed on", "Agent", "Status", "Kind", "Created",
+)
+
+# Historical single-tracker schema: one `Ticket` value qualified by a
+# `Ticket System` ("groundcrew"/"linear"/"jira"/empty). The multi-tracker schema
+# gives each system its own field; _migrate_legacy_ticket_fields maps a legacy
+# pair to the matching field on read (and the next write persists it — lazy
+# migration). An unrecognized system is left untouched (no data loss).
+_LEGACY_SYSTEM_TO_FIELD = {
+    "": "Plan-keeper Ticket",
+    "groundcrew": "Plan-keeper Ticket",
+    "linear": "Linear Ticket",
+    "jira": "Jira Ticket",
+}
 
 # `Kind` classifies the *document type* (orthogonal to Status, which is the
 # lifecycle). The values are ordered by pipeline position, idea → ready-to-build.
@@ -26,6 +44,29 @@ def validate_kind(value: str) -> str:
             code=2,
         )
     return normalized
+
+
+def _migrate_legacy_ticket_fields(meta: dict[str, str]) -> None:
+    """In-place: translate a legacy ``Ticket`` / ``Ticket System`` pair into the
+    matching per-system field, then drop the legacy keys.
+
+    Mutates ``meta`` so every reader transparently sees the multi-tracker schema;
+    the next ``serialize_frontmatter`` persists it (lazy migration on next write).
+    Fill-if-absent: a new field already present wins (a half-migrated file keeps
+    its new value). An unrecognized system is left wholly untouched — no data
+    loss, no misfiling into an id field.
+    """
+    if "Ticket" not in meta and "Ticket System" not in meta:
+        return
+    ticket = (meta.get("Ticket") or "").strip()
+    system = (meta.get("Ticket System") or "").strip().lower()
+    field = _LEGACY_SYSTEM_TO_FIELD.get(system)
+    if field is None:
+        return  # unrecognized system: preserve the legacy pair as foreign fields
+    meta.pop("Ticket", None)
+    meta.pop("Ticket System", None)
+    if ticket and not meta.get(field):
+        meta[field] = ticket
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -82,6 +123,7 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
         body = body[2:]
     elif body.startswith("\n"):
         body = body[1:]
+    _migrate_legacy_ticket_fields(meta)
     return meta, body
 
 
@@ -118,6 +160,7 @@ def _inject_default_frontmatter(
     body_text: str,
     kind: Optional[str] = None,
     created: Optional[str] = None,
+    plankeeper_ticket: Optional[str] = None,
 ) -> str:
     """Ensure body_text starts with frontmatter containing Status and Created
     (and Kind, when a kind is supplied).
@@ -150,6 +193,11 @@ def _inject_default_frontmatter(
     fill-if-absent — a body that already carries a valid `Created` keeps it.
     """
     meta, body = parse_frontmatter(body_text)
+    # Mint-once: a plan is born with a Plan-keeper Ticket and never has it
+    # overwritten. Fill-if-absent (a body already carrying one keeps it), like
+    # Status/Kind/Created below.
+    if plankeeper_ticket and not meta.get("Plan-keeper Ticket"):
+        meta["Plan-keeper Ticket"] = plankeeper_ticket
     if not meta.get("Status"):
         meta["Status"] = "backlog"
     if kind and not meta.get("Kind"):

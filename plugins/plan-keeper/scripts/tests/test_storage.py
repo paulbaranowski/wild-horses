@@ -469,8 +469,13 @@ class TestResolveTicket(IsolatedHomeTestCase):
                     stdin="# Body\ntext\n", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
         path = Path(r.stdout.strip())
+        # Route the id to the right per-system field by shape: a plan-keeper id
+        # (plan-<n>) overrides the auto-minted Plan-keeper Ticket; anything else
+        # is treated as an external (Linear) id. find_plans_by_ticket matches
+        # across all three fields, so resolution works regardless.
+        flag = "--plankeeper-ticket" if ticket.startswith("plan-") else "--linear-ticket"
         u = run_cli("file-meta", "set", "--file", str(path),
-                    "--ticket-id", ticket, home=self.home)
+                    flag, ticket, home=self.home)
         self.assertEqual(u.returncode, 0, u.stderr)
         return path
 
@@ -531,7 +536,7 @@ class TestResolveTicket(IsolatedHomeTestCase):
         self._save_with_ticket("scratch", "g", "plan-88")
         r = run_cli("file-meta", "get", "--ticket", "plan-88", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn('"Ticket": "plan-88"', r.stdout)
+        self.assertIn('"Plan-keeper Ticket": "plan-88"', r.stdout)
 
     def test_file_meta_get_ticket_not_found_exits_3(self) -> None:
         r = run_cli("file-meta", "get", "--ticket", "plan-nope", home=self.home)

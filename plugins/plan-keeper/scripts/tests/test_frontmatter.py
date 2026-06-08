@@ -28,13 +28,13 @@ class TestFileMetaGet(IsolatedHomeTestCase):
         )
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
-        self.assertEqual(data, {"Ticket": "", "Ticket System": "", "Completed on": "", "Agent": "", "Status": "", "Kind": "", "Created": ""})
+        self.assertEqual(data, {"Plan-keeper Ticket": "", "Linear Ticket": "", "Jira Ticket": "", "Completed on": "", "Agent": "", "Status": "", "Kind": "", "Created": ""})
 
     def test_full_frontmatter_parses(self) -> None:
         path = self._write_plan(
             "---\n"
-            "Ticket: ENG-123\n"
-            "Ticket System: linear\n"
+            "Plan-keeper Ticket: plan-1\n"
+            "Linear Ticket: ENG-123\n"
             "Completed on: 2026-05-20\n"
             "---\n"
             "\n# Heading\n"
@@ -46,8 +46,9 @@ class TestFileMetaGet(IsolatedHomeTestCase):
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
         self.assertEqual(data, {
-            "Ticket": "ENG-123",
-            "Ticket System": "linear",
+            "Plan-keeper Ticket": "plan-1",
+            "Linear Ticket": "ENG-123",
+            "Jira Ticket": "",
             "Completed on": "2026-05-20",
             "Agent": "",
             "Status": "",
@@ -58,8 +59,7 @@ class TestFileMetaGet(IsolatedHomeTestCase):
     def test_partial_frontmatter_returns_present_fields(self) -> None:
         path = self._write_plan(
             "---\n"
-            "Ticket: ENG-99\n"
-            "Ticket System: linear\n"
+            "Linear Ticket: ENG-99\n"
             "---\n"
             "# H\n"
         )
@@ -69,7 +69,7 @@ class TestFileMetaGet(IsolatedHomeTestCase):
         )
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
-        self.assertEqual(data["Ticket"], "ENG-99")
+        self.assertEqual(data["Linear Ticket"], "ENG-99")
         self.assertEqual(data["Completed on"], "")
 
     def test_malformed_frontmatter_missing_colon_exits_5(self) -> None:
@@ -175,23 +175,23 @@ class TestFileMetaSet(IsolatedHomeTestCase):
             "---\nAgent: claude\nStatus: backlog\n" + "".join(extra) + "---\n\n# Body\n"
         )
 
-    def test_sets_ticket_id_and_system(self) -> None:
+    def test_sets_linear_and_jira_tickets(self) -> None:
         path = self._managed()
         result = run_cli(
             "file-meta", "set", "--file", str(path),
-            "--ticket-id", "ENG-123", "--ticket-system", "linear",
+            "--linear-ticket", "ENG-123", "--jira-ticket", "PROJ-9",
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         text = path.read_text(encoding="utf-8")
-        self.assertIn("Ticket: ENG-123", text)
-        self.assertIn("Ticket System: linear", text)
+        self.assertIn("Linear Ticket: ENG-123", text)
+        self.assertIn("Jira Ticket: PROJ-9", text)
 
     def test_rejects_bare_file(self) -> None:
         path = self._write_plan("# Heading\n\nBody.\n")
         original = path.read_text(encoding="utf-8")
         result = run_cli(
-            "file-meta", "set", "--file", str(path), "--ticket-id", "ENG-123",
+            "file-meta", "set", "--file", str(path), "--linear-ticket", "ENG-123",
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 2)
@@ -199,18 +199,16 @@ class TestFileMetaSet(IsolatedHomeTestCase):
         self.assertEqual(path.read_text(encoding="utf-8"), original)
 
     def test_updates_existing_ticket_in_place(self) -> None:
-        path = self._managed("Ticket: OLD-1\n", "Ticket System: jira\n")
+        path = self._managed("Linear Ticket: OLD-1\n")
         result = run_cli(
             "file-meta", "set", "--file", str(path),
-            "--ticket-id", "ENG-99", "--ticket-system", "linear",
+            "--linear-ticket", "ENG-99",
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         text = path.read_text(encoding="utf-8")
-        self.assertIn("Ticket: ENG-99", text)
-        self.assertIn("Ticket System: linear", text)
+        self.assertIn("Linear Ticket: ENG-99", text)
         self.assertNotIn("OLD-1", text)
-        self.assertNotIn("Ticket System: jira", text)
 
     def test_preserves_unmodified_fields(self) -> None:
         path = self._managed("Ticket: KEEP-1\n", "Completed on: 2026-05-19\n")
@@ -244,7 +242,7 @@ class TestFileMetaSet(IsolatedHomeTestCase):
     def test_omits_empty_fields(self) -> None:
         path = self._managed()
         result = run_cli(
-            "file-meta", "set", "--file", str(path), "--ticket-id", "ENG-1",
+            "file-meta", "set", "--file", str(path), "--linear-ticket", "ENG-1",
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 0, result.stderr)

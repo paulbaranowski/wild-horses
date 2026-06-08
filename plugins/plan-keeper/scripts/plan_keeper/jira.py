@@ -230,10 +230,10 @@ def _push_jira(section: dict, title: str, description: str, meta: dict, force_ne
     email = section["email"]
     token = section["apiToken"]
     defaults = section["defaults"]
-    has_existing = bool(meta.get("Ticket")) and meta.get("Ticket System") == "jira"
+    existing = (meta.get("Jira Ticket") or "").strip()
     adf = _adf_paragraph(description)
-    if has_existing and not force_new:
-        key = meta["Ticket"]
+    if existing and not force_new:
+        key = existing
         jira_update_issue(
             site, email, token, key,
             {"summary": title, "description": adf},

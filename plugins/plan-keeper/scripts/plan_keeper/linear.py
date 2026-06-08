@@ -212,10 +212,9 @@ def linear_create_issue(api_key: str, input_dict: dict) -> dict:
 def _push_linear(section: dict, title: str, description: str, meta: dict, force_new: bool) -> dict:
     api_key = section["apiKey"]
     defaults = section["defaults"]
-    has_existing = bool(meta.get("Ticket")) and meta.get("Ticket System") == "linear"
-    if has_existing and not force_new:
-        # update path — implemented in Task 10
-        return _push_linear_update(api_key, meta["Ticket"], title, description)
+    existing = (meta.get("Linear Ticket") or "").strip()
+    if existing and not force_new:
+        return _push_linear_update(api_key, existing, title, description)
     input_dict = {
         "title": title,
         "description": description,
