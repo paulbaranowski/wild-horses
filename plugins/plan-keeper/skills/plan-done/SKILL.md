@@ -33,7 +33,7 @@ Prefer conversation context; fall back to a CLI listing.
 
 If present, extract `<name>` and pass `--override <name>` to all CLI calls below.
 
-**If the user names the plan by its `Ticket:` id** (e.g. `plan-195296912509085`, `ENG-123`) instead of a filename, skip the listing and archive it directly with `--ticket <id>` in step 3. Resolution is global across `~/plans/`, so no `--override` is needed; the CLI exits 3 when no active plan carries that ticket and exits 2 (listing candidates) when more than one does.
+**If the user names the plan by a ticket id** (e.g. `plan-195296912509085`, `ENG-123`) instead of a filename, skip the listing and archive it directly with `--ticket <id>` in step 3. Resolution matches any of the plan's id fields (`Plan-keeper Ticket` / `Linear Ticket` / `Jira Ticket`) globally across `~/plans/`, so no `--override` is needed; the CLI exits 3 when no active plan carries that ticket and exits 2 (listing candidates) when more than one does.
 
 **Look for a clear plan candidate from this session:**
 
@@ -93,7 +93,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set --statu
 
 `--file` takes the **full path** (`~/plans/<repo>/<filename>`), where `<repo>` is the folder shown in step 1's listing. The CLI does: read source, write `Status: done` + `Completed on: <today>` into the YAML frontmatter, atomic-write to `~/plans/<repo>/done/<filename>`, unlink the source. Today's date is in the user's local timezone (override with `--completed-on YYYY-MM-DD`).
 
-When the user named the plan by its ticket id, pass `--ticket <id>` instead of `--file` (the two are mutually exclusive — supply exactly one). `--ticket` resolves the plan across all repos by its `Ticket:` frontmatter; the destination `done/` is derived from the plan's own repo:
+When the user named the plan by a ticket id, pass `--ticket <id>` instead of `--file` (the two are mutually exclusive — supply exactly one). `--ticket` resolves the plan across all repos by any of its id fields (`Plan-keeper Ticket` / `Linear Ticket` / `Jira Ticket`); the destination `done/` is derived from the plan's own repo:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set --status done \

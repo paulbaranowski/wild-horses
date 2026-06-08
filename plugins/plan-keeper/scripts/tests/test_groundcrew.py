@@ -8,12 +8,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from support import (
+from support import (  # noqa: E402  (inserts scripts dir on sys.path)
     IsolatedHomeTestCase,
     _import_cli_module,
     run_cli,
 )
+from plan_keeper import groundcrew, storage  # noqa: E402
 
 
 class TestGroundcrewFetch(IsolatedHomeTestCase):
@@ -80,9 +82,9 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             issues = json.loads(result.stdout)
             self.assertEqual(issues[0]["sourceRef"]["path"], str(plan.resolve()))
 
-    def test_groundcrew_fetch_stamps_id_into_frontmatter(self):
-        """fetch mirrors the synthesized id into the Ticket / Ticket System
-        pair (Ticket System: groundcrew) so a human can see the mapping."""
+    def test_groundcrew_fetch_mints_id_into_frontmatter(self):
+        """fetch mints the plan-keeper id into the Plan-keeper Ticket field
+        (mint-once) so a human can see the mapping; no Ticket System line."""
         with tempfile.TemporaryDirectory() as home:
             d = Path(home) / "plans" / "herds"
             d.mkdir(parents=True)
@@ -92,8 +94,8 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
                 run_cli("crew", "fetch", home=Path(home), cwd=self.cwd).stdout
             )
             text = plan.read_text()
-            self.assertIn(f"Ticket: {issues[0]['id']}", text)
-            self.assertIn("Ticket System: groundcrew", text)
+            self.assertIn(f"Plan-keeper Ticket: {issues[0]['id']}", text)
+            self.assertNotIn("Ticket System", text)
 
     def test_groundcrew_fetch_stamp_is_idempotent(self):
         """Once stamped, repeated fetches don't rewrite the file."""
@@ -121,11 +123,13 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             )
             text = plan.read_text()
             self.assertIn("tags: [infra]", text)
-            self.assertIn(f"Ticket: {issues[0]['id']}", text)
+            self.assertIn(f"Plan-keeper Ticket: {issues[0]['id']}", text)
 
-    def test_groundcrew_fetch_heals_stale_stamp(self):
-        """A stale groundcrew Ticket is corrected to the canonical (hash) id —
-        the frontmatter is a mirror, never the source of truth."""
+    def test_groundcrew_fetch_preserves_existing_id_no_heal(self):
+        """A plan that already carries an id keeps it verbatim — mint-once, never
+        recomputed or overwritten (the frozen-id contract). A legacy groundcrew
+        Ticket pair is read (migrated in-memory) as that same id, so fetch never
+        re-mints it, and `crew get` resolves the original id."""
         with tempfile.TemporaryDirectory() as home:
             d = Path(home) / "plans" / "r"
             d.mkdir(parents=True)
@@ -137,29 +141,48 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             issues = json.loads(
                 run_cli("crew", "fetch", home=Path(home), cwd=self.cwd).stdout
             )
-            self.assertNotEqual(issues[0]["id"], "plan-999999")
-            self.assertIn(f"Ticket: {issues[0]['id']}", plan.read_text())
-            self.assertNotIn("plan-999999", plan.read_text())
+            # Frozen: the stored id is reported as-is, not re-hashed to a new one.
+            self.assertEqual(issues[0]["id"], "plan-999999")
+            self.assertIn("plan-999999", plan.read_text())
+            # And it resolves by that id.
+            r = run_cli("crew", "get", "plan-999999", home=Path(home), cwd=self.cwd)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
 
-    def test_groundcrew_fetch_does_not_clobber_external_ticket(self):
-        """A plan already filed in Linear/Jira keeps its tracker reference;
-        groundcrew dispatches via the recomputed id without touching it."""
+    def test_groundcrew_fetch_persists_migration_on_next_write(self):
+        """Once a real mutation touches a legacy plan (e.g. crew start), the new
+        Plan-keeper Ticket field is persisted and the legacy pair is dropped."""
         with tempfile.TemporaryDirectory() as home:
             d = Path(home) / "plans" / "r"
             d.mkdir(parents=True)
             plan = d / "2026-01-01-x.md"
             plan.write_text(
-                "---\nTicket: ENG-1\nTicket System: linear\n"
+                "---\nTicket: plan-999999\nTicket System: groundcrew\n"
+                "Agent: claude\nStatus: todo\n---\n# T\n"
+            )
+            run_cli("crew", "start", "plan-999999", home=Path(home), cwd=self.cwd)
+            text = plan.read_text()
+            self.assertIn("Plan-keeper Ticket: plan-999999", text)
+            self.assertNotIn("Ticket System", text)
+
+    def test_groundcrew_fetch_does_not_clobber_external_ticket(self):
+        """A plan already filed in Linear keeps its tracker reference; fetch
+        mints a separate plan-keeper id without touching the Linear field."""
+        with tempfile.TemporaryDirectory() as home:
+            d = Path(home) / "plans" / "r"
+            d.mkdir(parents=True)
+            plan = d / "2026-01-01-x.md"
+            plan.write_text(
+                "---\nLinear Ticket: ENG-1\n"
                 "Agent: claude\nStatus: todo\n---\n# T\n"
             )
             issues = json.loads(
                 run_cli("crew", "fetch", home=Path(home), cwd=self.cwd).stdout
             )
             text = plan.read_text()
-            self.assertIn("Ticket: ENG-1", text)
-            self.assertIn("Ticket System: linear", text)
+            self.assertIn("Linear Ticket: ENG-1", text)
             self.assertRegex(issues[0]["id"], r"^plan-\d+$")
-            # The recomputed id still resolves the plan.
+            self.assertIn(f"Plan-keeper Ticket: {issues[0]['id']}", text)
+            # The minted id resolves the plan.
             r = run_cli("crew", "get", issues[0]["id"],
                         home=Path(home), cwd=self.cwd)
             self.assertEqual(r.returncode, 0, msg=r.stderr)
@@ -275,28 +298,28 @@ class TestGroundcrewId(IsolatedHomeTestCase):
     def test_id_matches_groundcrew_ticket_shape(self):
         # groundcrew enforces TICKET_RE = /^[a-z][\\da-z]*-\\d+$/.
         self.assertRegex(
-            self.cli.groundcrew_id("herds", "2026-04-30-foo"),
+            self.cli.plankeeper_id("herds", "2026-04-30-foo"),
             r"^[a-z][\da-z]*-\d+$",
         )
 
     def test_id_is_stable_across_calls(self):
         self.assertEqual(
-            self.cli.groundcrew_id("herds", "2026-04-30-foo"),
-            self.cli.groundcrew_id("herds", "2026-04-30-foo"),
+            self.cli.plankeeper_id("herds", "2026-04-30-foo"),
+            self.cli.plankeeper_id("herds", "2026-04-30-foo"),
         )
 
     def test_id_differs_by_repo(self):
         # Same stem in two repos must not collide: groundcrew uses the bare
         # id as a git branch and run-state filename, with no repo qualifier.
         self.assertNotEqual(
-            self.cli.groundcrew_id("r1", "2026-01-01-x"),
-            self.cli.groundcrew_id("r2", "2026-01-01-x"),
+            self.cli.plankeeper_id("r1", "2026-01-01-x"),
+            self.cli.plankeeper_id("r2", "2026-01-01-x"),
         )
 
     def test_id_differs_by_stem(self):
         self.assertNotEqual(
-            self.cli.groundcrew_id("r", "2026-01-01-x"),
-            self.cli.groundcrew_id("r", "2026-01-02-y"),
+            self.cli.plankeeper_id("r", "2026-01-01-x"),
+            self.cli.plankeeper_id("r", "2026-01-02-y"),
         )
 
     def test_collision_guard_raises_with_both_paths(self):
@@ -305,7 +328,7 @@ class TestGroundcrewId(IsolatedHomeTestCase):
             {"id": "plan-1", "sourceRef": {"path": "/b.md"}},
         ]
         with self.assertRaises(self.cli.PlanKeeperCliError) as ctx:
-            self.cli._assert_no_groundcrew_id_collisions(issues)
+            self.cli._assert_no_plankeeper_id_collisions(issues)
         self.assertIn("/a.md", str(ctx.exception))
         self.assertIn("/b.md", str(ctx.exception))
 
@@ -314,7 +337,31 @@ class TestGroundcrewId(IsolatedHomeTestCase):
             {"id": "plan-1", "sourceRef": {"path": "/a.md"}},
             {"id": "plan-2", "sourceRef": {"path": "/b.md"}},
         ]
-        self.cli._assert_no_groundcrew_id_collisions(issues)  # no raise
+        self.cli._assert_no_plankeeper_id_collisions(issues)  # no raise
+
+    def test_collision_guard_skips_empty_ids(self):
+        # Unminted plans (empty id, before fetch mints) must not collide.
+        issues = [
+            {"id": "", "sourceRef": {"path": "/a.md"}},
+            {"id": "", "sourceRef": {"path": "/b.md"}},
+        ]
+        self.cli._assert_no_plankeeper_id_collisions(issues)  # no raise
+
+
+class TestFetchMintFailure(IsolatedHomeTestCase):
+    """fetch must never ship an issue with an empty id (the id is groundcrew's
+    worktree/branch/run-state key). If minting can't persist, skip the plan."""
+
+    def test_fetch_excludes_plan_when_mint_cannot_persist(self):
+        d = self.plans_root / "r"
+        d.mkdir(parents=True)
+        (d / "2026-01-01-x.md").write_text("---\nStatus: todo\n---\n# X\n")
+        with patch.object(storage, "PLAN_ROOT", self.plans_root), \
+                patch.object(groundcrew, "write_atomic", side_effect=OSError("disk full")):
+            issues = groundcrew._collect_crew_issues()
+        # The plan couldn't get a frozen id, so it must not ship at all — never
+        # with an empty id.
+        self.assertEqual(issues, [])
 
 class TestGroundcrewResolveOne(IsolatedHomeTestCase):
     """Tests for the groundcrew-resolve-one subcommand."""
@@ -329,8 +376,10 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         d = self.home / "plans" / "r"
         d.mkdir(parents=True)
         plan = d / "2026-01-01-x.md"
-        plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# Title\n")
-        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        ticket = self.cli.plankeeper_id("r", "2026-01-01-x")
+        plan.write_text(
+            f"---\nPlan-keeper Ticket: {ticket}\nAgent: claude\nStatus: todo\n---\n# Title\n"
+        )
         result = run_cli("crew", "get", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
@@ -343,12 +392,13 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
     def test_groundcrew_resolve_one_finds_done_plan(self):
         d = self.home / "plans" / "r" / "done"
         d.mkdir(parents=True)
-        (d / "2025-12-31-old.md").write_text(
-            "---\nAgent: claude\nStatus: done\n---\n# Old\n"
-        )
         # Archived plan's repo is the grandparent dir ("r"), so its id is
-        # keyed on ("r", stem) — same as when it was active.
-        ticket = self.cli.groundcrew_id("r", "2025-12-31-old")
+        # keyed on ("r", stem) — same as when it was active. It was minted while
+        # active, so the frozen id is stored in frontmatter.
+        ticket = self.cli.plankeeper_id("r", "2025-12-31-old")
+        (d / "2025-12-31-old.md").write_text(
+            f"---\nPlan-keeper Ticket: {ticket}\nAgent: claude\nStatus: done\n---\n# Old\n"
+        )
         result = run_cli("crew", "get", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0)
@@ -363,8 +413,10 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         d = self.home / "plans" / "r"
         d.mkdir(parents=True)
         plan = d / "2026-01-01-local.md"
-        plan.write_text("---\nStatus: in-progress\n---\n# Local\n")
-        ticket = self.cli.groundcrew_id("r", "2026-01-01-local")
+        ticket = self.cli.plankeeper_id("r", "2026-01-01-local")
+        plan.write_text(
+            f"---\nPlan-keeper Ticket: {ticket}\nStatus: in-progress\n---\n# Local\n"
+        )
         result = run_cli("crew", "get", ticket, home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertEqual(json.loads(result.stdout)["id"], ticket)
@@ -388,10 +440,10 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         """Regression: archived plans must report their repo name, not 'done'."""
         d = self.home / "plans" / "myrepo" / "done"
         d.mkdir(parents=True)
+        ticket = self.cli.plankeeper_id("myrepo", "2025-12-31-old")
         (d / "2025-12-31-old.md").write_text(
-            "---\nAgent: claude\nStatus: done\n---\n# Old\n"
+            f"---\nPlan-keeper Ticket: {ticket}\nAgent: claude\nStatus: done\n---\n# Old\n"
         )
-        ticket = self.cli.groundcrew_id("myrepo", "2025-12-31-old")
         result = run_cli("crew", "get", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
@@ -402,10 +454,10 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         """Regression: paused plans must report their repo name, not 'deferred'."""
         d = self.home / "plans" / "myrepo" / "deferred"
         d.mkdir(parents=True)
+        ticket = self.cli.plankeeper_id("myrepo", "2025-06-15-paused")
         (d / "2025-06-15-paused.md").write_text(
-            "---\nAgent: claude\nStatus: backlog\n---\n# Paused\n"
+            f"---\nPlan-keeper Ticket: {ticket}\nAgent: claude\nStatus: backlog\n---\n# Paused\n"
         )
-        ticket = self.cli.groundcrew_id("myrepo", "2025-06-15-paused")
         result = run_cli("crew", "get", ticket,
                          home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
@@ -448,8 +500,10 @@ class TestCrewStart(IsolatedHomeTestCase):
         d = self.home / "plans" / "r"
         d.mkdir(parents=True)
         plan = d / "2026-01-01-x.md"
-        plan.write_text("---\nAgent: claude\nStatus: todo\n---\n# Title\n")
-        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        ticket = self.cli.plankeeper_id("r", "2026-01-01-x")
+        plan.write_text(
+            f"---\nPlan-keeper Ticket: {ticket}\nAgent: claude\nStatus: todo\n---\n# Title\n"
+        )
         result = run_cli("crew", "start", ticket, home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("Status: in-progress", plan.read_text())
@@ -494,9 +548,14 @@ class TestCrewStart(IsolatedHomeTestCase):
         done = repo / "done" / "2026-01-01-x.md"
         done.parent.mkdir(parents=True)
         active = repo / "2026-01-01-x.md"
-        active.write_text("---\nStatus: todo\n---\n# X\n")
-        done.write_text("---\nStatus: done\n---\n# X\n")
-        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        ticket = self.cli.plankeeper_id("r", "2026-01-01-x")
+        # Active and archived share a stem, so they were minted to the same id.
+        active.write_text(
+            f"---\nPlan-keeper Ticket: {ticket}\nStatus: todo\n---\n# X\n"
+        )
+        done.write_text(
+            f"---\nPlan-keeper Ticket: {ticket}\nStatus: done\n---\n# X\n"
+        )
         result = run_cli("crew", "start", ticket, home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("Status: in-progress", active.read_text())
@@ -518,8 +577,10 @@ class TestCrewReview(IsolatedHomeTestCase):
         d = self.home / "plans" / "r"
         d.mkdir(parents=True)
         plan = d / "2026-01-01-x.md"
-        plan.write_text("---\nAgent: claude\nStatus: in-progress\n---\n# Title\n")
-        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        ticket = self.cli.plankeeper_id("r", "2026-01-01-x")
+        plan.write_text(
+            f"---\nPlan-keeper Ticket: {ticket}\nAgent: claude\nStatus: in-progress\n---\n# Title\n"
+        )
         result = run_cli("crew", "review", ticket, home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("Status: in-review", plan.read_text())
@@ -563,8 +624,10 @@ class TestCrewReview(IsolatedHomeTestCase):
         repo = self.home / "plans" / "r"
         done = repo / "done" / "2026-01-01-x.md"
         done.parent.mkdir(parents=True)
-        done.write_text("---\nStatus: done\n---\n# X\n")
-        ticket = self.cli.groundcrew_id("r", "2026-01-01-x")
+        ticket = self.cli.plankeeper_id("r", "2026-01-01-x")
+        done.write_text(
+            f"---\nPlan-keeper Ticket: {ticket}\nStatus: done\n---\n# X\n"
+        )
         result = run_cli("crew", "review", ticket, home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("Status: in-review", done.read_text())
@@ -746,9 +809,9 @@ class TestQueue(IsolatedHomeTestCase):
         self.assertNotIn("Status: backlog", text)
         self.assertIn("Agent: codex", text)  # existing Agent untouched
 
-    def test_queue_set_promote_stamps_groundcrew_ticket(self) -> None:
-        # Promoting a plan claims the groundcrew Ticket pair so the id is
-        # visible the moment it's queued.
+    def test_queue_set_promote_mints_plankeeper_ticket(self) -> None:
+        # Promoting a plan mints its plan-keeper id so it's visible the moment
+        # it's queued (mint-once; no Ticket System line).
         p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")
         r = run_cli(
             "crew", "queue", "set", "--status", "todo",
@@ -756,16 +819,17 @@ class TestQueue(IsolatedHomeTestCase):
         )
         self.assertEqual(r.returncode, 0, r.stderr)
         text = p.read_text()
-        self.assertRegex(text, r"Ticket: plan-\d+")
-        self.assertIn("Ticket System: groundcrew", text)
+        self.assertRegex(text, r"Plan-keeper Ticket: plan-\d+")
+        self.assertNotIn("Ticket System", text)
 
     def test_queue_set_promote_does_not_clobber_external_ticket(self) -> None:
-        # A plan already filed in Linear keeps its tracker reference on promote.
+        # A plan already filed in Linear keeps its tracker reference on promote,
+        # and additionally gets a minted plan-keeper id.
         d = self.plans_root / "alpha"
         d.mkdir(parents=True, exist_ok=True)
         p = d / "2026-05-01-a.md"
         p.write_text(
-            "---\nTicket: ENG-1\nTicket System: linear\nStatus: backlog\n---\n\n# a\n",
+            "---\nLinear Ticket: ENG-1\nStatus: backlog\n---\n\n# a\n",
             encoding="utf-8",
         )
         r = run_cli(
@@ -774,9 +838,9 @@ class TestQueue(IsolatedHomeTestCase):
         )
         self.assertEqual(r.returncode, 0, r.stderr)
         text = p.read_text()
-        self.assertIn("Ticket: ENG-1", text)
-        self.assertIn("Ticket System: linear", text)
-        self.assertNotIn("groundcrew", text)
+        self.assertIn("Linear Ticket: ENG-1", text)
+        self.assertRegex(text, r"Plan-keeper Ticket: plan-\d+")
+        self.assertNotIn("Ticket System", text)
 
     def test_queue_set_dequeue_does_not_stamp_groundcrew(self) -> None:
         p = self._make_plan("alpha", "2026-05-01-a.md", status="todo")

@@ -82,15 +82,16 @@ level under `~/plans/`, alongside whatever entries are already there.
 - **fetch** — globs `~/plans/*/*.md` (one level deep, skipping `done/` and
   `deferred/`). Each plan with valid frontmatter becomes one issue. `Status:
 backlog` maps to adapter status `other` (fetched but not dispatched); `Status:
-todo` maps to `todo` (dispatchable). Each issue's `id` is a synthesized
-  `plan-<digits>` (a stable hash of repo + filename — plan filenames don't fit
-  groundcrew's ticket-id shape). fetch also mirrors that id into the plan's
-  `Ticket` / `Ticket System: groundcrew` frontmatter so a human can read the
-  mapping. It's display-only and self-healing (the hash stays canonical), and it
-  never overwrites a `linear`/`jira` reference left by plan-linear/plan-jira.
-- **resolveOne** (`crew get ${id}`) — recomputes each plan's id across active,
-  then `done/`, then `deferred/`, and returns the match. Exits 3 if no plan maps
-  to that id.
+todo` maps to `todo` (dispatchable). Each issue's `id` is the plan's
+  **`Plan-keeper Ticket`** — a `plan-<digits>` id minted once (at `plan-save`,
+  or here on first fetch if a legacy plan lacks one) and then frozen. fetch mints
+  it only when absent and **never overwrites** an existing one, so a renamed plan
+  keeps its id. The minted value is a hash of repo + filename (plan filenames
+  don't fit groundcrew's ticket-id shape) used purely as a one-time seed. A plan
+  can independently carry `Linear Ticket` / `Jira Ticket` values, left untouched.
+- **resolveOne** (`crew get ${id}`) — reads each plan's stored `Plan-keeper
+Ticket` across active, then `done/`, then `deferred/`, and returns the match.
+  Exits 3 if no plan carries that id.
 - **markInProgress** (`crew start ${id}`) — resolves `${id}` with the _same_
   resolver as `crew get`, then atomic-write flips that plan's `Status` to
   `in-progress` so the next `fetch` sees it out of the dispatch pool. Because the

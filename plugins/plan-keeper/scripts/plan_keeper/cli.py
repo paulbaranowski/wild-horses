@@ -38,13 +38,11 @@ from plan_keeper.crew_install import (
     run_crew_install,
 )
 from plan_keeper.groundcrew import (
-    _apply_groundcrew_ticket,
-    _assert_no_groundcrew_id_collisions,
+    _assert_no_plankeeper_id_collisions,
     _collect_crew_issues,
     _repo_for_plan,
     _resolve_crew_id,
-    _stamp_groundcrew_ticket,
-    groundcrew_id,
+    plankeeper_id,
 )
 from plan_keeper.jira import (
     _resolve_jira_project_id,
@@ -388,6 +386,7 @@ def cmd_save(args) -> int:
             injected = _inject_default_frontmatter(
                 source.read_text(encoding="utf-8"),
                 created=_iso_from_stat(source.stat()),
+                plankeeper_ticket=plankeeper_id(repo, target.stem),
             )
             write_atomic(target, injected)
             # Skip the unlink when --from-path already points AT the target
@@ -414,7 +413,10 @@ def cmd_save(args) -> int:
         # so JSON/YAML siblings of paired saves remain byte-exact). Merges
         # into user-supplied frontmatter rather than duplicating.
         if ext == "md":
-            content = _inject_default_frontmatter(content, kind)
+            content = _inject_default_frontmatter(
+                content, kind,
+                plankeeper_ticket=plankeeper_id(repo, target.stem),
+            )
         write_atomic(target, content)
     print(target)
     return 0
@@ -503,9 +505,10 @@ def cmd_file_meta_set(args) -> int:
     """Edit plan frontmatter via one self-documenting flag per field.
 
     The plan is located by `--file` or `--ticket` (the cross-repo locator,
-    consistent with push). `--ticket` is *never* a value — the
-    `Ticket:` frontmatter value is written with `--ticket-id`, so the word
-    "ticket" means the same thing (locate) on every subcommand.
+    consistent with push). `--ticket` is *never* a value — an id is written into
+    its own field with `--plankeeper-ticket` / `--linear-ticket` /
+    `--jira-ticket`, so the word "ticket" means the same thing (locate) on every
+    subcommand.
 
     Inputs are validated (Kind enum, Completed-on date) BEFORE the file is
     located or read, so a typo fails with exit 2 and never touches the file.
@@ -516,10 +519,12 @@ def cmd_file_meta_set(args) -> int:
     # Map each value flag to its frontmatter key, in canonical order. Building
     # this first means validate_kind/parse_date_arg run before any file I/O.
     updates: list[tuple[str, str]] = []
-    if args.ticket_id is not None:
-        updates.append(("Ticket", args.ticket_id))
-    if args.ticket_system is not None:
-        updates.append(("Ticket System", args.ticket_system))
+    if args.plankeeper_ticket is not None:
+        updates.append(("Plan-keeper Ticket", args.plankeeper_ticket))
+    if args.linear_ticket is not None:
+        updates.append(("Linear Ticket", args.linear_ticket))
+    if args.jira_ticket is not None:
+        updates.append(("Jira Ticket", args.jira_ticket))
     if args.completed_on is not None:
         updates.append(("Completed on", parse_date_arg(args.completed_on)))
     if args.agent is not None:
@@ -530,8 +535,9 @@ def cmd_file_meta_set(args) -> int:
         updates.append(("Kind", validate_kind(args.kind)))
     if not updates:
         raise PlanKeeperCliError(
-            "file-meta set requires at least one of --ticket-id, --ticket-system, "
-            "--completed-on, --agent, --status, --kind",
+            "file-meta set requires at least one of --plankeeper-ticket, "
+            "--linear-ticket, --jira-ticket, --completed-on, --agent, --status, "
+            "--kind",
             code=2,
         )
     path = _resolve_file_meta_path(args)
@@ -684,15 +690,14 @@ def cmd_ticket_api(args) -> int:
 def cmd_crew_fetch(args) -> int:
     """Emit a JSON array of issues for groundcrew's shell adapter to consume.
 
-    Scans ~/plans/*/*.md (one level deep — skips done/ and deferred/), asserts
-    no two plans synthesized the same id, then mirrors each id into its plan's
-    Ticket frontmatter for human traceability.
+    Scans ~/plans/*/*.md (one level deep — skips done/ and deferred/). For each
+    plan, ``_collect_crew_issues`` mints a frozen ``Plan-keeper Ticket`` if one
+    is absent (mint-once, never overwritten); this asserts no two plans carry
+    the same id.
     """
     del args
     issues = _collect_crew_issues()
-    _assert_no_groundcrew_id_collisions(issues)
-    for issue in issues:
-        _stamp_groundcrew_ticket(Path(issue["sourceRef"]["path"]), issue["id"])
+    _assert_no_plankeeper_id_collisions(issues)
     print(json.dumps(issues))
     return 0
 
@@ -843,14 +848,15 @@ def cmd_queue_set(args) -> int:
         meta, body = parse_frontmatter(text)
         meta["Status"] = args.status
         if args.status == "todo":
-            # Promote = "ready for groundcrew", so claim the groundcrew Ticket
-            # now (same id fetch would synthesize) — the mapping is visible the
-            # moment a plan is queued, not only after the first dispatch tick.
+            # Promote = "ready for groundcrew": ensure the plan-keeper id exists
+            # (mint-once) so the mapping is visible the moment a plan is queued,
+            # not only after the first dispatch tick.
             if args.default_agent and not meta.get("Agent", "").strip():
                 meta["Agent"] = args.default_agent
-            _apply_groundcrew_ticket(
-                meta, groundcrew_id(_repo_for_plan(resolved), resolved.stem)
-            )
+            if not (meta.get("Plan-keeper Ticket") or "").strip():
+                meta["Plan-keeper Ticket"] = plankeeper_id(
+                    _repo_for_plan(resolved), resolved.stem
+                )
         new_text = serialize_frontmatter(meta, body)
         if not new_text.endswith("\n"):
             new_text += "\n"
@@ -1164,16 +1170,17 @@ def build_parser() -> argparse.ArgumentParser:
     def _add_locator(p) -> None:
         """Add the shared `--file | --ticket` locator group (exactly one).
 
-        `--ticket` locates a plan by its Ticket: frontmatter across all repos
-        — the same meaning it has on push, so the flag never doubles
-        as a value setter (set writes the Ticket value via --ticket-id).
+        `--ticket` locates a plan by any of its id fields (Plan-keeper/Linear/
+        Jira Ticket) across all repos — the same meaning it has on push, so the
+        flag never doubles as a value setter (set writes an id into its own
+        field via --plankeeper-ticket / --linear-ticket / --jira-ticket).
         """
         g = p.add_mutually_exclusive_group(required=True)
         g.add_argument("--file", help="path to a plan .md file")
         g.add_argument(
             "--ticket",
-            help="locate the plan by its Ticket: frontmatter across all repos "
-                 "(alternative to --file)",
+            help="locate the plan by any of its id fields (Plan-keeper/Linear/"
+                 "Jira Ticket) across all repos (alternative to --file)",
         )
 
     p_fm_get = file_meta_sub.add_parser("get", help="print frontmatter as JSON")
@@ -1204,12 +1211,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_fm_set.add_argument("--completed-on", help="set Completed on (YYYY-MM-DD)")
     p_fm_set.add_argument(
-        "--ticket-system", choices=["linear", "jira"], help="set Ticket System"
+        "--plankeeper-ticket", dest="plankeeper_ticket",
+        help="set the Plan-keeper Ticket value (the plan-keeper id; normally "
+             "minted automatically at save — set manually only to repair/override)",
     )
     p_fm_set.add_argument(
-        "--ticket-id",
-        help="set the Ticket: value (distinct from --ticket, which locates a "
-             "plan; use --ticket-id to record an issue id like ENG-123)",
+        "--linear-ticket", dest="linear_ticket",
+        help="set the Linear Ticket value (an issue id like ENG-123)",
+    )
+    p_fm_set.add_argument(
+        "--jira-ticket", dest="jira_ticket",
+        help="set the Jira Ticket value (an issue key like PROJ-9)",
     )
 
     p_fm_strip = file_meta_sub.add_parser("strip", help="print body without frontmatter")

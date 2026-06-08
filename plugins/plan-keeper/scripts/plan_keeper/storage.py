@@ -117,14 +117,14 @@ def list_plans(repo: str, state: str) -> list[Path]:
 
 
 def find_plans_by_ticket(ticket_id: str) -> list[Path]:
-    """Return active (top-level) plans across all repos whose `Ticket:`
-    frontmatter equals `ticket_id`.
+    """Return active (top-level) plans across all repos that carry `ticket_id`
+    in any of their id fields.
 
-    Global and system-agnostic: a literal match on the stored value, so
-    groundcrew (`plan-<hash>`), Linear (`ENG-123`), and Jira ids all resolve
-    through one path — no re-synthesis of the groundcrew id. `done/` and
-    `deferred/` are excluded because every operation that resolves by ticket
-    (archive, status flip, push) acts on an active plan.
+    Global and system-agnostic: a literal match against the stored
+    `Plan-keeper Ticket` (`plan-<n>`), `Linear Ticket` (`ENG-123`), and
+    `Jira Ticket` values, so an id from any tracker resolves through one path.
+    `done/` and `deferred/` are excluded because every operation that resolves
+    by ticket (archive, status flip, push) acts on an active plan.
     """
     matches: list[Path] = []
     if not PLAN_ROOT.exists():
@@ -140,7 +140,14 @@ def find_plans_by_ticket(ticket_id: str) -> list[Path]:
                 meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
             except (PlanKeeperCliError, OSError, UnicodeDecodeError):
                 continue
-            if (meta.get("Ticket") or "").strip() == ticket_id:
+            stored = {
+                val for val in (
+                    (meta.get("Plan-keeper Ticket") or "").strip(),
+                    (meta.get("Linear Ticket") or "").strip(),
+                    (meta.get("Jira Ticket") or "").strip(),
+                ) if val
+            }
+            if ticket_id in stored:
                 matches.append(path)
     return matches
 

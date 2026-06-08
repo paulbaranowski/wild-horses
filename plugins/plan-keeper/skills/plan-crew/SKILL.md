@@ -14,8 +14,8 @@ queue) and dequeue `todo → backlog` (pull out). Backed by two `plan_keeper_cli
 
 - **Scope:** the current repo by default (`crew queue list`); `--all` lists every repo, `--repo <name>` lists one named repo. See [Choosing the scope](#choosing-the-scope).
 - **Reads:** `~/plans/<repo>/*.md` with frontmatter (one level deep; `done/`, `deferred/` excluded), filtered to the resolved scope.
-- **Writes:** frontmatter `Status` (and, on promote, `Agent` when missing, plus the groundcrew `Ticket` / `Ticket System` stamp) — atomic per file.
-- **Groundcrew ticket stamp:** on promote, the plan's synthesized groundcrew id (`plan-<digits>`) is written to `Ticket` with `Ticket System: groundcrew`, so the dispatch id is visible the moment a plan is queued. A plan already tracked in `linear`/`jira` keeps that reference untouched.
+- **Writes:** frontmatter `Status` (and, on promote, `Agent` when missing, plus a minted `Plan-keeper Ticket` when absent) — atomic per file.
+- **Plan-keeper ticket mint:** on promote, the plan's `Plan-keeper Ticket` (`plan-<digits>`, minted once and frozen) is written if absent, so the dispatch id is visible the moment a plan is queued. Any `Linear Ticket` / `Jira Ticket` the plan carries is left untouched (the three ids coexist).
 - **Promote default agent:** a `backlog` plan with no `Agent` gets `Agent: claude` on promote, so it
   dispatches as the `claude` agent explicitly (groundcrew would already default to claude, but this
   makes it visible in the frontmatter and the queue view). Promote here is the **only** path that
@@ -164,6 +164,6 @@ Re-run step 1 and show the updated queue so the user sees the result.
 
 ## Notes
 
-- plan-crew only ever sets `Status` to `todo` or `backlog` (and, on promote, fills a default `Agent` when missing and stamps the groundcrew `Ticket` / `Ticket System`). The system-managed states (`in-progress`, `in-review`, `done`) are written by groundcrew / plan-done, never here.
+- plan-crew only ever sets `Status` to `todo` or `backlog` (and, on promote, fills a default `Agent` when missing and mints the `Plan-keeper Ticket` when absent). The system-managed states (`in-progress`, `in-review`, `done`) are written by groundcrew / plan-done, never here.
 - The mutation is atomic (tmp file + fsync + os.replace), so an interrupted run can't corrupt a plan.
 - This skill scopes to the current repo by default. `--all` widens it to the whole `~/plans/` tree (its original bulk cross-repo mode); `--repo <name>` points it at one other repo. See [Choosing the scope](#choosing-the-scope).

@@ -25,49 +25,48 @@ _GROUNDCREW_STATUS_MAP = {
     "done": "done",
 }
 
-GROUNDCREW_TICKET_SYSTEM = "groundcrew"
+def plankeeper_id(repo: str, stem: str) -> str:
+    """Mint a plan-keeper ticket id for a plan: ``plan-<digits>``.
 
-
-def groundcrew_id(repo: str, stem: str) -> str:
-    """Synthesize a groundcrew ticket id for a plan: ``plan-<digits>``.
-
-    groundcrew requires every ticket id to match ``/^[a-z][\\da-z]*-\\d+$/``
-    and reuses the bare id as a permanent key — the worktree dir
-    (``<repo>-<id>``), the git branch (``<user>-<id>``), and the run-state
-    filename all derive from it. Plan filenames (e.g.
-    ``2026-04-30-notification-service-typed-models``) don't fit that shape,
-    so we hash a stable identity into a conforming id.
-
-    Stateless by design: the id is a pure function of ``(repo, stem)``, so
-    ``fetch`` and ``resolve-one`` agree with no stored mapping, and the id
-    stays stable across a plan's lifecycle (status flip, move to ``done/``,
-    which change neither the repo nor the stem). The repo is part of the key
-    because the id carries no repo qualifier downstream — two same-named
-    plans in different repos must not collide. Uses a 48-bit BLAKE2 digest:
-    plenty of headroom for a personal plan set, and ``cmd_groundcrew_fetch``
-    fails loudly on the astronomically-unlikely collision rather than
-    silently merging two plans onto one worktree.
+    Used as a **one-time seed generator**: plan-save (and, for legacy plans,
+    the first ``crew fetch``) calls this once, stores the result in the plan's
+    ``Plan-keeper Ticket`` frontmatter, and thereafter the id is only ever read
+    back — never recomputed. groundcrew requires every ticket id to match
+    ``/^[a-z][\\da-z]*-\\d+$/`` and reuses the bare id as a permanent key — the
+    worktree dir (``<repo>-<id>``), the git branch (``<user>-<id>``), and the
+    run-state filename all derive from it — so the minted value must conform;
+    the 48-bit BLAKE2 digest of ``<repo>/<stem>`` does. The repo is part of the
+    seed because the id carries no repo qualifier downstream — two same-named
+    plans in different repos must mint distinct ids on first save. A mint-time
+    collision is astronomically unlikely (and ``crew fetch`` fails loudly on a
+    duplicate stored id rather than silently merging two plans onto one
+    worktree).
     """
     digest = hashlib.blake2b(f"{repo}/{stem}".encode("utf-8"), digest_size=6).digest()
     return f"plan-{int.from_bytes(digest, 'big')}"
 
 
-def _assert_no_groundcrew_id_collisions(issues: list[dict]) -> None:
-    """Raise if two plans synthesized the same groundcrew id.
+def _assert_no_plankeeper_id_collisions(issues: list[dict]) -> None:
+    """Raise if two plans carry the same stored ``Plan-keeper Ticket``.
 
     A collision would make groundcrew treat two distinct plans as one ticket
     (shared worktree/branch/run-state) — a silent state-corrupting outcome.
-    The hash space makes this practically impossible, but if it ever happens
-    the user can break the tie by renaming one plan file.
+    A mint-time collision is practically impossible given the hash space; this
+    also catches a hand-copied plan file that duplicated another's stored id.
+    The user breaks the tie by changing one plan's ``Plan-keeper Ticket``. Empty
+    ids (an unminted plan that fetch is about to mint) are skipped.
     """
     seen: dict[str, str] = {}
     for issue in issues:
         ticket = issue["id"]
+        if not ticket:
+            continue
         path = issue["sourceRef"]["path"]
         if ticket in seen:
             raise PlanKeeperCliError(
-                f"groundcrew id collision: {seen[ticket]!r} and {path!r} "
-                f"both map to {ticket!r}; rename one plan file to break the tie",
+                f"plan-keeper id collision: {seen[ticket]!r} and {path!r} "
+                f"both carry {ticket!r}; change one plan's Plan-keeper Ticket "
+                f"to break the tie",
                 code=2,
             )
         seen[ticket] = path
@@ -83,43 +82,39 @@ def _repo_for_plan(path: Path) -> str:
     return parent.name
 
 
-def _apply_groundcrew_ticket(meta: dict[str, str], ticket: str) -> bool:
-    """Claim the `Ticket` / `Ticket System` pair for groundcrew on an in-hand
-    meta dict, returning True iff it changed.
+def _mint_plankeeper_ticket_if_absent(path: Path) -> Optional[str]:
+    """Return the plan's stored ``Plan-keeper Ticket``, minting and persisting
+    one if absent.
 
-    Claims the pair only when it's empty or already ``groundcrew``; a
-    ``linear``/``jira`` reference (written by plan-linear/plan-jira) — or an orphan
-    ``Ticket`` under no system — is left untouched, so a tracked plan keeps
-    its real reference and still dispatches via the recomputed id.
-    """
-    system = (meta.get("Ticket System") or "").strip().lower()
-    if system == GROUNDCREW_TICKET_SYSTEM:
-        if meta.get("Ticket") == ticket:
-            return False  # already current
-    elif system or meta.get("Ticket"):
-        return False  # another tracker (or an orphan Ticket) owns these fields
-    meta["Ticket"] = ticket
-    meta["Ticket System"] = GROUNDCREW_TICKET_SYSTEM
-    return True
-
-
-def _stamp_groundcrew_ticket(path: Path, ticket: str) -> None:
-    """Mirror the synthesized id into the plan's `Ticket` / `Ticket System`
-    frontmatter (the same pair plan-linear/plan-jira use), so a human can see which plan
-    a ``plan-<n>`` id maps to.
-
-    Display-only and self-healing: ``groundcrew_id()`` stays the canonical id,
-    so ``resolve-one`` never trusts these fields — it recomputes the hash.
-    Rewrites only when absent or stale (see _apply_groundcrew_ticket), so
-    steady-state fetches don't churn the file. Best-effort: a read/parse error
-    is swallowed so one unwritable file can't abort the whole fetch.
+    Mint-once: a present value is authoritative and is never recomputed or
+    overwritten, so a renamed plan keeps its id (the whole point of the frozen
+    id). Only the first call for a plan writes; steady-state fetches don't churn
+    the file. Best-effort: a read/parse/write error is swallowed and returns
+    None, so one unwritable file can't abort the whole fetch.
     """
     try:
-        meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
-    except (OSError, PlanKeeperCliError):
-        return
-    if _apply_groundcrew_ticket(meta, ticket):
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    # Only mint for real plan files (those that open with frontmatter), mirroring
+    # _plan_to_issue's skip — never grow frontmatter onto a bare .md (e.g. a stray
+    # README), which would make it look dispatchable.
+    if not (text.startswith("---\n") or text.startswith("---\r\n")):
+        return None
+    try:
+        meta, body = parse_frontmatter(text)
+    except PlanKeeperCliError:
+        return None
+    existing = (meta.get("Plan-keeper Ticket") or "").strip()
+    if existing:
+        return existing
+    minted = plankeeper_id(_repo_for_plan(path), path.stem)
+    meta["Plan-keeper Ticket"] = minted
+    try:
         write_atomic(path, serialize_frontmatter(meta, body))
+    except OSError:
+        return None
+    return minted
 
 
 def _plan_to_issue(path: Path) -> Optional[dict]:
@@ -144,8 +139,11 @@ def _plan_to_issue(path: Path) -> Optional[dict]:
     # repo is the grandparent for archived/paused plans (done/, deferred/), so
     # `crew get` reports the real repo, not "done"/"deferred".
     repo_name = _repo_for_plan(path)
+    # Read-only: the id is the stored, frozen Plan-keeper Ticket (minted at save
+    # or by _mint_plankeeper_ticket_if_absent during fetch). May be "" for an
+    # unminted plan; callers that need a guaranteed id mint first.
     return {
-        "id": groundcrew_id(repo_name, path.stem),
+        "id": (meta.get("Plan-keeper Ticket") or "").strip(),
         "title": title,
         "description": body.rstrip(),
         "status": adapter_status,
@@ -223,10 +221,11 @@ def _collect_crew_issues() -> list[dict]:
     One level deep — ``done/`` and ``deferred/`` are excluded (they're not
     dispatchable). Plans being driven locally (in-progress with no Agent — see
     ``_is_locally_driven``) are excluded too, so groundcrew never tracks work a
-    human picked up in their own session. Shared by ``crew fetch`` (which then
-    asserts no id collisions and stamps the Ticket frontmatter) and ``crew
-    install``'s post-patch data-path check, so both see the exact same plan
-    set.
+    human picked up in their own session. Mints a frozen ``Plan-keeper Ticket``
+    for any plan that lacks one (mint-once, no overwrite) so every emitted issue
+    has a stable id. Shared by ``crew fetch`` (which then asserts no id
+    collisions) and ``crew install``'s post-patch data-path check, so both see
+    the exact same plan set.
     """
     issues: list[dict] = []
     if not storage.PLAN_ROOT.exists():
@@ -239,8 +238,12 @@ def _collect_crew_issues() -> list[dict]:
                 continue
             if _is_locally_driven(plan):
                 continue
+            _mint_plankeeper_ticket_if_absent(plan)
             issue = _plan_to_issue(plan)
-            if issue is not None:
+            # Skip a plan whose id couldn't be minted/persisted (empty id) — an
+            # empty id is groundcrew's worktree/branch/run-state key and would
+            # corrupt the adapter. It'll be retried on the next fetch.
+            if issue is not None and issue["id"]:
                 issues.append(issue)
     return issues
 
@@ -263,13 +266,15 @@ def _discover_plan_repos() -> list[str]:
 
 
 def _resolve_crew_id(plan_id: str) -> Optional[dict]:
-    """The issue dict whose synthesized id == ``plan_id``, or None if none.
+    """The issue dict whose stored ``Plan-keeper Ticket`` == ``plan_id``, or None.
 
-    Recomputes each plan's id across active, then ``done/``, then
+    Reads each plan's stored, frozen id across active, then ``done/``, then
     ``deferred/`` (a live plan wins over an archived one sharing its stem).
     The single resolver behind both ``crew get`` and ``crew start``: because
     they share this lookup, "if get can find it, start can mark it" holds by
-    construction — the two can never diverge on which id maps to which file.
+    construction. Read-only — it never mints; an id only reaches groundcrew via
+    a prior ``fetch`` (which mints), so every resolvable plan already has one.
+    An unminted plan (empty id) can never match a real ``plan_id``.
     """
     if not storage.PLAN_ROOT.exists():
         return None
@@ -283,6 +288,6 @@ def _resolve_crew_id(plan_id: str) -> Optional[dict]:
                 if not plan.is_file() or not plan.name.endswith(".md"):
                     continue
                 issue = _plan_to_issue(plan)
-                if issue is not None and issue["id"] == plan_id:
+                if issue is not None and issue["id"] and issue["id"] == plan_id:
                     return issue
     return None

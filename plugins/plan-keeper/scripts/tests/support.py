@@ -35,7 +35,7 @@ def _import_cli_module():
     """Return the plan_keeper.cli module — the flat public surface tests use.
 
     cli.py imports every domain symbol the in-process tests reference
-    (push_subcommand, groundcrew_id, save_config, the linear_*/jira_* clients,
+    (push_subcommand, plankeeper_id, save_config, the linear_*/jira_* clients,
     write_atomic, …), so tests keep a single `cli.<name>` namespace despite the
     split into modules. PLAN_ROOT is the one deliberate exception: it is NOT a
     cli attribute. Tests that relocate the plans root patch `storage.PLAN_ROOT`
