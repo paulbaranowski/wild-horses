@@ -20,6 +20,7 @@ Mirrors the precedent at plugins/plan-keeper/scripts/tests/.
 import json
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -610,6 +611,100 @@ class TestTimeoutKillsProcessGroup(IsolatedHomeTestCase):
             "grandchild process kept writing after the pull timed out — "
             "it was orphaned instead of killed with its process group",
         )
+
+
+class TestSignalKillsInflightGroups(IsolatedHomeTestCase):
+    """Regression coverage for the parent-death runaway: the timeout-based
+    process-group kill only fires if the CLI is alive to hit the timeout. But
+    git runs in its own session (start_new_session=True), so a Ctrl-C / harness
+    SIGTERM to the CLI does NOT reach the detached git children — they'd be
+    orphaned and keep writing tmp_pack_* files. The CLI must trap SIGINT/SIGTERM
+    and tear down every in-flight git process group before exiting. The shim
+    spawns a long-lived grandchild appending to a marker; after we SIGTERM the
+    CLI the marker must STOP growing."""
+
+    def _install_git_shim_that_forks_a_grandchild(self, marker: Path) -> dict[str, str]:
+        """Same shim as the timeout test, but with a high per-call timeout so the
+        timeout path can't fire — the only thing that can stop the grandchild is
+        the CLI's own signal handler reacting to the SIGTERM we send it."""
+        real_git = shutil.which("git")
+        assert real_git, "git must be on PATH for this test"
+        shim_dir = self.home / "bin"
+        shim_dir.mkdir()
+        shim = shim_dir / "git"
+        shim.write_text(
+            "#!/bin/sh\n"
+            'for a in "$@"; do\n'
+            '  if [ "$a" = "pull" ]; then\n'
+            f"    ( while true; do echo x >> '{marker}'; sleep 0.1; done ) &\n"
+            "    sleep 30\n"
+            "    exit 0\n"
+            "  fi\n"
+            "done\n"
+            f'exec "{real_git}" "$@"\n'
+        )
+        shim.chmod(0o755)
+        # Timeout far above the test's lifetime so this exercises the SIGNAL
+        # teardown, not the timeout teardown.
+        return {"PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}", "UPDATE_GIT_REPOS_TIMEOUT": "60"}
+
+    def _assert_signal_kills_grandchildren(self, sig: int) -> None:
+        bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        commit_to_bare(bare, self.scratch, "main")
+        self.write_config([{"path": str(repo), "branch": "main"}])
+
+        marker = self.home / "grandchild-heartbeat"
+        marker.write_text("")
+        env_extra = self._install_git_shim_that_forks_a_grandchild(marker)
+
+        env = {**os.environ, "HOME": str(self.home), **env_extra}
+        proc = subprocess.Popen(
+            ["python3", str(CLI), "pull-all"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+        )
+        try:
+            # Wait until the grandchild is actually writing — i.e. the pull is
+            # genuinely in flight — before we signal, so we test mid-pull teardown.
+            deadline = time.monotonic() + 10
+            while marker.stat().st_size == 0:
+                if time.monotonic() > deadline:
+                    proc.kill()
+                    self.fail("pull never started writing — shim/setup broken")
+                time.sleep(0.05)
+
+            proc.send_signal(sig)
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                self.fail(f"CLI did not exit after signal {sig} — handler missing/hung")
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            for pipe in (proc.stdout, proc.stderr):
+                if pipe:
+                    pipe.close()
+
+        # The CLI has exited. If its signal handler tore down the git process
+        # group, the grandchild is dead and the marker is frozen. If the CLI
+        # just died (default action) the detached grandchild keeps appending.
+        size_after_exit = marker.stat().st_size
+        time.sleep(1.5)
+        size_later = marker.stat().st_size
+        self.assertEqual(
+            size_after_exit, size_later,
+            f"grandchild kept writing after the CLI got signal {sig} — the CLI "
+            "exited without killing its in-flight git process group, leaving an "
+            "orphan that can fill the disk",
+        )
+
+    def test_sigterm_to_cli_kills_inflight_grandchildren(self) -> None:
+        self._assert_signal_kills_grandchildren(signal.SIGTERM)
+
+    def test_sigint_to_cli_kills_inflight_grandchildren(self) -> None:
+        # Ctrl-C is the common case, and SIGINT's Python default (raise
+        # KeyboardInterrupt) differs from SIGTERM's — both must tear down.
+        self._assert_signal_kills_grandchildren(signal.SIGINT)
 
 
 class TestLowDiskPreflight(IsolatedHomeTestCase):
