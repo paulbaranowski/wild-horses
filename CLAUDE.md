@@ -41,6 +41,7 @@ plugins/marketplace/               -- plugin root (skills-based)
 
 ### plan-keeper (Homebrew binary)
 
+- **plan-keeper is a task-management system, not a Linear/Jira stager.** The unit is a task, and a task is a plan file in `~/plans/<repo>/` that either spawns more plans (planning tasks: idea → spec → exec-plan) or gets built into code (implementation tasks: exec-plan → PR). plan-keeper is the system of record; exporting to Linear/Jira is occasional, not the default. Don't reframe it as a plan filing cabinet or a tracker front-end. See `plugins/plan-keeper/README.md` ("The model") and `plan-kinds.md`.
 - **The plan-keeper CLI ships as an auto-built Homebrew binary — you don't rebuild or republish it by hand.** Edits to `plugins/plan-keeper/scripts/**` are picked up by the auto-build on merge and reach users' runtime through the version-stable brew binary (`crew install` wires `~/plans/*` into the groundcrew config, which invokes that binary). So a source fix lands for users via the auto-build; there is no manual rebuild step to remember.
 - **The CLI version lives in two files that must move together: `plugins/plan-keeper/.claude-plugin/plugin.json` AND `plugins/plan-keeper/scripts/plan_keeper/__init__.py` (`__version__`).** `pyproject.toml` reads `__version__` (so the brew package and `--version` agree), and `test_cli.py::TestVersion::test_version_matches_plugin_manifest` fails if the two drift. Bump both in the same change.
 
