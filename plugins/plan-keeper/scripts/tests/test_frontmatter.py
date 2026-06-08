@@ -8,6 +8,11 @@ import json
 import unittest
 from pathlib import Path
 
+from plan_keeper.frontmatter import (
+    _inject_default_frontmatter,
+    parse_frontmatter,
+    serialize_frontmatter,
+)
 from support import (
     IsolatedHomeTestCase,
     run_cli,
@@ -211,21 +216,22 @@ class TestFileMetaSet(IsolatedHomeTestCase):
         self.assertNotIn("OLD-1", text)
 
     def test_preserves_unmodified_fields(self) -> None:
-        path = self._managed("Ticket: KEEP-1\n", "Completed on: 2026-05-19\n")
-        # Only setting --completed-on; Ticket should stay.
+        path = self._managed("Linear Ticket: KEEP-1\n", "Completed on: 2026-05-19\n")
+        # Only setting --completed-on; Linear Ticket should stay.
         result = run_cli(
             "file-meta", "set", "--file", str(path), "--completed-on", "2026-05-20",
             home=self.home, cwd=self.cwd,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         text = path.read_text(encoding="utf-8")
-        self.assertIn("Ticket: KEEP-1", text)
+        self.assertIn("Linear Ticket: KEEP-1", text)
         self.assertIn("Completed on: 2026-05-20", text)
 
     def test_preserves_foreign_field_through_write(self) -> None:
-        # A rewrite must not drop foreign frontmatter.
+        # A rewrite must not drop foreign frontmatter. Use a genuinely foreign
+        # key (not Ticket*, which the migration shim would rewrite).
         path = self._write_plan(
-            "---\ntags: [planning, infra]\nTicket: KEEP-1\n---\n\n# H\n"
+            "---\ntags: [planning, infra]\nLinear Ticket: KEEP-1\n---\n\n# H\n"
         )
         result = run_cli(
             "file-meta", "set", "--file", str(path), "--completed-on", "2026-05-20",
@@ -234,10 +240,10 @@ class TestFileMetaSet(IsolatedHomeTestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         text = path.read_text(encoding="utf-8")
         self.assertIn("tags: [planning, infra]", text)
-        self.assertIn("Ticket: KEEP-1", text)
+        self.assertIn("Linear Ticket: KEEP-1", text)
         self.assertIn("Completed on: 2026-05-20", text)
         # Managed fields serialize in canonical order ahead of foreign ones.
-        self.assertLess(text.index("Ticket:"), text.index("tags:"))
+        self.assertLess(text.index("Linear Ticket:"), text.index("tags:"))
 
     def test_omits_empty_fields(self) -> None:
         path = self._managed()
@@ -308,7 +314,7 @@ class TestFileMetaSet(IsolatedHomeTestCase):
         """The exact mutation plan-do step 6 makes: flip Status to in-progress
         and clear Agent in one call, so a plan being driven locally drops out
         of the groundcrew queue."""
-        path = self._managed("Ticket: plan-123\n")
+        path = self._managed("Plan-keeper Ticket: plan-123\n")
         result = run_cli(
             "file-meta", "set", "--file", str(path),
             "--status", "in-progress", "--agent", "",
@@ -318,7 +324,7 @@ class TestFileMetaSet(IsolatedHomeTestCase):
         text = path.read_text(encoding="utf-8")
         self.assertNotIn("Agent:", text)
         self.assertIn("Status: in-progress", text)
-        self.assertIn("Ticket: plan-123", text)  # unrelated fields survive
+        self.assertIn("Plan-keeper Ticket: plan-123", text)  # unrelated fields survive
 
     def test_kind_normalized_lowercase(self) -> None:
         path = self._managed()
@@ -348,15 +354,18 @@ class TestFileMetaSet(IsolatedHomeTestCase):
         self.assertEqual(result.returncode, 2)
         self.assertNotIn("Completed on:", path.read_text(encoding="utf-8"))
 
-    def test_rejects_invalid_ticket_system(self) -> None:
+    def test_removed_legacy_ticket_flags_are_rejected(self) -> None:
+        # Regression guard: the old single-tracker flags were replaced by the
+        # per-system ones; re-introducing them would be a schema regression.
         path = self._managed()
         original = path.read_text(encoding="utf-8")
-        result = run_cli(
-            "file-meta", "set", "--file", str(path), "--ticket-system", "github",
-            home=self.home, cwd=self.cwd,
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(path.read_text(encoding="utf-8"), original)
+        for flag in ("--ticket-system", "--ticket-id"):
+            result = run_cli(
+                "file-meta", "set", "--file", str(path), flag, "x",
+                home=self.home, cwd=self.cwd,
+            )
+            self.assertEqual(result.returncode, 2, f"{flag} should be unrecognized")
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
 
     def test_directory_exits_3_not_traceback(self) -> None:
         d = self.cwd / "adir.md"
@@ -438,6 +447,89 @@ class TestCreatedStamp(IsolatedHomeTestCase):
         )
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("Created:", Path(r.stdout.strip()).read_text())
+
+
+class TestMultiTrackerSchema(unittest.TestCase):
+    """Direct unit tests for the multi-tracker fields + legacy migration shim."""
+
+    def test_new_fields_roundtrip_without_legacy_keys(self) -> None:
+        text = (
+            "---\nPlan-keeper Ticket: plan-42\nLinear Ticket: ENG-7\n"
+            "Jira Ticket: PROJ-9\nStatus: todo\n---\n\n# Title\nbody\n"
+        )
+        meta, body = parse_frontmatter(text)
+        self.assertEqual(meta["Plan-keeper Ticket"], "plan-42")
+        self.assertEqual(meta["Linear Ticket"], "ENG-7")
+        self.assertEqual(meta["Jira Ticket"], "PROJ-9")
+        out = serialize_frontmatter(meta, body)
+        self.assertIn("Plan-keeper Ticket: plan-42", out)
+        self.assertIn("Linear Ticket: ENG-7", out)
+        self.assertIn("Jira Ticket: PROJ-9", out)
+        self.assertNotIn("Ticket System", out)
+
+    def test_legacy_groundcrew_ticket_migrates_to_plankeeper(self) -> None:
+        meta, _ = parse_frontmatter(
+            "---\nTicket: plan-999\nTicket System: groundcrew\nStatus: todo\n---\n\nbody\n"
+        )
+        self.assertEqual(meta["Plan-keeper Ticket"], "plan-999")
+        self.assertNotIn("Ticket", meta)
+        self.assertNotIn("Ticket System", meta)
+
+    def test_legacy_empty_system_migrates_to_plankeeper(self) -> None:
+        meta, _ = parse_frontmatter("---\nTicket: plan-5\nStatus: todo\n---\n\nbody\n")
+        self.assertEqual(meta["Plan-keeper Ticket"], "plan-5")
+        self.assertNotIn("Ticket", meta)
+
+    def test_legacy_linear_ticket_migrates_to_linear_field(self) -> None:
+        meta, _ = parse_frontmatter(
+            "---\nTicket: ENG-3\nTicket System: linear\nStatus: todo\n---\n\nbody\n"
+        )
+        self.assertEqual(meta["Linear Ticket"], "ENG-3")
+        self.assertEqual(meta["Plan-keeper Ticket"], "")
+        self.assertNotIn("Ticket", meta)
+
+    def test_legacy_jira_ticket_migrates_to_jira_field(self) -> None:
+        meta, _ = parse_frontmatter(
+            "---\nTicket: PROJ-1\nTicket System: jira\nStatus: todo\n---\n\nbody\n"
+        )
+        self.assertEqual(meta["Jira Ticket"], "PROJ-1")
+        self.assertNotIn("Ticket", meta)
+
+    def test_unrecognized_system_left_untouched(self) -> None:
+        meta, _ = parse_frontmatter(
+            "---\nTicket: GH-1\nTicket System: github\nStatus: todo\n---\n\nbody\n"
+        )
+        self.assertEqual(meta["Plan-keeper Ticket"], "")
+        self.assertEqual(meta.get("Ticket"), "GH-1")
+        self.assertEqual(meta.get("Ticket System"), "github")
+
+    def test_lone_ticket_system_without_ticket_is_preserved(self) -> None:
+        # No Ticket value → nothing to migrate; the lone key is not dropped.
+        meta, _ = parse_frontmatter(
+            "---\nTicket System: groundcrew\nStatus: todo\n---\n\nbody\n"
+        )
+        self.assertEqual(meta["Plan-keeper Ticket"], "")
+        self.assertEqual(meta.get("Ticket System"), "groundcrew")
+
+    def test_new_field_wins_over_legacy_when_both_present(self) -> None:
+        meta, _ = parse_frontmatter(
+            "---\nPlan-keeper Ticket: plan-new\nTicket: plan-old\n"
+            "Ticket System: groundcrew\nStatus: todo\n---\n\nbody\n"
+        )
+        self.assertEqual(meta["Plan-keeper Ticket"], "plan-new")
+        self.assertNotIn("Ticket", meta)
+
+    def test_inject_mints_plankeeper_ticket_when_absent(self) -> None:
+        out = _inject_default_frontmatter("# T\nbody\n", plankeeper_ticket="plan-77")
+        self.assertIn("Plan-keeper Ticket: plan-77", out)
+
+    def test_inject_does_not_overwrite_existing_plankeeper_ticket(self) -> None:
+        out = _inject_default_frontmatter(
+            "---\nPlan-keeper Ticket: plan-keep\nStatus: todo\n---\n\nbody\n",
+            plankeeper_ticket="plan-other",
+        )
+        self.assertIn("Plan-keeper Ticket: plan-keep", out)
+        self.assertNotIn("plan-other", out)
 
 
 if __name__ == "__main__":

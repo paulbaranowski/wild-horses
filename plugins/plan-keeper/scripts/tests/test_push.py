@@ -188,7 +188,7 @@ class TestPushLinearUpdate(unittest.TestCase):
         repo_dir.mkdir(parents=True, exist_ok=True)
         path = repo_dir / "plan.md"
         path.write_text(
-            "---\nTicket: ENG-123\nTicket System: linear\n---\n\n"
+            "---\nLinear Ticket: ENG-123\n---\n\n"
             "# Updated Title\n\n## Body\n",
             encoding="utf-8",
         )
@@ -205,12 +205,30 @@ class TestPushLinearUpdate(unittest.TestCase):
         self.assertEqual(set(input_dict.keys()), {"title", "description"})  # nothing else
         self.assertEqual(sent["variables"]["id"], "ENG-123")
 
+    def test_update_detects_legacy_schema_via_migration(self) -> None:
+        # A plan still on the old Ticket/Ticket System schema must be recognized
+        # as an existing Linear ticket (migrated in-memory at parse) and updated.
+        repo_dir = self.plans_root / "herds"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        path = repo_dir / "plan.md"
+        path.write_text(
+            "---\nTicket: ENG-123\nTicket System: linear\n---\n\n# T\n\n## Body\n",
+            encoding="utf-8",
+        )
+        with patch(
+            "urllib.request.urlopen",
+            return_value=self._mock_update_response(),
+        ):
+            result = self.cli.push_subcommand(name="linear", file_path=str(path), force_new=False)
+        self.assertEqual(result["action"], "update")
+        self.assertEqual(result["id"], "ENG-123")
+
     def test_update_uses_force_new_when_set(self) -> None:
         repo_dir = self.plans_root / "herds"
         repo_dir.mkdir(parents=True, exist_ok=True)
         path = repo_dir / "plan.md"
         path.write_text(
-            "---\nTicket: OLD-1\nTicket System: linear\n---\n\n# T\n",
+            "---\nLinear Ticket: OLD-1\n---\n\n# T\n",
             encoding="utf-8",
         )
         # With force_new=True, this should call create, not update.
@@ -320,7 +338,7 @@ class TestPushJira(unittest.TestCase):
         repo_dir.mkdir(parents=True, exist_ok=True)
         path = repo_dir / "plan.md"
         path.write_text(
-            "---\nTicket: HERDS-100\nTicket System: jira\n---\n\n# T\n",
+            "---\nJira Ticket: HERDS-100\n---\n\n# T\n",
             encoding="utf-8",
         )
         with patch(

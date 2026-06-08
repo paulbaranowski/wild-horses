@@ -121,7 +121,7 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             )
             text = plan.read_text()
             self.assertIn("tags: [infra]", text)
-            self.assertIn(f"Ticket: {issues[0]['id']}", text)
+            self.assertIn(f"Plan-keeper Ticket: {issues[0]['id']}", text)
 
     def test_groundcrew_fetch_preserves_existing_id_no_heal(self):
         """A plan that already carries an id keeps it verbatim — mint-once, never

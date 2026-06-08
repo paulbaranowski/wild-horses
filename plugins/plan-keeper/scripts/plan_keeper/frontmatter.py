@@ -56,16 +56,16 @@ def _migrate_legacy_ticket_fields(meta: dict[str, str]) -> None:
     its new value). An unrecognized system is left wholly untouched — no data
     loss, no misfiling into an id field.
     """
-    if "Ticket" not in meta and "Ticket System" not in meta:
-        return
     ticket = (meta.get("Ticket") or "").strip()
     system = (meta.get("Ticket System") or "").strip().lower()
+    if not ticket:
+        return  # nothing to migrate; a lone/empty Ticket System is left as-is
     field = _LEGACY_SYSTEM_TO_FIELD.get(system)
     if field is None:
         return  # unrecognized system: preserve the legacy pair as foreign fields
     meta.pop("Ticket", None)
     meta.pop("Ticket System", None)
-    if ticket and not meta.get(field):
+    if not meta.get(field):
         meta[field] = ticket
 
 
