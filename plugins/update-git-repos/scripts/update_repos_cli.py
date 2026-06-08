@@ -10,12 +10,15 @@ JSON on stdout; non-zero exit means the command itself failed to run
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 import shutil
 import signal
 import subprocess
 import sys
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -167,6 +170,87 @@ def _terminate_group(proc: subprocess.Popen) -> None:
             continue  # escalate to the next signal
 
 
+# Every live `git` subprocess, so a fatal signal (or an unexpected exit) can
+# tear down their process groups instead of orphaning detached git sessions.
+# Without this, the _terminate_group cleanup only ever runs on the *timeout*
+# path inside a living parent: because git runs with start_new_session=True it
+# is shielded from the terminal's Ctrl-C, so a SIGINT/SIGTERM to this CLI (or an
+# OOM that we *can* still catch as a signal) would kill the parent and leave
+# `git index-pack` writing multi-GB tmp_pack_* files to the disk forever. Guarded
+# by a lock because pull-all runs git from a thread pool.
+_INFLIGHT_LOCK = threading.Lock()
+_INFLIGHT: set[subprocess.Popen] = set()
+
+# Set true the instant fatal teardown begins. Once set, git() refuses to spawn a
+# new detached session: without this gate the teardown snapshot (taken before the
+# grace sleep) could miss a `git pull` a worker starts *during* that sleep, and
+# os._exit would then strand it — the exact orphan teardown exists to prevent.
+_TEARING_DOWN = False
+
+# Blocked around git()'s spawn+register critical section so a fatal signal can't
+# land between creating the detached git session and recording it in _INFLIGHT
+# (which would hide it from teardown). Blocking also stops a same-thread handler
+# (pull-one runs git on the main thread) from re-entering _INFLIGHT_LOCK and
+# self-deadlocking, since threading.Lock is not reentrant.
+_FATAL_SIGNALS = frozenset({signal.SIGINT, signal.SIGTERM})
+
+
+def _killpg_quietly(pgid: int, sig: int) -> None:
+    try:
+        os.killpg(pgid, sig)
+    except (ProcessLookupError, OSError):
+        pass  # group already gone
+
+
+def _kill_inflight_groups() -> None:
+    """SIGTERM then SIGKILL every in-flight git process group.
+
+    Batched (one shared grace period, not per-proc) so tearing down a full
+    pull-all fan-out on Ctrl-C stays fast. Unlike _terminate_group this does NOT
+    communicate()/reap — the owning worker thread (or interpreter shutdown) does
+    that; we only need the groups *dead* so they stop writing tmp_pack_* files.
+    Reaping here would also race the worker's own communicate() on the same proc.
+    """
+    with _INFLIGHT_LOCK:
+        procs = list(_INFLIGHT)
+    pgids = []
+    for proc in procs:
+        try:
+            pgids.append(os.getpgid(proc.pid))
+        except (ProcessLookupError, OSError):
+            pass  # already exited
+    if not pgids:
+        return
+    for pgid in pgids:
+        _killpg_quietly(pgid, signal.SIGTERM)
+    time.sleep(GIT_TERM_GRACE_SECONDS)
+    for pgid in pgids:
+        _killpg_quietly(pgid, signal.SIGKILL)
+
+
+def _on_fatal_signal(signum: int, frame) -> None:
+    """Tear down in-flight git groups, then exit so we don't strand orphans."""
+    del frame
+    # Close the gate FIRST, before snapshotting _INFLIGHT below. Any worker that
+    # reaches git()'s under-lock check after this point sees teardown in progress
+    # and aborts its spawn instead of starting a session we'd miss.
+    global _TEARING_DOWN
+    _TEARING_DOWN = True
+    _kill_inflight_groups()
+    # os._exit skips atexit/finally — the groups are already handled, and we must
+    # not run more Python from a signal handler than necessary. 128+signum is the
+    # shell convention for "killed by signal N".
+    os._exit(128 + signum)
+
+
+def install_signal_handlers() -> None:
+    """Trap SIGINT/SIGTERM (and register an atexit backstop) so any abnormal
+    exit kills in-flight git groups. Must run on the main thread."""
+    signal.signal(signal.SIGINT, _on_fatal_signal)
+    signal.signal(signal.SIGTERM, _on_fatal_signal)
+    atexit.register(_kill_inflight_groups)
+
+
 def git(cwd: Path, *args: str) -> tuple[int, str, str]:
     """Run a git command. Returns (rc, stdout, stderr) with both trimmed.
 
@@ -177,22 +261,48 @@ def git(cwd: Path, *args: str) -> tuple[int, str, str]:
 
     git runs in its own session (start_new_session=True) so that on timeout we
     can signal the *whole* process group — see _terminate_group for why killing
-    only the direct child isn't enough.
+    only the direct child isn't enough. The proc is tracked in _INFLIGHT for the
+    duration so a fatal signal can tear its group down too (see
+    _kill_inflight_groups).
+
+    Spawn+register is made atomic against fatal signals by blocking SIGINT/SIGTERM
+    around it (pthread_sigmask) and re-checking _TEARING_DOWN under the lock. This
+    closes a TOCTOU race: _kill_inflight_groups snapshots _INFLIGHT then sleeps
+    through the grace period, so a session spawned during that window would be
+    invisible to teardown and orphaned by os._exit. If teardown has begun by the
+    time we hold the lock, we kill the just-spawned group ourselves and abort.
     """
+    # Block fatal signals so the handler can't fire between Popen and the gate
+    # check below (which would let an untracked session escape), and so a
+    # same-thread handler can't re-enter the non-reentrant _INFLIGHT_LOCK.
+    signal.pthread_sigmask(signal.SIG_BLOCK, _FATAL_SIGNALS)
     try:
-        proc = subprocess.Popen(
-            ["git", "-C", str(cwd), *args],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            env=git_env(),
-            start_new_session=True,
-        )
-    except FileNotFoundError:
-        return 127, "", "git not found"
+        try:
+            proc = subprocess.Popen(
+                ["git", "-C", str(cwd), *args],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                env=git_env(),
+                start_new_session=True,
+            )
+        except FileNotFoundError:
+            return 127, "", "git not found"
+        with _INFLIGHT_LOCK:
+            if _TEARING_DOWN:
+                # Teardown started while we were spawning; the snapshot already
+                # ran without us. Kill this group ourselves so it can't orphan.
+                _terminate_group(proc)
+                return GIT_TIMEOUT_RC, "", "aborted during shutdown"
+            _INFLIGHT.add(proc)
+    finally:
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, _FATAL_SIGNALS)
     try:
         out, err = proc.communicate(timeout=git_timeout())
     except subprocess.TimeoutExpired:
         _terminate_group(proc)
         return GIT_TIMEOUT_RC, "", "timed out"
+    finally:
+        with _INFLIGHT_LOCK:
+            _INFLIGHT.discard(proc)
     return proc.returncode, out.strip(), err.strip()
 
 
@@ -596,6 +706,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    install_signal_handlers()
     args = build_parser().parse_args()
     args.func(args)
 
