@@ -344,8 +344,10 @@ class TestSave(IsolatedHomeTestCase):
         self.assertIn("--agent", r.stderr)
 
     def test_save_merges_existing_frontmatter(self) -> None:
-        """Body that already has frontmatter is merged, not duplicated."""
-        body = "---\nTicket: ENG-1\n---\n\n# Body\n"
+        """Body that already has frontmatter is merged, not duplicated. A legacy
+        bare Ticket is migrated to Plan-keeper Ticket (which then satisfies the
+        save-time mint, so no second plan-<n> is added)."""
+        body = "---\nLinear Ticket: ENG-1\n---\n\n# Body\n"
         r = run_cli(
             "save", "--override", "testrepo", "--topic", "Test",
             stdin=body,
@@ -353,12 +355,14 @@ class TestSave(IsolatedHomeTestCase):
         )
         self.assertEqual(r.returncode, 0, msg=r.stderr)
         text = Path(r.stdout.strip()).read_text()
-        # Incoming Ticket preserved; Status backlog filled; no Agent injected.
-        self.assertIn("---\n", text)  # has frontmatter markers
-        self.assertEqual(text.count("Ticket: ENG-1"), 1)
+        # Incoming Linear Ticket preserved; Status backlog filled; no Agent;
+        # a plan-keeper id is minted (the plan had none).
+        self.assertEqual(text.count("Linear Ticket: ENG-1"), 1)
         self.assertNotIn("Agent:", text)
         self.assertEqual(text.count("Status: backlog"), 1)
-        # Verify the structure: should have opening ---, then fields, then closing ---
+        self.assertRegex(text, r"Plan-keeper Ticket: plan-\d+")
+        # Single frontmatter block: exactly two --- delimiter lines.
+        self.assertEqual(text.count("\n---\n"), 1)
         self.assertTrue(text.startswith("---\n"))
 
     def test_save_existing_agent_status_not_overwritten(self) -> None:
