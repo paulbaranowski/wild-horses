@@ -512,10 +512,11 @@ class TestPullTimeout(IsolatedHomeTestCase):
     git() bounds every call with a timeout; a killed pull surfaces as
     `timed-out` instead of blocking forever."""
 
-    def _install_git_shim_that_hangs_on_pull(self) -> dict[str, str]:
-        """Put a `git` shim first on PATH that hangs on `pull` but defers to
+    def _install_git_shim_that_hangs_on_fetch(self) -> dict[str, str]:
+        """Put a `git` shim first on PATH that hangs on `fetch` but defers to
         real git for everything else, so status checks still classify the repo
-        as ready and only the network pull stalls. Returns env overlay."""
+        as ready and only the network fetch stalls. `fetch` is the network step
+        the CLI now runs (in place of `git pull`). Returns env overlay."""
         real_git = shutil.which("git")
         assert real_git, "git must be on PATH for this test"
         shim_dir = self.home / "bin"
@@ -526,7 +527,7 @@ class TestPullTimeout(IsolatedHomeTestCase):
         shim.write_text(
             "#!/bin/sh\n"
             'for a in "$@"; do\n'
-            '  if [ "$a" = "pull" ]; then exec sleep 30; fi\n'
+            '  if [ "$a" = "fetch" ]; then exec sleep 30; fi\n'
             "done\n"
             f'exec "{real_git}" "$@"\n'
         )
@@ -538,7 +539,7 @@ class TestPullTimeout(IsolatedHomeTestCase):
         commit_to_bare(bare, self.scratch, "main")  # a real pull would fast-forward
         self.write_config([{"path": str(repo), "branch": "main"}])
 
-        env_extra = self._install_git_shim_that_hangs_on_pull()
+        env_extra = self._install_git_shim_that_hangs_on_fetch()
         start = time.monotonic()
         r = run_cli("pull-all", home=self.home, env_extra=env_extra)
         elapsed = time.monotonic() - start
@@ -563,11 +564,13 @@ class TestTimeoutKillsProcessGroup(IsolatedHomeTestCase):
     growing — proof the grandchild was reaped, not orphaned."""
 
     def _install_git_shim_that_forks_a_grandchild(self, marker: Path) -> dict[str, str]:
-        """`git` shim that, on `pull`, backgrounds a grandchild which appends to
-        `marker` forever, then blocks. Everything else defers to real git so
-        status checks still classify the repo as ready. The grandchild is NOT
-        `exec`'d, so it's a separate PID in the shim's process group — exactly
-        the orphan case. start_new_session in the CLI means killpg gets it."""
+        """`git` shim that, on `fetch`, backgrounds a grandchild which appends to
+        `marker` forever, then blocks. `fetch` is the CLI's network step (where
+        the real `git index-pack` grandchild would be forked). Everything else
+        defers to real git so status checks still classify the repo as ready.
+        The grandchild is NOT `exec`'d, so it's a separate PID in the shim's
+        process group — exactly the orphan case. start_new_session in the CLI
+        means killpg gets it."""
         real_git = shutil.which("git")
         assert real_git, "git must be on PATH for this test"
         shim_dir = self.home / "bin"
@@ -576,7 +579,7 @@ class TestTimeoutKillsProcessGroup(IsolatedHomeTestCase):
         shim.write_text(
             "#!/bin/sh\n"
             'for a in "$@"; do\n'
-            '  if [ "$a" = "pull" ]; then\n'
+            '  if [ "$a" = "fetch" ]; then\n'
             f"    ( while true; do echo x >> '{marker}'; sleep 0.1; done ) &\n"
             "    sleep 30\n"
             "    exit 0\n"
@@ -635,7 +638,7 @@ class TestSignalKillsInflightGroups(IsolatedHomeTestCase):
         shim.write_text(
             "#!/bin/sh\n"
             'for a in "$@"; do\n'
-            '  if [ "$a" = "pull" ]; then\n'
+            '  if [ "$a" = "fetch" ]; then\n'
             f"    ( while true; do echo x >> '{marker}'; sleep 0.1; done ) &\n"
             "    sleep 30\n"
             "    exit 0\n"
@@ -720,9 +723,10 @@ class TestSignalGatesNewSpawnsDuringTeardown(IsolatedHomeTestCase):
 
     def _install_shim(self, status_marker: Path, writer_marker: Path) -> dict[str, str]:
         """`git` shim that blocks (killably) on `status` so a worker parks in
-        repo_status, and on `pull` backgrounds a forever-writer grandchild. The
-        status block is how we deterministically place a worker "between
-        repo_status and git pull" at the instant we signal the CLI."""
+        repo_status, and on `fetch` backgrounds a forever-writer grandchild
+        (`fetch` is the CLI's network step, in place of `git pull`). The status
+        block is how we deterministically place a worker "between repo_status and
+        the fetch" at the instant we signal the CLI."""
         real_git = shutil.which("git")
         assert real_git, "git must be on PATH for this test"
         shim_dir = self.home / "bin"
@@ -735,7 +739,7 @@ class TestSignalGatesNewSpawnsDuringTeardown(IsolatedHomeTestCase):
             f"    echo s > '{status_marker}'\n"   # tell the test the worker is parked
             "    exec sleep 30\n"                  # killable; teardown SIGTERM frees the worker
             "  fi\n"
-            '  if [ "$a" = "pull" ]; then\n'
+            '  if [ "$a" = "fetch" ]; then\n'
             f"    ( while true; do echo x >> '{writer_marker}'; sleep 0.1; done ) &\n"
             "    sleep 30\n"
             "    exit 0\n"
@@ -919,6 +923,110 @@ class TestPullOnePreflight(IsolatedHomeTestCase):
         # The diffstat rides along with the verbose output too.
         self.assertIn("stat", data)
         self.assertIn("changed", data["stat"])
+
+
+class TestFetchHeadRaceHardening(IsolatedHomeTestCase):
+    """Regression coverage for the transient 'Cannot fast-forward to multiple
+    branches' race.
+
+    `git pull` fast-forwards against FETCH_HEAD — a single file in the repo's
+    *shared* common git dir, visible to every linked worktree, with no per-write
+    lock. When a concurrent fetch (an emdash worktree, a sibling fetch) writes
+    FETCH_HEAD at the same instant, `main` can end up listed twice as for-merge,
+    and pull's ff step refuses with that fatal — even though the repo is cleanly
+    fast-forwardable. The CLI now fetches one named ref and fast-forwards against
+    the stable tracking ref refs/remotes/origin/<branch>, never reading
+    FETCH_HEAD, so the race can't surface as pull-failed.
+
+    The shim below makes `git pull` fail with the exact fatal while deferring
+    fetch/merge/everything-else to real git. On the OLD code path (which ran
+    `git pull`) every repo here would come back pull-failed; on the new
+    fetch+merge path `git pull` is never invoked, so they fast-forward cleanly.
+    That asymmetry is the proof the merge target moved off FETCH_HEAD."""
+
+    def _install_git_shim_that_fails_on_pull(self) -> dict[str, str]:
+        """Put a `git` shim first on PATH that fails any `git pull ...` with the
+        multi-branch fatal, but defers every other subcommand (fetch, merge,
+        rev-parse, status, diff, ...) to real git. Returns an env overlay."""
+        real_git = shutil.which("git")
+        assert real_git, "git must be on PATH for this test"
+        shim_dir = self.home / "bin"
+        shim_dir.mkdir()
+        shim = shim_dir / "git"
+        shim.write_text(
+            "#!/bin/sh\n"
+            'for a in "$@"; do\n'
+            '  if [ "$a" = "pull" ]; then\n'
+            '    echo "fatal: Cannot fast-forward to multiple branches." >&2\n'
+            "    exit 128\n"
+            "  fi\n"
+            "done\n"
+            f'exec "{real_git}" "$@"\n'
+        )
+        shim.chmod(0o755)
+        return {"PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"}
+
+    def test_fast_forward_survives_pull_ff_race(self) -> None:
+        bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        commit_to_bare(bare, self.scratch, "main")  # a fast-forward is available
+        self.write_config([{"path": str(repo), "branch": "main"}])
+
+        env_extra = self._install_git_shim_that_fails_on_pull()
+        r = run_cli("pull-all", home=self.home, env_extra=env_extra)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        result = json.loads(r.stdout)["results"][0]
+        # `git pull` would have failed; fetch + named-ref merge still lands it.
+        self.assertEqual(result["status"], "pulled", result)
+        self.assertTrue((repo / "extra.txt").exists())
+
+    def test_up_to_date_survives_pull_ff_race(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        self.write_config([{"path": str(repo), "branch": "main"}])
+
+        env_extra = self._install_git_shim_that_fails_on_pull()
+        r = run_cli("pull-all", home=self.home, env_extra=env_extra)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        payload = json.loads(r.stdout)
+        # Already current: before_sha == after_sha -> up-to-date, collapsed into
+        # the count, never surfaced as pull-failed.
+        self.assertEqual(payload["results"], [])
+        self.assertEqual(payload["up_to_date"], 1)
+
+    def test_genuine_divergence_still_pull_failed(self) -> None:
+        # Local main has a commit origin/main lacks, and origin/main has one
+        # local lacks -> not a fast-forward. The hardening must NOT mask this:
+        # a real non-ff still reports pull-failed.
+        bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        commit_to_bare(bare, self.scratch, "main")  # origin advances
+        (repo / "local.txt").write_text("local\n")  # local diverges
+        git(repo, "add", "local.txt")
+        git(repo, "commit", "-m", "local-only")
+        self.write_config([{"path": str(repo), "branch": "main"}])
+
+        r = run_cli("pull-all", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        result = json.loads(r.stdout)["results"][0]
+        self.assertEqual(result["status"], "pull-failed", result)
+        self.assertIn("error", result)
+        # The failed ff must not have moved HEAD or touched the local commit.
+        self.assertFalse((repo / "extra.txt").exists())
+
+    def test_fetch_failure_is_pull_failed(self) -> None:
+        # A broken origin makes the *fetch* step fail (path/network error). That
+        # surfaces as pull-failed, same as a genuine divergence — both are real
+        # failures the user must see.
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        git(repo, "remote", "set-url", "origin", str(self.scratch / "does-not-exist.git"))
+        self.write_config([{"path": str(repo), "branch": "main"}])
+
+        r = run_cli("pull-all", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        result = json.loads(r.stdout)["results"][0]
+        self.assertEqual(result["status"], "pull-failed", result)
+        # The contract is a *non-empty* error; some fetch failures write the
+        # `fatal:` line to stdout rather than stderr, so the message must still
+        # come through.
+        self.assertTrue(result.get("error"), result)
 
 
 class TestAllowListShellInjection(IsolatedHomeTestCase):
