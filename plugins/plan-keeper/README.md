@@ -2,7 +2,7 @@
 
 plan-keeper is a local **task-management system** built around plans. A task _is_ a plan file in `~/plans/<repo>/`, and it takes one of two shapes: a **planning task**, whose output is more plans (an idea you brainstorm into a spec; a PRD you turn into an executable plan), or an **implementation task** — an executable plan that gets built into code. The same tool captures both, routes each to its next step, and archives it when done. Everything is tracked locally in markdown on your machine, never committed to any repo; filing a plan out to Linear or Jira is an occasional export, not the system of record.
 
-Eight skills cover the lifecycle: list a repo's plans read-only (`plan-list`), capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), archive with a completion stamp (`plan-done`), edit frontmatter (`plan-update`), manage the groundcrew dispatch queue (`plan-crew`), and file plans as Linear or Jira tickets (`plan-linear`, `plan-jira`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine — nothing is committed to any repo.
+Nine skills cover the lifecycle: list a repo's plans read-only (`plan-list`), capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), split one plan into dependency-wired slices (`plan-split`), archive with a completion stamp (`plan-done`), edit frontmatter (`plan-update`), manage the groundcrew dispatch queue (`plan-crew`), and file plans as Linear or Jira tickets (`plan-linear`, `plan-jira`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine — nothing is committed to any repo.
 
 ## The model
 
@@ -22,7 +22,7 @@ plan-keeper is the system of record for these tasks — they live in `~/plans/<r
 
 Two install paths — pick by what you need:
 
-**Plugin** — the eight skills plus the bundled CLI script, loaded into Claude Code:
+**Plugin** — the nine skills plus the bundled CLI script, loaded into Claude Code:
 
 ```text
 /plugin install plan-keeper@wild-horses
@@ -43,6 +43,7 @@ The binary is the same tool the plugin's bundled CLI script provides, just deliv
 | **[`plan-list`](skills/plan-list/)**     | Lists    | Read-only inventory of a repo's plans, grouped by `Status` (in-progress / in-review / todo / backlog), newest-first. Shows what's there and stops — no body read, no mutation. `--state done`/`deferred` for the archives.                                                                |
 | **[`plan-save`](skills/plan-save/)**     | Captures | Writes the latest plan from the current conversation to `~/plans/<repo>/<YYYY-MM-DD>-<topic>.md`.                                                                                                                                                                                         |
 | **[`plan-do`](skills/plan-do/)**         | Routes   | Lists not-yet-started plans for the current repo, classifies readiness (idea / spec / execution-ready), and routes to the matching next skill. Execution-ready plans get all three execution engines (autonomous / task-list-builder / executing-plans), recommended-first by plan shape. |
+| **[`plan-split`](skills/plan-split/)**   | Splits   | Decomposes one plan into N independently-grabbable vertical-slice plans (tracer bullets), wired with native `Blocked-by:` dependencies and promoted to `todo` so groundcrew dispatches the wave in dependency order. Marks the source plan `done` when it was a saved file.               |
 | **[`plan-done`](skills/plan-done/)**     | Archives | Moves a completed plan to `~/plans/<repo>/done/` and appends a `*Completed: YYYY-MM-DD*` stamp.                                                                                                                                                                                           |
 | **[`plan-update`](skills/plan-update/)** | Edits    | Mutates frontmatter fields (`Agent`, `Status`, `Ticket`) for a single plan in the current repo.                                                                                                                                                                                           |
 | **[`plan-crew`](skills/plan-crew/)**     | Queues   | Shows the groundcrew dispatch queue — the current repo by default, or every repo with `--all` ("all repos") — and bulk-promotes/dequeues plans (`Status todo/backlog`). Multi-select; the bulk counterpart to plan-update.                                                                |
@@ -101,7 +102,7 @@ A plan can declare prerequisites with a `Blocked-by:` frontmatter line — a com
 Blocked-by: plan-849321 (auth-schema), ENG-456 (token-store)
 ```
 
-On `fetch`, plan-keeper resolves each reference and embeds a `{id, title, status}` snapshot in the issue's `blockers` array. groundcrew holds any `todo` plan while **any** blocker isn't `done`, then auto-dispatches it on the next fetch once they all are. plan-keeper never masquerades the plan's real `Status` — the gate lives in groundcrew. Set it with `file-meta set --blocked-by`; details and cycle handling are in [`groundcrew/README.md`](groundcrew/README.md#dependencies-between-plans).
+On `fetch`, plan-keeper resolves each reference and embeds a `{id, title, status}` snapshot in the issue's `blockers` array. groundcrew holds any `todo` plan while **any** blocker isn't `done`, then auto-dispatches it on the next fetch once they all are. plan-keeper never masquerades the plan's real `Status` — the gate lives in groundcrew. Set it with `file-meta set --blocked-by`; details and cycle handling are in [`groundcrew/README.md`](groundcrew/README.md#dependencies-between-plans). To generate a whole wave of dependency-wired slices from one plan at once, use [`plan-split`](skills/plan-split/).
 
 ### Managing the queue with `plan-crew`
 
@@ -207,6 +208,7 @@ A PreToolUse hook (`hooks/hooks.json`) auto-approves `python3 .../plan_keeper_cl
 | `skills/plan-list/SKILL.md`        | Instructions for the read-only listing flow                                                                                   |
 | `skills/plan-save/SKILL.md`        | Instructions for the save flow                                                                                                |
 | `skills/plan-do/SKILL.md`          | Instructions for the list-and-route flow                                                                                      |
+| `skills/plan-split/SKILL.md`       | Instructions for the decompose-into-dependency-wired-slices flow                                                              |
 | `skills/plan-done/SKILL.md`        | Instructions for the archive flow                                                                                             |
 | `scripts/plan_keeper_cli.py`       | Bundled CLI entry shim — the only sanctioned mutator for `~/plans/`                                                           |
 | `scripts/plan_keeper/`             | CLI implementation package (errors, naming, storage, frontmatter, config, http, linear, jira, push, groundcrew, upgrade, cli) |
