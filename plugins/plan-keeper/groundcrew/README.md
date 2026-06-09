@@ -39,13 +39,14 @@ What it does:
    it into the injected command strings, so dispatch never depends on groundcrew's
    runtime `$PATH`.
 2. Backs up your config to `crew.config.ts.bak`.
-3. Injects two **sentinel-wrapped** regions — one in `sources:`, one in
-   `workspace.knownRepositories:` — each delimited by
+3. Injects one **sentinel-wrapped** region — a `plans` shell source in
+   `sources:` — delimited by
    `/* plan-keeper:managed:start */ … /* plan-keeper:managed:end */`. Re-running
-   replaces these regions in place (no duplication; the repo set refreshes), so
-   it's fully idempotent. The default `crew init` config ships `sources:`
-   commented out (the Linear adapter is implicit); when there's no active
-   `sources:` array, `crew install` adds one.
+   replaces this region in place (no duplication), so it's fully idempotent. The
+   default `crew init` config ships `sources:` commented out (the Linear adapter
+   is implicit); when there's no active `sources:` array, `crew install` adds
+   one. `crew install` does **not** touch `workspace.knownRepositories` —
+   registering the repos groundcrew may dispatch into is left to you.
 4. Validates the patched config with `crew doctor`. The gate is whether doctor
    can **load** the config — a patch that broke the TS is rolled back from the
    backup. Doctor failures unrelated to the plans source (a missing Linear API
@@ -56,12 +57,12 @@ What it does:
 
 `plan-keeper crew install --dry-run` prints the diff it would apply and writes
 nothing. If your config has no active `sources:` array and no `export default`
-object to add one to — or no `knownRepositories:` array — `crew install` writes
-nothing and prints the exact blocks for you to paste manually.
+object to add one to, `crew install` writes nothing and prints the exact block
+for you to paste manually.
 
 ## What gets injected
 
-Into `sources:`:
+One region, into `sources:`:
 
 ```ts
 /* plan-keeper:managed:start */
@@ -70,12 +71,13 @@ Into `sources:`:
           verify: "/opt/homebrew/bin/plan-keeper crew fetch >/dev/null",
           fetch: "/opt/homebrew/bin/plan-keeper crew fetch",
           resolveOne: "/opt/homebrew/bin/plan-keeper crew get ${id}",
-          markInProgress: "/opt/homebrew/bin/plan-keeper crew start ${id}" } },
+          markInProgress: "/opt/homebrew/bin/plan-keeper crew start ${id}",
+          markInReview: "/opt/homebrew/bin/plan-keeper crew review ${id}" } },
 /* plan-keeper:managed:end */
 ```
 
-Into `workspace.knownRepositories:`: the repo directory names discovered one
-level under `~/plans/`, alongside whatever entries are already there.
+`crew install` does not modify `workspace.knownRepositories` — register the
+repos groundcrew may dispatch into yourself.
 
 ## How dispatch works
 

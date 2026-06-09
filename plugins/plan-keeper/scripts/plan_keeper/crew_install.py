@@ -1,19 +1,21 @@
 """`crew install`: wire ~/plans/* into a groundcrew config with a connection
 that survives plan-keeper upgrades.
 
-The patch is sentinel-wrapped and idempotent: two managed regions (one inside
-the config's ``sources:`` array, one inside ``knownRepositories:``) are
-inserted on first run and replaced in place on every re-run. The command
-strings call the resolved absolute ``plan-keeper`` binary directly, so dispatch
-never depends on groundcrew's runtime ``$PATH`` and the wiring doesn't rot when
-the plugin version bumps (brew relinks the binary in place on upgrade).
+The patch is sentinel-wrapped and idempotent: one managed region inside the
+config's ``sources:`` array is inserted on first run and replaced in place on
+every re-run. The command strings call the resolved absolute ``plan-keeper``
+binary directly, so dispatch never depends on groundcrew's runtime ``$PATH``
+and the wiring doesn't rot when the plugin version bumps (brew relinks the
+binary in place on upgrade).
+
+plan-keeper does not touch ``workspace.knownRepositories`` — registering the
+repos groundcrew may dispatch into is left to the config owner.
 
 The pure patcher (:func:`build_patched_config`) is separated from the IO/process
 orchestration (:func:`run_crew_install`) so the anchoring + idempotency logic is
 unit-testable without a real groundcrew install on the machine.
 """
 import difflib
-import json
 import os
 import re
 import subprocess
@@ -21,13 +23,11 @@ from pathlib import Path
 from typing import Callable, Optional, TextIO
 
 from plan_keeper.errors import PlanKeeperCliError
-from plan_keeper.groundcrew import _collect_crew_issues, _discover_plan_repos
+from plan_keeper.groundcrew import _collect_crew_issues
 from plan_keeper.storage import write_atomic
 
-# A managed region is bracketed by these comment sentinels. Both the sources
-# region and the knownRepositories region use the *same* pair — they're
-# disambiguated positionally (each sits flush inside its own array's `[`), not
-# by distinct marker text.
+# A managed region is bracketed by these comment sentinels. Only the
+# ``sources:`` array carries one; it sits flush inside that array's `[`.
 SENTINEL_START = "/* plan-keeper:managed:start */"
 SENTINEL_END = "/* plan-keeper:managed:end */"
 
@@ -70,15 +70,6 @@ def _render_source_region(pk: str) -> str:
         f'          markInProgress: "{pk} crew start ${{id}}",\n'
         f'          markInReview: "{pk} crew review ${{id}}" }} }},'
     )
-
-
-def _render_repos_region(repos: "list[str]") -> str:
-    """The discovered plan-repo names injected into ``knownRepositories:``.
-
-    Each name is JSON-encoded (so it is a correctly-quoted TS string literal)
-    and comma-terminated so the entries that already follow still parse.
-    """
-    return "\n".join(f"      {json.dumps(repo)}," for repo in repos)
 
 
 def _find_active_array_open(config: str, array_name: str) -> Optional[int]:
@@ -145,34 +136,39 @@ def _create_sources_array(config: str, body: str) -> Optional[str]:
     return config[:at] + block + config[at:]
 
 
-def build_patched_config(config: str, pk: str, repos: "list[str]") -> Optional[str]:
-    """Patch both managed regions into ``config``, returning the new text.
+def build_patched_config(config: str, pk: str) -> Optional[str]:
+    """Patch the managed ``sources`` region into ``config``, returning the new text.
 
     ``sources`` is upserted into the active array when present, else a fresh
     ``sources`` key is created in the export object (the common case — the
-    default config comments ``sources`` out). ``knownRepositories`` must already
-    exist (``crew init`` always ships it inside ``workspace``); if it doesn't,
-    None signals the caller to fall back to the manual-paste safety valve rather
-    than guess where ``workspace`` lives.
+    default config comments ``sources`` out). None signals the caller to fall
+    back to the manual-paste safety valve when there is neither an active
+    ``sources`` array nor an ``export default {`` object to add one to — and
+    also when an active ``sources`` array carries a *malformed* managed region
+    (a start sentinel with no matching end), where failing fast beats minting a
+    duplicate ``sources`` key.
     """
     sources_body = _render_source_region(pk)
+    # _upsert_managed_region returns None for two distinct reasons: there is no
+    # active `sources:` array to anchor in, or the array exists but its managed
+    # region is malformed (a SENTINEL_START with no matching SENTINEL_END). Only
+    # the first warrants creating a fresh `sources` key — falling through on the
+    # malformed case would mint a *second* `sources` key beside the broken one.
+    # Distinguish them by whether an active array was actually located.
+    has_active_sources = _find_active_array_open(config, "sources") is not None
     patched = _upsert_managed_region(config, "sources", sources_body)
     if patched is None:
+        if has_active_sources:
+            return None  # malformed managed block — fail fast, don't duplicate
         patched = _create_sources_array(config, sources_body)
-        if patched is None:
-            return None
-    return _upsert_managed_region(
-        patched, "knownRepositories", _render_repos_region(repos)
-    )
+    return patched
 
 
-def _managed_blocks_text(pk: str, repos: "list[str]") -> str:
-    """The two managed regions, labeled, for the manual-paste safety valve."""
+def _managed_blocks_text(pk: str) -> str:
+    """The managed ``sources`` region, labeled, for the manual-paste safety valve."""
     return (
         f"# Paste inside your config's `sources: [` array:\n"
-        f"{SENTINEL_START}\n{_render_source_region(pk)}\n{SENTINEL_END}\n\n"
-        f"# Paste inside your config's `knownRepositories: [` array:\n"
-        f"{SENTINEL_START}\n{_render_repos_region(repos)}\n{SENTINEL_END}"
+        f"{SENTINEL_START}\n{_render_source_region(pk)}\n{SENTINEL_END}"
     )
 
 
@@ -220,9 +216,9 @@ def run_crew_install(
 
     Collaborators are injected (``pk`` = the resolved binary path, ``run_doctor``
     = the validation hook) so the orchestration is testable without a real
-    groundcrew binary. Repo discovery and the post-patch fetch check read the
-    in-process plan tree directly (``storage.PLAN_ROOT``), which the tests
-    isolate by patching that constant.
+    groundcrew binary. The post-patch fetch check reads the in-process plan tree
+    directly (``storage.PLAN_ROOT``), which the tests isolate by patching that
+    constant.
     """
     if not config_path.exists():
         raise PlanKeeperCliError(
@@ -230,21 +226,20 @@ def run_crew_install(
             f"first (or pass --config)",
             code=2,
         )
-    repos = _discover_plan_repos()
     original = config_path.read_text(encoding="utf-8")
-    patched = build_patched_config(original, pk, repos)
+    patched = build_patched_config(original, pk)
 
     if patched is None:
-        # Safety valve: anchors not found. Write nothing; hand the user the
-        # exact blocks to paste themselves.
+        # Safety valve: no place to anchor `sources`. Write nothing; hand the
+        # user the exact block to paste themselves.
         print(
-            f"plan-keeper: could not locate `sources:` / `knownRepositories:` "
-            f"arrays in {config_path} — nothing was written.\n",
+            f"plan-keeper: could not locate a `sources:` array or an "
+            f"`export default {{` object in {config_path} — nothing was written.\n",
             file=out,
         )
-        print(_managed_blocks_text(pk, repos), file=out)
+        print(_managed_blocks_text(pk), file=out)
         raise PlanKeeperCliError(
-            "config anchors not found; printed the managed blocks for manual "
+            "config anchor not found; printed the managed block for manual "
             "paste (nothing written)",
             code=2,
         )
@@ -273,7 +268,7 @@ def run_crew_install(
 
     plan_count = len(_collect_crew_issues())
     summary = (
-        f"plan-keeper: wired {len(repos)} repo(s) into {config_path}; "
+        f"plan-keeper: wired the plans source into {config_path}; "
         f"config loads; {plan_count} plan(s) visible to fetch "
         f"(backup: {backup.name})"
     )
