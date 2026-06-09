@@ -26,9 +26,10 @@ from plan_keeper.crew_install import (
 )
 from plan_keeper.errors import PlanKeeperCliError
 
-# A minimal but realistic groundcrew config: both anchors present, each array
-# already holding one foreign entry so we can prove the managed region
-# coexists with hand-maintained content.
+# A minimal but realistic groundcrew config: the `sources:` anchor is present
+# and already holds one foreign entry so we can prove the managed region
+# coexists with hand-maintained content. `knownRepositories` is present too —
+# plan-keeper must leave it untouched.
 BASE_CONFIG = """\
 import type { Config } from "groundcrew";
 
@@ -68,18 +69,17 @@ export default {
 class TestBuildPatchedConfig(unittest.TestCase):
     """The pure patcher: anchoring, idempotency, and content."""
 
-    def test_fresh_insert_adds_both_regions(self):
-        out = build_patched_config(BASE_CONFIG, PK, ["alpha", "beta"])
+    def test_fresh_insert_adds_one_sources_region(self):
+        out = build_patched_config(BASE_CONFIG, PK)
         assert out is not None
-        # One managed region per array.
-        self.assertEqual(out.count(SENTINEL_START), 2)
-        self.assertEqual(out.count(SENTINEL_END), 2)
+        # Exactly one managed region — only `sources:` is managed now.
+        self.assertEqual(out.count(SENTINEL_START), 1)
+        self.assertEqual(out.count(SENTINEL_END), 1)
         # Foreign content is preserved (coexists with the managed region).
         self.assertIn('{ kind: "github", name: "issues" }', out)
-        self.assertIn('"existing-repo"', out)
 
     def test_command_strings_bake_in_resolved_binary(self):
-        out = build_patched_config(BASE_CONFIG, PK, ["alpha"])
+        out = build_patched_config(BASE_CONFIG, PK)
         assert out is not None
         self.assertIn(f'fetch: "{PK} crew fetch"', out)
         self.assertIn(f'verify: "{PK} crew fetch >/dev/null"', out)
@@ -88,43 +88,40 @@ class TestBuildPatchedConfig(unittest.TestCase):
         self.assertIn(f'markInProgress: "{PK} crew start ${{id}}"', out)
         self.assertIn(f'markInReview: "{PK} crew review ${{id}}"', out)
 
-    def test_discovered_repos_are_listed(self):
-        out = build_patched_config(BASE_CONFIG, PK, ["alpha", "beta"])
+    def test_known_repositories_left_untouched(self):
+        """plan-keeper no longer manages knownRepositories: the array and its
+        entries must come through the patch byte-identical, with no sentinel."""
+        out = build_patched_config(BASE_CONFIG, PK)
         assert out is not None
-        self.assertIn('"alpha",', out)
-        self.assertIn('"beta",', out)
+        # The pre-existing entry survives and no managed region was inserted
+        # into the knownRepositories array.
+        kr_start = out.index("knownRepositories:")
+        self.assertNotIn(SENTINEL_START, out[kr_start:])
+        self.assertIn('"existing-repo"', out)
 
     def test_rerun_is_idempotent(self):
-        once = build_patched_config(BASE_CONFIG, PK, ["alpha"])
+        once = build_patched_config(BASE_CONFIG, PK)
         assert once is not None
-        twice = build_patched_config(once, PK, ["alpha"])
+        twice = build_patched_config(once, PK)
         assert twice is not None
         self.assertEqual(once, twice)
         # No duplicated regions on re-run.
-        self.assertEqual(twice.count(SENTINEL_START), 2)
+        self.assertEqual(twice.count(SENTINEL_START), 1)
 
     def test_rerun_idempotent_on_crew_init_config(self):
         """The created-sources path (commented-out `sources:`) must also be
         idempotent: re-running must not stack a second created array."""
-        once = build_patched_config(CREW_INIT_CONFIG, PK, ["repoA"])
+        once = build_patched_config(CREW_INIT_CONFIG, PK)
         assert once is not None
-        twice = build_patched_config(once, PK, ["repoA"])
+        twice = build_patched_config(once, PK)
         assert twice is not None
         self.assertEqual(once, twice)
-        self.assertEqual(twice.count(SENTINEL_START), 2)
-
-    def test_rerun_refreshes_repo_set_without_duplicating(self):
-        once = build_patched_config(BASE_CONFIG, PK, ["alpha"])
-        assert once is not None
-        refreshed = build_patched_config(once, PK, ["alpha", "beta"])
-        assert refreshed is not None
-        self.assertEqual(refreshed.count(SENTINEL_START), 2)  # still two regions
-        self.assertIn('"beta",', refreshed)
+        self.assertEqual(twice.count(SENTINEL_START), 1)
 
     def test_rerun_repoints_binary_path(self):
-        once = build_patched_config(BASE_CONFIG, "/old/plan-keeper", ["alpha"])
+        once = build_patched_config(BASE_CONFIG, "/old/plan-keeper")
         assert once is not None
-        moved = build_patched_config(once, "/new/plan-keeper", ["alpha"])
+        moved = build_patched_config(once, "/new/plan-keeper")
         assert moved is not None
         self.assertIn("/new/plan-keeper crew fetch", moved)
         self.assertNotIn("/old/plan-keeper", moved)
@@ -133,37 +130,29 @@ class TestBuildPatchedConfig(unittest.TestCase):
         """crew init comments `sources:` out — anchor it inside the comment and
         the TS breaks. Instead a fresh active `sources` key is created, and the
         commented original is left untouched."""
-        out = build_patched_config(CREW_INIT_CONFIG, PK, ["repoA"])
+        out = build_patched_config(CREW_INIT_CONFIG, PK)
         assert out is not None
-        self.assertEqual(out.count(SENTINEL_START), 2)  # created + knownRepos
+        self.assertEqual(out.count(SENTINEL_START), 1)  # the created sources
         self.assertIn(f'fetch: "{PK} crew fetch"', out)
-        self.assertIn('"repoA",', out)
         # The commented-out template `sources:` is preserved as-is.
         self.assertIn("//   { kind:", out)
+        # knownRepositories nested in workspace is left alone.
+        self.assertIn('"your-org/your-repo"', out)
 
-    def test_patches_nested_known_repositories(self):
-        """crew init nests knownRepositories inside workspace; the managed
-        region coexists with the entry already there."""
-        out = build_patched_config(CREW_INIT_CONFIG, PK, ["repoA"])
+    def test_patches_existing_sources_array(self):
+        out = build_patched_config(
+            'export default { sources: [] } satisfies Config;', PK
+        )
         assert out is not None
-        self.assertIn('"repoA",', out)
-        self.assertIn('"your-org/your-repo"', out)  # pre-existing entry kept
-
-    def test_no_export_default_returns_none(self):
-        """No active sources AND no export object to create one in → safety
-        valve (the caller prints the blocks for manual paste)."""
-        orphan = 'const cfg = { knownRepositories: [] };'
-        self.assertIsNone(build_patched_config(orphan, PK, []))
-
-    def test_missing_known_repositories_anchor_returns_none(self):
-        no_repos = 'export default { sources: [] } satisfies Config;'
-        self.assertIsNone(build_patched_config(no_repos, PK, []))
-
-    def test_empty_repo_set_still_patches_sources(self):
-        out = build_patched_config(BASE_CONFIG, PK, [])
-        assert out is not None
-        self.assertEqual(out.count(SENTINEL_START), 2)
+        self.assertEqual(out.count(SENTINEL_START), 1)
         self.assertIn(f'fetch: "{PK} crew fetch"', out)
+
+    def test_no_sources_and_no_export_default_returns_none(self):
+        """No active sources AND no export object to create one in → safety
+        valve (the caller prints the block for manual paste). Absence of a
+        knownRepositories array no longer matters."""
+        orphan = 'const cfg = { knownRepositories: [] };'
+        self.assertIsNone(build_patched_config(orphan, PK))
 
 
 class TestResolveConfigPath(unittest.TestCase):
@@ -227,8 +216,11 @@ class TestRunCrewInstall(IsolatedHomeTestCase):
         )
         self.assertEqual(rc, 0)
         patched = self.config.read_text()
-        self.assertEqual(patched.count(SENTINEL_START), 2)
-        self.assertIn('"myrepo",', patched)  # discovered from PLAN_ROOT
+        self.assertEqual(patched.count(SENTINEL_START), 1)
+        # knownRepositories is left alone — no managed region, entry preserved.
+        kr_start = patched.index("knownRepositories:")
+        self.assertNotIn(SENTINEL_START, patched[kr_start:])
+        self.assertIn('"existing-repo"', patched)
         # Backup holds the pristine original.
         backup = self.config.with_name("crew.config.ts.bak")
         self.assertTrue(backup.exists())
@@ -256,7 +248,7 @@ class TestRunCrewInstall(IsolatedHomeTestCase):
         )
         self.assertEqual(rc, 0)
         # Patch was NOT rolled back.
-        self.assertEqual(self.config.read_text().count(SENTINEL_START), 2)
+        self.assertEqual(self.config.read_text().count(SENTINEL_START), 1)
         # User is told doctor still has (unrelated) complaints.
         self.assertIn("unrelated to the plans source", self.out.getvalue())
         self.assertIn("Linear API key", self.out.getvalue())
@@ -274,10 +266,9 @@ class TestRunCrewInstall(IsolatedHomeTestCase):
         self.assertIn("+", self.out.getvalue())
 
     def test_anchor_missing_writes_nothing_and_prints_blocks(self):
-        # knownRepositories absent (and not auto-created) → safety valve.
-        self.config.write_text(
-            'export default { sources: [] } satisfies Config;\n'
-        )
+        # No `sources:` array and no `export default {` to create one in →
+        # safety valve.
+        self.config.write_text('const cfg = { foo: 1 };\n')
         original = self.config.read_text()
         with self.assertRaises(PlanKeeperCliError) as ctx:
             run_crew_install(
@@ -287,7 +278,7 @@ class TestRunCrewInstall(IsolatedHomeTestCase):
         self.assertEqual(ctx.exception.code, 2)
         self.assertEqual(self.config.read_text(), original)  # nothing written
         self.assertFalse(self.config.with_name("crew.config.ts.bak").exists())
-        # The blocks to paste are printed for the user.
+        # The block to paste is printed for the user.
         self.assertIn(SENTINEL_START, self.out.getvalue())
         self.assertIn(f"{PK} crew fetch", self.out.getvalue())
 

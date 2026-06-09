@@ -463,23 +463,6 @@ def _collect_crew_issues() -> list[dict]:
     return issues
 
 
-def _discover_plan_repos() -> list[str]:
-    """The repo directory names one level under ``~/plans/`` (sorted).
-
-    These seed the ``knownRepositories`` allow-list that ``crew install``
-    writes into the groundcrew config. Hidden dirs and non-directories are
-    skipped; ``done``/``deferred`` are *not* special here — they only ever
-    appear nested inside a repo dir, never as a top-level repo.
-    """
-    if not storage.PLAN_ROOT.exists():
-        return []
-    return sorted(
-        entry.name
-        for entry in storage.PLAN_ROOT.iterdir()
-        if entry.is_dir() and not entry.name.startswith(".")
-    )
-
-
 def _resolve_crew_id(plan_id: str) -> Optional[dict]:
     """The issue dict whose stored ``Plan-keeper Ticket`` == ``plan_id``, or None.
 
