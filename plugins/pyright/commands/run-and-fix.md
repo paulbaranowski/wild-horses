@@ -175,7 +175,7 @@ Files with `<error-count>` ≥ 30 produce a heavy task; flag those when the `tas
 
 ### Step 2 — Resolve task fields per file
 
-For each file from Step 1, build the per-finding fields the `task-list-builder` ingests (per its hard rules in `${CLAUDE_PLUGIN_ROOT}/../harness/skills/task-list-builder/SKILL.md`; find via `Glob "**/harness/skills/task-list-builder/SKILL.md"` if cross-plugin path doesn't resolve):
+For each file from Step 1, build the per-finding fields the `task-list-builder` ingests (per its hard rules in `${CLAUDE_PLUGIN_ROOT}/../refactor/skills/task-list-builder/SKILL.md`; find via `Glob "**/refactor/skills/task-list-builder/SKILL.md"` if cross-plugin path doesn't resolve):
 
 - **`title`** — `Fix <rule>[, <rule>] in <file-path>` listing the rules when `<rule-set>` has ≤ 2 rules; otherwise `Fix pyright errors in <file-path>` (rule-agnostic). This avoids titles like `Fix A and B and C and D and E in src/foo.py`.
 - **`what`** — copy the matching intent's bullet **verbatim** from § "Apply the chosen intent" above. Don't paraphrase. The per-task agent reads `what` to decide its lean — paraphrasing drops constraints (e.g., omitting "still flag `bugs.md`-class items" from `silence`) and leans the task wrong.
@@ -227,7 +227,7 @@ Hand off to the `task-list-builder` skill with arguments `--slug pyright --md-bo
 
 `--slug pyright` overrides the default `task-list-builder` filename suffix so the deliverables retain pyright provenance. The slug must match `[a-z][a-z0-9-]*`; `pyright` qualifies.
 
-Find the builder's `SKILL.md` at `${CLAUDE_PLUGIN_ROOT}/../harness/skills/task-list-builder/SKILL.md`; fall back to `Glob "**/harness/skills/task-list-builder/SKILL.md"` if the cross-plugin path doesn't resolve. Re-read it for the up-to-date procedure.
+Find the builder's `SKILL.md` at `${CLAUDE_PLUGIN_ROOT}/../refactor/skills/task-list-builder/SKILL.md`; fall back to `Glob "**/refactor/skills/task-list-builder/SKILL.md"` if the cross-plugin path doesn't resolve. Re-read it for the up-to-date procedure.
 
 When the builder finishes, three outcomes are possible:
 
@@ -237,7 +237,7 @@ When the builder finishes, three outcomes are possible:
 
 ### Step 3 — Run the task list
 
-Hand off to the `task-list-runner` skill, passing the absolute path to the `.json` from Step 2 with the `--all` flag. The runner owns the Agent loop, the `MAX_ITER` math, the Task Implementation Prompt (per-task agent instructions, including the per-task `verifySteps` and `agentValidations` evaluation flow), and the final summary. Re-read its `SKILL.md` (find via `Glob "**/harness/skills/task-list-runner/SKILL.md"` if needed) for the up-to-date procedure.
+Hand off to the `task-list-runner` skill, passing the absolute path to the `.json` from Step 2 with the `--all` flag. The runner owns the Agent loop, the `MAX_ITER` math, the Task Implementation Prompt (per-task agent instructions, including the per-task `verifySteps` and `agentValidations` evaluation flow), and the final summary. Re-read its `SKILL.md` (find via `Glob "**/refactor/skills/task-list-runner/SKILL.md"` if needed) for the up-to-date procedure.
 
 The runner is synchronous from this orchestrator's perspective — control returns when every task is `complete` or `failed` (or `MAX_ITER` is hit). Don't proceed past this step until the runner returns.
 
@@ -295,7 +295,7 @@ Present the residual to the user; ask whether to:
 
 - Take on another iteration (re-run `/pyright:run-and-fix` on the residual scope)
 - Accept the residual as the run's final state and proceed to Phase 5
-- Hand off the residual interventions to `/harness:reasoning-gaps` per the standard end-of-run pointer in Phase 5
+- Hand off the residual interventions to `/refactor:reasoning-gaps` per the standard end-of-run pointer in Phase 5
 
 ---
 
@@ -345,7 +345,7 @@ Unless `--no-suggestions` was given, follow the procedure in `${CLAUDE_PLUGIN_RO
 After the summary (and suggestions, if any), **always** print a single-line handoff pointer, regardless of intent, whether zero was reached, or whether `--no-suggestions` was set:
 
 ```text
-Next: pyright covers the **typing axis**. The **implicit-flow** and **structure/docs** axes belong to /harness:reasoning-gaps — which ideally runs *before* pyright, since it does the type design that this command then propagates. If you haven't run it yet, run /harness:reasoning-gaps and re-run this command after.
+Next: pyright covers the **typing axis**. The **implicit-flow** and **structure/docs** axes belong to /refactor:reasoning-gaps — which ideally runs *before* pyright, since it does the type design that this command then propagates. If you haven't run it yet, run /refactor:reasoning-gaps and re-run this command after.
 ```
 
 This is a plain text pointer — no coupling, no shared state, no arguments passed. The user decides whether to run it.

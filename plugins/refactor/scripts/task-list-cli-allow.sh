@@ -25,9 +25,9 @@ cmd=$(jq -r '.tool_input.command // empty')
 # That suffix is tighter than just `/task_list_cli.py` (a stray script
 # elsewhere on the filesystem won't match) and is the common substring
 # between both layouts:
-#   - dev:       /...checkout.../plugins/harness/skills/task-list-runner/task_list_cli.py
-#   - installed: /...cache/wild-horses/harness/<version>/skills/task-list-runner/task_list_cli.py
-# (The `harness` segment is NOT adjacent to `skills` in the installed
+#   - dev:       /...checkout.../plugins/refactor/skills/task-list-runner/task_list_cli.py
+#   - installed: /...cache/wild-horses/refactor/<version>/skills/task-list-runner/task_list_cli.py
+# (The `refactor` segment is NOT adjacent to `skills` in the installed
 # path — a version directory sits between them — so we anchor on the
 # `skills/task-list-runner/` prefix instead.) Two-clause check (instead
 # of one regex with end-anchor) handles Claude Code's defensive

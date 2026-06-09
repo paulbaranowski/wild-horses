@@ -193,7 +193,7 @@ The injection happens for every `.md` save — both heredoc and `--from-path` mo
 
 ## Paired-output handling
 
-`task-list-builder` produces a paired `.json` (the canonical task list the harness loop runner consumes) and `.md` (a human-readable report). Both files are written to `docs/exec-plans/active/<date>-<runid>-<short>.<slug>.{json,md}` (default `<slug>` is `task-list-builder`; `/harness:reasoning-gaps` uses `reasoning-gaps`, `/harness:feedback-blockers` uses `feedback-blockers`). The filename already encodes date, run-id, and identity — there is no need to rename it.
+`task-list-builder` produces a paired `.json` (the canonical task list the harness loop runner consumes) and `.md` (a human-readable report). Both files are written to `docs/exec-plans/active/<date>-<runid>-<short>.<slug>.{json,md}` (default `<slug>` is `task-list-builder`; `/refactor:reasoning-gaps` uses `reasoning-gaps`, `/refactor:feedback-blockers` uses `feedback-blockers`). The filename already encodes date, run-id, and identity — there is no need to rename it.
 
 When the user invokes plan-save after a task-list-builder run, save **both** files in one go:
 

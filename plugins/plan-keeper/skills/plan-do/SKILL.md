@@ -25,7 +25,7 @@ For plans that aren't execution-ready yet (idea, spec), the skill suggests the s
 - **`<repo>`:** auto-derived or override — see [../../repo-derivation.md](../../repo-derivation.md).
 - **Classification (tier 1, readiness):** idea / spec / execution-ready. Read the plan's `Kind:` frontmatter first (authoritative — see [../../plan-kinds.md](../../plan-kinds.md)); infer from content only when `Kind` is absent.
 - **Classification (tier 2, shape — only for execution-ready):** picks which of the three execution engines to recommend first; all three are always offered.
-- **Routing:** `superpowers:brainstorming` (idea), `superpowers:writing-plans` (spec). Execution-ready → menu of `autonomous:autonomous`, `harness:task-list-builder`→`task-list-runner`, `superpowers:executing-plans`.
+- **Routing:** `superpowers:brainstorming` (idea), `superpowers:writing-plans` (spec). Execution-ready → menu of `autonomous:autonomous`, `refactor:task-list-builder`→`task-list-runner`, `superpowers:executing-plans`.
 - **Confirmation:** required before reading any plan file and before invoking any next skill.
 
 ## Procedure
@@ -71,7 +71,7 @@ Not-yet-started plans in ~/plans/wild-horses/:
 
   1. [todo]    2026-05-19-plan-do-design.md
   2. [todo]    2026-05-17-task-list-runner-refactor.md
-  3. [backlog] 2026-05-15-harness-namespace-cleanup.md
+  3. [backlog] 2026-05-15-refactor-namespace-cleanup.md
 
 (2 other plans are in progress — say "show all" to see them.)
 
@@ -135,7 +135,7 @@ Pick the **recommended** engine with this classification (apply in order; first 
 | Recommend                                            | Signals in the plan                                                                                                                                                                                                             |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **`autonomous:autonomous`**                          | Self-contained and well-specified; bounded scope; clear acceptance criteria; reads like a single ticket/feature that naturally ends in a PR; no mid-flight human judgment calls implied. _"Could hand this to an AFK agent."_   |
-| **`harness:task-list-builder` → `task-list-runner`** | Multiple independent tasks; per-task acceptance criteria; dependency notation between tasks; "dispatch" / "subagents" / "in parallel" / "independent" language; large scope where structured tracking and resumability pay off. |
+| **`refactor:task-list-builder` → `task-list-runner`** | Multiple independent tasks; per-task acceptance criteria; dependency notation between tasks; "dispatch" / "subagents" / "in parallel" / "independent" language; large scope where structured tracking and resumability pay off. |
 | **`superpowers:executing-plans`**                    | Sequential phases with explicit review/checkpoint language; dependent linear flow ("first do X, then do Y"); risky or high-uncertainty work the user would want to review phase-by-phase; TDD-with-review-gates.                |
 
 The tiebreaker axis is **autonomy-readiness first** (is it specified enough to need no supervision?), then **independence** (parallel task-list vs. sequential review-gated).
@@ -147,7 +147,7 @@ Present the menu — recommended option first with a one-line reason, the others
 
   1. autonomous:autonomous — [recommended] AFK, no human in the loop: implements,
      tests, runs an independent sub-agent review to convergence, opens a PR.
-  2. harness:task-list-builder → task-list-runner — convert to a structured JSON
+  2. refactor:task-list-builder → task-list-runner — convert to a structured JSON
      task list, then dispatch each task to a sub-agent; resumable, best for many
      independent tasks.
   3. superpowers:executing-plans — sequential execution with your review at each
@@ -175,7 +175,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set \
 **Handoff specifics per engine:**
 
 - **`autonomous:autonomous`** — the plan read in step 3 _is_ the Task. autonomous accepts an in-context plan as a task source (its input-resolution step 3), so no issue URL is needed — the plan content is the authoritative spec. You may also hand it the plan's file path (`~/plans/<repo>/<filename>`) explicitly. Do not look up or pass any `Ticket:` frontmatter field — the plan is the source of truth.
-- **`harness:task-list-builder`** — invoke it to convert the plan into the structured JSON task list; it hands off to `harness:task-list-runner` to execute the tasks.
+- **`refactor:task-list-builder`** — invoke it to convert the plan into the structured JSON task list; it hands off to `refactor:task-list-runner` to execute the tasks.
 - **`superpowers:executing-plans`** — invoke directly; the plan in context is the implementation plan it executes.
 - **`superpowers:brainstorming` / `superpowers:writing-plans`** — invoke directly (the idea / spec paths).
 

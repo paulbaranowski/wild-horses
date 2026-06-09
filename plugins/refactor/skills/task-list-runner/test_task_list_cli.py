@@ -3,11 +3,11 @@
 
 Stdlib-only — no pytest needed. Run from anywhere:
 
-    python3 plugins/harness/skills/task-list-runner/test_task_list_cli.py
+    python3 plugins/refactor/skills/task-list-runner/test_task_list_cli.py
 
 Or via unittest discovery:
 
-    python3 -m unittest discover -s plugins/harness/skills/task-list-runner -p 'test_task_list_cli.py'
+    python3 -m unittest discover -s plugins/refactor/skills/task-list-runner -p 'test_task_list_cli.py'
 
 Tests invoke the CLI as a subprocess so exit codes, argparse behaviour,
 and stdout/stderr separation are exercised exactly as a dispatched
@@ -84,7 +84,7 @@ class CliTestCase(unittest.TestCase):
         # so set-status-failed tests (which intentionally leave the staging
         # file) don't leak into the next test's fixtures.
         digest = hashlib.md5(str(self.task_path.resolve()).encode("utf-8")).hexdigest()[:12]
-        for stale in Path("/tmp").glob(f"harness-stage-{digest}-*.json"):
+        for stale in Path("/tmp").glob(f"refactor-stage-{digest}-*.json"):
             try:
                 stale.unlink()
             except FileNotFoundError:
@@ -118,7 +118,7 @@ class CliTestCase(unittest.TestCase):
     def _staging_path_for(self, task_id: int) -> Path:
         """Mirror of task_list_cli._staging_path — same hash, same shape."""
         digest = hashlib.md5(str(self.task_path.resolve()).encode("utf-8")).hexdigest()[:12]
-        return Path(f"/tmp/harness-stage-{digest}-{task_id}.json")
+        return Path(f"/tmp/refactor-stage-{digest}-{task_id}.json")
 
     def _make_drafted(self, task_id: int, commit_msg: str, log: str) -> Path:
         """Drive a task through `draft` and return its staging path.

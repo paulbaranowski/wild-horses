@@ -7,8 +7,8 @@ A [Claude Code](https://claude.ai/code) plugin marketplace for making code AI-re
 Three questions an AI agent has to be able to answer before it can edit your code reliably:
 
 1. _Does the type layer tell the truth?_ — answered by `/pyright:run-and-fix` (Python only).
-2. _If an AI agent read this code, what would it get wrong?_ — answered by `/harness:reasoning-gaps`.
-3. _Can an AI edit this code and know whether it got it right?_ — answered by `/harness:feedback-blockers`.
+2. _If an AI agent read this code, what would it get wrong?_ — answered by `/refactor:reasoning-gaps`.
+3. _Can an AI edit this code and know whether it got it right?_ — answered by `/refactor:feedback-blockers`.
 
 Run them in that order on a PR or feature branch. Each step asks a harder question than the last: types, then comprehension, then verification.
 
@@ -16,7 +16,7 @@ Run them in that order on a PR or feature branch. Each step asks a harder questi
 
 ### [pyright](plugins/pyright/README.md)
 
-Run pyright on a Python codebase and fix what it finds, using a documented playbook of fix patterns instead of ad-hoc guesses. Three fix intents (`silence`, `improve`, `bugs-only`) shape how aggressively to refactor. Parallelizes across agents for codebases with ≥20 errors. Hands off cleanly to `/harness:reasoning-gaps`.
+Run pyright on a Python codebase and fix what it finds, using a documented playbook of fix patterns instead of ad-hoc guesses. Three fix intents (`silence`, `improve`, `bugs-only`) shape how aggressively to refactor. Parallelizes across agents for codebases with ≥20 errors. Hands off cleanly to `/refactor:reasoning-gaps`.
 
 ```text
 /plugin install pyright@wild-horses
@@ -28,21 +28,21 @@ Run pyright on a Python codebase and fix what it finds, using a documented playb
 
 See **[plugins/pyright/README.md](plugins/pyright/README.md)** for fix-intent semantics, the rule/library/bug pattern files, and ratchet/persist flags.
 
-### [harness](plugins/harness/README.md)
+### [refactor](plugins/refactor/README.md)
 
 Two commands plus a task-list pipeline for making code agent-friendly. The commands diagnose reasoning gaps and feedback-loop blockers; the task-list skills (`task-list-builder`, `task-list-runner`, `task-list-viewer`) produce, execute, and inspect the resulting remediation plans.
 
 ```text
-/plugin install harness@wild-horses
+/plugin install refactor@wild-horses
 
-/harness:reasoning-gaps              # comprehension review
-/harness:feedback-blockers           # observability review
+/refactor:reasoning-gaps              # comprehension review
+/refactor:feedback-blockers           # observability review
 /task-list-builder                   # build an implementation plan
 /task-list-runner --all              # drive an implementation plan to completion
 /task-list-viewer                    # inspect what's left
 ```
 
-See **[plugins/harness/README.md](plugins/harness/README.md)** for what each command analyzes, the task-list pipeline, and a comparison with the [superpowers](https://github.com/obra/superpowers) plan skills.
+See **[plugins/refactor/README.md](plugins/refactor/README.md)** for what each command analyzes, the task-list pipeline, and a comparison with the [superpowers](https://github.com/obra/superpowers) plan skills.
 
 ### [linting-hooks](plugins/linting-hooks/README.md)
 

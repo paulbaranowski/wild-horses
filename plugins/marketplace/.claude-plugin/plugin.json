@@ -1,7 +1,7 @@
 {
   "name": "marketplace",
   "description": "Scaffold a Claude Code plugin marketplace with proper structure, schema validation, and CLAUDE.md conventions.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": {
     "name": "Paul Baranowski"
   }

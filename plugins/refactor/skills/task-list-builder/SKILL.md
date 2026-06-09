@@ -28,8 +28,8 @@ After stripping, what remains is the input source for Phase 1.B (path / free-for
 **Typical caller patterns:**
 
 - User running standalone: no flags. Default slug, generated MD body.
-- `/harness:feedback-blockers` Phase 4: `--slug feedback-blockers --md-body-from-context`. The merged Phase 3 report is in conversation; the slug preserves provenance.
-- `/harness:reasoning-gaps` Phase 4: `--slug reasoning-gaps --md-body-from-context`. Same shape.
+- `/refactor:feedback-blockers` Phase 4: `--slug feedback-blockers --md-body-from-context`. The merged Phase 3 report is in conversation; the slug preserves provenance.
+- `/refactor:reasoning-gaps` Phase 4: `--slug reasoning-gaps --md-body-from-context`. Same shape.
 
 ---
 
@@ -90,7 +90,7 @@ Order matters: put the **fastest** step first (typecheck is usually faster than 
 
 **Do not** add `lint` steps automatically — lint is rarely an acceptance criterion for a refactor, and adding it noisily slows every iteration. The user can ask for it during the Phase 5 preview if they want.
 
-This matches the convention used by `/harness:reasoning-gaps` and `/harness:feedback-blockers` (see the `verifySteps` field definition in `task-list-schema.md`).
+This matches the convention used by `/refactor:reasoning-gaps` and `/refactor:feedback-blockers` (see the `verifySteps` field definition in `task-list-schema.md`).
 
 ---
 
@@ -249,7 +249,7 @@ The MD body comes from one of two sources, decided by Phase 0:
 - A `## Scope` section listing the files in `scope` (repo-relative).
 - A `## Tasks` section with one subsection per task: title as `### N. <title>`, then `**What:**`, `**Resolves:**`, `**Effort:**`, `**Creates new code:**`, `**Acceptance criteria:**` (bulleted list).
 
-**`--md-body-from-context` — copy a pre-rendered analysis report verbatim.** When the caller passed this flag, find the most recent rendered analysis report in the current conversation (typical sources: the merged report from `/harness:feedback-blockers` or `/harness:reasoning-gaps` Phase 3) and use it verbatim as the body — exactly as it appeared, headings and all. Do **not** edit, summarize, or re-format. The frontmatter above is still added by the builder so the file shape stays uniform across callers.
+**`--md-body-from-context` — copy a pre-rendered analysis report verbatim.** When the caller passed this flag, find the most recent rendered analysis report in the current conversation (typical sources: the merged report from `/refactor:feedback-blockers` or `/refactor:reasoning-gaps` Phase 3) and use it verbatim as the body — exactly as it appeared, headings and all. Do **not** edit, summarize, or re-format. The frontmatter above is still added by the builder so the file shape stays uniform across callers.
 
 If `--md-body-from-context` is set but no rendered analysis report is found in conversation, refuse and ask the caller for the body — do **not** silently fall back to the synthesized body, since callers using this flag are committing to a specific deliverable shape that the synthesized body would not satisfy.
 
@@ -306,5 +306,5 @@ Do **not** stage or commit either file. Do not run `git add`.
 - **Writing files without a preview.** Always show the preview in Phase 5; never silently overwrite.
 - **Modifying an existing MD in rewrite mode.** When rewriting a JSON task file, if a paired MD already exists, do NOT touch it. Do not overwrite it, do not create a second MD with a different name, do not "refresh" it. The user has explicitly asked for the MD to be left alone. Only write an MD in rewrite mode when one does not already exist at the path recorded in the existing JSON's `plan` field.
 - **Generating a new run-id in rewrite mode.** Reuse the existing file's path verbatim. Generating a new path for a rewrite would orphan the old file and break any external references to it.
-- **Synthesizing the MD body when `--md-body-from-context` was passed.** The flag is a contract: the caller has a specific deliverable shape (typically the merged Phase 3 analysis report from `/harness:feedback-blockers` or `/harness:reasoning-gaps`) that the synthesized body would not satisfy. If the conversation does not contain a rendered analysis report, halt and ask — do not silently fall back.
+- **Synthesizing the MD body when `--md-body-from-context` was passed.** The flag is a contract: the caller has a specific deliverable shape (typically the merged Phase 3 analysis report from `/refactor:feedback-blockers` or `/refactor:reasoning-gaps`) that the synthesized body would not satisfy. If the conversation does not contain a rendered analysis report, halt and ask — do not silently fall back.
 - **Inventing a slug.** When `--slug` is not passed, the slug is `task-list-builder` (the default). Don't infer a slug from the input description or context. Slugs are explicit caller-supplied provenance markers.

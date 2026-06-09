@@ -71,6 +71,6 @@ Failing tasks move to `failed` status with a log; the loop continues to the next
 | Verification      | Author writes verification steps in prose                      | Top-level `verifySteps` array; the CLI runs typecheck → tests in order, fail-fast, with per-step log files        |
 | Acceptance        | Read-and-judge by the executing agent                          | Fresh-context read-only `Explore` subagent evaluates `agentValidations` (runtime denies `Write`/`Edit`)           |
 | Concurrency       | Subagent-driven supports parallel subagents                    | Strictly sequential foreground `Agent` calls — tasks may depend on prior edits                                    |
-| Typical scale     | A handful of well-scoped tasks                                 | 10–50 uniform tasks (the typical `/harness:reasoning-gaps` or `/harness:feedback-blockers` output)                |
+| Typical scale     | A handful of well-scoped tasks                                 | 10–50 uniform tasks (the typical `/refactor:reasoning-gaps` or `/refactor:feedback-blockers` output)                |
 
 Pick superpowers when the plan itself is a deliverable and a human will review each step. Pick the harness loop when the plan is a means to an end and you want strict verification and unattended execution across a homogeneous batch of tasks.

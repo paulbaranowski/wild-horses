@@ -118,7 +118,7 @@ Patterns where pyright has uncovered a genuine runtime bug. These are **flagged 
 
 At the end of a run, the command offers to save the improvement suggestions to `docs/exec-plans/active/pyright-improvements-<timestamp>.md`. That file is a handoff artifact — **not committed**, per the project convention for exec plans.
 
-## Relationship to `/harness:reasoning-gaps`
+## Relationship to `/refactor:reasoning-gaps`
 
 ### Recommended order: reasoning-gaps **first**, then pyright
 
@@ -130,7 +130,7 @@ Reasoning-gaps does type **design**: turning `str` into `Literal['draft','publis
 
 So the order is:
 
-1. **`/harness:reasoning-gaps`** — design pass. Decides what the types _should_ be.
+1. **`/refactor:reasoning-gaps`** — design pass. Decides what the types _should_ be.
 2. **`/pyright:run-and-fix --intent improve`** — enforcement pass. Propagates the design across every call site that doesn't match.
 
 (Optional pragmatic pre-pass: a cheap `/pyright:run-and-fix --intent silence` first can surface obvious signature gaps — untyped params, missing return types — that reasoning-gaps would have to rediscover anyway. The load-bearing pyright run is still the second one, after the design is in place.)

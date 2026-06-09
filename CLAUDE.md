@@ -6,10 +6,10 @@ This is a Claude Code **plugin marketplace**.
 
 ```text
 .claude-plugin/marketplace.json    -- marketplace catalog (points to plugins)
-plugins/harness/                   -- plugin root (commands-based)
+plugins/refactor/                   -- plugin root (commands-based)
   .claude-plugin/plugin.json       -- plugin manifest
-  commands/feedback-blockers.md    -- /harness:feedback-blockers
-  commands/reasoning-gaps.md       -- /harness:reasoning-gaps
+  commands/feedback-blockers.md    -- /refactor:feedback-blockers
+  commands/reasoning-gaps.md       -- /refactor:reasoning-gaps
 plugins/marketplace/               -- plugin root (skills-based)
   .claude-plugin/plugin.json       -- plugin manifest
   skills/create/SKILL.md           -- /create (marketplace scaffolding)
@@ -49,36 +49,36 @@ plugins/marketplace/               -- plugin root (skills-based)
 
 - Keep it minimal: `name`, `description`, `version`, `author`. That's it for most plugins.
 - `repository` must be a **string** (URL), not an object.
-- `name` determines the command namespace (e.g., plugin name `harness` + command name `feedback-blockers` = `/harness:feedback-blockers`).
+- `name` determines the command namespace (e.g., plugin name `refactor` + command name `feedback-blockers` = `/refactor:feedback-blockers`).
 
 ### marketplace.json
 
-- The marketplace `name` is the brand (`wild-horses`). The plugin entry `name` is the install identifier (`harness`).
-- Install command: `/plugin install harness@wild-horses`
+- The marketplace `name` is the brand (`wild-horses`). The plugin entry `name` is the install identifier (`refactor`).
+- Install command: `/plugin install refactor@wild-horses`
 - Plugin `source` for local plugins must start with `./` and is relative to the repo root.
 - Set `version` in the marketplace entry OR plugin.json, not both. Plugin.json wins silently.
 - Optional useful fields on plugin entries: `category`, `homepage`, `license`, `keywords`.
 
 ### Commands vs Skills (slash menu namespacing)
 
-- **Use `commands/` for user-invoked slash commands.** Commands get the `plugin-name:command-name` prefix in the `/` autocomplete menu (e.g., `/harness:feedback-blockers`).
-- **Skills (`skills/name/SKILL.md`) do NOT get the namespace prefix in the UI.** A skill named `setup` in a plugin named `harness` shows as just `/setup` with `(harness)` in the description — not `/harness:setup`. This is a Claude Code UI behavior as of v2.1.
+- **Use `commands/` for user-invoked slash commands.** Commands get the `plugin-name:command-name` prefix in the `/` autocomplete menu (e.g., `/refactor:feedback-blockers`).
+- **Skills (`skills/name/SKILL.md`) do NOT get the namespace prefix in the UI.** A skill named `setup` in a plugin named `refactor` shows as just `/setup` with `(refactor)` in the description — not `/refactor:setup`. This is a Claude Code UI behavior as of v2.1.
 - If you need model auto-invocation (`disable-model-invocation: false`), you must use skills — commands cannot be auto-triggered by Claude. Otherwise prefer commands.
 - Command frontmatter: `description` (required), `argument-hint`, `allowed-tools`. No `name:` field — the filename is the command name.
 - Skill frontmatter uses **hyphens** (e.g., `user-invocable`, `disable-model-invocation`), not underscores.
 
 ### Authoring agent-facing prompts (skills, commands, sub-prompts)
 
-- **In prohibition lists only ("Don't:", "Never:", "Strictly forbidden:" sections), every bullet must lead with `Don't` / `Never`.** Scope is load-bearing: this rule applies **only** to bullets that are prohibitions or warnings. **Do NOT apply it to descriptive bullets** — asset lists / file manifests / feature lists / capability descriptions / positive instructions / any bullet whose purpose is to _state what something is or does_ must stay as-is. Rewriting a descriptive bullet as `**Don't ...**` inverts its meaning; if a reviewer suggests that, the reviewer is wrong — push back, do not comply. Why the rule exists for prohibition lists: bullets that read as gerunds ("Re-invoking…") or bare imperatives parse as descriptions of _techniques_ whenever a model only attends to one bullet at a time (partial recall, paraphrase, inner-monologue quoting); the section header's polarity lives one structural level up and may not be co-attended, so each prohibition bullet must carry its own negation. Repo convention — set in `plugins/harness/skills/task-list-runner/SKILL.md` lines 128–172 — is a bolded `**Don't <verb-phrase>**` lead-in on each _prohibitive_ bullet, e.g. `**Don't re-invoke individual verification steps directly** (...)`.
-- **Sub-prompts inside SKILL.md count as agent-facing prompts.** Blockquoted (`>`) text inside a SKILL.md is shipped verbatim to a dispatched `Agent` — apply the same prompt-engineering rules (per-bullet negation, bolded lead-ins, no critical info one structural level up from where the model attends) to those lines as to the SKILL.md body itself. Canonical example: the Task Implementation Prompt at `plugins/harness/skills/task-list-runner/SKILL.md` lines 128–172.
+- **In prohibition lists only ("Don't:", "Never:", "Strictly forbidden:" sections), every bullet must lead with `Don't` / `Never`.** Scope is load-bearing: this rule applies **only** to bullets that are prohibitions or warnings. **Do NOT apply it to descriptive bullets** — asset lists / file manifests / feature lists / capability descriptions / positive instructions / any bullet whose purpose is to _state what something is or does_ must stay as-is. Rewriting a descriptive bullet as `**Don't ...**` inverts its meaning; if a reviewer suggests that, the reviewer is wrong — push back, do not comply. Why the rule exists for prohibition lists: bullets that read as gerunds ("Re-invoking…") or bare imperatives parse as descriptions of _techniques_ whenever a model only attends to one bullet at a time (partial recall, paraphrase, inner-monologue quoting); the section header's polarity lives one structural level up and may not be co-attended, so each prohibition bullet must carry its own negation. Repo convention — set in `plugins/refactor/skills/task-list-runner/SKILL.md` lines 128–172 — is a bolded `**Don't <verb-phrase>**` lead-in on each _prohibitive_ bullet, e.g. `**Don't re-invoke individual verification steps directly** (...)`.
+- **Sub-prompts inside SKILL.md count as agent-facing prompts.** Blockquoted (`>`) text inside a SKILL.md is shipped verbatim to a dispatched `Agent` — apply the same prompt-engineering rules (per-bullet negation, bolded lead-ins, no critical info one structural level up from where the model attends) to those lines as to the SKILL.md body itself. Canonical example: the Task Implementation Prompt at `plugins/refactor/skills/task-list-runner/SKILL.md` lines 128–172.
 
 ### Schema source-of-truth
 
-- **When multiple skills consume a structured format, define the schema in one doc and have skills link to it — never re-state it.** Example: `plugins/harness/task-list-schema.md` defines the runner's task JSON schema; both `task-list-builder` and `task-list-runner` link to it from their `SKILL.md` (line 13 of each) instead of duplicating field definitions. Schema drift between paired skills is a real cost — a definition that exists in two places will eventually diverge.
+- **When multiple skills consume a structured format, define the schema in one doc and have skills link to it — never re-state it.** Example: `plugins/refactor/task-list-schema.md` defines the runner's task JSON schema; both `task-list-builder` and `task-list-runner` link to it from their `SKILL.md` (line 13 of each) instead of duplicating field definitions. Schema drift between paired skills is a real cost — a definition that exists in two places will eventually diverge.
 
 ### CLI design for agent loops
 
-Conventions for Python CLIs (like `plugins/harness/skills/task-list-runner/task_list_cli.py`) that get auto-approved by a harness PreToolUse hook and called by dispatched agents.
+Conventions for Python CLIs (like `plugins/refactor/skills/task-list-runner/task_list_cli.py`) that get auto-approved by a harness PreToolUse hook and called by dispatched agents.
 
 - **Mutate via stdin (`--flag -`) where possible, not via `Write` + Bash.** Every mutation should fit in one Bash call. The pattern `cli mutate --log-file - <<'EOF' ... EOF` ships the body in a single auto-approved Bash invocation; `Write` to `/tmp/x` followed by `cli mutate --log-file /tmp/x` is two tool calls, each gated separately by the auto-mode classifier. Use a _quoted_ heredoc (`<<'EOF'`) so the shell passes the body byte-verbatim — no `$VAR` expansion or quote-mangling.
 - **Mutations write atomically: tmp file + `fsync` + `os.replace` against the original.** Improvised in-place edits silently corrupted a 37-task session in the prior iteration of this work; the corruption (a missing structural comma) went undetected for 19 subsequent iterations. The agent-loop context makes this _more_ important than for a normal CLI: agents will keep iterating against a broken state file rather than halting, so corruption that a human would notice immediately can survive 19 turns of work. See `write_atomic` in `task_list_cli.py`.
@@ -86,7 +86,7 @@ Conventions for Python CLIs (like `plugins/harness/skills/task-list-runner/task_
 
 ### Hook design
 
-- **PreToolUse hook allow-list matches must anchor on plugin-specific path structure, not bare script name.** `plugins/harness/scripts/task-list-cli-allow.sh` matches `python3 .../skills/task-list-runner/task_list_cli.py` rather than the filename alone, so a stray `task_list_cli.py` elsewhere in the workspace doesn't get auto-approved. Both the dev-checkout path (`plugins/harness/...`) and the installed plugin-cache path (with version directory) need to match.
+- **PreToolUse hook allow-list matches must anchor on plugin-specific path structure, not bare script name.** `plugins/refactor/scripts/task-list-cli-allow.sh` matches `python3 .../skills/task-list-runner/task_list_cli.py` rather than the filename alone, so a stray `task_list_cli.py` elsewhere in the workspace doesn't get auto-approved. Both the dev-checkout path (`plugins/refactor/...`) and the installed plugin-cache path (with version directory) need to match.
 
 ## Agent skills
 

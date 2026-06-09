@@ -7,7 +7,7 @@ The full instructions Claude follows when this skill runs are in [`SKILL.md`](./
 ## Invoke
 
 ```text
-/harness:task-list-runner [path to .json or .md task file] [--all | --next]
+/refactor:task-list-runner [path to .json or .md task file] [--all | --next]
 ```
 
 With no path, the runner auto-locates an in-progress task file under `docs/exec-plans/active/`.
@@ -34,7 +34,7 @@ Modes: `--all` (run every remaining task non-interactively), `--next` (one task 
 
 ```mermaid
 flowchart TD
-    Start([User invokes<br/>/harness:task-list-runner])
+    Start([User invokes<br/>/refactor:task-list-runner])
     Start --> P1["Phase 1 — Parse args<br/>path? mode --all/--next/none?"]
     P1 --> P2{Path given?}
     P2 -->|".md"| MdResolve["Read frontmatter task_file →<br/>resolves to .json"]
@@ -109,7 +109,7 @@ All mutations to the JSON go through `task_list_cli.py`. The CLI is auto-approve
 
 `task_list_cli.py` is the canonical interface to the task JSON — the runner and dispatched agents never edit the file directly. Subcommands: `next`, `start`, `draft`, `publish`, `set-status`, `get`, `list`, `status`, `remaining`, `verify`. See the "CLI reference" section of [`SKILL.md`](./SKILL.md) for the full surface.
 
-The harness plugin's PreToolUse hook auto-approves invocations of this CLI so the loop runs without per-call permission prompts.
+The refactor plugin's PreToolUse hook auto-approves invocations of this CLI so the loop runs without per-call permission prompts.
 
 ## Schema
 
@@ -126,13 +126,13 @@ The JSON schema is defined once, in [`../../task-list-schema.md`](../../task-lis
 Run the tests from the repo root:
 
 ```text
-uv run pytest plugins/harness/skills/task-list-runner/test_task_list_cli.py
+uv run pytest plugins/refactor/skills/task-list-runner/test_task_list_cli.py
 ```
 
 ## Install
 
-The skill ships with the `harness` plugin:
+The skill ships with the `refactor` plugin:
 
 ```text
-/plugin install harness@wild-horses
+/plugin install refactor@wild-horses
 ```

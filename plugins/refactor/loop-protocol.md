@@ -1,4 +1,4 @@
-# Loop Protocol — shared by `/harness:feedback-blockers` and `/harness:reasoning-gaps`
+# Loop Protocol — shared by `/refactor:feedback-blockers` and `/refactor:reasoning-gaps`
 
 This file documents the post-analysis flow both commands share: the Phase 4 options menu. **The JSON task file is built by the `task-list-builder` skill** (`${CLAUDE_PLUGIN_ROOT}/skills/task-list-builder/SKILL.md`) — re-read its SKILL.md before invoking it; do not duplicate or re-state its phases here. **Execution** (resuming an existing task file, the iterative Agent loop, and the Task Implementation Prompt) lives in the `task-list-runner` skill at `${CLAUDE_PLUGIN_ROOT}/skills/task-list-runner/SKILL.md`. The JSON file shape is defined in `${CLAUDE_PLUGIN_ROOT}/task-list-schema.md` — both skills link to it.
 

@@ -1,4 +1,4 @@
-# /harness:feedback-blockers
+# /refactor:feedback-blockers
 
 **Core question:** _Can an AI edit this code and know whether it got it right?_
 
@@ -7,11 +7,11 @@ This is about **correctness and observability**, not cycle speed. When an AI mak
 ## Usage
 
 ```text
-/harness:feedback-blockers src/auth/
-/harness:feedback-blockers src/api.py
-/harness:feedback-blockers the ingestion service
-/harness:feedback-blockers
-/harness:feedback-blockers --resume
+/refactor:feedback-blockers src/auth/
+/refactor:feedback-blockers src/api.py
+/refactor:feedback-blockers the ingestion service
+/refactor:feedback-blockers
+/refactor:feedback-blockers --resume
 ```
 
 The argument is a file path, directory path, or free-form description. With no argument, defaults to files changed on the current branch. `--resume` picks up an in-progress task list from `docs/exec-plans/active/`.
@@ -33,7 +33,7 @@ Findings from all four agents are deduplicated and merged. When the same code lo
 
 A ranked list of interventions. The report can optionally be implemented via [task-list-runner](task-list-runner.md) — each intervention becomes a task, agents implement them one at a time, progress is tracked in a JSON task file that supports `--resume` across sessions.
 
-## How this differs from `/harness:reasoning-gaps`
+## How this differs from `/refactor:reasoning-gaps`
 
 |             | reasoning-gaps                       | feedback-blockers                                 |
 | ----------- | ------------------------------------ | ------------------------------------------------- |

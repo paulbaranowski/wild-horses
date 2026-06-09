@@ -21,8 +21,8 @@ Optional flags:
 ## Typical caller patterns
 
 - **Standalone**: no flags. Default slug, generated MD body.
-- **From `/harness:reasoning-gaps`**: `--slug reasoning-gaps --md-body-from-context`. The merged report is in conversation; the slug preserves provenance.
-- **From `/harness:feedback-blockers`**: `--slug feedback-blockers --md-body-from-context`. Same shape.
+- **From `/refactor:reasoning-gaps`**: `--slug reasoning-gaps --md-body-from-context`. The merged report is in conversation; the slug preserves provenance.
+- **From `/refactor:feedback-blockers`**: `--slug feedback-blockers --md-body-from-context`. Same shape.
 
 ## Output
 

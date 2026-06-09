@@ -240,7 +240,7 @@ def _staging_path(task_file: Path, task_id: int) -> Path:
     file, which the runner detects on the next status-check anyway.
     """
     digest = hashlib.md5(str(task_file.resolve()).encode("utf-8")).hexdigest()[:12]
-    return Path(f"/tmp/harness-stage-{digest}-{task_id}.json")
+    return Path(f"/tmp/refactor-stage-{digest}-{task_id}.json")
 
 
 def _staging_write(staging_path: Path, payload: dict) -> None:

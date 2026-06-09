@@ -44,4 +44,4 @@ Idempotent — running it again when everything is installed reports all-green a
 
 ## Why it's a separate plugin
 
-These hooks were originally bundled with the `harness` plugin but were split out so the harness analysis commands don't carry a dependency on `prettier` / `markdownlint` / `pyright` being installed. Install this plugin only if you want the post-edit linting feedback.
+These hooks were originally bundled with the `refactor` plugin but were split out so the refactor analysis commands don't carry a dependency on `prettier` / `markdownlint` / `pyright` being installed. Install this plugin only if you want the post-edit linting feedback.

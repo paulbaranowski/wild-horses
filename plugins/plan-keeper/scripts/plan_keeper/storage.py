@@ -24,7 +24,7 @@ def write_atomic(path: Path, content: str) -> None:
 
     POSIX-atomic. The original file is untouched until the rename, so
     no half-written intermediate state is observable. Lifted from
-    plugins/harness/skills/task-list-runner/task_list_cli.py.
+    plugins/refactor/skills/task-list-runner/task_list_cli.py.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(

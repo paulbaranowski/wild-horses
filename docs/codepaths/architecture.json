@@ -62,9 +62,9 @@
       "description": "Marketplace manifest at repo root; Claude Code reads this to enumerate installable plugins."
     },
     {
-      "id": "harness-plugin",
+      "id": "refactor-plugin",
       "category": "plugin",
-      "label": "harness plugin",
+      "label": "refactor plugin",
       "description": "Plugin providing reasoning-gaps / feedback-blockers analyses and task-list-runner/builder skills."
     },
     {
@@ -175,7 +175,7 @@
     },
     {
       "from": "marketplace-catalog",
-      "to": "harness-plugin"
+      "to": "refactor-plugin"
     },
     {
       "from": "marketplace-catalog",
@@ -194,19 +194,19 @@
       "to": "codepath-visualizer-plugin"
     },
     {
-      "from": "harness-plugin",
+      "from": "refactor-plugin",
       "to": "task-list-runner"
     },
     {
-      "from": "harness-plugin",
+      "from": "refactor-plugin",
       "to": "task-list-builder"
     },
     {
-      "from": "harness-plugin",
+      "from": "refactor-plugin",
       "to": "feedback-blockers"
     },
     {
-      "from": "harness-plugin",
+      "from": "refactor-plugin",
       "to": "reasoning-gaps"
     },
     {

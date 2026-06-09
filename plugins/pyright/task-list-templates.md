@@ -10,8 +10,8 @@ after the user resolves `--intent`; the matching block is copied verbatim
 into every per-file task in the run.
 
 The schema rule for `agentValidations` (in
-`${CLAUDE_PLUGIN_ROOT}/../harness/task-list-schema.md`, find via
-`Glob "**/harness/task-list-schema.md"` if cross-plugin path doesn't
+`${CLAUDE_PLUGIN_ROOT}/../refactor/task-list-schema.md`, find via
+`Glob "**/refactor/task-list-schema.md"` if cross-plugin path doesn't
 resolve): **"if you can write a shell command that answers the question, it
 belongs in `verifySteps`, not here."** The entries below are
 inspection-verifiable factual claims a fresh-context validation subagent

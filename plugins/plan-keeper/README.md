@@ -60,13 +60,13 @@ conversation ──► plan-save ──► ~/plans/<repo>/*.md ──► plan-do
                           spec            ─► superpowers:writing-plans
                           execution-ready ─► menu (recommended first):
                                 ├─► autonomous:autonomous                           (AFK ──► PR)
-                                ├─► harness:task-list-builder ──► task-list-runner  (dispatched tasks)
+                                ├─► refactor:task-list-builder ──► task-list-runner  (dispatched tasks)
                                 └─► superpowers:executing-plans                     (sequential, review-gated)
 
                                                        plan-done ──► ~/plans/<repo>/done/<file>.md
 ```
 
-`plan-do` is the entry point that joins the [superpowers](https://github.com/obra/superpowers) brainstorming → writing-plans → executing-plans pipeline (plus the [autonomous](../autonomous/skills/autonomous/) and [task-list-builder](../harness/skills/task-list-builder/) engines) at the right stage. It classifies in two tiers: **readiness** (idea / spec / execution-ready) picks the path; for execution-ready plans, **shape** (single-ticket vs. independent task list vs. sequential phases) picks which execution engine is recommended first — though all three are always offered.
+`plan-do` is the entry point that joins the [superpowers](https://github.com/obra/superpowers) brainstorming → writing-plans → executing-plans pipeline (plus the [autonomous](../autonomous/skills/autonomous/) and [task-list-builder](../refactor/skills/task-list-builder/) engines) at the right stage. It classifies in two tiers: **readiness** (idea / spec / execution-ready) picks the path; for execution-ready plans, **shape** (single-ticket vs. independent task list vs. sequential phases) picks which execution engine is recommended first — though all three are always offered.
 
 ## Groundcrew integration
 

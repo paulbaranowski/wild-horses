@@ -7,10 +7,10 @@ argument-hint: "[path or description] [--full] [--resume [task-file-path]]"
 
 Analyze code for **feedback-loop blockers** — encapsulation gaps, OOP design issues, testability barriers, and harness-unfriendly patterns that prevent fast, clear change-test-fix cycles. Uses 4 parallel specialist agents, then synthesizes findings into a prioritized remediation plan with concrete interventions.
 
-**Bundled assets at `${CLAUDE_PLUGIN_ROOT}`** (if the variable isn't substituted in this context, find the files with `Glob "**/harness/loop-protocol.md"` and read the siblings alongside it):
+**Bundled assets at `${CLAUDE_PLUGIN_ROOT}`** (if the variable isn't substituted in this context, find the files with `Glob "**/refactor/loop-protocol.md"` and read the siblings alongside it):
 
-- `loop-protocol.md` — Phase 4 options menu. Shared with `/harness:reasoning-gaps`.
-- `task-list-schema.md` — JSON task file shape. Shared with `/harness:reasoning-gaps`, `task-list-builder`, and `task-list-runner`.
+- `loop-protocol.md` — Phase 4 options menu. Shared with `/refactor:reasoning-gaps`.
+- `task-list-schema.md` — JSON task file shape. Shared with `/refactor:reasoning-gaps`, `task-list-builder`, and `task-list-runner`.
 - `skills/task-list-builder/SKILL.md` — task-list construction (verifySteps discovery, run-ID, JSON + MD writing, preview). Invoked from Phase 4 Options 1, 2, and 3 with `--slug feedback-blockers --md-body-from-context`.
 - `skills/task-list-runner/SKILL.md` — execution engine (resume, Agent loop, Task Implementation Prompt). Invoked from Phase 4 Options 1 and 2 and from `--resume`.
 - `agents/feedback-blockers/encapsulation.md`

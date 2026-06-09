@@ -26,7 +26,7 @@ idea  ──► superpowers:brainstorming    ──► spec
 spec  ──► superpowers:writing-plans    ──► impl plan
 execution-ready ──► menu (recommended first):
         ├──► autonomous:autonomous                           (AFK, no human, ──► PR)
-        ├──► harness:task-list-builder ──► task-list-runner  (dispatched tasks)
+        ├──► refactor:task-list-builder ──► task-list-runner  (dispatched tasks)
         └──► superpowers:executing-plans                     (sequential, review-gated)
 ```
 

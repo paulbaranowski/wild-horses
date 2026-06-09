@@ -1,19 +1,19 @@
-# harness
+# refactor
 
 Make a codebase agent-friendly. Two analysis commands diagnose what AI agents will struggle with — reasoning gaps and feedback-loop blockers — and a paired task-list pipeline drives the resulting remediation plans to completion.
 
 Install:
 
 ```text
-/plugin install harness@wild-horses
+/plugin install refactor@wild-horses
 ```
 
 ## Commands
 
 | Command                                                       | Asks                                                         | When to use                                                                                                  |
 | ------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| **[`/harness:reasoning-gaps`](docs/reasoning-gaps.md)**       | _If an AI agent read this code, what would it get wrong?_    | Comprehension review — types, implicit control flow, structure & docs. Best for dynamically typed languages. |
-| **[`/harness:feedback-blockers`](docs/feedback-blockers.md)** | _Can an AI edit this code and know whether it got it right?_ | Correctness & observability — encapsulation, OOP design, testability, harness-friendliness.                  |
+| **[`/refactor:reasoning-gaps`](docs/reasoning-gaps.md)**       | _If an AI agent read this code, what would it get wrong?_    | Comprehension review — types, implicit control flow, structure & docs. Best for dynamically typed languages. |
+| **[`/refactor:feedback-blockers`](docs/feedback-blockers.md)** | _Can an AI edit this code and know whether it got it right?_ | Correctness & observability — encapsulation, OOP design, testability, harness-friendliness.                  |
 
 Both analysis commands end by producing a paired `.json` + `.md` plan and handing it to the task-list pipeline below.
 
@@ -32,11 +32,11 @@ The runner is a strict alternative to the [superpowers](https://github.com/obra/
 ## Recommended order
 
 ```text
-1. /harness:reasoning-gaps         # comprehension axis — design types & flow
+1. /refactor:reasoning-gaps         # comprehension axis — design types & flow
 2. /pyright:run-and-fix            # Python only — enforces type design at every call site
-3. /harness:feedback-blockers      # observability axis
+3. /refactor:feedback-blockers      # observability axis
 ```
 
 Each step asks a harder question than the last, and each ends by handing the resulting plan to [task-list-runner](docs/task-list-runner.md) for unattended execution.
 
-> **Why reasoning-gaps before pyright (counter-intuitive).** Pyright is a consistency checker, not a design tool — run it first on weakly-typed code and the easy fix is `: Any` and `# type: ignore`, which silences errors without improving the types. Reasoning-gaps redesigns the types first (e.g. `str` → `Literal[...]`, `dict[str, Any]` → `TypedDict`); pyright then propagates that design across every call site. Full rationale: [pyright README — Relationship to /harness:reasoning-gaps](../pyright/README.md#relationship-to-harnessreasoning-gaps).
+> **Why reasoning-gaps before pyright (counter-intuitive).** Pyright is a consistency checker, not a design tool — run it first on weakly-typed code and the easy fix is `: Any` and `# type: ignore`, which silences errors without improving the types. Reasoning-gaps redesigns the types first (e.g. `str` → `Literal[...]`, `dict[str, Any]` → `TypedDict`); pyright then propagates that design across every call site. Full rationale: [pyright README — Relationship to /refactor:reasoning-gaps](../pyright/README.md#relationship-to-refactorreasoning-gaps).

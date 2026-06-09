@@ -4,13 +4,13 @@
     "name": "Paul Baranowski"
   },
   "metadata": {
-    "description": "Code quality and harness-engineering plugins for Claude Code"
+    "description": "Code quality and AI-readiness refactoring plugins for Claude Code"
   },
   "plugins": [
     {
-      "name": "harness",
-      "source": "./plugins/harness",
-      "description": "feedback-blockers, reasoning-gaps, and setup commands for harness engineering. Analyze code for feedback-loop blockers, AI reasoning gaps, and set up the harness directory structure.",
+      "name": "refactor",
+      "source": "./plugins/refactor",
+      "description": "feedback-blockers and reasoning-gaps commands for refactoring code toward AI-readiness. Analyze code for feedback-loop blockers and AI reasoning gaps.",
       "author": {
         "name": "Paul Baranowski"
       },
@@ -70,7 +70,7 @@
     {
       "name": "plan-keeper",
       "source": "./plugins/plan-keeper",
-      "description": "Organize markdown plans in ~/plans/<repo>/. plan-save captures the latest plan from a conversation; plan-do lists and routes a saved plan to the right next superpowers/harness skill based on its shape (idea / spec / impl plan / task-list); plan-done archives a completed plan into ~/plans/<repo>/done/ with a completion stamp; plan-linear and plan-jira file a plan as a Linear or Jira ticket.",
+      "description": "Organize markdown plans in ~/plans/<repo>/. plan-save captures the latest plan from a conversation; plan-do lists and routes a saved plan to the right next superpowers/refactor skill based on its shape (idea / spec / impl plan / task-list); plan-done archives a completed plan into ~/plans/<repo>/done/ with a completion stamp; plan-linear and plan-jira file a plan as a Linear or Jira ticket.",
       "author": {
         "name": "Paul Baranowski"
       },

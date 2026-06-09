@@ -1,4 +1,4 @@
-# /harness:reasoning-gaps
+# /refactor:reasoning-gaps
 
 **Core question:** _If an AI agent read this code, what would it get wrong?_
 
@@ -9,11 +9,11 @@ This is **not a code quality review.** Code can be well-written, type-clean, and
 ## Usage
 
 ```text
-/harness:reasoning-gaps src/auth/
-/harness:reasoning-gaps src/api.py
-/harness:reasoning-gaps the cli code
-/harness:reasoning-gaps
-/harness:reasoning-gaps --resume
+/refactor:reasoning-gaps src/auth/
+/refactor:reasoning-gaps src/api.py
+/refactor:reasoning-gaps the cli code
+/refactor:reasoning-gaps
+/refactor:reasoning-gaps --resume
 ```
 
 The argument is a file path, directory path, or free-form description. With no argument, defaults to files changed on the current branch. `--resume` picks up an in-progress task list from `docs/exec-plans/active/`.
@@ -36,7 +36,7 @@ A ranked list of interventions. Each intervention is a coherent change like _"Cr
 
 **Interventions that create new code get paired test tasks.** If an intervention decomposes a long function or extracts a new class, the plan automatically generates a companion test task placed immediately after it. The test task specifies the exact new functions/classes to test, concrete test cases (happy path, edge cases, error handling), and where the test file should go. Annotation/docstring/comment-only interventions don't get test tasks — they're verified by their own acceptance criteria.
 
-## How this differs from `/harness:feedback-blockers`
+## How this differs from `/refactor:feedback-blockers`
 
 |             | reasoning-gaps                       | feedback-blockers                                 |
 | ----------- | ------------------------------------ | ------------------------------------------------- |
@@ -44,4 +44,4 @@ A ranked list of interventions. Each intervention is a coherent change like _"Cr
 | Lens        | comprehension                        | correctness & observability                       |
 | Typical fix | add types, docs, narrow control flow | tighten assertions, surface effects, shrink seams |
 
-In Python, **run this command before `/pyright:run-and-fix --intent improve`, not after.** Design the types here first — turning `str` into `Literal[...]`, `dict[str, Any]` into `TypedDict`, etc. — then pyright propagates that design across every call site. Pyright-first invites silencing with `: Any` and `# type: ignore` before any design pass runs. Full rationale: [pyright README — Relationship to /harness:reasoning-gaps](../../pyright/README.md#relationship-to-harnessreasoning-gaps).
+In Python, **run this command before `/pyright:run-and-fix --intent improve`, not after.** Design the types here first — turning `str` into `Literal[...]`, `dict[str, Any]` into `TypedDict`, etc. — then pyright propagates that design across every call site. Pyright-first invites silencing with `: Any` and `# type: ignore` before any design pass runs. Full rationale: [pyright README — Relationship to /refactor:reasoning-gaps](../../pyright/README.md#relationship-to-refactorreasoning-gaps).

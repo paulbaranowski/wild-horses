@@ -40,11 +40,11 @@
         },
         {
           "from": "claude-code",
-          "to": "harness-plugin",
-          "annotation": "Claude Code resolves the request to the `harness` plugin's task-list-runner skill."
+          "to": "refactor-plugin",
+          "annotation": "Claude Code resolves the request to the `refactor` plugin's task-list-runner skill."
         },
         {
-          "from": "harness-plugin",
+          "from": "refactor-plugin",
           "to": "task-list-runner",
           "annotation": "Skill loads SKILL.md and begins the runner loop."
         },
@@ -72,11 +72,11 @@
         },
         {
           "from": "claude-code",
-          "to": "harness-plugin",
-          "annotation": "Claude Code resolves to harness's task-list-builder skill."
+          "to": "refactor-plugin",
+          "annotation": "Claude Code resolves to refactor's task-list-builder skill."
         },
         {
-          "from": "harness-plugin",
+          "from": "refactor-plugin",
           "to": "task-list-builder",
           "annotation": "Skill reads its SKILL.md instructions and the linked task-list-schema.md."
         },

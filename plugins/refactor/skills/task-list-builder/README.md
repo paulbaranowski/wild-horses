@@ -7,7 +7,7 @@ The full instructions Claude follows when this skill runs are in [`SKILL.md`](./
 ## Invoke
 
 ```text
-/harness:task-list-builder [free-form description | path to .md report | path to .json task file (rewrite) | empty for conversation context]
+/refactor:task-list-builder [free-form description | path to .md report | path to .json task file (rewrite) | empty for conversation context]
 ```
 
 Pairs with [`task-list-runner`](../task-list-runner/), which consumes the JSON the builder produces.
@@ -17,17 +17,17 @@ Pairs with [`task-list-runner`](../task-list-runner/), which consumes the JSON t
 Turns one of these inputs into a paired task list under `docs/exec-plans/active/`:
 
 - a free-form description of work
-- a `/harness:reasoning-gaps` or `/harness:feedback-blockers` report (`.md`)
+- a `/refactor:reasoning-gaps` or `/refactor:feedback-blockers` report (`.md`)
 - an existing `.json` task file (rewrite-in-place)
 - recent conversation context (when no argument is given)
 
-Output is always two files: a `.<slug>.json` (machine-readable, the runner's input) and a paired `.<slug>.md` (human-readable summary). The default slug is `task-list-builder`; callers can override it with `--slug <name>` to preserve provenance (e.g., `/harness:feedback-blockers` passes `--slug feedback-blockers` so its output files are clearly distinguishable).
+Output is always two files: a `.<slug>.json` (machine-readable, the runner's input) and a paired `.<slug>.md` (human-readable summary). The default slug is `task-list-builder`; callers can override it with `--slug <name>` to preserve provenance (e.g., `/refactor:feedback-blockers` passes `--slug feedback-blockers` so its output files are clearly distinguishable).
 
 ## How it works
 
 ```mermaid
 flowchart TD
-    Start([User invokes<br/>/harness:task-list-builder])
+    Start([User invokes<br/>/refactor:task-list-builder])
 
     subgraph Inputs["Input sources (Phase 1.B)"]
       direction TB
@@ -64,7 +64,7 @@ flowchart TD
     end
 
     Output --> P7["Phase 7 — Hand off<br/>not staged · not committed"]
-    P7 --> Runner([Ready for<br/>/harness:task-list-runner])
+    P7 --> Runner([Ready for<br/>/refactor:task-list-runner])
 ```
 
 ## Schema
@@ -82,8 +82,8 @@ See [`example.json`](./example.json) for a minimal valid task file.
 
 ## Install
 
-The skill ships with the `harness` plugin:
+The skill ships with the `refactor` plugin:
 
 ```text
-/plugin install harness@wild-horses
+/plugin install refactor@wild-horses
 ```
