@@ -42,10 +42,16 @@ from plan_keeper.groundcrew import (
     _blockers_for_plan,
     _build_repo_index,
     _collect_crew_issues,
-    _repo_for_plan,
     _resolve_crew_id,
-    plankeeper_id,
 )
+from plan_keeper.ids import (
+    ensure_id,
+    id_for_path,
+)
+
+# Re-export so existing tests can read `cli.plankeeper_id`. The `as plankeeper_id`
+# form marks this an intentional re-export; the single definition lives in `ids`.
+from plan_keeper.ids import plankeeper_id as plankeeper_id
 from plan_keeper.jira import (
     _resolve_jira_project_id,
     _validate_jira_site,
@@ -388,7 +394,7 @@ def cmd_save(args) -> int:
             injected = _inject_default_frontmatter(
                 source.read_text(encoding="utf-8"),
                 created=_iso_from_stat(source.stat()),
-                plankeeper_ticket=plankeeper_id(repo, target.stem),
+                plankeeper_ticket=id_for_path(target),
             )
             write_atomic(target, injected)
             # Skip the unlink when --from-path already points AT the target
@@ -417,7 +423,7 @@ def cmd_save(args) -> int:
         if ext == "md":
             content = _inject_default_frontmatter(
                 content, kind,
-                plankeeper_ticket=plankeeper_id(repo, target.stem),
+                plankeeper_ticket=id_for_path(target),
             )
         write_atomic(target, content)
     print(target)
@@ -857,10 +863,7 @@ def cmd_queue_set(args) -> int:
             # not only after the first dispatch tick.
             if args.default_agent and not meta.get("Agent", "").strip():
                 meta["Agent"] = args.default_agent
-            if not (meta.get("Plan-keeper Ticket") or "").strip():
-                meta["Plan-keeper Ticket"] = plankeeper_id(
-                    _repo_for_plan(resolved), resolved.stem
-                )
+            ensure_id(meta, resolved)  # mint-once into meta (no-op if present)
         new_text = serialize_frontmatter(meta, body)
         if not new_text.endswith("\n"):
             new_text += "\n"

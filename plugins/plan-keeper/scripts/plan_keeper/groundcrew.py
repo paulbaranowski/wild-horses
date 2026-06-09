@@ -1,8 +1,12 @@
-"""groundcrew shell-adapter glue: synthesize a stable ``plan-<n>`` id for each
-plan, convert plans to the adapter's issue-dict shape, and mirror the
-synthesized id into the plan's ``Ticket`` frontmatter for human traceability.
+"""groundcrew shell-adapter glue: convert plans to the adapter's issue-dict
+shape and mirror each plan's frozen id into its ``Plan-keeper Ticket``
+frontmatter for human traceability.
+
+Plan identity itself — how a ``plan-<n>`` id is computed, derived from a path,
+and minted-once — lives in ``plan_keeper.ids``; this module imports those
+helpers (``plankeeper_id``, ``id_for_path``, ``mint_into_path_if_absent``)
+rather than owning the algorithm.
 """
-import hashlib
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,8 +15,17 @@ from typing import Optional
 from plan_keeper import storage
 from plan_keeper.dates import _iso_utc_now
 from plan_keeper.errors import PlanKeeperCliError
-from plan_keeper.frontmatter import parse_frontmatter, serialize_frontmatter
-from plan_keeper.storage import write_atomic
+from plan_keeper.frontmatter import parse_frontmatter
+from plan_keeper.ids import (
+    id_for_path,
+    mint_into_path_if_absent,
+    repo_for_plan,
+)
+
+# Re-export so existing callers/tests can read `groundcrew.plankeeper_id`. The
+# `as plankeeper_id` form marks this an intentional re-export (not a stray
+# unused import); the single definition lives in `ids`.
+from plan_keeper.ids import plankeeper_id as plankeeper_id
 
 # Translates plan-keeper's on-disk Status: vocabulary to the groundcrew shell
 # adapter's enum. `backlog` is fetched but never dispatched (confirm one via
@@ -25,27 +38,6 @@ _GROUNDCREW_STATUS_MAP = {
     "in-review": "in-review",
     "done": "done",
 }
-
-def plankeeper_id(repo: str, stem: str) -> str:
-    """Mint a plan-keeper ticket id for a plan: ``plan-<digits>``.
-
-    Used as a **one-time seed generator**: plan-save (and, for legacy plans,
-    the first ``crew fetch``) calls this once, stores the result in the plan's
-    ``Plan-keeper Ticket`` frontmatter, and thereafter the id is only ever read
-    back — never recomputed. groundcrew requires every ticket id to match
-    ``/^[a-z][\\da-z]*-\\d+$/`` and reuses the bare id as a permanent key — the
-    worktree dir (``<repo>-<id>``), the git branch (``<user>-<id>``), and the
-    run-state filename all derive from it — so the minted value must conform;
-    the 48-bit BLAKE2 digest of ``<repo>/<stem>`` does. The repo is part of the
-    seed because the id carries no repo qualifier downstream — two same-named
-    plans in different repos must mint distinct ids on first save. A mint-time
-    collision is astronomically unlikely (and ``crew fetch`` fails loudly on a
-    duplicate stored id rather than silently merging two plans onto one
-    worktree).
-    """
-    digest = hashlib.blake2b(f"{repo}/{stem}".encode("utf-8"), digest_size=6).digest()
-    return f"plan-{int.from_bytes(digest, 'big')}"
-
 
 def _assert_no_plankeeper_id_collisions(issues: list[dict]) -> None:
     """Raise if two plans carry the same stored ``Plan-keeper Ticket``.
@@ -71,51 +63,6 @@ def _assert_no_plankeeper_id_collisions(issues: list[dict]) -> None:
                 code=2,
             )
         seen[ticket] = path
-
-
-def _repo_for_plan(path: Path) -> str:
-    """The repo a plan belongs to: its parent dir name, or the grandparent
-    when the plan lives under `done/` or `deferred/`. Single source of truth
-    so the synthesized id is stable across a plan's move into those subdirs."""
-    parent = path.parent
-    if parent.name in {"done", "deferred"}:
-        return parent.parent.name
-    return parent.name
-
-
-def _mint_plankeeper_ticket_if_absent(path: Path) -> Optional[str]:
-    """Return the plan's stored ``Plan-keeper Ticket``, minting and persisting
-    one if absent.
-
-    Mint-once: a present value is authoritative and is never recomputed or
-    overwritten, so a renamed plan keeps its id (the whole point of the frozen
-    id). Only the first call for a plan writes; steady-state fetches don't churn
-    the file. Best-effort: a read/parse/write error is swallowed and returns
-    None, so one unwritable file can't abort the whole fetch.
-    """
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    # Only mint for real plan files (those that open with frontmatter), mirroring
-    # _plan_to_issue's skip — never grow frontmatter onto a bare .md (e.g. a stray
-    # README), which would make it look dispatchable.
-    if not (text.startswith("---\n") or text.startswith("---\r\n")):
-        return None
-    try:
-        meta, body = parse_frontmatter(text)
-    except PlanKeeperCliError:
-        return None
-    existing = (meta.get("Plan-keeper Ticket") or "").strip()
-    if existing:
-        return existing
-    minted = plankeeper_id(_repo_for_plan(path), path.stem)
-    meta["Plan-keeper Ticket"] = minted
-    try:
-        write_atomic(path, serialize_frontmatter(meta, body))
-    except OSError:
-        return None
-    return minted
 
 
 def _plan_to_issue(
@@ -148,13 +95,13 @@ def _plan_to_issue(
     title = _extract_h1_safe(body) or path.stem
     # repo is the grandparent for archived/paused plans (done/, deferred/), so
     # `crew get` reports the real repo, not "done"/"deferred".
-    repo_name = _repo_for_plan(path)
+    repo_name = repo_for_plan(path)
     if index is not None:
         blockers, _ = _blockers_for_plan(meta, index, warn_label=warn_label)
     else:
         blockers = []
     # Read-only: the id is the stored, frozen Plan-keeper Ticket (minted at save
-    # or by _mint_plankeeper_ticket_if_absent during fetch). May be "" for an
+    # or by ids.mint_into_path_if_absent during fetch). May be "" for an
     # unminted plan; callers that need a guaranteed id mint first.
     return {
         "id": (meta.get("Plan-keeper Ticket") or "").strip(),
@@ -216,9 +163,9 @@ def _build_repo_index(repo: str) -> dict[str, dict]:
     Returns a dict mapping each plan's identity strings to a shared entry
     ``{id, title, status, location, key, blocked_by}``. A plan is keyed under
     every id it carries — its frozen ``Plan-keeper Ticket``, its ``Linear
-    Ticket``, its ``Jira Ticket`` — plus the computed ``plankeeper_id(repo,
-    stem)`` as a fallback so an unminted plan still resolves by the id it would
-    be minted to. ``status`` is canonical (via ``_GROUNDCREW_STATUS_MAP``); a
+    Ticket``, its ``Jira Ticket`` — plus the computed id (``ids.id_for_path``)
+    as a fallback so an unminted plan still resolves by the id it would be
+    minted to. ``status`` is canonical (via ``_GROUNDCREW_STATUS_MAP``); a
     plan physically in ``done/`` reports ``done``. The canonical ``key`` (used by
     cycle detection and as the snapshot id) is the plan's stored plan-keeper id,
     or the computed one when unminted. Best-effort: unreadable/unparseable files
@@ -243,7 +190,7 @@ def _build_repo_index(repo: str) -> dict[str, dict]:
                 meta, body = parse_frontmatter(plan.read_text(encoding="utf-8"))
             except (OSError, PlanKeeperCliError):
                 continue
-            computed = plankeeper_id(repo, plan.stem)
+            computed = id_for_path(plan)
             pk = (meta.get("Plan-keeper Ticket") or "").strip()
             primary = pk or computed
             if location == "done":
@@ -270,7 +217,7 @@ def _build_repo_index(repo: str) -> dict[str, dict]:
             # highest-priority plan: active is iterated before done/ then
             # deferred/, matching `_resolve_crew_id`'s active-wins-over-archived
             # rule. This matters because an active plan and a same-stem archived
-            # one compute the *same* plankeeper_id — without this guard the
+            # one compute the *same* id — without this guard the
             # archived (done) entry would overwrite the active one and a
             # Blocked-by ref would resolve to the wrong plan/status, flipping the
             # dispatch gate.
@@ -453,7 +400,7 @@ def _collect_crew_issues() -> list[dict]:
                 continue
             if _is_locally_driven(plan):
                 continue
-            _mint_plankeeper_ticket_if_absent(plan)
+            mint_into_path_if_absent(plan)
             issue = _plan_to_issue(plan, index=index, warn_label=plan.stem)
             # Skip a plan whose id couldn't be minted/persisted (empty id) — an
             # empty id is groundcrew's worktree/branch/run-state key and would
@@ -490,6 +437,6 @@ def _resolve_crew_id(plan_id: str) -> Optional[dict]:
                     # Rebuild with the repo index so `crew get` carries the same
                     # blocker snapshot as `crew fetch` (or a held plan could slip
                     # through the resolveOne path). No warn label — get is quiet.
-                    index = _build_repo_index(_repo_for_plan(plan))
+                    index = _build_repo_index(repo_for_plan(plan))
                     return _plan_to_issue(plan, index=index)
     return None
