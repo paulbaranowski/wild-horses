@@ -62,7 +62,7 @@ def _render_source_region(pk: str) -> str:
     command runs); it is intentionally literal here, not a Python value.
     """
     return (
-        '      { kind: "shell", name: "plans",\n'
+        '      { kind: "shell", name: "plankeeper",\n'
         "        commands: {\n"
         f'          verify: "{pk} crew fetch >/dev/null",\n'
         f'          fetch: "{pk} crew fetch",\n'
