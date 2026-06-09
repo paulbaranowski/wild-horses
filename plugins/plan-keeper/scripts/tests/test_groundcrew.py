@@ -357,7 +357,7 @@ class TestFetchMintFailure(IsolatedHomeTestCase):
         d.mkdir(parents=True)
         (d / "2026-01-01-x.md").write_text("---\nStatus: todo\n---\n# X\n")
         with patch.object(storage, "PLAN_ROOT", self.plans_root), \
-                patch.object(groundcrew, "write_atomic", side_effect=OSError("disk full")):
+                patch("plan_keeper.ids.write_atomic", side_effect=OSError("disk full")):
             issues = groundcrew._collect_crew_issues()
         # The plan couldn't get a frozen id, so it must not ship at all — never
         # with an empty id.
