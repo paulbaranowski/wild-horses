@@ -390,14 +390,20 @@ def repo_status(repo_path: str, branch: str) -> dict:
 
 
 def pull_repo(repo_path: str, branch: str, *, stash: bool = False, verbose: bool = True) -> dict:
-    """Pull one repo. Always runs `git pull --ff-only origin <branch>`.
+    """Pull one repo: fetch one ref, then `git merge --ff-only` against the
+    stable tracking ref refs/remotes/origin/<branch> (never FETCH_HEAD).
+
+    Splitting `git pull` into an explicit fetch + named-ref merge makes the
+    fast-forward immune to the transient "Cannot fast-forward to multiple
+    branches" race that FETCH_HEAD corruption (a concurrent fetch in a sibling
+    worktree) triggers — see the inline comments on the fetch/merge core.
 
     A `pulled` result always carries a one-line `stat` (git's `--shortstat`) so
     callers can report what landed. `verbose=True` (the default, used by
-    pull-one) additionally includes the full `git pull` stdout — the per-file
-    listing — as `output`. `verbose=False` (used by pull-all) omits `output`:
-    one diffstat line per repo is fine, but a full per-file listing for every
-    repo overflows tool-output buffers on real-world configs.
+    pull-one) additionally includes the full `git merge --stat` stdout — the
+    per-file listing — as `output`. `verbose=False` (used by pull-all) omits
+    `output`: one diffstat line per repo is fine, but a full per-file listing
+    for every repo overflows tool-output buffers on real-world configs.
     """
     p = Path(repo_path).expanduser()
     out: dict = {"path": str(p), "branch": branch}
@@ -428,25 +434,62 @@ def pull_repo(repo_path: str, branch: str, *, stash: bool = False, verbose: bool
             return out
         stashed = "No local changes to save" not in sout
 
-    # HEAD before the pull, so we can diff it against the new tip to report
-    # exactly what landed. Captured even when the rev-parse fails (unborn
-    # HEAD) — the stat is then simply omitted below.
+    # HEAD before the fetch, so we can both detect "nothing moved"
+    # (before_sha == after_sha) and diff the old tip against the new one to
+    # report exactly what landed. Captured even when rev-parse fails (unborn
+    # HEAD) — before_sha is then empty and the stat is simply omitted below.
     rc_before, before_sha, _ = git(p, "rev-parse", "HEAD")
 
-    rc, pout, perr = git(p, "pull", "--ff-only", "origin", branch)
+    # Two explicit steps instead of one `git pull`, to dodge the transient
+    # "Cannot fast-forward to multiple branches" race. `git pull` fast-forwards
+    # against FETCH_HEAD — a single file in the *shared* common git dir, visible
+    # to every linked worktree, with no per-write lock; a concurrent fetch (an
+    # emdash worktree, a sibling fetch) can leave `main` listed twice as
+    # for-merge and pull's ff step then refuses, even on a cleanly
+    # fast-forwardable repo. So:
+
+    # 1. Fetch exactly one ref into its tracking ref. The leading '+'
+    #    force-updates refs/remotes/origin/<branch> (a tracking ref is meant to
+    #    mirror the remote); git takes a per-ref lock, so a concurrent fetch of
+    #    the same ref is serialized, never corrupted. This is the network step —
+    #    a timeout or failure here is the remote's (or the path's) fault.
+    rc, fout, ferr = git(p, "fetch", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
     if rc != 0:
         if rc == GIT_TIMEOUT_RC:
             out["status"] = "timed-out"
-            out["error"] = f"git pull exceeded the {git_timeout():.0f}s timeout"
+            out["error"] = f"git fetch exceeded the {git_timeout():.0f}s timeout"
         else:
             out["status"] = "pull-failed"
-            out["error"] = (perr or pout).strip()
+            # Some fetch failures print the `fatal:` line to stdout, not stderr,
+            # so fall back to stdout to keep `error` non-empty (the contract).
+            out["error"] = (ferr or fout).strip()
         if stashed:
             # Try to restore their work so we don't strand it.
             git(p, "stash", "pop")
         return out
 
-    if "Already up to date" in pout or "Already up-to-date" in pout:
+    # 2. Fast-forward against the stable tracking ref, NEVER FETCH_HEAD. The
+    #    merge reads refs/remotes/origin/<branch>, a named ref protected by
+    #    git's per-ref lock, so a racing fetch elsewhere can't corrupt the merge
+    #    target. A non-zero rc here is now a genuine non-fast-forward (diverged
+    #    history), correctly reported as pull-failed. `--stat` (verbose only)
+    #    gives the per-file `output`; pull-all omits it to bound its output.
+    target = f"refs/remotes/origin/{branch}"
+    merge_args = ("merge", "--ff-only", "--stat", target) if verbose else ("merge", "--ff-only", target)
+    rc, mout, merr = git(p, *merge_args)
+    if rc != 0:
+        out["status"] = "pull-failed"
+        out["error"] = (merr or mout).strip()
+        if stashed:
+            git(p, "stash", "pop")
+        return out
+
+    # HEAD after the merge. up-to-date iff the fast-forward moved nothing —
+    # detected by SHA compare instead of grepping merge stdout for "Already up
+    # to date", which is more robust and i18n-proof (git localizes that line).
+    rc_after, after_sha, _ = git(p, "rev-parse", "HEAD")
+
+    if rc_before == 0 and rc_after == 0 and before_sha == after_sha:
         out["status"] = "up-to-date"
     else:
         out["status"] = "pulled"
@@ -459,7 +502,7 @@ def pull_repo(repo_path: str, branch: str, *, stash: bool = False, verbose: bool
             if rc_stat == 0 and stat:
                 out["stat"] = stat
         if verbose:
-            out["output"] = pout
+            out["output"] = mout
 
     if stashed:
         prc, ppout, pperr = git(p, "stash", "pop")
