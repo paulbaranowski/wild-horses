@@ -81,6 +81,9 @@ class TestBuildPatchedConfig(unittest.TestCase):
     def test_command_strings_bake_in_resolved_binary(self):
         out = build_patched_config(BASE_CONFIG, PK)
         assert out is not None
+        # The shell source is named for the tool (plankeeper), not the ~/plans
+        # directory it reads — this is the label groundcrew shows.
+        self.assertIn('name: "plankeeper"', out)
         self.assertIn(f'fetch: "{PK} crew fetch"', out)
         self.assertIn(f'verify: "{PK} crew fetch >/dev/null"', out)
         # ${id} is groundcrew's literal token, not interpolated by us.
