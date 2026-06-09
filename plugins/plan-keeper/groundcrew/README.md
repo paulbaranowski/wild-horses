@@ -66,7 +66,7 @@ One region, into `sources:`:
 
 ```ts
 /* plan-keeper:managed:start */
-      { kind: "shell", name: "plans",
+      { kind: "shell", name: "plankeeper",
         commands: {
           verify: "/opt/homebrew/bin/plan-keeper crew fetch >/dev/null",
           fetch: "/opt/homebrew/bin/plan-keeper crew fetch",
