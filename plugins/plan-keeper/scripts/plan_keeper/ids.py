@@ -99,7 +99,7 @@ def mint_into_path_if_absent(path: Path) -> Optional[str]:
     """
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
     # Only mint for real plan files (those that open with frontmatter), mirroring
     # _plan_to_issue's skip — never grow frontmatter onto a bare .md (e.g. a stray

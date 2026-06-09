@@ -99,6 +99,15 @@ class TestMintIntoPathIfAbsent(IsolatedHomeTestCase):
         self.assertIsNone(ids.mint_into_path_if_absent(p))
         self.assertEqual(p.read_text(encoding="utf-8"), "# just a readme\n")
 
+    def test_returns_none_on_non_utf8_file(self):
+        # Best-effort: a non-UTF8 .md must be skipped (return None), not crash
+        # the whole fetch. read_text raises UnicodeDecodeError (a ValueError,
+        # not an OSError), so it needs its own guard.
+        p = self.plans_root / "r" / "2026-06-08-bad.md"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"---\nStatus: todo\n---\n# bad\xff\n")
+        self.assertIsNone(ids.mint_into_path_if_absent(p))
+
 
 class TestMintSitesAgreeWithChokepoint(IsolatedHomeTestCase):
     """End-to-end: the id a mint site stores equals id_for_path(plan), proving
