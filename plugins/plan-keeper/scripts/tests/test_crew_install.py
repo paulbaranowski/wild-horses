@@ -154,6 +154,23 @@ class TestBuildPatchedConfig(unittest.TestCase):
         orphan = 'const cfg = { knownRepositories: [] };'
         self.assertIsNone(build_patched_config(orphan, PK))
 
+    def test_active_sources_with_malformed_sentinel_returns_none(self):
+        """An active `sources:` array whose managed region is malformed — a
+        SENTINEL_START with no matching SENTINEL_END — must fail fast (None),
+        not fall through to creating a second `sources` key beside the broken
+        one. An `export default {` is present so the create path *would* fire if
+        the malformed case weren't caught."""
+        malformed = (
+            "export default {\n"
+            "  sources: [\n"
+            f"{SENTINEL_START}\n"
+            '      { kind: "shell", name: "plans", commands: {} },\n'
+            "  ],\n"
+            "} satisfies Config;\n"
+        )
+        self.assertNotIn(SENTINEL_END, malformed)  # guard: truly unterminated
+        self.assertIsNone(build_patched_config(malformed, PK))
+
 
 class TestResolveConfigPath(unittest.TestCase):
     """--config > $GROUNDCREW_CONFIG > ~/.config/groundcrew/crew.config.ts."""

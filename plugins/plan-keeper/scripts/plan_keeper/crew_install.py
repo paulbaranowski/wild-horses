@@ -143,11 +143,23 @@ def build_patched_config(config: str, pk: str) -> Optional[str]:
     ``sources`` key is created in the export object (the common case — the
     default config comments ``sources`` out). None signals the caller to fall
     back to the manual-paste safety valve when there is neither an active
-    ``sources`` array nor an ``export default {`` object to add one to.
+    ``sources`` array nor an ``export default {`` object to add one to — and
+    also when an active ``sources`` array carries a *malformed* managed region
+    (a start sentinel with no matching end), where failing fast beats minting a
+    duplicate ``sources`` key.
     """
     sources_body = _render_source_region(pk)
+    # _upsert_managed_region returns None for two distinct reasons: there is no
+    # active `sources:` array to anchor in, or the array exists but its managed
+    # region is malformed (a SENTINEL_START with no matching SENTINEL_END). Only
+    # the first warrants creating a fresh `sources` key — falling through on the
+    # malformed case would mint a *second* `sources` key beside the broken one.
+    # Distinguish them by whether an active array was actually located.
+    has_active_sources = _find_active_array_open(config, "sources") is not None
     patched = _upsert_managed_region(config, "sources", sources_body)
     if patched is None:
+        if has_active_sources:
+            return None  # malformed managed block — fail fast, don't duplicate
         patched = _create_sources_array(config, sources_body)
     return patched
 
