@@ -112,3 +112,36 @@ which wraps the `crew queue list` / `crew queue set` subcommands.
 After promotion, the next `crew run` dispatches the plan and it shows up in the
 `crew status` Queue. (`crew doctor` only checks host prerequisites — it doesn't
 list plans.)
+
+## Dependencies between plans
+
+A plan can declare prerequisites with a `Blocked-by:` frontmatter line — a
+comma-separated list of prerequisite **ticket IDs** in the same repo (a
+`Plan-keeper Ticket`, a `Linear Ticket`, or a `Jira Ticket`), each with an
+optional `(filename)` hint that is ignored:
+
+```text
+Blocked-by: plan-849321 (auth-schema), ENG-456 (token-store)
+```
+
+On `fetch`, plan-keeper resolves each reference to its in-repo plan and embeds a
+`{id, title, status}` snapshot in the issue's `blockers` array. groundcrew's own
+eligibility check holds any `todo` plan while **any** embedded blocker's status
+is not `done` — so a dependent plan is not dispatched until every prerequisite is
+finished, and it auto-dispatches on the next `fetch` once they are. plan-keeper
+keeps reporting the plan's real `Status` (no masquerade); the gate lives in
+groundcrew. `crew get` carries the same snapshot, so the resolveOne path can't
+slip a held plan through.
+
+Set it with:
+
+```bash
+plan-keeper file-meta set --file ~/plans/<repo>/<file>.md \
+  --blocked-by "plan-849321 (auth-schema), ENG-456"
+```
+
+A reference that matches no plan, or points at a `deferred/` plan, holds the
+dependent and prints a `note:` on stderr. Dependency cycles (A↔B) are detected
+and warned on stderr; they stay held (neither can reach `done` first).
+`crew queue list` also reports `blocked` / `blockedBy` per plan for the
+`plan-crew` skill to render.

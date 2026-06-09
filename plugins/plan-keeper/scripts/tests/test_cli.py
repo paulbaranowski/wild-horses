@@ -950,5 +950,39 @@ class TestMultiTrackerCoexistence(IsolatedHomeTestCase):
         self.assertEqual(json.loads(got.stdout)["Linear Ticket"], "ENG-42")
 
 
+class TestFileMetaSetBlockedBy(IsolatedHomeTestCase):
+    def _plan(self) -> Path:
+        path = self.cwd / "plan.md"
+        path.write_text("---\nStatus: todo\n---\n# T\n", encoding="utf-8")
+        return path
+
+    def test_sets_blocked_by(self) -> None:
+        p = self._plan()
+        r = run_cli(
+            "file-meta", "set", "--file", str(p),
+            "--blocked-by", "plan-1 (auth), ENG-2",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Blocked-by: plan-1 (auth), ENG-2", p.read_text())
+
+    def test_get_returns_blocked_by(self) -> None:
+        p = self._plan()
+        run_cli("file-meta", "set", "--file", str(p), "--blocked-by", "plan-1",
+                home=self.home, cwd=self.cwd)
+        r = run_cli("file-meta", "get", "--file", str(p),
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(json.loads(r.stdout)["Blocked-by"], "plan-1")
+
+    def test_clears_blocked_by_with_empty_string(self) -> None:
+        p = self._plan()
+        run_cli("file-meta", "set", "--file", str(p), "--blocked-by", "plan-1",
+                home=self.home, cwd=self.cwd)
+        r = run_cli("file-meta", "set", "--file", str(p), "--blocked-by", "",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("Blocked-by:", p.read_text())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -59,15 +59,21 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue list --rep
 
 **Run `crew queue list` fresh every time you reach this step — including on a re-invocation later in the same conversation, and again whenever step 5 sends you back here.** Never reprint an earlier queue from memory: plans get promoted, dequeued, or dispatched between turns, so a cached queue can be stale — and the user picks actions by the row numbers, so stale numbers target the wrong plan. The numbered queue you show must come from the output you just ran.
 
-Output is a JSON array of `{repo, file, status, agent}` objects (one per active plan). Repos are grouped
-in alphabetical order, and the plans within each repo arrive newest-first (by each plan's `Created:`
-stamp, falling back to its filename date). Preserve that order — don't re-sort. Group them for the user
-by `status` and present each ACTIONABLE plan with a global number:
+Output is a JSON array of `{repo, file, status, agent, blocked, blockedBy}` objects (one per active plan).
+Repos are grouped in alphabetical order, and the plans within each repo arrive newest-first (by each
+plan's `Created:` stamp, falling back to its filename date). Preserve that order — don't re-sort. Group
+them for the user by `status` and present each ACTIONABLE plan with a global number:
 
 - **Queued (todo)** — the live dispatch queue. Show `repo · file · agent`. These are **dequeue** candidates.
 - **In flight (in-progress)** — groundcrew is running these now. Show as read-only context; do NOT number them for action.
 - **In review (in-review)** — read-only context; do NOT number for action.
 - **Available** — `status` of `backlog` or empty string. Show `repo · file · agent`. These are **promote** candidates.
+
+`blocked` (bool) and `blockedBy` (the unsatisfied prerequisite ticket IDs) report dependency state: a
+plan with `Blocked-by:` prerequisites that aren't yet `done`. When `blocked` is true, append a held
+marker and its blockers to the row, e.g. `⏸ blocked by plan-849321`, and do **not** frame the plan as
+ready-to-dispatch — even a `todo` plan that is `blocked` will be held back by groundcrew until its
+prerequisites finish. You may still let the user dequeue it; just don't present it as "will be dispatched."
 
 Number the **Available** and **Queued** rows in one continuous numbered list so the user can refer to
 any actionable plan by a single number. Example:

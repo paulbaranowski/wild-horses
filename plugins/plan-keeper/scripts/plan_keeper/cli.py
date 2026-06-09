@@ -39,6 +39,8 @@ from plan_keeper.crew_install import (
 )
 from plan_keeper.groundcrew import (
     _assert_no_plankeeper_id_collisions,
+    _blockers_for_plan,
+    _build_repo_index,
     _collect_crew_issues,
     _repo_for_plan,
     _resolve_crew_id,
@@ -533,11 +535,13 @@ def cmd_file_meta_set(args) -> int:
         updates.append(("Status", args.status))
     if args.kind is not None:
         updates.append(("Kind", validate_kind(args.kind)))
+    if args.blocked_by is not None:
+        updates.append(("Blocked-by", args.blocked_by))
     if not updates:
         raise PlanKeeperCliError(
             "file-meta set requires at least one of --plankeeper-ticket, "
             "--linear-ticket, --jira-ticket, --completed-on, --agent, --status, "
-            "--kind",
+            "--kind, --blocked-by",
             code=2,
         )
     path = _resolve_file_meta_path(args)
@@ -902,6 +906,9 @@ def cmd_queue_list(args) -> int:
         # (recency_key, row) within this repo so plans sort newest-first per
         # repo. Repos stay grouped in their outer alphabetical order; only the
         # plans inside each one are ordered most-recent-to-least-recent.
+        # The repo index resolves each plan's Blocked-by refs so the row can
+        # report dispatch-readiness for the plan-crew UI.
+        index = _build_repo_index(repo_entry.name)
         keyed: list[tuple[tuple[str, str], dict]] = []
         for plan in sorted(repo_entry.iterdir()):
             if not plan.is_file() or not plan.name.endswith(".md"):
@@ -916,11 +923,14 @@ def cmd_queue_list(args) -> int:
                 meta, _ = parse_frontmatter(text)
             except PlanKeeperCliError:
                 continue
+            _, unsatisfied = _blockers_for_plan(meta, index)
             keyed.append((plan_recency_key(meta, plan.name), {
                 "repo": repo_entry.name,
                 "file": plan.name,
                 "status": meta.get("Status", "").strip(),
                 "agent": meta.get("Agent", "").strip(),
+                "blocked": bool(unsatisfied),
+                "blockedBy": unsatisfied,
             }))
         keyed.sort(key=lambda kr: kr[0], reverse=True)
         rows.extend(row for _, row in keyed)
@@ -1222,6 +1232,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_fm_set.add_argument(
         "--jira-ticket", dest="jira_ticket",
         help="set the Jira Ticket value (an issue key like PROJ-9)",
+    )
+    p_fm_set.add_argument(
+        "--blocked-by", dest="blocked_by",
+        help="set Blocked-by: a comma-separated list of prerequisite ticket IDs "
+             "in the same repo (each may carry an optional '(filename)' hint that "
+             "is ignored). Pass an empty string to clear. No existence check at "
+             "set time — unresolved refs are flagged at crew fetch.",
     )
 
     p_fm_strip = file_meta_sub.add_parser("strip", help="print body without frontmatter")

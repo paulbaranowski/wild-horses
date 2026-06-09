@@ -672,11 +672,11 @@ class TestQueue(IsolatedHomeTestCase):
         by_file = {row["file"]: row for row in rows}
         self.assertEqual(
             by_file["2026-05-01-a.md"],
-            {"repo": "alpha", "file": "2026-05-01-a.md", "status": "todo", "agent": "codex"},
+            {"repo": "alpha", "file": "2026-05-01-a.md", "status": "todo", "agent": "codex", "blocked": False, "blockedBy": []},
         )
         self.assertEqual(
             by_file["2026-05-02-b.md"],
-            {"repo": "beta", "file": "2026-05-02-b.md", "status": "backlog", "agent": ""},
+            {"repo": "beta", "file": "2026-05-02-b.md", "status": "backlog", "agent": "", "blocked": False, "blockedBy": []},
         )
 
     def test_queue_list_groups_repos_and_orders_newest_first_within_each(self) -> None:
@@ -796,6 +796,22 @@ class TestQueue(IsolatedHomeTestCase):
         )
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("not allowed with", r.stderr)
+
+    def test_queue_list_reports_blocked_and_blocked_by(self) -> None:
+        self._make_plan("alpha", "2026-05-01-dep.md", status="todo")
+        dep_id = groundcrew.plankeeper_id("alpha", "2026-05-01-dep")
+        d = self.plans_root / "alpha"
+        (d / "2026-05-02-main.md").write_text(
+            f"---\nStatus: todo\nBlocked-by: {dep_id}\n---\n\n# main\n",
+            encoding="utf-8",
+        )
+        r = run_cli("crew", "queue", "list", "--all", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        by_file = {row["file"]: row for row in json.loads(r.stdout)}
+        self.assertEqual(by_file["2026-05-02-main.md"]["blocked"], True)
+        self.assertEqual(by_file["2026-05-02-main.md"]["blockedBy"], [dep_id])
+        self.assertEqual(by_file["2026-05-01-dep.md"]["blocked"], False)
+        self.assertEqual(by_file["2026-05-01-dep.md"]["blockedBy"], [])
 
     def test_queue_set_promotes_backlog_to_todo(self) -> None:
         p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog", agent="codex")
@@ -936,6 +952,280 @@ class TestQueue(IsolatedHomeTestCase):
         self.assertNotEqual(r.returncode, 0)
         # good plan must be untouched because validation fails before any write
         self.assertIn("Status: backlog", good.read_text())
+
+
+class TestBlockerHelpers(IsolatedHomeTestCase):
+    """Unit tests for the Blocked-by parse/index/snapshot/cycle helpers."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        # In-process helpers read storage.PLAN_ROOT directly; point it at the
+        # isolated $HOME's plans tree (subprocess tests get this via HOME env).
+        self._orig_plan_root = storage.PLAN_ROOT
+        storage.PLAN_ROOT = self.plans_root
+
+    def tearDown(self) -> None:
+        storage.PLAN_ROOT = self._orig_plan_root
+        super().tearDown()
+
+    def test_parse_blocked_by_strips_parentheticals_and_empties(self) -> None:
+        self.assertEqual(
+            groundcrew._parse_blocked_by("plan-1 (auth), ENG-2 , , plan-3(x)"),
+            ["plan-1", "ENG-2", "plan-3"],
+        )
+
+    def test_parse_blocked_by_empty(self) -> None:
+        self.assertEqual(groundcrew._parse_blocked_by(""), [])
+
+    def test_build_repo_index_keys_by_every_id(self) -> None:
+        d = self.plans_root / "r"
+        d.mkdir(parents=True)
+        (d / "2026-01-01-a.md").write_text(
+            "---\nPlan-keeper Ticket: plan-555\nLinear Ticket: ENG-9\n"
+            "Status: in-review\n---\n# A title\n"
+        )
+        done = d / "done"
+        done.mkdir()
+        (done / "2025-12-31-b.md").write_text("---\nStatus: done\n---\n# B title\n")
+        index = groundcrew._build_repo_index("r")
+        # keyed by stored plan-keeper id, stored linear id, AND computed id
+        self.assertEqual(index["plan-555"]["status"], "in-review")
+        self.assertEqual(index["plan-555"]["title"], "A title")
+        self.assertEqual(index["plan-555"]["location"], "active")
+        self.assertIs(index["ENG-9"], index["plan-555"])
+        a_computed = groundcrew.plankeeper_id("r", "2026-01-01-a")
+        self.assertIs(index[a_computed], index["plan-555"])
+        # an unminted done/ plan is keyed by its computed id, status done
+        b_computed = groundcrew.plankeeper_id("r", "2025-12-31-b")
+        self.assertEqual(index[b_computed]["status"], "done")
+        self.assertEqual(index[b_computed]["location"], "done")
+
+    def test_blockers_for_plan_snapshots_status(self) -> None:
+        d = self.plans_root / "r"
+        d.mkdir(parents=True)
+        (d / "2026-01-01-dep-todo.md").write_text("---\nStatus: todo\n---\n# Dep Todo\n")
+        done = d / "done"
+        done.mkdir()
+        (done / "2025-12-31-dep-done.md").write_text("---\nStatus: done\n---\n# Dep Done\n")
+        index = groundcrew._build_repo_index("r")
+        todo_id = groundcrew.plankeeper_id("r", "2026-01-01-dep-todo")
+        done_id = groundcrew.plankeeper_id("r", "2025-12-31-dep-done")
+        meta = {"Blocked-by": f"{todo_id}, {done_id}"}
+        blockers, unsatisfied = groundcrew._blockers_for_plan(meta, index)
+        by_id = {b["id"]: b for b in blockers}
+        self.assertEqual(by_id[todo_id]["status"], "todo")
+        self.assertEqual(by_id[todo_id]["title"], "Dep Todo")
+        self.assertEqual(by_id[done_id]["status"], "done")
+        self.assertEqual(unsatisfied, [todo_id])
+
+    def test_blockers_for_plan_unresolved_ref_holds(self) -> None:
+        index = groundcrew._build_repo_index("r")  # empty repo
+        blockers, unsatisfied = groundcrew._blockers_for_plan(
+            {"Blocked-by": "plan-404"}, index
+        )
+        self.assertEqual(
+            blockers, [{"id": "plan-404", "title": "(unresolved)", "status": "other"}]
+        )
+        self.assertEqual(unsatisfied, ["plan-404"])
+
+    def test_blockers_for_plan_deferred_ref_holds(self) -> None:
+        deferred = self.plans_root / "r" / "deferred"
+        deferred.mkdir(parents=True)
+        (deferred / "2025-06-01-paused.md").write_text(
+            "---\nStatus: backlog\n---\n# Paused\n"
+        )
+        index = groundcrew._build_repo_index("r")
+        pid = groundcrew.plankeeper_id("r", "2025-06-01-paused")
+        blockers, unsatisfied = groundcrew._blockers_for_plan({"Blocked-by": pid}, index)
+        self.assertEqual(blockers[0]["status"], "other")  # held (not done)
+        self.assertEqual(unsatisfied, [pid])
+
+    def test_blockers_for_plan_no_field(self) -> None:
+        index = groundcrew._build_repo_index("r")
+        self.assertEqual(groundcrew._blockers_for_plan({}, index), ([], []))
+
+    def test_build_repo_index_tolerates_stray_done_file(self) -> None:
+        # A plain file literally named `done` (or `deferred`) in the repo dir
+        # must not crash the index build (it would abort the whole fetch).
+        d = self.plans_root / "r"
+        d.mkdir(parents=True)
+        (d / "2026-01-01-x.md").write_text("---\nStatus: todo\n---\n# X\n")
+        (d / "done").write_text("i am a file, not a directory\n")
+        index = groundcrew._build_repo_index("r")  # must not raise
+        self.assertIn(groundcrew.plankeeper_id("r", "2026-01-01-x"), index)
+
+    def test_build_repo_index_active_wins_over_archived_same_stem(self) -> None:
+        # An active plan and a done/ plan with the same stem compute the SAME
+        # plankeeper_id. The index must keep the ACTIVE one (first-writer wins),
+        # so a Blocked-by ref to that id resolves to the live (todo) plan, not
+        # the archived (done) one — otherwise the dispatch gate flips.
+        d = self.plans_root / "r"
+        d.mkdir(parents=True)
+        (d / "2026-01-01-x.md").write_text("---\nStatus: todo\n---\n# X active\n")
+        done = d / "done"
+        done.mkdir()
+        (done / "2026-01-01-x.md").write_text("---\nStatus: done\n---\n# X done\n")
+        index = groundcrew._build_repo_index("r")
+        shared = groundcrew.plankeeper_id("r", "2026-01-01-x")
+        self.assertEqual(index[shared]["location"], "active")
+        self.assertEqual(index[shared]["status"], "todo")
+        # A dependent on that id is therefore (correctly) blocked.
+        _, unsatisfied = groundcrew._blockers_for_plan({"Blocked-by": shared}, index)
+        self.assertEqual(unsatisfied, [shared])
+
+    def test_detect_dependency_cycles_finds_a_b_cycle(self) -> None:
+        d = self.plans_root / "r"
+        d.mkdir(parents=True)
+        a = groundcrew.plankeeper_id("r", "2026-01-01-a")
+        b = groundcrew.plankeeper_id("r", "2026-01-02-b")
+        (d / "2026-01-01-a.md").write_text(f"---\nStatus: todo\nBlocked-by: {b}\n---\n# A\n")
+        (d / "2026-01-02-b.md").write_text(f"---\nStatus: todo\nBlocked-by: {a}\n---\n# B\n")
+        index = groundcrew._build_repo_index("r")
+        cycles = groundcrew._detect_dependency_cycles(index)
+        self.assertTrue(cycles, "expected a cycle")
+        flat = {node for cyc in cycles for node in cyc}
+        self.assertIn(a, flat)
+        self.assertIn(b, flat)
+
+    def test_detect_dependency_cycles_finds_three_node_cycle(self) -> None:
+        d = self.plans_root / "r"
+        d.mkdir(parents=True)
+        a = groundcrew.plankeeper_id("r", "2026-01-01-a")
+        b = groundcrew.plankeeper_id("r", "2026-01-02-b")
+        c = groundcrew.plankeeper_id("r", "2026-01-03-c")
+        (d / "2026-01-01-a.md").write_text(f"---\nStatus: todo\nBlocked-by: {b}\n---\n# A\n")
+        (d / "2026-01-02-b.md").write_text(f"---\nStatus: todo\nBlocked-by: {c}\n---\n# B\n")
+        (d / "2026-01-03-c.md").write_text(f"---\nStatus: todo\nBlocked-by: {a}\n---\n# C\n")
+        index = groundcrew._build_repo_index("r")
+        cycles = groundcrew._detect_dependency_cycles(index)
+        self.assertTrue(cycles, "expected a cycle")
+        self.assertEqual({node for cyc in cycles for node in cyc}, {a, b, c})
+
+    def test_detect_dependency_cycles_finds_self_dependency(self) -> None:
+        d = self.plans_root / "r"
+        d.mkdir(parents=True)
+        a = groundcrew.plankeeper_id("r", "2026-01-01-a")
+        (d / "2026-01-01-a.md").write_text(f"---\nStatus: todo\nBlocked-by: {a}\n---\n# A\n")
+        index = groundcrew._build_repo_index("r")
+        cycles = groundcrew._detect_dependency_cycles(index)
+        self.assertTrue(cycles, "expected a self-cycle")
+        self.assertIn(a, {node for cyc in cycles for node in cyc})
+
+    def test_detect_dependency_cycles_none_when_acyclic(self) -> None:
+        d = self.plans_root / "r"
+        d.mkdir(parents=True)
+        b = groundcrew.plankeeper_id("r", "2026-01-02-b")
+        (d / "2026-01-01-a.md").write_text(f"---\nStatus: todo\nBlocked-by: {b}\n---\n# A\n")
+        (d / "2026-01-02-b.md").write_text("---\nStatus: todo\n---\n# B\n")
+        index = groundcrew._build_repo_index("r")
+        self.assertEqual(groundcrew._detect_dependency_cycles(index), [])
+
+
+class TestBlockedByGate(IsolatedHomeTestCase):
+    """End-to-end: Blocked-by feeds groundcrew's blockers array via fetch/get."""
+
+    def _repo(self) -> Path:
+        d = self.plans_root / "r"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def test_fetch_embeds_blocker_snapshot(self) -> None:
+        d = self._repo()
+        (d / "2026-01-01-dep.md").write_text("---\nStatus: todo\n---\n# Dep\n")
+        dep_id = groundcrew.plankeeper_id("r", "2026-01-01-dep")
+        (d / "2026-01-02-main.md").write_text(
+            f"---\nStatus: todo\nBlocked-by: {dep_id}\n---\n# Main\n"
+        )
+        issues = json.loads(
+            run_cli("crew", "fetch", home=self.home, cwd=self.cwd).stdout
+        )
+        main = next(
+            i for i in issues if Path(i["sourceRef"]["path"]).stem == "2026-01-02-main"
+        )
+        self.assertEqual(main["hasMoreBlockers"], False)
+        self.assertEqual(len(main["blockers"]), 1)
+        self.assertEqual(main["blockers"][0]["status"], "todo")  # held
+        dep = next(
+            i for i in issues if Path(i["sourceRef"]["path"]).stem == "2026-01-01-dep"
+        )
+        self.assertEqual(dep["blockers"], [])
+
+    def test_fetch_blocker_clears_when_prereq_done(self) -> None:
+        d = self._repo()
+        done = d / "done"
+        done.mkdir()
+        (done / "2026-01-01-dep.md").write_text("---\nStatus: done\n---\n# Dep\n")
+        dep_id = groundcrew.plankeeper_id("r", "2026-01-01-dep")
+        (d / "2026-01-02-main.md").write_text(
+            f"---\nStatus: todo\nBlocked-by: {dep_id}\n---\n# Main\n"
+        )
+        issues = json.loads(
+            run_cli("crew", "fetch", home=self.home, cwd=self.cwd).stdout
+        )
+        main = next(
+            i for i in issues if Path(i["sourceRef"]["path"]).stem == "2026-01-02-main"
+        )
+        self.assertEqual(main["blockers"][0]["status"], "done")  # satisfied
+
+    def test_fetch_resolves_blocker_via_linear_ticket(self) -> None:
+        """A Blocked-by ref that names a stored Linear ticket (ENG-id), not the
+        computed plan-keeper id, still resolves to the prerequisite."""
+        d = self._repo()
+        (d / "2026-01-01-dep.md").write_text(
+            "---\nLinear Ticket: ENG-9\nStatus: in-review\n---\n# Dep\n"
+        )
+        (d / "2026-01-02-main.md").write_text(
+            "---\nStatus: todo\nBlocked-by: ENG-9 (dep)\n---\n# Main\n"
+        )
+        issues = json.loads(
+            run_cli("crew", "fetch", home=self.home, cwd=self.cwd).stdout
+        )
+        main = next(
+            i for i in issues if Path(i["sourceRef"]["path"]).stem == "2026-01-02-main"
+        )
+        self.assertEqual(len(main["blockers"]), 1)
+        self.assertEqual(main["blockers"][0]["status"], "in-review")  # held (not done)
+
+    def test_fetch_warns_on_unresolved_ref(self) -> None:
+        d = self._repo()
+        (d / "2026-01-02-main.md").write_text(
+            "---\nStatus: todo\nBlocked-by: plan-404\n---\n# Main\n"
+        )
+        r = run_cli("crew", "fetch", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("plan-404", r.stderr)
+        main = next(
+            i for i in json.loads(r.stdout)
+            if Path(i["sourceRef"]["path"]).stem == "2026-01-02-main"
+        )
+        self.assertEqual(main["blockers"][0]["status"], "other")  # held
+
+    def test_fetch_warns_on_cycle(self) -> None:
+        d = self._repo()
+        a = groundcrew.plankeeper_id("r", "2026-01-01-a")
+        b = groundcrew.plankeeper_id("r", "2026-01-02-b")
+        (d / "2026-01-01-a.md").write_text(f"---\nStatus: todo\nBlocked-by: {b}\n---\n# A\n")
+        (d / "2026-01-02-b.md").write_text(f"---\nStatus: todo\nBlocked-by: {a}\n---\n# B\n")
+        r = run_cli("crew", "fetch", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("cycle", r.stderr.lower())
+
+    def test_get_carries_blockers_and_is_quiet(self) -> None:
+        """`crew get` carries the same blocker snapshot as fetch, but (unlike
+        fetch) prints no stderr warning on an unresolved ref."""
+        d = self._repo()
+        (d / "2026-01-02-main.md").write_text(
+            "---\nStatus: todo\nBlocked-by: plan-404\n---\n# Main\n"
+        )
+        # fetch first so the plan gets a minted, resolvable id.
+        run_cli("crew", "fetch", home=self.home, cwd=self.cwd)
+        main_id = groundcrew.plankeeper_id("r", "2026-01-02-main")
+        r = run_cli("crew", "get", main_id, home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, "")  # get stays quiet
+        issue = json.loads(r.stdout)
+        self.assertEqual(len(issue["blockers"]), 1)
+        self.assertEqual(issue["blockers"][0]["status"], "other")  # still held
 
 
 if __name__ == "__main__":
