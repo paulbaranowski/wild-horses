@@ -808,61 +808,72 @@ def cmd_upgrade(args) -> int:
     )
 
 
-def cmd_queue_set(args) -> int:
-    """Bulk-set Status on plans named by newline-delimited stdin paths.
+def _resolve_repo_plan_names(
+    files: list[str], repo_override: Optional[str]
+) -> list[Path]:
+    """Resolve bare plan filenames against one repo's ~/plans/<repo>/ dir.
 
-    Reads absolute plan paths (one per line) from stdin and writes each
-    plan's frontmatter Status to --status (todo|backlog), atomically. When
-    --status is todo and --default-agent is given, a plan whose Agent is
-    missing/empty also gets Agent: <name> in the same update; a plan that
-    already names an Agent keeps it. Dequeue (--status backlog) never
-    touches Agent.
+    Shared front half of `queue add` and `queue drop`: turns the user's bare
+    filenames into validated absolute paths, all-or-nothing. `repo_override`
+    (the `--repo` flag) names the repo; when None the repo is derived from the
+    cwd exactly like `queue list`'s default scope. `.md` is appended when
+    omitted.
 
-    Path validation mirrors `crew start`: every path must be
-    absolute, end in .md, resolve inside PLAN_ROOT, exist, and have
-    frontmatter. The whole batch is validated FIRST — if any path is
-    invalid, nothing is written (all-or-nothing), so a typo can't leave the
-    queue half-mutated.
+    Every name must land *directly* inside the repo dir (so a `../other-repo/
+    x.md` name can't cross repos), point at an existing file, and carry
+    frontmatter — else a PlanKeeperCliError is raised. The whole batch is
+    validated before any caller writes, so a typo can't half-mutate the queue.
     """
-    raw = sys.stdin.read()
-    paths = [line.strip() for line in raw.splitlines() if line.strip()]
-    if not paths:
-        raise PlanKeeperCliError("crew queue set: no plan paths on stdin", code=2)
-    plan_root = storage.PLAN_ROOT.resolve()
+    repo = derive_repo(repo_override)
+    repo_root = repo_dir(repo).resolve()
     resolved_paths: list[Path] = []
-    for raw_path in paths:
-        path = Path(raw_path)
-        if not path.is_absolute():
-            raise PlanKeeperCliError(f"path must be absolute: {path}", code=2)
-        if path.suffix != ".md":
+    for raw_name in files:
+        name = raw_name if raw_name.endswith(".md") else raw_name + ".md"
+        resolved = (repo_root / name).resolve()
+        if resolved.parent != repo_root:
             raise PlanKeeperCliError(
-                f"path must point to a .md plan file: {path}", code=2
+                f"plan must be a bare filename in repo {repo!r}: {raw_name}",
+                code=2,
             )
-        resolved = path.resolve()
-        try:
-            resolved.relative_to(plan_root)
-        except ValueError as err:
-            raise PlanKeeperCliError(
-                f"path is outside PLAN_ROOT ({plan_root}): {path}", code=2
-            ) from err
         if not resolved.exists():
-            raise PlanKeeperCliError(f"plan file not found: {resolved}", code=3)
+            raise PlanKeeperCliError(
+                f"plan not found in repo {repo!r}: {name}", code=3
+            )
         text = resolved.read_text(encoding="utf-8")
         if not (text.startswith("---\n") or text.startswith("---\r\n")):
             raise PlanKeeperCliError(
                 f"{resolved} has no frontmatter (cannot set Status)", code=2
             )
         resolved_paths.append(resolved)
+    return resolved_paths
+
+
+def _apply_queue_status(
+    resolved_paths: list[Path], status: str, default_agent: Optional[str]
+) -> int:
+    """Write `status` to each already-validated plan, atomically.
+
+    Shared write body of `queue add` (promote → todo) and `queue drop`
+    (dequeue → backlog) — the two commands differ only in the status they pass
+    and whether they fill an Agent, so the mutation lives here once instead of
+    drifting between two call sites.
+
+    Callers validate the whole batch FIRST (all-or-nothing), so by the time we
+    write, every path is known-good. On `status == "todo"` (promote) each plan's
+    id is minted (mint-once) and a plan with no Agent gets `default_agent`; a
+    plan that already names an Agent keeps it. `status == "backlog"` (dequeue)
+    never touches Agent or mints. Each written path is printed.
+    """
     for resolved in resolved_paths:
         text = resolved.read_text(encoding="utf-8")
         meta, body = parse_frontmatter(text)
-        meta["Status"] = args.status
-        if args.status == "todo":
+        meta["Status"] = status
+        if status == "todo":
             # Promote = "ready for groundcrew": ensure the plan-keeper id exists
             # (mint-once) so the mapping is visible the moment a plan is queued,
             # not only after the first dispatch tick.
-            if args.default_agent and not meta.get("Agent", "").strip():
-                meta["Agent"] = args.default_agent
+            if default_agent and not meta.get("Agent", "").strip():
+                meta["Agent"] = default_agent
             ensure_id(meta, resolved)  # mint-once into meta (no-op if present)
         new_text = serialize_frontmatter(meta, body)
         if not new_text.endswith("\n"):
@@ -870,6 +881,33 @@ def cmd_queue_set(args) -> int:
         write_atomic(resolved, new_text)
         print(resolved)
     return 0
+
+
+def cmd_queue_add(args) -> int:
+    """Promote one-or-more plans to Status: todo by bare filename.
+
+    The single-step promote: each positional names a plan file in `--repo`
+    (default: the current repo, derived from the cwd). No absolute path, no
+    stdin. Repo-scoping, `.md`-append, and all-or-nothing validation live in
+    `_resolve_repo_plan_names`; the write (mint-once id, default Agent on a plan
+    with none, atomic) is `_apply_queue_status`. Re-adding an already-todo plan
+    is a harmless re-write.
+    """
+    resolved = _resolve_repo_plan_names(args.files, args.repo)
+    return _apply_queue_status(resolved, "todo", args.agent)
+
+
+def cmd_queue_drop(args) -> int:
+    """Dequeue one-or-more plans back to Status: backlog by bare filename.
+
+    The inverse of `add`: pulls each named plan out of the groundcrew queue
+    (todo → backlog) without touching its Agent or minting an id. Same
+    repo-scoping and all-or-nothing validation as `add` via
+    `_resolve_repo_plan_names`. Dropping an already-backlog plan is a no-op
+    re-write.
+    """
+    resolved = _resolve_repo_plan_names(args.files, args.repo)
+    return _apply_queue_status(resolved, "backlog", None)
 
 
 def cmd_queue_list(args) -> int:
@@ -1259,12 +1297,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     # `crew` groups the groundcrew dispatch adapter (fetch/get/start/review —
     # the machine protocol the crew.config.ts source calls directly) with
-    # `install` (one-shot config wiring) and the cross-repo `queue` manager the
-    # plan-crew skill drives. These deliberately avoid list/get/set naming:
+    # `install` (one-shot config wiring) and the `queue` manager the plan-crew
+    # skill drives. The adapter legs deliberately avoid list/get/set naming:
     # fetch/start/review all mutate (fetch stamps the groundcrew Ticket;
     # start/review flip Status), so a read-only `list`/`get` label would
-    # mislead — and `crew queue list`/`crew queue set` are the genuinely
-    # read-only / general-write pair.
+    # mislead. `queue` is the human/skill surface: `list` (read) plus the
+    # `add` (promote → todo) / `drop` (dequeue → backlog) write pair, each
+    # addressing plans by bare filename within a `--repo` (default: current).
     p_crew = sub.add_parser(
         "crew",
         help="groundcrew dispatch adapter (fetch/get/start/review) + install + queue",
@@ -1318,7 +1357,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_crew_queue = crew_sub.add_parser(
         "queue",
-        help="cross-repo groundcrew queue: list active plans / set Status in bulk",
+        help="groundcrew queue: list active plans / add (promote) / drop (dequeue)",
     )
     crew_queue_sub = p_crew_queue.add_subparsers(
         dest="queue_cmd", required=True, metavar="<subcommand>",
@@ -1342,18 +1381,37 @@ def build_parser() -> argparse.ArgumentParser:
              "(normalized like any repo override)",
     )
 
-    p_queue_set = crew_queue_sub.add_parser(
-        "set",
-        help="set Status on plans named by newline-delimited stdin paths",
+    p_queue_add = crew_queue_sub.add_parser(
+        "add",
+        help="promote plans to Status: todo by bare filename",
     )
-    p_queue_set.add_argument(
-        "--status", required=True, choices=["todo", "backlog"],
-        help="Status to write on every listed plan",
+    p_queue_add.add_argument(
+        "files", nargs="+", metavar="<file>",
+        help="bare plan filename(s) in the repo's ~/plans/<repo>/ "
+             "(.md appended if omitted)",
     )
-    p_queue_set.add_argument(
-        "--default-agent",
-        help="when --status todo, fill Agent: <name> on plans with no Agent "
-             "set (ignored for --status backlog)",
+    p_queue_add.add_argument(
+        "--repo",
+        help="repo to resolve filenames against (default: the current repo)",
+    )
+    p_queue_add.add_argument(
+        "--agent", default="claude",
+        help="Agent to stamp on plans with none (default: claude); a plan "
+             "that already names an Agent keeps it",
+    )
+
+    p_queue_drop = crew_queue_sub.add_parser(
+        "drop",
+        help="dequeue plans back to Status: backlog by bare filename",
+    )
+    p_queue_drop.add_argument(
+        "files", nargs="+", metavar="<file>",
+        help="bare plan filename(s) in the repo's ~/plans/<repo>/ "
+             "(.md appended if omitted)",
+    )
+    p_queue_drop.add_argument(
+        "--repo",
+        help="repo to resolve filenames against (default: the current repo)",
     )
 
     sub.add_parser(
@@ -1390,7 +1448,8 @@ _PROVIDER_DISPATCH = {
 
 _QUEUE_DISPATCH = {
     "list": cmd_queue_list,
-    "set": cmd_queue_set,
+    "add": cmd_queue_add,
+    "drop": cmd_queue_drop,
 }
 
 _CREW_DISPATCH = {

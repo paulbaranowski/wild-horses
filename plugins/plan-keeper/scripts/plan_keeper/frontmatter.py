@@ -173,9 +173,10 @@ def _inject_default_frontmatter(
          re-serialize, return.
 
     Note: save does NOT inject an `Agent` field. The `Agent: <name>` tag is the
-    groundcrew dispatch signal, and plan-crew (`queue set --default-agent`) is
-    the sole writer of it — a plan is born with no Agent and only acquires one
-    when promoted to the groundcrew queue. A body that hand-declares `Agent` is
+    groundcrew dispatch signal, and promote (`queue add`, which defaults
+    `--agent claude`) is the sole writer of it — a plan is born with no Agent
+    and only acquires one when promoted to the groundcrew queue. A body that
+    hand-declares `Agent` is
     still preserved verbatim (parse_frontmatter round-trips foreign/managed
     fields); save just never adds one on its own.
 

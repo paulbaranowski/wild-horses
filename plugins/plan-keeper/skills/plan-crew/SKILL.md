@@ -7,8 +7,10 @@ description: Use when the user asks to see or manage the groundcrew queue, queue
 
 Show the groundcrew dispatch queue — by default the **current repo's** plans, or **every** repo under
 `~/plans/` on request — and manage it both directions in bulk: promote `backlog → todo` (add to the
-queue) and dequeue `todo → backlog` (pull out). Backed by two `plan_keeper_cli.py` subcommands:
-`crew queue list` (the scoped read) and `crew queue set` (bulk atomic `Status` write).
+queue) and dequeue `todo → backlog` (pull out). Backed by three `plan_keeper_cli.py` subcommands:
+`crew queue list` (the scoped read), `crew queue add` (promote → todo), and `crew queue drop`
+(dequeue → backlog). Both writers address plans by **bare filename** within a `--repo`, so you act on
+each repo's selections with one call per direction.
 
 ## Quick reference
 
@@ -101,8 +103,10 @@ If `crew queue list` returns `[]`, tell the user the current scope has no plans 
 ### 2. Parse the user's actions
 
 The user replies with `promote <numbers>` and/or `dequeue <numbers>` (either or both, any order). Map
-each number back to its `{repo, file}` from the `crew queue list` output. Build the absolute path for each
-selected plan as `$HOME/plans/<repo>/<file>`.
+each number back to its `{repo, file}` from the `crew queue list` output, then **group the selections by
+`repo` and direction** — `add` and `drop` each take bare filenames scoped to one `--repo`, so each repo
+gets its own call per direction. (For the default current-repo scope there is only one repo, so it's a
+single call each way.)
 
 - `promote` targets must currently be **Available** (backlog/empty). If the user numbers a `todo` row for promote, point it out and ask.
 - `dequeue` targets must currently be **Queued** (todo). If the user numbers a backlog row for dequeue, point it out and ask.
@@ -129,27 +133,25 @@ confirmation. Do not write anything until the user agrees.
 
 ### 4. Apply
 
-Run one `crew queue set` per direction selected. Each call takes the newline-delimited absolute paths on
-stdin via a quoted heredoc (one auto-approved Bash call each).
+Run one call per `repo` per direction selected, passing that repo's chosen plans as **bare filenames**
+(the `file` field from the JSON — no path, no `$HOME`) after `--repo <repo>`.
 
-Promote (writes `Agent: claude` where missing):
+Promote (writes `Agent: claude` where missing — that's the `add` default; a plan that already names an
+Agent keeps it):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue set --status todo --default-agent claude <<'EOF'
-/Users/<you>/plans/<repo>/<file>.md
-/Users/<you>/plans/<repo2>/<file2>.md
-EOF
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue add --repo <repo> <file>.md <file2>.md
 ```
 
 Dequeue (never touches Agent):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue set --status backlog <<'EOF'
-/Users/<you>/plans/<repo>/<file>.md
-EOF
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue drop --repo <repo> <file>.md
 ```
 
-Use the real absolute paths (expand `$HOME`). Use a quoted heredoc (`<<'EOF'`) so paths pass byte-verbatim.
+If the user selected plans across several repos (an `--all` listing), issue one `add`/`drop` per repo —
+each call is atomic over its own repo's batch. Always pass `--repo <repo>` from the JSON row rather than
+relying on the cwd, so the call targets the listed repo regardless of where you're running from.
 
 ### 5. Re-show the queue
 
@@ -159,13 +161,13 @@ Re-run step 1 and show the updated queue so the user sees the result.
 
 - **Numbering in-progress or in-review plans for action.** They are read-only context. Only `backlog`/empty (promote) and `todo` (dequeue) rows get action numbers.
 - **Writing before confirming.** Step 3 is mandatory even for a single obvious promote.
-- **Passing `--default-agent` on a dequeue.** Dequeue is `--status backlog` with no `--default-agent`; the CLI ignores a default agent on backlog, but omit it to keep intent clear.
-- **Building paths from the display string instead of the JSON.** Always map the chosen number back to the `{repo, file}` fields from `crew queue list`, then form `$HOME/plans/<repo>/<file>`.
+- **Mixing repos in one `add`/`drop` call.** Each call is scoped to a single `--repo`. When an `--all` selection spans repos, group by repo and issue one call per repo per direction — don't pass another repo's filenames under the wrong `--repo`.
+- **Passing absolute paths or `$HOME/plans/...`.** `add`/`drop` take **bare filenames** (the `file` field) plus `--repo <repo>`. A path with a slash is rejected (it must resolve directly inside the repo dir). Map the chosen number back to the `{repo, file}` fields from `crew queue list` and pass `file` verbatim.
 
 ## Edge cases
 
 - **`crew queue list` returns `[]`** — the current scope has no plans. For a current-repo run, name the repo and offer `--all` ("show all repos") in case they expected another repo's plans; then stop.
-- **A chosen plan's frontmatter is malformed** — `crew queue set` exits non-zero with a message and writes nothing (all-or-nothing). Surface the error; the user can fix that plan via plan-save/plan-update and retry.
+- **A chosen plan's frontmatter is malformed** — `crew queue add`/`drop` exit non-zero with a message and write nothing for that repo's batch (all-or-nothing). Surface the error; the user can fix that plan via plan-save/plan-update and retry.
 - **User selects a `todo` plan to promote (or a `backlog` plan to dequeue)** — it's already in/out of the queue; point it out and skip it rather than writing a no-op.
 
 ## Notes

@@ -109,7 +109,8 @@ plan-keeper file-meta set --file ~/plans/<repo>/<file>.md --status todo
 ```
 
 Or promote/dequeue across all repos interactively with the `plan-crew` skill,
-which wraps the `crew queue list` / `crew queue set` subcommands.
+which wraps the `crew queue list` / `crew queue add` / `crew queue drop`
+subcommands.
 
 After promotion, the next `crew run` dispatches the plan and it shows up in the
 `crew status` Queue. (`crew doctor` only checks host prerequisites — it doesn't
