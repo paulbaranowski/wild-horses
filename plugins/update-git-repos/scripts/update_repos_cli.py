@@ -355,8 +355,11 @@ def is_misconfigured_bare(path: Path) -> bool:
     rc, gitdir, _ = git(path, "rev-parse", "--git-dir")
     if rc != 0:
         return False
-    name = gitdir.strip().rstrip("/").rsplit("/", 1)[-1]
-    return name == ".git"
+    # Path(...).name gets the final component cross-platform: git may emit
+    # backslash separators for --git-dir on Windows, which a "/"-only split
+    # would miss. A genuine bare repo returns ".", whose .name is "" (not
+    # ".git"), so it stays correctly excluded.
+    return Path(gitdir.strip()).name == ".git"
 
 
 def detect_default_branch(repo_path: Path) -> str:
@@ -779,7 +782,11 @@ def cmd_fix_bare(args: argparse.Namespace) -> None:
         "branch": entry["branch"],
         "status_after": status_after["status"],
     }
-    if status_after.get("current_branch"):
+    # Presence check, not truthiness: repo_status() sets current_branch for every
+    # real repo (detached HEAD included, as the truthy "(detached)"), omitting the
+    # key only on its early returns (missing / not-a-repo / bare-misconfig). We
+    # want to mirror exactly those omissions, so test for the key, not its value.
+    if "current_branch" in status_after:
         result["current_branch"] = status_after["current_branch"]
     # status_after may still be a problem state — notably `bare-misconfig` again,
     # if the worktree tooling that causes this re-set core.bare between our unset
