@@ -102,28 +102,47 @@ jobs:
       - name: Re-point the formula and push to the tap
         if: steps.guard.outputs.published == 'false'
         working-directory: homebrew-tap
+        # Pass the version/tag/repo through env rather than interpolating ${{ }}
+        # straight into the run script: a `${{ }}` value is substituted as text
+        # BEFORE bash parses the script, so a version string with shell
+        # metacharacters could execute here — and this step holds the
+        # HOMEBREW_TAP_TOKEN push capability. As env vars they reach bash as inert
+        # data ($version/$tag/$repo), never re-parsed.
+        env:
+          version: ${{ steps.ver.outputs.version }}
+          tag: ${{ steps.ver.outputs.tag }}
+          repo: ${{ github.repository }}
         run: |
-          version="${{ steps.ver.outputs.version }}"
-          # update-formula.sh fetches the just-pushed tag's tarball to hash it.
-          # GitHub generates that archive on first request, so a brief ref/tarball
-          # propagation lag can 404 an early attempt. Retry up to 5 times with a 5s
-          # backoff (~20s of cover). set -euo pipefail in the script means a failed
-          # curl aborts BEFORE it rewrites the formula, so retrying is safe (no
-          # partial write to clean up). NB: the tag is already pushed by this point,
-          # so if every attempt fails the run leaves a published tag with a stale
-          # formula — the tag-keyed guard above will NOT re-point it on a re-run.
-          # Recover with the manual "Re-point the formula" step in RELEASING.md.
+          # The tap's update-formula.sh takes <formula> <version> — it serves both
+          # plan-keeper and crew-config, so the formula name is NOT optional. (A
+          # prior single-arg call here read the version AS the formula name and
+          # spun the old blind retry loop 5× on the resulting usage error, leaving
+          # the pushed tag pointing at a stale formula.)
+          #
+          # The ONLY transient failure in this step is GitHub not having generated
+          # the source tarball yet: that archive is created on first request, so an
+          # early fetch can 404 for a few seconds after the tag push above. We
+          # isolate that wait to a pre-flight poll on the tarball URL, THEN run
+          # update-formula.sh exactly once. Splitting the eventually-consistent
+          # wait from the deterministic rewrite means a real error — bad args,
+          # unknown formula, sha/sed failure — fails FAST and loud instead of being
+          # retried and buried. NB: the tag is already pushed by this point, so if
+          # the pre-flight exhausts or the rewrite fails, the run leaves a published
+          # tag with a stale formula — the tag-keyed guard above will NOT re-point
+          # it on a re-run. Recover with the manual step in RELEASING.md.
+          url="https://github.com/${repo}/archive/refs/tags/${tag}.tar.gz"
           attempt=1
           max_attempts=5
-          until ./update-formula.sh "$version"; do
+          until curl -fsSL -o /dev/null "$url"; do
             if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "update-formula.sh failed after $attempt attempts" >&2
+              echo "source tarball not available after $attempt attempts: $url" >&2
               exit 1
             fi
-            echo "update-formula.sh attempt $attempt failed; retrying in 5s..."
+            echo "tarball not generated yet (attempt $attempt); retrying in 5s..."
             attempt=$((attempt + 1))
             sleep 5
           done
+          ./update-formula.sh plan-keeper "$version"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if [ -z "$(git status --porcelain)" ]; then
