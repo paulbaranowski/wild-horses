@@ -5,7 +5,7 @@ description: Use when the user asks to split a plan into independently-grabbable
 
 # plan-split
 
-Decompose **one plan** into **N child implementation-task plans** under `~/plans/<repo>/`, each a thin vertical slice (tracer bullet), wired together with plan-keeper's native `Blocked-by:` dependencies and promoted to `todo` so groundcrew dispatches them in dependency order — the ready ones immediately, the blocked ones the moment their prerequisites finish.
+Decompose **one plan** into **N child implementation-task plans** under `~/plans/<repo>/`, each a thin vertical slice (tracer bullet), wired together with plan-keeper's native `Blocked-by:` dependencies and staged at `todo`. Queue the staged slices through `plan-crew` (which stamps each one's `Agent:` tag — the dispatch gate `file-meta set` doesn't write) and groundcrew runs the wave in dependency order — the ready ones immediately, the blocked ones the moment their prerequisites finish.
 
 This is the `to-issues` decomposition pattern retargeted from an external issue tracker to the plans tree. It composes the existing CLI (`save`, `file-meta get`, `file-meta set`) — there is no new subcommand.
 
@@ -126,11 +126,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set --file 
   --blocked-by "<prereq-ticket> (<prereq-filename>), <prereq-ticket-2> (<prereq-filename-2>)"
 ```
 
-**5d. Promote to `todo`.** Make every slice dispatchable — groundcrew's eligibility check holds the blocked ones until their prerequisites reach `done`:
+**5d. Stage every slice at `todo`.** Set each slice's status to `todo`:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set --file <path> --status todo
 ```
+
+This stages the slices but does **not** make them dispatchable: `file-meta set` writes no `Agent:` tag, and groundcrew skips every agent-less plan in every status — the `Agent` tag is a separate, required dispatch gate. To actually dispatch the slices, queue them through the `plan-crew` skill (`crew queue add`), which stamps `Agent: claude` on each. groundcrew's eligibility check then holds the blocked ones until their prerequisites reach `done`.
 
 ### 6. Mark the source plan done
 
@@ -144,7 +146,7 @@ This relocates the source plan to `~/plans/<repo>/done/` and stamps `Completed o
 
 ### 7. Confirm
 
-Report, on consecutive lines: each published slice's absolute path with its ordinal, its `Status` (`todo`), and its blockers (or "ready"); then the archived source-plan path (if step 6 ran). For example:
+Report, on consecutive lines: each published slice's absolute path with its ordinal, its `Status` (`todo`), and its blockers (or "ready", meaning no unfinished prerequisite — not "dispatchable"); then the archived source-plan path (if step 6 ran). Close with a one-line reminder that the slices still need to be queued via `plan-crew` to receive an `Agent` before groundcrew will dispatch them. For example:
 
 ```text
 Split into 3 slices in ~/plans/<repo>/:
@@ -152,6 +154,7 @@ Split into 3 slices in ~/plans/<repo>/:
   02 …-02-api--exec-plan.md      todo   blocked by 01
   03 …-03-ui--exec-plan.md       todo   blocked by 02
 Source plan archived to ~/plans/<repo>/done/<source>.md
+Next: queue these via plan-crew (stamps Agent: claude) to make them dispatchable.
 ```
 
 ## Collisions
@@ -163,12 +166,12 @@ Source plan archived to ~/plans/<repo>/done/<source>.md
 - **Don't publish before the user approves the breakdown.** Step 4 is a hard gate — the user shapes granularity and dependencies before anything is written, exactly as `to-issues` quizzes before filing.
 - **Don't put the `Source:` reference in `Blocked-by:`.** The source plan is provenance, not a prerequisite — a slice is not blocked on the plan it was carved from. `Source:` and `Blocked-by:` are orthogonal keys.
 - **Don't reference a prerequisite before it is saved.** Publish in dependency order so each `Blocked-by:` cites a ticket that already exists; a reference matching no plan holds the dependent and prints a `note:` on stderr.
-- **Don't leave slices at `backlog` and expect dispatch.** groundcrew only dispatches `todo` plans — step 5d promotes every slice; the dependency gate (not the status) is what holds blocked ones back.
+- **Don't claim a freshly-split slice is dispatchable.** Step 5d stages slices at `todo`, but groundcrew also requires an `Agent:` tag (which `file-meta set` does not write) and a registered repo before it will dispatch. A split slice is `todo` + agent-less = held until queued via `plan-crew`. State that, not "dispatchable."
 - **Don't read the CLI's exit 2 as fatal.** It is the collision signal — resolve it per [Collisions](#collisions) and re-run.
 - **Don't auto-mark the source done when it was conversation-only.** Step 6 runs only for a saved-file source; there is no file to move otherwise.
 
 ## Notes
 
 - Each slice is a full task in its own right (`Kind: exec-plan`), so `plan-do`, `plan-crew`, `plan-update`, and `plan-done` all operate on it like any other plan.
-- The `Blocked-by:` machinery, ticket resolution, and the dispatch gate live in groundcrew — see [../../groundcrew/README.md](../../groundcrew/README.md). plan-keeper reports each slice's real `Status`; it never masquerades a held plan.
+- The `Blocked-by:` machinery, ticket resolution, and the full set of dispatch gates (active-in-a-registered-repo + `todo` + `Agent` tag + unblocked) live in groundcrew — see [../../groundcrew/README.md](../../groundcrew/README.md). plan-keeper reports each slice's real `Status`; it never masquerades a held plan.
 - Sibling skills in the `plan-` family (`plan-save`, `plan-do`, `plan-done`, `plan-crew`, `plan-update`) share the same CLI and the same `~/plans/<repo>/` tree.
