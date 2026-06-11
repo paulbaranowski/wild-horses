@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """update-git-repos CLI.
 
-Maintains ~/.config/wild-horses/update-git-repos/repos.json and runs
-`git pull --ff-only` against each configured repo. All subcommands print
+Maintains ~/.config/wild-horses/update-git-repos/repos.json and fetches
+`origin/<branch>` then fast-forwards with `git merge --ff-only` against the
+tracking ref for each configured repo. All subcommands print
 JSON on stdout; non-zero exit means the command itself failed to run
 (not a per-repo error — those are reported inside the JSON).
 """

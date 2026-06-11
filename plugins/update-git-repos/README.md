@@ -22,7 +22,7 @@ First run, with an empty config, walks you through bootstrap: scan a root direct
 
 For each repo, the skill:
 
-- runs `git pull --ff-only origin <branch>` when the working tree is clean and the current branch matches the configured one;
+- fetches `origin/<branch>` and fast-forwards with `git merge --ff-only` against the tracking ref when the working tree is clean and the current branch matches the configured one;
 - skips and reports when the current branch is different (it never silently switches branches);
 - prompts you per dirty repo: **skip** or **stash → pull → pop**.
 
@@ -44,7 +44,7 @@ A bundled `scripts/update_repos_cli.py` does all I/O and git calls. Each subcomm
 
 ## Safety
 
-- `git pull --ff-only` — diverged history fails fast instead of auto-merging.
+- `git merge --ff-only` against the tracking ref — diverged history fails fast instead of auto-merging.
 - Dirty repos are never auto-stashed; you're asked per repo.
 - `stash pop` conflicts are reported explicitly so you know the conflict markers are in the working tree.
 - `wrong-branch` repos are reported, never silently checked out.
