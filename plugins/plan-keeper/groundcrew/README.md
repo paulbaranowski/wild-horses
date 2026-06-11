@@ -79,12 +79,34 @@ One region, into `sources:`:
 `crew install` does not modify `workspace.knownRepositories` — register the
 repos groundcrew may dispatch into yourself.
 
+## What makes a plan dispatchable
+
+groundcrew dispatches a plan only when **all** of these gates pass at once — no
+single one is sufficient:
+
+1. **It's an active plan in a repo bucket.** The file lives one level deep under
+   `~/plans/<repo>/` (not in `done/` or `deferred/`, which `fetch` skips).
+2. **Its repo is registered with groundcrew.** The `<repo>` must be listed in
+   your `workspace.knownRepositories` — `crew install` does **not** add it (see
+   the install notes above). An unregistered repo's plans can't be dispatched
+   into, even when everything else is in order.
+3. **`Status: todo`.** `backlog` (and any other value) is fetched but held.
+4. **It carries an `Agent:` tag.** `fetch` **skips every agent-less plan in every
+   status, including `todo`** — there is no implicit "default to claude." The
+   `Agent` tag is the signal that a plan was explicitly handed to groundcrew (a
+   human driving a plan locally via `plan-do` clears it). The `plan-crew` skill
+   (`crew queue add`) is what writes `Agent: claude` when promoting.
+5. **It isn't blocked.** Every `Blocked-by` prerequisite must be `done` (see
+   [Dependencies between plans](#dependencies-between-plans)).
+
 ## How dispatch works
 
 - **fetch** — globs `~/plans/*/*.md` (one level deep, skipping `done/` and
-  `deferred/`). Each plan with valid frontmatter becomes one issue. `Status:
-backlog` maps to adapter status `other` (fetched but not dispatched); `Status:
-todo` maps to `todo` (dispatchable). Each issue's `id` is the plan's
+  `deferred/`). Each plan with valid frontmatter **and an `Agent:` tag** becomes
+  one issue (agent-less plans are skipped in every status — gate 4 above).
+  `Status: backlog` maps to adapter status `other` (fetched but not dispatched);
+  `Status: todo` maps to `todo` (dispatched once its repo is registered and it's
+  unblocked). Each issue's `id` is the plan's
   **`Plan-keeper Ticket`** — a `plan-<digits>` id minted once (at `plan-save`,
   or here on first fetch if a legacy plan lacks one) and then frozen. fetch mints
   it only when absent and **never overwrites** an existing one, so a renamed plan
@@ -102,19 +124,26 @@ Ticket` across active, then `done/`, then `deferred/`, and returns the match.
 
 ## Promoting a plan
 
+Use the `plan-crew` skill (or `crew queue add` directly) — it both flips
+`Status: todo` **and** stamps `Agent: claude` when the plan has none, so the plan
+clears gates 3 and 4 in one step:
+
 ```bash
-# Save a plan via plan-save (defaults to Status: backlog).
-# Then promote to todo:
-plan-keeper file-meta set --file ~/plans/<repo>/<file>.md --status todo
+plan-keeper crew queue add --repo <repo> <file>.md
 ```
 
-Or promote/dequeue across all repos interactively with the `plan-crew` skill,
-which wraps the `crew queue list` / `crew queue add` / `crew queue drop`
-subcommands.
+`plan-crew` wraps `crew queue list` / `crew queue add` / `crew queue drop` and
+lets you promote/dequeue across repos interactively.
 
-After promotion, the next `crew run` dispatches the plan and it shows up in the
-`crew status` Queue. (`crew doctor` only checks host prerequisites — it doesn't
-list plans.)
+`file-meta set --status todo` flips the status **but does not write an `Agent:`
+tag**, so a plan promoted that way stays agent-less and is **not** dispatched
+(gate 4). Either add the tag yourself (`file-meta set --agent claude`) or, more
+simply, promote through `crew queue add`, which does both.
+
+Once a plan passes every gate in [What makes a plan
+dispatchable](#what-makes-a-plan-dispatchable), the next `crew run` dispatches it
+and it shows up in the `crew status` Queue. (`crew doctor` only checks host
+prerequisites — it doesn't list plans.)
 
 ## Dependencies between plans
 
