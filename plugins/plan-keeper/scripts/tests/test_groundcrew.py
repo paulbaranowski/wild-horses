@@ -317,6 +317,15 @@ class TestGroundcrewId(IsolatedHomeTestCase):
             r"^[a-z][\da-z]*-\d+$",
         )
 
+    def test_id_integer_fits_in_32_bits(self):
+        # Locks the readability contract: ID_DIGEST_SIZE = 4 (32-bit) keeps the
+        # minted integer < 2**32, i.e. at most 10 digits. A bump back toward the
+        # old 6-byte digest (or any larger size) trips this.
+        minted = self.cli.plankeeper_id("herds", "2026-04-30-foo")
+        value = int(minted.removeprefix("plan-"))
+        self.assertLess(value, 2**32)
+        self.assertLessEqual(len(str(value)), 10)
+
     def test_id_is_stable_across_calls(self):
         self.assertEqual(
             self.cli.plankeeper_id("herds", "2026-04-30-foo"),

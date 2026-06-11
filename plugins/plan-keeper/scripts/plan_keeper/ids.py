@@ -21,9 +21,17 @@ from plan_keeper.storage import write_atomic
 
 # The one knob for id length. A `digest_size` of N bytes yields an N*8-bit
 # integer, so the `plan-<digits>` id is at most ceil(N*8 * log10(2)) digits.
-# 6 bytes (48-bit) -> up to ~15 digits. This is the seam a future "shorter ids"
-# change flips; nothing else needs to move.
-ID_DIGEST_SIZE = 6
+# 4 bytes (32-bit) -> up to 10 digits (e.g. `plan-2950118472`); the prior
+# 6 bytes (48-bit) ran to ~15 (`plan-195296912509085`), which made groundcrew's
+# worktree dirs, branches, and run-state filenames hard to read.
+#
+# Collisions follow the birthday bound over the 2**(8*N) space, caught loudly
+# (never silently merged) by `_assert_no_plankeeper_id_collisions` at crew fetch.
+# At 32-bit that risk is ~0.0001% at 100 lifetime plans, ~0.01% at 1000, and
+# still only ~1% at 10k. This constant is the dial for more or less margin:
+# 3 -> 24-bit / 8 digits (tighter, ~3% at 1000), 5 -> 40-bit / 13 digits (more
+# headroom). This is the seam the "shorter ids" change flips; nothing else moves.
+ID_DIGEST_SIZE = 4
 
 
 def plankeeper_id(repo: str, stem: str) -> str:
@@ -39,9 +47,10 @@ def plankeeper_id(repo: str, stem: str) -> str:
     the ``ID_DIGEST_SIZE``-byte BLAKE2 digest of ``<repo>/<stem>`` does. The repo
     is part of the seed because the id carries no repo qualifier downstream — two
     same-named plans in different repos must mint distinct ids on first save. A
-    mint-time collision is astronomically unlikely (and ``crew fetch`` fails
-    loudly on a duplicate stored id rather than silently merging two plans onto
-    one worktree).
+    mint-time collision is unlikely but not impossible at this digest size (see
+    ``ID_DIGEST_SIZE`` for the birthday-bound characteristics); ``crew fetch``
+    catches any duplicate stored id loudly rather than silently merging two plans
+    onto one worktree.
     """
     digest = hashlib.blake2b(
         f"{repo}/{stem}".encode("utf-8"), digest_size=ID_DIGEST_SIZE
