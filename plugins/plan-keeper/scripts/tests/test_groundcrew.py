@@ -658,8 +658,9 @@ class TestCrewReview(IsolatedHomeTestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("Status: in-review", done.read_text())
 
+
 class TestQueue(IsolatedHomeTestCase):
-    """Cross-repo `queue list` / `queue set` for the plan-crew skill."""
+    """Cross-repo `queue list` (the scoped read) for the plan-crew skill."""
 
     def _make_plan(
         self,
@@ -839,145 +840,252 @@ class TestQueue(IsolatedHomeTestCase):
         self.assertEqual(by_file["2026-05-01-dep.md"]["blocked"], False)
         self.assertEqual(by_file["2026-05-01-dep.md"]["blockedBy"], [])
 
-    def test_queue_set_promotes_backlog_to_todo(self) -> None:
-        p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog", agent="codex")
+
+class TestQueueAdd(IsolatedHomeTestCase):
+    """`crew queue add <file>...` — promote plans to Status: todo by bare name.
+
+    Resolves bare plan filenames against a single repo's ~/plans/<repo>/ —
+    the current repo by default (cwd basename is "workdir", see
+    IsolatedHomeTestCase), or `--repo <name>` for another. Shares the
+    mint/default-agent/atomic-write body (`_apply_queue_status`) with `drop`.
+    """
+
+    def _make_plan(
+        self,
+        name: str,
+        status: str = "backlog",
+        agent: str = "",
+        repo: str = "workdir",
+    ) -> Path:
+        d = self.plans_root / repo
+        d.mkdir(parents=True, exist_ok=True)
+        fm = ["---"]
+        if agent:
+            fm.append(f"Agent: {agent}")
+        if status:
+            fm.append(f"Status: {status}")
+        fm.append("---")
+        p = d / name
+        p.write_text("\n".join(fm) + f"\n\n# {name}\n", encoding="utf-8")
+        return p
+
+    def test_add_promotes_bare_filename_in_current_repo(self) -> None:
+        p = self._make_plan("2026-06-08-a.md", status="backlog")
         r = run_cli(
-            "crew", "queue", "set", "--status", "todo",
-            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+            "crew", "queue", "add", "2026-06-08-a.md",
+            home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 0, r.stderr)
         text = p.read_text()
         self.assertIn("Status: todo", text)
         self.assertNotIn("Status: backlog", text)
-        self.assertIn("Agent: codex", text)  # existing Agent untouched
-
-    def test_queue_set_promote_mints_plankeeper_ticket(self) -> None:
-        # Promoting a plan mints its plan-keeper id so it's visible the moment
-        # it's queued (mint-once; no Ticket System line).
-        p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")
-        r = run_cli(
-            "crew", "queue", "set", "--status", "todo",
-            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
-        )
-        self.assertEqual(r.returncode, 0, r.stderr)
-        text = p.read_text()
-        self.assertRegex(text, r"Plan-keeper Ticket: plan-\d+")
-        self.assertNotIn("Ticket System", text)
-
-    def test_queue_set_promote_does_not_clobber_external_ticket(self) -> None:
-        # A plan already filed in Linear keeps its tracker reference on promote,
-        # and additionally gets a minted plan-keeper id.
-        d = self.plans_root / "alpha"
-        d.mkdir(parents=True, exist_ok=True)
-        p = d / "2026-05-01-a.md"
-        p.write_text(
-            "---\nLinear Ticket: ENG-1\nStatus: backlog\n---\n\n# a\n",
-            encoding="utf-8",
-        )
-        r = run_cli(
-            "crew", "queue", "set", "--status", "todo",
-            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
-        )
-        self.assertEqual(r.returncode, 0, r.stderr)
-        text = p.read_text()
-        self.assertIn("Linear Ticket: ENG-1", text)
-        self.assertRegex(text, r"Plan-keeper Ticket: plan-\d+")
-        self.assertNotIn("Ticket System", text)
-
-    def test_queue_set_dequeue_does_not_stamp_groundcrew(self) -> None:
-        p = self._make_plan("alpha", "2026-05-01-a.md", status="todo")
-        r = run_cli(
-            "crew", "queue", "set", "--status", "backlog",
-            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
-        )
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertNotIn("groundcrew", p.read_text())
-
-    def test_queue_set_promote_fills_missing_agent_with_default(self) -> None:
-        p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")  # no Agent
-        r = run_cli(
-            "crew", "queue", "set", "--status", "todo", "--default-agent", "claude",
-            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
-        )
-        self.assertEqual(r.returncode, 0, r.stderr)
-        text = p.read_text()
-        self.assertIn("Status: todo", text)
+        # default agent is claude when the plan has none
         self.assertIn("Agent: claude", text)
+        # prints the resolved absolute path
+        self.assertIn(str(p), r.stdout)
 
-    def test_queue_set_promote_keeps_existing_agent_over_default(self) -> None:
-        p = self._make_plan("alpha", "2026-05-01-a.md", status="backlog", agent="codex")
+    def test_add_appends_md_when_omitted(self) -> None:
+        p = self._make_plan("2026-06-08-a.md", status="backlog")
         r = run_cli(
-            "crew", "queue", "set", "--status", "todo", "--default-agent", "claude",
-            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+            "crew", "queue", "add", "2026-06-08-a",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Status: todo", p.read_text())
+
+    def test_add_mints_plankeeper_ticket(self) -> None:
+        p = self._make_plan("2026-06-08-a.md", status="backlog")
+        r = run_cli(
+            "crew", "queue", "add", "2026-06-08-a.md",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertRegex(p.read_text(), r"Plan-keeper Ticket: plan-\d+")
+
+    def test_add_agent_override(self) -> None:
+        p = self._make_plan("2026-06-08-a.md", status="backlog")
+        r = run_cli(
+            "crew", "queue", "add", "--agent", "codex", "2026-06-08-a.md",
+            home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 0, r.stderr)
         text = p.read_text()
         self.assertIn("Agent: codex", text)
         self.assertNotIn("Agent: claude", text)
 
-    def test_queue_set_dequeues_todo_to_backlog_without_touching_agent(self) -> None:
-        p = self._make_plan("alpha", "2026-05-01-a.md", status="todo")  # no Agent
+    def test_add_keeps_existing_agent_over_default(self) -> None:
+        p = self._make_plan("2026-06-08-a.md", status="backlog", agent="codex")
         r = run_cli(
-            "crew", "queue", "set", "--status", "backlog", "--default-agent", "claude",
-            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+            "crew", "queue", "add", "2026-06-08-a.md",
+            home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 0, r.stderr)
         text = p.read_text()
-        self.assertIn("Status: backlog", text)
-        self.assertNotIn("Agent:", text)  # dequeue never writes a default Agent
+        self.assertIn("Agent: codex", text)
+        self.assertNotIn("Agent: claude", text)
 
-    def test_queue_set_promotes_multiple_plans_in_one_call(self) -> None:
-        p1 = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")
-        p2 = self._make_plan("beta", "2026-05-02-b.md", status="backlog")
+    def test_add_promotes_multiple_files_in_one_call(self) -> None:
+        p1 = self._make_plan("2026-06-08-a.md", status="backlog")
+        p2 = self._make_plan("2026-06-09-b.md", status="backlog")
         r = run_cli(
-            "crew", "queue", "set", "--status", "todo", "--default-agent", "claude",
-            stdin=f"{p1}\n{p2}\n", home=self.home, cwd=self.cwd,
+            "crew", "queue", "add", "2026-06-08-a.md", "2026-06-09-b.md",
+            home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("Status: todo", p1.read_text())
         self.assertIn("Status: todo", p2.read_text())
 
-    def test_queue_set_rejects_path_outside_plan_root(self) -> None:
-        outside = self.home / "evil.md"
-        outside.write_text("---\nStatus: backlog\n---\n\n# evil\n", encoding="utf-8")
+    def test_add_is_idempotent_on_already_todo(self) -> None:
+        p = self._make_plan("2026-06-08-a.md", status="todo", agent="codex")
         r = run_cli(
-            "crew", "queue", "set", "--status", "todo",
-            stdin=str(outside) + "\n", home=self.home, cwd=self.cwd,
+            "crew", "queue", "add", "2026-06-08-a.md",
+            home=self.home, cwd=self.cwd,
         )
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("outside PLAN_ROOT", r.stderr)
-        self.assertIn("Status: backlog", outside.read_text())  # untouched
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = p.read_text()
+        self.assertIn("Status: todo", text)
+        self.assertIn("Agent: codex", text)  # existing agent untouched
 
-    def test_queue_set_rejects_plan_without_frontmatter(self) -> None:
-        d = self.plans_root / "alpha"
+    def test_add_missing_file_exits_3_all_or_nothing(self) -> None:
+        good = self._make_plan("2026-06-08-a.md", status="backlog")
+        r = run_cli(
+            "crew", "queue", "add", "2026-06-08-a.md", "nope.md",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("not found", r.stderr)
+        self.assertIn("workdir", r.stderr)
+        # nothing written: the good plan stays in backlog
+        self.assertIn("Status: backlog", good.read_text())
+
+    def test_add_rejects_plan_without_frontmatter(self) -> None:
+        d = self.plans_root / "workdir"
         d.mkdir(parents=True, exist_ok=True)
-        p = d / "2026-05-01-a.md"
+        p = d / "2026-06-08-a.md"
         p.write_text("# no frontmatter\n", encoding="utf-8")
         r = run_cli(
-            "crew", "queue", "set", "--status", "todo",
-            stdin=str(p) + "\n", home=self.home, cwd=self.cwd,
+            "crew", "queue", "add", "2026-06-08-a.md",
+            home=self.home, cwd=self.cwd,
         )
         self.assertEqual(r.returncode, 2)
         self.assertIn("no frontmatter", r.stderr)
 
-    def test_queue_set_errors_on_empty_stdin(self) -> None:
-        r = run_cli(
-            "crew", "queue", "set", "--status", "todo",
-            stdin="\n  \n", home=self.home, cwd=self.cwd,
+    def test_add_rejects_path_escaping_current_repo(self) -> None:
+        # A plan sitting in another repo must not be reachable via a ../ name.
+        other = self._make_plan(
+            "2026-06-08-evil.md", status="backlog", repo="elsewhere"
         )
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("no plan paths", r.stderr)
-
-    def test_queue_set_is_all_or_nothing_on_bad_path(self) -> None:
-        good = self._make_plan("alpha", "2026-05-01-a.md", status="backlog")
-        bad = self.plans_root / "alpha" / "missing.md"  # does not exist
         r = run_cli(
-            "crew", "queue", "set", "--status", "todo",
-            stdin=f"{good}\n{bad}\n", home=self.home, cwd=self.cwd,
+            "crew", "queue", "add", "../elsewhere/2026-06-08-evil.md",
+            home=self.home, cwd=self.cwd,
         )
         self.assertNotEqual(r.returncode, 0)
-        # good plan must be untouched because validation fails before any write
-        self.assertIn("Status: backlog", good.read_text())
+        self.assertIn("Status: backlog", other.read_text())  # untouched
+
+    def test_add_repo_flag_targets_named_repo(self) -> None:
+        # --repo promotes a plan in another repo by bare filename, while the
+        # cwd-derived default repo ("workdir") is left alone.
+        other = self._make_plan(
+            "2026-06-08-a.md", status="backlog", repo="elsewhere"
+        )
+        r = run_cli(
+            "crew", "queue", "add", "--repo", "elsewhere", "2026-06-08-a.md",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Status: todo", other.read_text())
+
+    def test_add_repo_flag_error_names_the_repo(self) -> None:
+        r = run_cli(
+            "crew", "queue", "add", "--repo", "elsewhere", "nope.md",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("not found", r.stderr)
+        self.assertIn("elsewhere", r.stderr)
+
+
+class TestQueueDrop(IsolatedHomeTestCase):
+    """`crew queue drop <file>...` — dequeue plans back to Status: backlog.
+
+    The inverse of `add`: same repo-scoping (current repo or `--repo`), bare
+    filenames, all-or-nothing validation — but writes backlog and never touches
+    Agent or mints an id.
+    """
+
+    def _make_plan(
+        self,
+        name: str,
+        status: str = "todo",
+        agent: str = "",
+        repo: str = "workdir",
+    ) -> Path:
+        d = self.plans_root / repo
+        d.mkdir(parents=True, exist_ok=True)
+        fm = ["---"]
+        if agent:
+            fm.append(f"Agent: {agent}")
+        if status:
+            fm.append(f"Status: {status}")
+        fm.append("---")
+        p = d / name
+        p.write_text("\n".join(fm) + f"\n\n# {name}\n", encoding="utf-8")
+        return p
+
+    def test_drop_dequeues_todo_to_backlog(self) -> None:
+        p = self._make_plan("2026-06-08-a.md", status="todo", agent="claude")
+        r = run_cli(
+            "crew", "queue", "drop", "2026-06-08-a.md",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = p.read_text()
+        self.assertIn("Status: backlog", text)
+        self.assertNotIn("Status: todo", text)
+        # dequeue leaves an existing Agent in place, just no longer queued
+        self.assertIn("Agent: claude", text)
+
+    def test_drop_never_mints_or_adds_agent(self) -> None:
+        p = self._make_plan("2026-06-08-a.md", status="todo")  # no Agent
+        r = run_cli(
+            "crew", "queue", "drop", "2026-06-08-a.md",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = p.read_text()
+        self.assertNotIn("Agent:", text)
+        self.assertNotIn("Plan-keeper Ticket", text)
+
+    def test_drop_appends_md_and_targets_repo_flag(self) -> None:
+        other = self._make_plan(
+            "2026-06-08-a.md", status="todo", repo="elsewhere"
+        )
+        r = run_cli(
+            "crew", "queue", "drop", "--repo", "elsewhere", "2026-06-08-a",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Status: backlog", other.read_text())
+
+    def test_drop_is_idempotent_on_already_backlog(self) -> None:
+        p = self._make_plan("2026-06-08-a.md", status="backlog")
+        r = run_cli(
+            "crew", "queue", "drop", "2026-06-08-a.md",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Status: backlog", p.read_text())
+
+    def test_drop_missing_file_exits_3_all_or_nothing(self) -> None:
+        good = self._make_plan("2026-06-08-a.md", status="todo")
+        r = run_cli(
+            "crew", "queue", "drop", "2026-06-08-a.md", "nope.md",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("not found", r.stderr)
+        # nothing written: the good plan stays queued
+        self.assertIn("Status: todo", good.read_text())
 
 
 class TestBlockerHelpers(IsolatedHomeTestCase):

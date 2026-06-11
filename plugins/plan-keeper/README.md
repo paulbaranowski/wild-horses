@@ -109,7 +109,7 @@ On `fetch`, plan-keeper resolves each reference and embeds a `{id, title, status
 The `plan-crew` skill is the human-facing front end for the dispatch queue — triggered by phrases like "show the groundcrew queue" or "queue these plans for groundcrew." It does two things, both backed by the `crew queue` subcommands:
 
 1. **Shows the queue** (`crew queue list`) — the current repo by default, every repo on "all repos" (`--all`), or one named repo (`--repo <name>`). Plans are grouped by `Status`: **Queued** (`todo` — the live dispatch pool), **Available** (`backlog` or unset — promote candidates), and read-only **In flight** (`in-progress`) / **In review** (`in-review`). A plan held by unfinished `Blocked-by:` prerequisites is flagged with its blockers and is never presented as ready-to-dispatch.
-2. **Promotes and dequeues in bulk** (`crew queue set`) — `backlog → todo` to add to the queue, `todo → backlog` to pull out. Multi-select, and confirmation is required before any write. Promoting fills `Agent: claude` when no agent is set and mints the `Plan-keeper Ticket` if absent, so the dispatch id is visible the moment a plan is queued; dequeue never touches `Agent`.
+2. **Promotes and dequeues** (`crew queue add` / `crew queue drop`) — `backlog → todo` to add to the queue, `todo → backlog` to pull out. Plans are named by bare filename within a `--repo` (one call per repo per direction), multi-select, and confirmation is required before any write. Promoting fills `Agent: claude` when no agent is set and mints the `Plan-keeper Ticket` if absent, so the dispatch id is visible the moment a plan is queued; dequeue never touches `Agent`.
 
 plan-crew is the multi-select, cross-repo counterpart to `plan-update` (the single-plan frontmatter editor). It only ever writes `Status` `todo`/`backlog` (plus the promote-time `Agent`/`Plan-keeper Ticket` fills) — the system-managed states (`in-progress`, `in-review`, `done`) are written by groundcrew and `plan-done`, never here.
 
@@ -171,7 +171,8 @@ See [Groundcrew integration](#groundcrew-integration):
 - `crew install [--config PATH] [--dry-run]` — wire `~/plans/*` into a groundcrew config.
 - `crew fetch` / `crew get ${id}` / `crew start ${id}` / `crew review ${id}` — the machine protocol groundcrew's config calls directly.
 - `crew queue list [--all | --repo NAME]` — emit the queue as a JSON array of `{repo, file, status, agent, blocked, blockedBy}`.
-- `crew queue set --status todo|backlog [--default-agent claude]` — bulk-set `Status` on newline-delimited plan paths read from stdin.
+- `crew queue add [--repo NAME] [--agent claude] <file>...` — promote plans to `Status: todo` by bare filename (the current repo by default), minting the `Plan-keeper Ticket` and filling `Agent` where missing.
+- `crew queue drop [--repo NAME] <file>...` — dequeue plans back to `Status: backlog` by bare filename; never touches `Agent`.
 
 #### Maintenance
 
@@ -180,11 +181,8 @@ See [Groundcrew integration](#groundcrew-integration):
 ### Examples
 
 ```bash
-# Queue two plans for groundcrew (paths on stdin via a quoted heredoc):
-plan-keeper crew queue set --status todo --default-agent claude <<'EOF'
-/Users/you/plans/herds/2026-05-22-refactor-db.md
-/Users/you/plans/wild-horses/2026-05-21-readme-pass.md
-EOF
+# Queue two plans in the herds repo for groundcrew (bare filenames):
+plan-keeper crew queue add --repo herds 2026-05-22-refactor-db.md 2026-05-20-fix-auth.md
 
 # Mark a prerequisite dependency, then archive a finished plan:
 plan-keeper file-meta set --file ~/plans/herds/2026-05-22-refactor-db.md --blocked-by "plan-849321 (auth-schema)"

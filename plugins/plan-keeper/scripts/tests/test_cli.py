@@ -850,6 +850,27 @@ class TestVersion(IsolatedHomeTestCase):
             "(bump both together when releasing)",
         )
 
+    def test_top_level_help_banner_includes_version(self) -> None:
+        module = _import_cli_module()
+        r = run_cli("--help", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(module.__version__, r.stdout.splitlines()[0])
+
+    def test_subcommand_help_banner_includes_version(self) -> None:
+        # Every HelpfulArgumentParser stamps the version, including deep
+        # subcommands like `crew queue`.
+        module = _import_cli_module()
+        r = run_cli("crew", "queue", "--help", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(module.__version__, r.stdout.splitlines()[0])
+
+    def test_error_help_banner_includes_version(self) -> None:
+        # The help printed before an argument error also carries the version.
+        module = _import_cli_module()
+        r = run_cli("bogus-subcommand", home=self.home)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn(module.__version__, r.stderr.splitlines()[0])
+
 
 class TestSaveKindInFilename(IsolatedHomeTestCase):
     def test_kind_adds_double_hyphen_suffix(self) -> None:
