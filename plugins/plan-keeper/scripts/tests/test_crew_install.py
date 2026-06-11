@@ -202,8 +202,10 @@ class TestRunCrewInstall(IsolatedHomeTestCase):
         super().setUp()
         self.plans_root.mkdir(parents=True)
         (self.plans_root / "myrepo").mkdir()
+        # Assigned (has an Agent) so it survives the unassigned-plan gate and
+        # counts toward the "visible to fetch" total the installer reports.
         (self.plans_root / "myrepo" / "2026-01-01-x.md").write_text(
-            "---\nStatus: todo\n---\n# X\n"
+            "---\nAgent: claude\nStatus: todo\n---\n# X\n"
         )
         self._root_patch = patch.object(storage, "PLAN_ROOT", self.plans_root)
         self._root_patch.start()
