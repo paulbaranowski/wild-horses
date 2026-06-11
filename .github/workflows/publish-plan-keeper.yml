@@ -102,9 +102,17 @@ jobs:
       - name: Re-point the formula and push to the tap
         if: steps.guard.outputs.published == 'false'
         working-directory: homebrew-tap
+        # Pass the version/tag/repo through env rather than interpolating ${{ }}
+        # straight into the run script: a `${{ }}` value is substituted as text
+        # BEFORE bash parses the script, so a version string with shell
+        # metacharacters could execute here — and this step holds the
+        # HOMEBREW_TAP_TOKEN push capability. As env vars they reach bash as inert
+        # data ($version/$tag/$repo), never re-parsed.
+        env:
+          version: ${{ steps.ver.outputs.version }}
+          tag: ${{ steps.ver.outputs.tag }}
+          repo: ${{ github.repository }}
         run: |
-          version="${{ steps.ver.outputs.version }}"
-          tag="${{ steps.ver.outputs.tag }}"
           # The tap's update-formula.sh takes <formula> <version> — it serves both
           # plan-keeper and crew-config, so the formula name is NOT optional. (A
           # prior single-arg call here read the version AS the formula name and
@@ -122,7 +130,7 @@ jobs:
           # the pre-flight exhausts or the rewrite fails, the run leaves a published
           # tag with a stale formula — the tag-keyed guard above will NOT re-point
           # it on a re-run. Recover with the manual step in RELEASING.md.
-          url="https://github.com/${{ github.repository }}/archive/refs/tags/${tag}.tar.gz"
+          url="https://github.com/${repo}/archive/refs/tags/${tag}.tar.gz"
           attempt=1
           max_attempts=5
           until curl -fsSL -o /dev/null "$url"; do

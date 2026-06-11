@@ -124,7 +124,7 @@ hash it, and fails loudly if the tag doesn't exist yet.
 ```bash
 git clone https://github.com/paulbaranowski/homebrew-tap.git   # if needed
 cd homebrew-tap
-./update-formula.sh <version>          # rewrites url + sha256 in Formula/plan-keeper.rb
+./update-formula.sh plan-keeper <version>   # rewrites url + sha256 in Formula/plan-keeper.rb
 git commit -am "plan-keeper <version>"
 git push
 ```
