@@ -11,7 +11,7 @@ Pull every repo in the config from `origin/<branch>` in one shot. When a working
 
 - **Config:** `~/.config/wild-horses/update-git-repos/repos.json` — `{"default_dirty_action": "ask|skip|stash", "repos": [{"path": "...", "branch": "main", "dirty_action": "ask|skip|stash"}, ...]}`. Both action keys are optional; `default_dirty_action` defaults to `ask`, and a per-repo `dirty_action` overrides it. **Resolution:** per-repo `dirty_action` → top-level `default_dirty_action` → `ask`.
 - **CLI:** `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" <subcommand>`
-- **Subcommands:** `bootstrap-discover --root DIR`, `add PATH [--branch B]`, `remove PATH`, `set-action <ask|skip|stash|inherit> [--repo PATH]`, `list`, `pull-all`, `pull-one PATH [--stash]`
+- **Subcommands:** `bootstrap-discover --root DIR`, `add PATH [--branch B]`, `remove PATH`, `set-action <ask|skip|stash|inherit> [--repo PATH]`, `list`, `pull-all`, `pull-one PATH [--stash]`, `fix-bare PATH`
 - **`list`** prints the full config as JSON. Use it only when the user wants to _preview_ what's configured without pulling — it is **not** part of the pull flow (step 1 below uses `pull-all`'s own empty-config signal instead).
 - **Every subcommand prints JSON on stdout.** Parse it; do not screen-scrape.
 - **Exit codes:** 0 means the command itself succeeded (per-repo errors live inside the JSON's `status` field); non-zero means the command itself failed (bad path, corrupt config, etc).
@@ -41,6 +41,7 @@ Otherwise the CLI inspects every repo, fast-forwards the clean+on-branch ones (a
 | `wrong-branch`             | current branch ≠ configured branch; not pulled                                                                                                                                                                                                                                                                            | report and skip (don't touch — user may be mid-work on a feature branch)                                |
 | `missing`                  | path doesn't exist anymore                                                                                                                                                                                                                                                                                                | report; offer to `remove`                                                                               |
 | `not-a-repo`               | path exists but isn't a git repo                                                                                                                                                                                                                                                                                          | report; offer to `remove`                                                                               |
+| `bare-misconfig`           | a stray `core.bare=true` is set on a real working tree (some worktree tooling re-sets it); git refuses every work-tree op, so it wasn't pulled; carries `error`                                                                                                                                                           | step 3.5 (offer the one-line `fix-bare`)                                                                |
 | `pull-failed`              | the `git fetch` failed (no `origin`, network error, or a remote that needed credentials — prompts are disabled, so auth fails fast instead of hanging) **or** the `--ff-only` fast-forward hit genuinely diverged history; the transient multi-branch `FETCH_HEAD` race is handled internally and no longer surfaces here | report with the `error` field                                                                           |
 | `stash-failed`             | the configured `stash` action's `git stash push` failed before any pull; repo left untouched; carries `error`                                                                                                                                                                                                             | report with the `error` field                                                                           |
 | `pulled-with-pop-conflict` | the configured `stash` action fast-forwarded but `git stash pop` hit a merge conflict; conflict markers are now in the working tree and the stash is gone; carries `pop_error`                                                                                                                                            | tell the user clearly and surface `pop_error` so they know what to resolve                              |
@@ -102,6 +103,25 @@ The result `status` is one of:
 - `pulled-with-pop-conflict` — fast-forward succeeded but `stash pop` hit a merge conflict. **The conflict markers are in the working tree now; the stash is gone.** Tell the user clearly and surface `pop_error` so they know what to resolve.
 - `stash-failed` / `pull-failed` — surface the `error` field; the working tree is unchanged.
 
+### 3.5 Handle misconfigured-bare repos (only those with `status: bare-misconfig`)
+
+A `bare-misconfig` repo is a real working tree with a stray `core.bare=true` — git refuses every work-tree operation until it's unset, so the repo wasn't pulled. Some worktree tooling (emdash/graft) re-sets the flag, so this can recur across runs. For each such repo, ask the user via AskUserQuestion: **"Unset core.bare and pull"** or **"Skip"**.
+
+For "Unset core.bare and pull":
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_repos_cli.py" fix-bare <PATH>
+```
+
+The result carries `action: "unset-bare"` and `status_after` (the repo's status once the flag is gone). Act on `status_after`:
+
+- `ready` — the flag is gone and the repo is clean+on-branch. Run `pull-one <PATH>` and report the result in step 4.
+- `dirty` / `wrong-branch` — the flag is gone but the repo now needs the normal dirty/wrong-branch handling. Fall through to step 3 (dirty prompt) or report and skip (wrong-branch), as appropriate.
+- `bare-misconfig` — the unset didn't stick: the worktree tooling re-set `core.bare=true` between the unset and the re-check. The result carries `error`. Surface it and tell the user the flag is being re-set by an external tool (re-running `fix-bare` will just lose the same race) — the durable fix is upstream, outside this skill's scope.
+- `fix-failed` — `git config core.bare false` itself failed; surface the `error` field, repo left as-is.
+
+On "Skip": report it under "Skipped:" in step 4 and leave the flag in place.
+
 ### 4. Summary
 
 Keep it terse — fewer tokens is better. **Only list repos that need the user's attention**: those that were `pulled` (so they see what changed) and those with a problem (`skipped`, `wrong-branch`, `dirty`, errors). **Render the `up_to_date` count as a single line** — `Up to date (no change): N repos` (the CLI already excluded those repos from `results`, so there are no paths to enumerate). If a whole group is empty, omit its header entirely.
@@ -136,3 +156,4 @@ When everything was already current and nothing else happened, the entire summar
 - **Don't skip the empty-config case.** `pull-all` returns `{"empty": true, ...}` (exit 0) when the config has no repos — handle that by routing into step 2, not by treating it as an error.
 - **Don't include `node_modules` or build dirs in `bootstrap-discover` results manually.** The CLI already skips them; if you see surprising paths, report them so we can extend the skip list, don't filter on the agent side.
 - **Don't pass `--branch` to `add` unless the user asked for a non-default branch.** The CLI's auto-detection from `origin/HEAD` is what makes the config self-maintaining.
+- **Don't run `fix-bare` on a genuinely bare repo.** `fix-bare` guards itself: it refuses (exit 2, "not a misconfigured-bare repo") anything that isn't a real working tree wrongly flagged `core.bare=true`. That refusal is correct, not an error to work around — never try to force `core.bare false` on a repo the guard rejects.
