@@ -109,7 +109,13 @@ def _plan_to_issue(
         "description": body.rstrip(),
         "status": adapter_status,
         "repository": repo_name,
-        "model": meta.get("Agent", "") or "claude",
+        # groundcrew's shellIssueSchema declares `agent: z.string().nullable()`
+        # — a required key with a nullable value. Emit the plan's Agent: tag, or
+        # null when it has none. crew fetch never surfaces agent-less plans (see
+        # `_is_unassigned`), so a null agent only reaches here via `crew get`,
+        # where null honestly says "unassigned" rather than fabricating a
+        # "claude" default for a plan no one has claimed.
+        "agent": meta.get("Agent", "").strip() or None,
         "assignee": "",
         "updatedAt": _iso_mtime(path),
         "blockers": blockers,
@@ -331,51 +337,42 @@ def _detect_dependency_cycles(index: dict[str, dict]) -> list[list[str]]:
     return cycles
 
 
-# Active states a human owns once they pick a plan up outside the crew:
-# in-progress (work) and in-review (review). backlog/todo are never
-# locally-driven — they're either parked or queued-for-dispatch — so they
-# stay visible regardless of Agent.
-_LOCALLY_DRIVEN_STATES = frozenset({"in-progress", "in-review"})
+def _is_unassigned(path: Path) -> bool:
+    """True for a plan with no ``Agent:`` tag — groundcrew's signal that no one
+    has claimed it for dispatch.
 
-
-def _is_locally_driven(path: Path) -> bool:
-    """True for a plan a human is driving outside groundcrew: an active state
-    (``in-progress`` or ``in-review``) with no ``Agent``.
-
-    groundcrew claims the ``Agent`` at queue time (``crew queue`` / the
-    plan-crew skill), so an active plan that still has no Agent was never
-    queued — a human picked it up in their own session (e.g. via ``plan-do``).
-    Once they own it, every active state it passes through is theirs, so it
-    must stay invisible to ``crew fetch``: groundcrew would otherwise count an
-    in-progress plan against its slot cap (surfacing it under "In progress (no
-    local worktree)") or act on an in-review one, even though no crew worktree
-    will ever exist for it. Read from the raw frontmatter, not the issue dict,
-    because ``_plan_to_issue`` coerces an empty Agent to the ``claude`` default
-    and so can no longer tell the two apart. Best-effort: an
-    unreadable/unparseable file is not treated as locally driven (it's filtered
+    The ``Agent`` tag is the single dispatch gate: groundcrew (via the
+    plan-crew skill / ``crew queue``) writes it when a plan is promoted to the
+    queue, and a human driving a plan in their own session (e.g. via
+    ``plan-do``) leaves it cleared. Either way, an agent-less plan is not
+    groundcrew's to run, so ``crew fetch`` skips it in *every* status — a parked
+    ``backlog`` plan, a human-picked-up ``in-progress`` one, and an
+    ``in-review`` one a human owns are all hidden alike. (This subsumes the
+    older active-state-only "locally driven" rule.) Read from raw frontmatter,
+    not the issue dict, so the skip happens before ``_collect_crew_issues``
+    mints an id into a plan it's about to drop. Best-effort: an
+    unreadable/unparseable file is not treated as unassigned (it's filtered
     elsewhere anyway).
     """
     try:
         meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
     except (OSError, PlanKeeperCliError):
         return False
-    return (
-        meta.get("Status", "").strip() in _LOCALLY_DRIVEN_STATES
-        and not meta.get("Agent", "").strip()
-    )
+    return not meta.get("Agent", "").strip()
 
 
 def _collect_crew_issues() -> list[dict]:
     """Every active plan under ``~/plans/<repo>/*.md`` as shell-adapter issues.
 
     One level deep — ``done/`` and ``deferred/`` are excluded (they're not
-    dispatchable). Plans being driven locally (in-progress with no Agent — see
-    ``_is_locally_driven``) are excluded too, so groundcrew never tracks work a
-    human picked up in their own session. Mints a frozen ``Plan-keeper Ticket``
-    for any plan that lacks one (mint-once, no overwrite) so every emitted issue
-    has a stable id. Shared by ``crew fetch`` (which then asserts no id
-    collisions) and ``crew install``'s post-patch data-path check, so both see
-    the exact same plan set.
+    dispatchable). Agent-less plans (no ``Agent:`` tag — see ``_is_unassigned``)
+    are excluded too, in every status: groundcrew only tracks plans explicitly
+    assigned for dispatch, never untriaged backlog or work a human picked up in
+    their own session. Mints a frozen ``Plan-keeper Ticket`` for any plan that
+    lacks one (mint-once, no overwrite) so every emitted issue has a stable id.
+    Shared by ``crew fetch`` (which then asserts no id collisions) and
+    ``crew install``'s post-patch data-path check, so both see the exact same
+    plan set.
     """
     issues: list[dict] = []
     if not storage.PLAN_ROOT.exists():
@@ -398,7 +395,7 @@ def _collect_crew_issues() -> list[dict]:
         for plan in sorted(repo_entry.iterdir()):
             if not plan.is_file() or not plan.name.endswith(".md"):
                 continue
-            if _is_locally_driven(plan):
+            if _is_unassigned(plan):
                 continue
             mint_into_path_if_absent(plan)
             issue = _plan_to_issue(plan, index=index, warn_label=plan.stem)
