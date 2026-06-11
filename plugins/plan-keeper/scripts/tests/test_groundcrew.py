@@ -54,9 +54,14 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             self.assertEqual(by_stem["2026-01-03-c"]["status"], "in-progress")
             self.assertEqual(by_stem["2026-01-01-a"]["repository"], "groundcrew")
             self.assertEqual(by_stem["2026-01-03-c"]["repository"], "herds")
-            self.assertEqual(by_stem["2026-01-01-a"]["model"], "claude")
+            self.assertEqual(by_stem["2026-01-01-a"]["agent"], "claude")
             for issue in issues:
                 self.assertRegex(issue["id"], r"^plan-\d+$")
+                # groundcrew's shellIssueSchema requires the `agent` key (the
+                # value is nullable, the key is not). The legacy `model` key
+                # must be gone so this can't silently regress.
+                self.assertIn("agent", issue)
+                self.assertNotIn("model", issue)
 
     def test_groundcrew_fetch_uses_h1_as_title(self):
         """Title comes from the first H1 in the body, not the filename."""
@@ -270,15 +275,23 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             }
             self.assertNotIn("2026-01-01-local", stems)
 
-    def test_groundcrew_fetch_keeps_agent_less_plan_when_not_in_progress(self):
-        """The hide rule is scoped to in-progress: a todo/backlog plan with no
-        Agent is still dispatchable and must stay visible (the model defaults
-        to claude downstream)."""
+    def test_groundcrew_fetch_hides_agent_less_plan_in_any_status(self):
+        """An agent-less plan is groundcrew's to run only once assigned: the
+        Agent: tag is the dispatch gate (the plan-crew skill writes it at queue
+        time). So a todo/backlog plan with no Agent is *not* fetched — the rule
+        spans every status, not just the active ones. A sibling plan that does
+        carry an Agent in the same statuses stays visible."""
         with tempfile.TemporaryDirectory() as home:
             d = Path(home) / "plans" / "r"
             d.mkdir(parents=True)
-            (d / "2026-01-01-todo.md").write_text(
-                "---\nStatus: todo\n---\n# Todo\n"
+            (d / "2026-01-01-todo-bare.md").write_text(
+                "---\nStatus: todo\n---\n# Todo bare\n"
+            )
+            (d / "2026-01-02-backlog-bare.md").write_text(
+                "---\nStatus: backlog\n---\n# Backlog bare\n"
+            )
+            (d / "2026-01-03-todo-assigned.md").write_text(
+                "---\nAgent: claude\nStatus: todo\n---\n# Todo assigned\n"
             )
             result = run_cli("crew", "fetch", home=Path(home), cwd=self.cwd)
             self.assertEqual(result.returncode, 0, msg=result.stderr)
@@ -286,7 +299,9 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
                 Path(i["sourceRef"]["path"]).stem
                 for i in json.loads(result.stdout)
             }
-            self.assertIn("2026-01-01-todo", stems)
+            self.assertNotIn("2026-01-01-todo-bare", stems)
+            self.assertNotIn("2026-01-02-backlog-bare", stems)
+            self.assertIn("2026-01-03-todo-assigned", stems)
 
 class TestGroundcrewId(IsolatedHomeTestCase):
     """Synthesized groundcrew ticket id (stateless deterministic hash)."""
@@ -419,7 +434,13 @@ class TestGroundcrewResolveOne(IsolatedHomeTestCase):
         )
         result = run_cli("crew", "get", ticket, home=self.home, cwd=self.cwd)
         self.assertEqual(result.returncode, 0, msg=result.stderr)
-        self.assertEqual(json.loads(result.stdout)["id"], ticket)
+        issue = json.loads(result.stdout)
+        self.assertEqual(issue["id"], ticket)
+        # No Agent: -> the issue carries `agent: null` (schema-valid; the key is
+        # required, the value nullable), never a fabricated "claude" default and
+        # never the legacy `model` key.
+        self.assertIsNone(issue["agent"])
+        self.assertNotIn("model", issue)
 
     def test_groundcrew_resolve_one_missing_returns_exit_3(self):
         """Spec: 'prints nothing for "not found", or exits 3.' We pick exit 3."""
@@ -1131,10 +1152,14 @@ class TestBlockedByGate(IsolatedHomeTestCase):
 
     def test_fetch_embeds_blocker_snapshot(self) -> None:
         d = self._repo()
-        (d / "2026-01-01-dep.md").write_text("---\nStatus: todo\n---\n# Dep\n")
+        # Both plans carry an Agent so they survive the unassigned-plan gate and
+        # appear in fetch; this test is about the blocker snapshot, not the gate.
+        (d / "2026-01-01-dep.md").write_text(
+            "---\nAgent: claude\nStatus: todo\n---\n# Dep\n"
+        )
         dep_id = groundcrew.plankeeper_id("r", "2026-01-01-dep")
         (d / "2026-01-02-main.md").write_text(
-            f"---\nStatus: todo\nBlocked-by: {dep_id}\n---\n# Main\n"
+            f"---\nAgent: claude\nStatus: todo\nBlocked-by: {dep_id}\n---\n# Main\n"
         )
         issues = json.loads(
             run_cli("crew", "fetch", home=self.home, cwd=self.cwd).stdout
@@ -1157,7 +1182,7 @@ class TestBlockedByGate(IsolatedHomeTestCase):
         (done / "2026-01-01-dep.md").write_text("---\nStatus: done\n---\n# Dep\n")
         dep_id = groundcrew.plankeeper_id("r", "2026-01-01-dep")
         (d / "2026-01-02-main.md").write_text(
-            f"---\nStatus: todo\nBlocked-by: {dep_id}\n---\n# Main\n"
+            f"---\nAgent: claude\nStatus: todo\nBlocked-by: {dep_id}\n---\n# Main\n"
         )
         issues = json.loads(
             run_cli("crew", "fetch", home=self.home, cwd=self.cwd).stdout
@@ -1175,7 +1200,7 @@ class TestBlockedByGate(IsolatedHomeTestCase):
             "---\nLinear Ticket: ENG-9\nStatus: in-review\n---\n# Dep\n"
         )
         (d / "2026-01-02-main.md").write_text(
-            "---\nStatus: todo\nBlocked-by: ENG-9 (dep)\n---\n# Main\n"
+            "---\nAgent: claude\nStatus: todo\nBlocked-by: ENG-9 (dep)\n---\n# Main\n"
         )
         issues = json.loads(
             run_cli("crew", "fetch", home=self.home, cwd=self.cwd).stdout
@@ -1189,7 +1214,7 @@ class TestBlockedByGate(IsolatedHomeTestCase):
     def test_fetch_warns_on_unresolved_ref(self) -> None:
         d = self._repo()
         (d / "2026-01-02-main.md").write_text(
-            "---\nStatus: todo\nBlocked-by: plan-404\n---\n# Main\n"
+            "---\nAgent: claude\nStatus: todo\nBlocked-by: plan-404\n---\n# Main\n"
         )
         r = run_cli("crew", "fetch", home=self.home, cwd=self.cwd)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -1215,9 +1240,10 @@ class TestBlockedByGate(IsolatedHomeTestCase):
         fetch) prints no stderr warning on an unresolved ref."""
         d = self._repo()
         (d / "2026-01-02-main.md").write_text(
-            "---\nStatus: todo\nBlocked-by: plan-404\n---\n# Main\n"
+            "---\nAgent: claude\nStatus: todo\nBlocked-by: plan-404\n---\n# Main\n"
         )
-        # fetch first so the plan gets a minted, resolvable id.
+        # fetch first so the plan gets a minted, resolvable id. (An agent-less
+        # plan would be skipped before minting, so the Agent tag is required.)
         run_cli("crew", "fetch", home=self.home, cwd=self.cwd)
         main_id = groundcrew.plankeeper_id("r", "2026-01-02-main")
         r = run_cli("crew", "get", main_id, home=self.home, cwd=self.cwd)
