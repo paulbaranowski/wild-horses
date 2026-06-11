@@ -370,7 +370,12 @@ class TestFetchMintFailure(IsolatedHomeTestCase):
     def test_fetch_excludes_plan_when_mint_cannot_persist(self):
         d = self.plans_root / "r"
         d.mkdir(parents=True)
-        (d / "2026-01-01-x.md").write_text("---\nStatus: todo\n---\n# X\n")
+        # Agent: claude clears the unassigned-plan gate in _collect_crew_issues
+        # so execution reaches mint_into_path_if_absent — without it the plan is
+        # skipped early and the patched write-failure path below never runs.
+        (d / "2026-01-01-x.md").write_text(
+            "---\nAgent: claude\nStatus: todo\n---\n# X\n"
+        )
         with patch.object(storage, "PLAN_ROOT", self.plans_root), \
                 patch("plan_keeper.ids.write_atomic", side_effect=OSError("disk full")):
             issues = groundcrew._collect_crew_issues()
