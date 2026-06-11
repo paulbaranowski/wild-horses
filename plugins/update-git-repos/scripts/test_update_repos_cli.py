@@ -17,6 +17,7 @@ under the tempdir, never touching the user's real config.
 
 Mirrors the precedent at plugins/plan-keeper/scripts/tests/.
 """
+import importlib.util
 import json
 import os
 import shutil
@@ -29,6 +30,14 @@ from pathlib import Path
 
 CLI = Path(__file__).parent / "update_repos_cli.py"
 ALLOW_SCRIPT = Path(__file__).parent / "update-repos-cli-allow.sh"
+
+# Import the CLI module in-process so pure helpers (e.g. is_misconfigured_bare)
+# can be unit-tested directly, not only through the subprocess surface. Safe
+# because the module guards execution behind `if __name__ == "__main__"`.
+_spec = importlib.util.spec_from_file_location("update_repos_cli", CLI)
+assert _spec and _spec.loader
+update_repos_cli = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(update_repos_cli)
 
 
 def run_cli(
@@ -1142,6 +1151,149 @@ class TestSetAction(IsolatedHomeTestCase):
 
     def test_set_unknown_repo_exits_2(self) -> None:
         r = run_cli("set-action", "skip", "--repo", "/nope", home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not in config", r.stderr)
+
+
+class TestMisconfiguredBare(IsolatedHomeTestCase):
+    """A real working tree with a stray `core.bare = true` makes git refuse
+    every work-tree operation ('fatal: this operation must be run in a work
+    tree'), so a plain pull came back as an opaque `pull-failed`. The CLI now
+    detects the specific contradiction — `is-bare-repository` reads core.bare
+    (true) while `--git-dir` still resolves to a real `.git` subdir — surfaces it
+    as `bare-misconfig`, and `fix-bare` offers the one-line repair
+    (`git config core.bare false`). A genuinely bare repo has `--git-dir == '.'`
+    and is correctly left untouched."""
+
+    @staticmethod
+    def _flip_to_bare(repo: Path) -> None:
+        git(repo, "config", "core.bare", "true")
+
+    def test_helper_true_for_flipped_working_tree(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        self._flip_to_bare(repo)
+        self.assertTrue(update_repos_cli.is_misconfigured_bare(repo))
+
+    def test_helper_false_for_genuine_bare_repo(self) -> None:
+        bare = (self.scratch / "genuine.git")
+        git(self.scratch, "init", "--bare", "-b", "main", str(bare))
+        self.assertFalse(update_repos_cli.is_misconfigured_bare(bare.resolve()))
+
+    def test_helper_false_for_normal_repo(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        self.assertFalse(update_repos_cli.is_misconfigured_bare(repo))
+
+    def test_pull_all_surfaces_bare_misconfig_not_pull_failed(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        self._flip_to_bare(repo)
+        self.write_config([{"path": str(repo), "branch": "main"}])
+        r = run_cli("pull-all", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        result = json.loads(r.stdout)["results"][0]
+        self.assertEqual(result["status"], "bare-misconfig")
+        self.assertTrue(result.get("error"), result)
+
+    def test_pull_one_surfaces_bare_misconfig_without_pulling(self) -> None:
+        bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        commit_to_bare(bare, self.scratch, "main")  # a real pull would fast-forward
+        self._flip_to_bare(repo)
+        self.write_config([{"path": str(repo), "branch": "main"}])
+        r = run_cli("pull-one", str(repo), home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["status"], "bare-misconfig")
+        # Refused to act, so the available fast-forward must NOT have landed.
+        self.assertFalse((repo / "extra.txt").exists())
+
+    def test_fix_bare_unsets_flag_and_a_later_pull_fast_forwards(self) -> None:
+        bare, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        commit_to_bare(bare, self.scratch, "main")
+        self._flip_to_bare(repo)
+        self.write_config([{"path": str(repo), "branch": "main"}])
+
+        r = run_cli("fix-bare", str(repo), home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        data = json.loads(r.stdout)
+        self.assertEqual(data["action"], "unset-bare")
+        self.assertEqual(data["status_after"], "ready")
+        # The flag is actually gone now, so the repo no longer reads as bare.
+        self.assertFalse(update_repos_cli.is_misconfigured_bare(repo))
+
+        # And a follow-up pull-one fast-forwards cleanly.
+        r2 = run_cli("pull-one", str(repo), home=self.home)
+        self.assertEqual(json.loads(r2.stdout)["status"], "pulled")
+        self.assertTrue((repo / "extra.txt").exists())
+
+    def test_fix_bare_reports_dirty_status_after_for_dirty_tree(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        (repo / "README.md").write_text("dirty\n")  # tracked-file edit
+        self._flip_to_bare(repo)
+        self.write_config([{"path": str(repo), "branch": "main"}])
+        r = run_cli("fix-bare", str(repo), home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["status_after"], "dirty")
+
+    def test_fix_bare_propagates_error_when_flag_is_reset_after_unset(self) -> None:
+        # The recurrence the feature exists for: the worktree tooling re-sets
+        # core.bare=true right after we unset it. We simulate that with a `git`
+        # shim that no-ops `config core.bare false` (so the flag never actually
+        # clears) but defers every other call to real git. fix-bare's git config
+        # then "succeeds" (rc 0), but the re-check still reads bare-misconfig —
+        # and the result must carry that error through, not silently drop it.
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        self._flip_to_bare(repo)
+        self.write_config([{"path": str(repo), "branch": "main"}])
+
+        real_git = shutil.which("git")
+        assert real_git, "git must be on PATH for this test"
+        shim_dir = self.home / "bin"
+        shim_dir.mkdir()
+        shim = shim_dir / "git"
+        shim.write_text(
+            "#!/bin/sh\n"
+            'case "$*" in\n'
+            "  *'config core.bare false'*) exit 0 ;;\n"   # pretend the unset didn't stick
+            "esac\n"
+            f'exec "{real_git}" "$@"\n'
+        )
+        shim.chmod(0o755)
+
+        r = run_cli(
+            "fix-bare", str(repo), home=self.home,
+            env_extra={"PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"},
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        data = json.loads(r.stdout)
+        self.assertEqual(data["action"], "unset-bare")
+        self.assertEqual(data["status_after"], "bare-misconfig")
+        self.assertTrue(data.get("error"), data)  # not silently dropped
+
+    def test_fix_bare_guard_refuses_genuine_bare_repo(self) -> None:
+        bare = (self.scratch / "genuine.git")
+        git(self.scratch, "init", "--bare", "-b", "main", str(bare))
+        bare = bare.resolve()
+        self.write_config([{"path": str(bare), "branch": "main"}])
+        r = run_cli("fix-bare", str(bare), home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not a misconfigured-bare", r.stderr)
+        # The guard must leave a genuinely bare repo untouched.
+        check = subprocess.run(
+            ["git", "-C", str(bare), "config", "--get", "core.bare"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(check.stdout.strip(), "true")
+
+    def test_fix_bare_guard_refuses_already_normal_repo(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        self.write_config([{"path": str(repo), "branch": "main"}])
+        r = run_cli("fix-bare", str(repo), home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not a misconfigured-bare", r.stderr)
+
+    def test_fix_bare_not_in_config_exits_2(self) -> None:
+        _, repo = make_remote_and_clone(self.work, self.scratch, "alpha")
+        self._flip_to_bare(repo)
+        self.write_config([])  # never added
+        r = run_cli("fix-bare", str(repo), home=self.home)
         self.assertEqual(r.returncode, 2)
         self.assertIn("not in config", r.stderr)
 

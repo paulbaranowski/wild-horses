@@ -32,14 +32,15 @@ A bundled `scripts/update_repos_cli.py` does all I/O and git calls. Each subcomm
 
 ### Subcommands
 
-| subcommand                      | what it does                                                         |
-| ------------------------------- | -------------------------------------------------------------------- |
-| `bootstrap-discover --root DIR` | walk `DIR` for `.git`, print discovered repos + their default branch |
-| `add PATH [--branch B]`         | add or update one entry (auto-detects branch from `origin/HEAD`)     |
-| `remove PATH`                   | drop one entry from the config                                       |
-| `list`                          | print the current config as JSON                                     |
-| `pull-all`                      | inspect every repo, pull the clean+on-branch ones, report the rest   |
-| `pull-one PATH [--stash]`       | pull one repo, optionally stash-pull-pop                             |
+| subcommand                      | what it does                                                                 |
+| ------------------------------- | ---------------------------------------------------------------------------- |
+| `bootstrap-discover --root DIR` | walk `DIR` for `.git`, print discovered repos + their default branch         |
+| `add PATH [--branch B]`         | add or update one entry (auto-detects branch from `origin/HEAD`)             |
+| `remove PATH`                   | drop one entry from the config                                               |
+| `list`                          | print the current config as JSON                                             |
+| `pull-all`                      | inspect every repo, pull the clean+on-branch ones, report the rest           |
+| `pull-one PATH [--stash]`       | pull one repo, optionally stash-pull-pop                                     |
+| `fix-bare PATH`                 | unset a stray `core.bare=true` on a real working tree, then re-report status |
 
 ## Safety
 
@@ -47,6 +48,7 @@ A bundled `scripts/update_repos_cli.py` does all I/O and git calls. Each subcomm
 - Dirty repos are never auto-stashed; you're asked per repo.
 - `stash pop` conflicts are reported explicitly so you know the conflict markers are in the working tree.
 - `wrong-branch` repos are reported, never silently checked out.
+- A real working tree wrongly flagged `core.bare=true` (some worktree tooling re-sets it) is detected as `bare-misconfig` rather than an opaque `pull-failed`, and `fix-bare` offers the one-line repair. Detection requires both `git rev-parse --is-bare-repository` == `true` **and** `--git-dir` resolving to a real `.git` subdir, so a genuinely bare repo (`--git-dir` == `.`) is excluded; `fix-bare` re-checks that signature and refuses anything else.
 - Config writes are atomic (`tmp + fsync + os.replace`).
 
 ## Tests

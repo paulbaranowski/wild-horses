@@ -338,6 +338,27 @@ def is_git_repo(path: Path) -> bool:
     return rc == 0
 
 
+def is_misconfigured_bare(path: Path) -> bool:
+    """True for a real working tree wrongly flagged core.bare=true.
+
+    Some worktree tooling (emdash/graft) intermittently sets core.bare=true on a
+    normal checkout, after which git refuses every work-tree operation
+    ('fatal: this operation must be run in a work tree'). We detect the
+    contradiction between two queries: `--is-bare-repository` reads the core.bare
+    flag (true), while `--git-dir` reports the on-disk layout — a real checkout
+    still resolves to a '.git' subdir. A genuine bare repo returns '.', so it is
+    correctly excluded and left untouched.
+    """
+    rc, bare, _ = git(path, "rev-parse", "--is-bare-repository")
+    if rc != 0 or bare.strip() != "true":
+        return False
+    rc, gitdir, _ = git(path, "rev-parse", "--git-dir")
+    if rc != 0:
+        return False
+    name = gitdir.strip().rstrip("/").rsplit("/", 1)[-1]
+    return name == ".git"
+
+
 def detect_default_branch(repo_path: Path) -> str:
     """Best-effort default branch: origin/HEAD -> current branch -> 'main'."""
     rc, out, _ = git(repo_path, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
@@ -357,7 +378,7 @@ def repo_status(repo_path: str, branch: str) -> dict:
     """Inspect a repo without mutating it.
 
     Returns a dict with at minimum {path, branch, status}. Status is one of:
-      missing, not-a-repo, wrong-branch, dirty, ready
+      missing, not-a-repo, bare-misconfig, wrong-branch, dirty, ready
     """
     p = Path(repo_path).expanduser()
     out: dict = {"path": str(p), "branch": branch}
@@ -367,6 +388,17 @@ def repo_status(repo_path: str, branch: str) -> dict:
         return out
     if not is_git_repo(p):
         out["status"] = "not-a-repo"
+        return out
+
+    # A real working tree with a stray core.bare=true must be caught here, before
+    # `git status` (the dirty check below) fatals with 'must be run in a work
+    # tree' and the failure surfaces as an opaque downstream pull-failed.
+    if is_misconfigured_bare(p):
+        out["status"] = "bare-misconfig"
+        out["error"] = (
+            "core.bare=true is set on a real working tree; every work-tree "
+            "operation will fail until it is unset (git config core.bare false)."
+        )
         return out
 
     rc, current, _ = git(p, "branch", "--show-current")
@@ -708,6 +740,56 @@ def cmd_pull_one(args: argparse.Namespace) -> None:
     print(json.dumps(pull_repo(entry["path"], entry["branch"], stash=args.stash), indent=2))
 
 
+def cmd_fix_bare(args: argparse.Namespace) -> None:
+    """Unset a stray core.bare=true on a real working tree, then re-report status.
+
+    Guarded twice: the path must be in config (like pull-one/remove), and it must
+    still read as misconfigured-bare at call time — so we never flip core.bare on
+    a genuinely bare repo or one already fixed. After unsetting, re-run the status
+    check so the caller knows whether a follow-up pull-one is safe.
+    """
+    p = resolve_path(args.path)
+    cfg = load_config()
+    entry = next((r for r in cfg["repos"] if resolve_path(r["path"]) == p), None)
+    if not entry:
+        sys.stderr.write(f"ERROR: not in config: {p}\n")
+        sys.exit(2)
+
+    if not is_misconfigured_bare(p):
+        sys.stderr.write(
+            f"ERROR: {p} is not a misconfigured-bare repo (core.bare is not a "
+            "stray flag on a real working tree); refusing to touch it.\n"
+        )
+        sys.exit(2)
+
+    rc, out, err = git(p, "config", "core.bare", "false")
+    if rc != 0:
+        print(json.dumps({
+            "path": str(p),
+            "action": "unset-bare",
+            "status": "fix-failed",
+            "error": (err or out).strip() or "git config core.bare false failed",
+        }, indent=2))
+        return
+
+    status_after = repo_status(entry["path"], entry["branch"])
+    result: dict = {
+        "path": str(p),
+        "action": "unset-bare",
+        "branch": entry["branch"],
+        "status_after": status_after["status"],
+    }
+    if status_after.get("current_branch"):
+        result["current_branch"] = status_after["current_branch"]
+    # status_after may still be a problem state — notably `bare-misconfig` again,
+    # if the worktree tooling that causes this re-set core.bare between our unset
+    # and this re-check (the exact recurrence this feature exists for). Carry its
+    # error through so the caller isn't left blind to why the repo still won't pull.
+    if status_after.get("error"):
+        result["error"] = status_after["error"]
+    print(json.dumps(result, indent=2))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="update_repos_cli.py", description="Pull all configured git repos.")
     sp = parser.add_subparsers(dest="cmd", required=True)
@@ -744,6 +826,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_po.add_argument("path")
     p_po.add_argument("--stash", action="store_true", help="Stash before pulling, pop after.")
     p_po.set_defaults(func=cmd_pull_one)
+
+    p_fb = sp.add_parser("fix-bare", help="Unset a stray core.bare=true on a real working tree.")
+    p_fb.add_argument("path")
+    p_fb.set_defaults(func=cmd_fix_bare)
 
     return parser
 
