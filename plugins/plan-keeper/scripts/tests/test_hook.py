@@ -44,6 +44,16 @@ class TestAllowScript(unittest.TestCase):
             "python3 /home/u/.claude/plugins/cache/wh/plan-keeper/1.1.0/scripts/plan_keeper_cli.py list"
         )
 
+    def test_refresh_worktree_cli_dev_path(self) -> None:
+        self.assert_match(
+            "python3 /repo/plugins/plan-keeper/scripts/refresh_worktree_cli.py refresh"
+        )
+
+    def test_refresh_worktree_cli_quoted_installed_path(self) -> None:
+        self.assert_match(
+            'python3 "/home/u/.claude/plugins/cache/wh/plan-keeper/6.1.0/scripts/refresh_worktree_cli.py" refresh'
+        )
+
     # --- Non-match cases (the new tighter regex must reject these) ---
 
     def test_rejects_python_c_exploit(self) -> None:
@@ -74,6 +84,16 @@ class TestAllowScript(unittest.TestCase):
     def test_rejects_missing_plan_keeper_segment(self) -> None:
         self.assert_no_match(
             "python3 /a/b/scripts/plan_keeper_cli.py list"
+        )
+
+    def test_rejects_refresh_cli_outside_plan_keeper(self) -> None:
+        self.assert_no_match(
+            "python3 /a/b/scripts/refresh_worktree_cli.py refresh"
+        )
+
+    def test_rejects_unrelated_script_named_like_refresh(self) -> None:
+        self.assert_no_match(
+            "python3 /a/b/plan-keeper/scripts/refresh_worktree_cli_evil.py refresh"
         )
 
 
