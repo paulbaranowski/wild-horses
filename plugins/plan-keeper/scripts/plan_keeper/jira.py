@@ -71,6 +71,10 @@ def refresh_jira_cache(site: str, email: str, api_token: str) -> list[str]:
     return warnings
 
 
+# Matches a bare hostname with an optional `:port` — the `(?::\d+)?` group is
+# that optional port. The pattern admits no scheme, path, userinfo, or `@`, so
+# a site value cannot smuggle a different authority into the constructed URL
+# and redirect the Basic-auth header to an attacker-controlled host.
 _JIRA_SITE_RE = re.compile(r"^[A-Za-z0-9.\-]+(?::\d+)?$")
 
 

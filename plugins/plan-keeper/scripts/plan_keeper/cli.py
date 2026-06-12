@@ -726,6 +726,10 @@ def cmd_crew_fetch(args) -> int:
     return 0
 
 
+# The character class excludes `/` and `\`, so a crew id can never contain a
+# path separator. `_resolve_crew_id` joins the id under PLAN_ROOT to locate a
+# plan file; rejecting separators here keeps a crafted id (e.g. `../../etc`)
+# from traversing out of PLAN_ROOT during that resolution.
 _GROUNDCREW_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -1500,6 +1504,11 @@ _REPO_DISPATCH = {
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    # Top-level command table. Nested subcommands are not resolved here: each
+    # group delegates to its module-level `_*_DISPATCH` table, which may itself
+    # delegate again. E.g. `crew queue add` runs `crew` -> `_CREW_DISPATCH` ->
+    # `queue` -> `_QUEUE_DISPATCH` -> `add`. Look in those tables for the leaf
+    # handlers, not here.
     dispatch = {
         "repo": lambda a: _dispatch(_REPO_DISPATCH, a.repo_cmd, "repo command")(a),
         "list": cmd_list,
