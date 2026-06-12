@@ -10,12 +10,17 @@ key per field, ``agent`` nullable). ``IndexEntry`` is plan-keeper's internal
 per-repo plan index entry. ``QueueRow`` is one row of ``crew queue list``'s
 JSON array.
 """
-from typing import Any, Optional, TypedDict
+from typing import Any, Literal, Optional, TypedDict
 
 # A decoded JSON object from an HTTP boundary. The alias localizes the ``Any``
 # to the raw-response layer (``http_post_json`` / ``http_get_json``); the
 # transform functions narrow it into the concrete row TypedDicts below.
 JsonObject = dict[str, Any]
+
+# The closed plan-Kind vocabulary. Members mirror ``frontmatter.VALID_KINDS``
+# exactly; that tuple stays the runtime source of truth (validation iterates it)
+# and this Literal is the static mirror so signatures can name the closed set.
+Kind = Literal["idea", "prd", "design", "spec", "exec-plan"]
 
 
 class LinearDefaults(TypedDict, total=False):

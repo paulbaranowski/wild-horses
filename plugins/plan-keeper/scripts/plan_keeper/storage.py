@@ -9,9 +9,18 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+from typing import Literal
 
 from plan_keeper.errors import PlanKeeperCliError
 from plan_keeper.frontmatter import parse_frontmatter
+
+# The closed lifecycle-Status vocabulary. Members mirror ``LIFECYCLE_STATES``
+# (``ACTIVE_STATES`` + the ``TERMINAL_DIRS`` keys) exactly; that tuple stays the
+# runtime source of truth and this Literal is the static mirror so signatures
+# can name the closed set.
+Status = Literal[
+    "backlog", "todo", "in-progress", "in-review", "done", "deferred"
+]
 
 PLAN_ROOT = Path.home() / "plans"
 MAX_SLUG_LEN = 50

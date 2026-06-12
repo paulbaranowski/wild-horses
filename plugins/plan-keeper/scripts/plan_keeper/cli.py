@@ -86,6 +86,7 @@ from plan_keeper.push import push_subcommand
 from plan_keeper.upgrade import default_capture, default_stream, run_upgrade
 from plan_keeper.storage import (
     LIFECYCLE_STATES,
+    Status,
     TERMINAL_DIRS,
     emit_collision,
     find_unused_suffix,
@@ -601,7 +602,7 @@ def cmd_file_meta_set(args) -> int:
     return 0
 
 
-def _terminal_target(source: Path, status: str) -> Path:
+def _terminal_target(source: Path, status: Status) -> Path:
     """Destination path for relocating `source` to a terminal `status`.
 
     The repo root is `source`'s parent, unless `source` already sits in a
@@ -730,7 +731,7 @@ def cmd_crew_get(args) -> int:
     return 0
 
 
-def _crew_set_status(plan_id: str, status: str) -> int:
+def _crew_set_status(plan_id: str, status: Status) -> int:
     """Flip the plan named by `${id}` to `Status: <status>`, exit 3 if no plan
     maps to that id. Shared body of `crew start` (in-progress) and `crew review`
     (in-review) — the two markIn* legs of the groundcrew TicketSource adapter.

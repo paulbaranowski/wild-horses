@@ -10,7 +10,7 @@ rather than owning the algorithm.
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from plan_keeper import storage
 from plan_keeper.dates import _iso_utc_now
@@ -32,6 +32,12 @@ from plan_keeper.ids import plankeeper_id as plankeeper_id
 # adapter's enum. `backlog` is fetched but never dispatched (confirm one via
 # `crew status <id>`; the aggregate `crew status` Queue lists only `todo`).
 # Anything else (typos, future values) falls through to "other".
+# The closed adapter-status vocabulary: the distinct values of
+# ``_GROUNDCREW_STATUS_MAP`` (``other`` is the catch-all). The map stays the
+# runtime source of truth; this Literal is the static mirror so signatures can
+# name the closed set.
+GroundcrewStatus = Literal["other", "todo", "in-progress", "in-review", "done"]
+
 _GROUNDCREW_STATUS_MAP = {
     "backlog": "other",
     "todo": "todo",

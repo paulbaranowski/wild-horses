@@ -11,6 +11,7 @@ from typing import Optional
 from plan_keeper.errors import PlanKeeperCliError
 from plan_keeper.frontmatter import VALID_KINDS
 from plan_keeper.storage import MAX_SLUG_LEN
+from plan_keeper.types import Kind
 
 
 def slugify_topic(text: str) -> str:
@@ -67,7 +68,7 @@ _NAME_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 _NAME_COLLISION_SUFFIX_RE = re.compile(r"-\d+$")
 
 
-def plan_filename(date_str: str, slug: str, ext: str, kind: Optional[str]) -> str:
+def plan_filename(date_str: str, slug: str, ext: str, kind: Optional[Kind]) -> str:
     """Build a plan's filename.
 
     `<date>-<slug>--<kind>.<ext>` on a markdown save that carries a Kind, else
