@@ -108,6 +108,16 @@
       "license": "MIT"
     },
     {
+      "name": "steelman",
+      "source": "./plugins/steelman",
+      "description": "Argue the strongest good-faith case AGAINST the proposed changes in the current conversation or a named design/plan file. A built-in red-team voice that surfaces hidden costs, wrong assumptions, simpler alternatives, second-order effects, and the do-nothing option, so a plan gets stress-tested before it ships.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
       "name": "pr-status-hook",
       "source": "./plugins/pr-status-hook",
       "description": "Stop hook that reports, at every turn-end, whether an open PR exists for the current branch (with its link), whether the last commits were actually pushed, and whether the working tree is dirty — all computed from real git/gh state, never from memory. Stays silent unless there is something worth reporting.",

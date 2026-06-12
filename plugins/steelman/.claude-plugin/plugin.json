@@ -1,0 +1,8 @@
+{
+  "name": "steelman",
+  "description": "Argue the strongest good-faith case AGAINST the proposed changes in the current conversation or a named design/plan file. A built-in red-team voice: surfaces hidden costs, wrong assumptions, simpler alternatives, and the do-nothing option, so a plan gets stress-tested before it ships.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Paul Baranowski"
+  }
+}
