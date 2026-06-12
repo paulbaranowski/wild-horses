@@ -48,6 +48,7 @@ from plan_keeper.ids import (
     ensure_id,
     id_for_path,
 )
+from plan_keeper.types import QueueRow
 
 # Re-export so existing tests can read `cli.plankeeper_id`. The `as plankeeper_id`
 # form marks this an intentional re-export; the single definition lives in `ids`.
@@ -935,7 +936,7 @@ def cmd_queue_list(args) -> int:
         scope = validate_repo_name(normalize_override(args.repo))
     else:
         scope = derive_repo(None)
-    rows: list[dict] = []
+    rows: list[QueueRow] = []
     if not storage.PLAN_ROOT.exists():
         print("[]")
         return 0
@@ -950,7 +951,7 @@ def cmd_queue_list(args) -> int:
         # The repo index resolves each plan's Blocked-by refs so the row can
         # report dispatch-readiness for the plan-crew UI.
         index = _build_repo_index(repo_entry.name)
-        keyed: list[tuple[tuple[str, str], dict]] = []
+        keyed: list[tuple[tuple[str, str], QueueRow]] = []
         for plan in sorted(repo_entry.iterdir()):
             if not plan.is_file() or not plan.name.endswith(".md"):
                 continue
@@ -965,14 +966,15 @@ def cmd_queue_list(args) -> int:
             except PlanKeeperCliError:
                 continue
             _, unsatisfied = _blockers_for_plan(meta, index)
-            keyed.append((plan_recency_key(meta, plan.name), {
+            row: QueueRow = {
                 "repo": repo_entry.name,
                 "file": plan.name,
                 "status": meta.get("Status", "").strip(),
                 "agent": meta.get("Agent", "").strip(),
                 "blocked": bool(unsatisfied),
                 "blockedBy": unsatisfied,
-            }))
+            }
+            keyed.append((plan_recency_key(meta, plan.name), row))
         keyed.sort(key=lambda kr: kr[0], reverse=True)
         rows.extend(row for _, row in keyed)
     print(json.dumps(rows))
