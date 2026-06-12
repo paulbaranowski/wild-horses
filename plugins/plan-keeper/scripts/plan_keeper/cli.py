@@ -41,7 +41,7 @@ from plan_keeper.groundcrew import (
     _assert_no_plankeeper_id_collisions,
     _blockers_for_plan,
     _build_repo_index,
-    _collect_crew_issues,
+    _collect_and_mint_crew_issues,
     _resolve_crew_id,
 )
 from plan_keeper.ids import (
@@ -525,6 +525,13 @@ def cmd_file_meta_set(args) -> int:
     The file must already have frontmatter — a bare file is rejected (exit 2)
     so a half-managed plan can't be created out from under plan-save's
     Agent/Status/Created defaults.
+
+    MUTATES DISK — RELOCATES AND STAMPS: a terminal ``--status`` (done /
+    deferred) does not rewrite in place. It writes the plan to the matching
+    terminal subdir (done/ or deferred/) and unlinks the source, so the plan's
+    on-disk path moves. A ``done`` status additionally stamps ``Completed on``
+    with today's date (unless the caller already supplied ``--completed-on``).
+    Active statuses are a pure in-place rewrite.
     """
     # Map each value flag to its frontmatter key, in canonical order. Building
     # this first means validate_kind/parse_date_arg run before any file I/O.
@@ -703,12 +710,17 @@ def cmd_crew_fetch(args) -> int:
     """Emit a JSON array of issues for groundcrew's shell adapter to consume.
 
     Scans ~/plans/*/*.md (one level deep — skips done/ and deferred/). For each
-    plan, ``_collect_crew_issues`` mints a frozen ``Plan-keeper Ticket`` if one
-    is absent (mint-once, never overwritten); this asserts no two plans carry
-    the same id.
+    plan, ``_collect_and_mint_crew_issues`` mints a frozen ``Plan-keeper
+    Ticket`` if one is absent (mint-once, never overwritten); this asserts no
+    two plans carry the same id.
+
+    MUTATES DISK: despite the read-flavoured name, fetch is not pure — for any
+    scanned plan that lacks a ``Plan-keeper Ticket``, it mints one and persists
+    it back into that plan file. A plain ``crew fetch`` can therefore rewrite
+    plans on disk.
     """
     del args
-    issues = _collect_crew_issues()
+    issues = _collect_and_mint_crew_issues()
     _assert_no_plankeeper_id_collisions(issues)
     print(json.dumps(issues))
     return 0

@@ -126,6 +126,11 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
         body = body[2:]
     elif body.startswith("\n"):
         body = body[1:]
+    # MUTATES meta IN PLACE: rewrites legacy ticket fields onto their current
+    # keys before returning. The returned dict already carries the migration,
+    # so any later serialize_frontmatter persists a legacy-field migration the
+    # caller never asked for — parsing a plan is enough to rewrite it on the
+    # next save.
     _migrate_legacy_ticket_fields(meta)
     return meta, body
 

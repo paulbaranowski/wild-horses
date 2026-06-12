@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Callable, Optional, TextIO
 
 from plan_keeper.errors import PlanKeeperCliError
-from plan_keeper.groundcrew import _collect_crew_issues
+from plan_keeper.groundcrew import _collect_and_mint_crew_issues
 from plan_keeper.storage import write_atomic
 
 # A managed region is bracketed by these comment sentinels. Only the
@@ -411,7 +411,7 @@ def run_crew_install(
             code=1,
         )
 
-    plan_count = len(_collect_crew_issues())
+    plan_count = len(_collect_and_mint_crew_issues())
     summary = (
         f"plan-keeper: wired the plans source into {config_path}; "
         f"config loads; {plan_count} plan(s) visible to fetch "

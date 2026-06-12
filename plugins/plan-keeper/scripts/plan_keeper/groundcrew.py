@@ -356,7 +356,7 @@ def _is_unassigned(path: Path) -> bool:
     ``backlog`` plan, a human-picked-up ``in-progress`` one, and an
     ``in-review`` one a human owns are all hidden alike. (This subsumes the
     older active-state-only "locally driven" rule.) Read from raw frontmatter,
-    not the issue dict, so the skip happens before ``_collect_crew_issues``
+    not the issue dict, so the skip happens before ``_collect_and_mint_crew_issues``
     mints an id into a plan it's about to drop. Best-effort: an
     unreadable/unparseable file is not treated as unassigned (it's filtered
     elsewhere anyway).
@@ -368,7 +368,7 @@ def _is_unassigned(path: Path) -> bool:
     return not meta.get("Agent", "").strip()
 
 
-def _collect_crew_issues() -> list[CrewIssue]:
+def _collect_and_mint_crew_issues() -> list[CrewIssue]:
     """Every active plan under ``~/plans/<repo>/*.md`` as shell-adapter issues.
 
     One level deep — ``done/`` and ``deferred/`` are excluded (they're not
