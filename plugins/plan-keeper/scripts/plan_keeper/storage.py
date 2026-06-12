@@ -22,6 +22,11 @@ Status = Literal[
     "backlog", "todo", "in-progress", "in-review", "done", "deferred"
 ]
 
+# Runtime/test override point: always reference as ``storage.PLAN_ROOT`` so the
+# attribute is read live off this module. Never import it by value
+# (``from plan_keeper.storage import PLAN_ROOT``) — a value import binds at
+# import time and silently breaks test isolation and any runtime override, since
+# rebinding this attribute afterwards won't reach the already-captured copy.
 PLAN_ROOT = Path.home() / "plans"
 MAX_SLUG_LEN = 50
 MAX_SUFFIX = 99

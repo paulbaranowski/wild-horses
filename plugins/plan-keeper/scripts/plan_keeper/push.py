@@ -38,6 +38,11 @@ def push_subcommand(name: str, file_path: str, force_new: bool = False) -> dict:
     text = path.read_text(encoding="utf-8")
     meta, body = parse_frontmatter(text)
     title = _extract_h1(body)
+    # derive_repo_full() and derive_repo(None) below take no explicit cwd, so the
+    # resolved repo — and therefore which .plankeeper.json config load_config reads
+    # for credentials — depends on os.getcwd() and the git remote origin, resolved
+    # via subprocess. Push targets the repo of the process's working directory, not
+    # the repo the plan file lives under.
     repo_full = derive_repo_full()
     description = _compose_description(repo_full, body)
     if len(description) > LINEAR_DESCRIPTION_LIMIT and name == "linear":

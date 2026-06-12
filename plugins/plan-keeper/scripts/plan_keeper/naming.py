@@ -165,6 +165,11 @@ def validate_extension(ext: str) -> str:
     return ext
 
 
+# Ambient-state dependency: the repo name resolved by _repo_from_git /
+# derive_repo — and therefore which ~/plans/<repo>/ dir and which
+# .plankeeper.json config get read and written — depends on os.getcwd() and the
+# git remote origin, resolved via subprocess. With no explicit `cwd`, the result
+# is a function of the process's current working directory.
 def _repo_from_git(cwd: Optional[str] = None) -> Optional[str]:
     """Return the repo folder name from `git remote origin`, or None.
 
