@@ -10,7 +10,12 @@ key per field, ``agent`` nullable). ``IndexEntry`` is plan-keeper's internal
 per-repo plan index entry. ``QueueRow`` is one row of ``crew queue list``'s
 JSON array.
 """
-from typing import Optional, TypedDict
+from typing import Any, Optional, TypedDict
+
+# A decoded JSON object from an HTTP boundary. The alias localizes the ``Any``
+# to the raw-response layer (``http_post_json`` / ``http_get_json``); the
+# transform functions narrow it into the concrete row TypedDicts below.
+JsonObject = dict[str, Any]
 
 
 class LinearDefaults(TypedDict, total=False):
@@ -161,3 +166,115 @@ class QueueRow(TypedDict):
     agent: str
     blocked: bool
     blockedBy: list[str]
+
+
+class LinearTeam(TypedDict):
+    """One transformed row from ``linear_teams``."""
+
+    id: str
+    name: str
+
+
+class LinearProject(TypedDict):
+    """One transformed row from ``linear_projects``.
+
+    ``teamIds`` is the flattened list of team ids the project belongs to.
+    """
+
+    id: str
+    name: str
+    teamIds: list[str]
+
+
+class LinearLabel(TypedDict):
+    """One transformed row from ``linear_labels``.
+
+    ``teamId`` is ``None`` for workspace-level (un-teamed) labels.
+    """
+
+    id: str
+    name: str
+    teamId: Optional[str]
+
+
+class LinearUser(TypedDict):
+    """One transformed row from ``linear_users``."""
+
+    id: str
+    name: str
+    email: str
+
+
+class LinearIssueInput(TypedDict, total=False):
+    """The ``IssueCreateInput`` payload built by ``_push_linear``.
+
+    ``title``/``description``/``teamId`` are always set on create; the rest are
+    added only when the corresponding default is present, hence ``total=False``.
+    """
+
+    title: str
+    description: str
+    teamId: str
+    projectId: str
+    assigneeId: str
+    labelIds: list[str]
+
+
+class JiraProject(TypedDict):
+    """One transformed row from ``jira_projects``.
+
+    ``key`` is the human-readable project key; ``id`` is the numeric id that
+    ``jira_issuetypes`` requires (see ``_resolve_jira_project_id``).
+    """
+
+    key: str
+    id: str
+    name: str
+
+
+class JiraComponent(TypedDict):
+    """One transformed row from ``jira_components``."""
+
+    id: str
+    name: str
+    projectKey: str
+
+
+class JiraUser(TypedDict):
+    """One transformed row from ``jira_users``.
+
+    ``email`` is ``""`` when the directory hides the user's email address.
+    """
+
+    accountId: str
+    name: str
+    email: str
+
+
+class JiraIssueType(TypedDict):
+    """One transformed row from ``jira_issuetypes``.
+
+    ``projectId`` is the numeric project id the issue types were fetched for.
+    """
+
+    id: str
+    name: str
+    projectId: str
+
+
+class JiraFields(TypedDict, total=False):
+    """The ``fields`` payload built by ``_push_jira`` for create/update.
+
+    ``project``/``summary``/``description``/``issuetype`` are set on create;
+    ``components``/``assignee``/``labels`` are added only when their default is
+    present. Update sends just ``summary``/``description``. ``total=False``
+    because no single call path sets every key.
+    """
+
+    project: dict[str, str]
+    summary: str
+    description: JsonObject
+    issuetype: dict[str, str]
+    components: list[dict[str, str]]
+    assignee: dict[str, str]
+    labels: list[str]

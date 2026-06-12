@@ -14,7 +14,15 @@ from plan_keeper.dates import _iso_utc_now
 from plan_keeper.errors import PlanKeeperCliError
 from plan_keeper.http import HTTP_TIMEOUT, http_get_json
 from plan_keeper.naming import derive_repo
-from plan_keeper.types import JiraSection
+from plan_keeper.types import (
+    JiraComponent,
+    JiraFields,
+    JiraIssueType,
+    JiraProject,
+    JiraSection,
+    JiraUser,
+    JsonObject,
+)
 
 
 def refresh_jira_cache(site: str, email: str, api_token: str) -> list[str]:
@@ -24,9 +32,9 @@ def refresh_jira_cache(site: str, email: str, api_token: str) -> list[str]:
     that aren't in the new cache). Empty list on clean refresh.
     """
     projects = jira_projects(site, email, api_token)
-    all_components: list[dict] = []
-    all_users: list[dict] = []
-    all_issuetypes: list[dict] = []
+    all_components: list[JiraComponent] = []
+    all_users: list[JiraUser] = []
+    all_issuetypes: list[JiraIssueType] = []
     for p in projects:
         all_components.extend(jira_components(site, email, api_token, p["key"]))
         all_users.extend(jira_users(site, email, api_token, p["key"]))
@@ -89,23 +97,29 @@ def _jira_auth_header(email: str, api_token: str) -> str:
     return "Basic " + base64.b64encode(raw).decode("ascii")
 
 
-def jira_viewer(site: str, email: str, api_token: str) -> dict:
+def jira_viewer(site: str, email: str, api_token: str) -> JsonObject:
+    """Return the authenticated Jira user object from ``/myself``."""
     url = f"https://{site}/rest/api/3/myself"
-    return http_get_json(url, {"Authorization": _jira_auth_header(email, api_token)})
+    resp = http_get_json(url, {"Authorization": _jira_auth_header(email, api_token)})
+    if not isinstance(resp, dict):
+        raise PlanKeeperCliError(f"unexpected Jira myself response: {resp!r}", code=5)
+    return resp
 
 
 def _jira_paginated(
     site: str, email: str, api_token: str,
     path: str, query_params: dict[str, str],
-) -> list[dict]:
+) -> list[JsonObject]:
     """Walk Jira's startAt/maxResults pagination and return all `values`."""
-    all_values: list[dict] = []
+    all_values: list[JsonObject] = []
     start_at = 0
     page_size = 50
     while True:
         params = {**query_params, "startAt": str(start_at), "maxResults": str(page_size)}
         url = f"https://{site}/rest/api/3/{path}?{urlencode(params)}"
         resp = http_get_json(url, {"Authorization": _jira_auth_header(email, api_token)})
+        if not isinstance(resp, dict):
+            raise PlanKeeperCliError(f"unexpected Jira paginated response: {resp!r}", code=5)
         page_values = resp.get("values", [])
         all_values.extend(page_values)
         if "isLast" in resp:
@@ -117,12 +131,14 @@ def _jira_paginated(
     return all_values
 
 
-def jira_projects(site: str, email: str, api_token: str) -> list[dict]:
+def jira_projects(site: str, email: str, api_token: str) -> list[JiraProject]:
+    """Return all Jira projects as ``{key, id, name}`` rows."""
     raw = _jira_paginated(site, email, api_token, "project/search", {})
     return [{"key": p["key"], "id": p["id"], "name": p["name"]} for p in raw]
 
 
-def jira_components(site: str, email: str, api_token: str, project_key: str) -> list[dict]:
+def jira_components(site: str, email: str, api_token: str, project_key: str) -> list[JiraComponent]:
+    """Return a project's components as ``{id, name, projectKey}`` rows."""
     url = f"https://{site}/rest/api/3/project/{project_key}/components"
     raw = http_get_json(url, {"Authorization": _jira_auth_header(email, api_token)})
     # Endpoint returns a flat list, not a paginated object.
@@ -131,10 +147,14 @@ def jira_components(site: str, email: str, api_token: str, project_key: str) -> 
     return [{"id": c["id"], "name": c["name"], "projectKey": project_key} for c in raw]
 
 
-def jira_users(site: str, email: str, api_token: str, project_key: str) -> list[dict]:
-    all_users: list[dict] = []
+def jira_users(site: str, email: str, api_token: str, project_key: str) -> list[JiraUser]:
+    """Return assignable users for a project as ``{accountId, name, email}`` rows."""
+    all_users: list[JsonObject] = []
     start_at = 0
     page_size = 50
+    # The assignable-user endpoint returns a bare JSON list, not a paginated
+    # {values, isLast} object, so it cannot use _jira_paginated; pagination is
+    # driven by short final pages (len(page) < page_size) instead.
     while True:
         url = (
             f"https://{site}/rest/api/3/user/assignable/multiProjectSearch?"
@@ -158,7 +178,8 @@ def jira_users(site: str, email: str, api_token: str, project_key: str) -> list[
     ]
 
 
-def jira_issuetypes(site: str, email: str, api_token: str, project_id: str) -> list[dict]:
+def jira_issuetypes(site: str, email: str, api_token: str, project_id: str) -> list[JiraIssueType]:
+    """Return issue types as ``{id, name, projectId}`` rows; project_id is the numeric id, not the key (see _resolve_jira_project_id)."""
     url = (
         f"https://{site}/rest/api/3/issuetype/project?"
         + urlencode({"projectId": project_id})
@@ -169,7 +190,7 @@ def jira_issuetypes(site: str, email: str, api_token: str, project_id: str) -> l
     return [{"id": t["id"], "name": t["name"], "projectId": project_id} for t in raw]
 
 
-def _adf_paragraph(text: str) -> dict:
+def _adf_paragraph(text: str) -> JsonObject:
     return {
         "type": "doc",
         "version": 1,
@@ -180,8 +201,8 @@ def _adf_paragraph(text: str) -> dict:
 
 
 def jira_create_issue(
-    site: str, email: str, api_token: str, fields: dict,
-) -> dict:
+    site: str, email: str, api_token: str, fields: JiraFields,
+) -> JsonObject:
     url = f"https://{site}/rest/api/3/issue"
     req = urllib.request.Request(
         url,
@@ -205,7 +226,7 @@ def jira_create_issue(
 
 
 def jira_update_issue(
-    site: str, email: str, api_token: str, key: str, fields: dict,
+    site: str, email: str, api_token: str, key: str, fields: JiraFields,
 ) -> None:
     url = f"https://{site}/rest/api/3/issue/{key}"
     req = urllib.request.Request(
@@ -234,7 +255,13 @@ def jira_update_issue(
 def _push_jira(
     section: JiraSection, title: str, description: str,
     meta: dict[str, str], force_new: bool,
-) -> dict:
+) -> JsonObject:
+    """Create or update a Jira issue for this plan.
+
+    Updates the existing ticket when ``meta`` carries a "Jira Ticket" key and
+    ``force_new`` is False; otherwise creates a new issue from the configured
+    defaults.
+    """
     # site/email/apiToken/defaults/projectKey are validated present by
     # _validate_config_for_push before this runs; the TypedDict still marks
     # every key optional because a half-configured section is a valid on-disk
@@ -265,7 +292,7 @@ def _push_jira(
             "url": f"https://{site}/browse/{key}",
             "title": title,
         }
-    fields = {
+    fields: JiraFields = {
         "project": {"key": project_key},
         "summary": title,
         "description": adf,

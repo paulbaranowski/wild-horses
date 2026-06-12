@@ -2,20 +2,31 @@
 metadata cache refresh, and issue create/update used by the push flow.
 """
 import sys
-from typing import Callable, Optional
+from typing import Callable, Optional, TypeVar
 
 from plan_keeper.config import load_config, save_config
 from plan_keeper.dates import _iso_utc_now
 from plan_keeper.errors import PlanKeeperCliError
 from plan_keeper.http import http_post_json
 from plan_keeper.naming import derive_repo
-from plan_keeper.types import LinearSection
+from plan_keeper.types import (
+    JsonObject,
+    LinearIssueInput,
+    LinearLabel,
+    LinearProject,
+    LinearSection,
+    LinearTeam,
+    LinearUser,
+)
 
 LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
 LINEAR_DESCRIPTION_LIMIT = 65_000
 
+# Row type produced by a paginated query's transform_node callable.
+_Row = TypeVar("_Row")
 
-def linear_viewer(api_key: str) -> dict:
+
+def linear_viewer(api_key: str) -> JsonObject:
     """Call Linear's viewer query — returns {id, name, email} on success."""
     query = "query { viewer { id name email } }"
     resp = http_post_json(
@@ -32,8 +43,8 @@ def _linear_paginated(
     api_key: str,
     query: str,
     root_key: str,
-    transform_node: Callable[[dict], dict],
-) -> list[dict]:
+    transform_node: Callable[[JsonObject], _Row],
+) -> list[_Row]:
     """Run a paginated Linear query and concatenate transformed nodes.
 
     Args:
@@ -46,7 +57,7 @@ def _linear_paginated(
 
     Returns the concatenated list of transformed nodes across all pages.
     """
-    all_nodes: list[dict] = []
+    all_nodes: list[_Row] = []
     after: Optional[str] = None
     while True:
         resp = http_post_json(
@@ -65,7 +76,8 @@ def _linear_paginated(
     return all_nodes
 
 
-def linear_teams(api_key: str) -> list[dict]:
+def linear_teams(api_key: str) -> list[LinearTeam]:
+    """Return all Linear teams as ``{id, name}`` rows."""
     query = (
         "query Teams($after: String) {"
         "  teams(first: 100, after: $after) {"
@@ -74,10 +86,15 @@ def linear_teams(api_key: str) -> list[dict]:
         "  }"
         "}"
     )
-    return _linear_paginated(api_key, query, "teams", lambda n: {"id": n["id"], "name": n["name"]})
+
+    def _team(n: JsonObject) -> LinearTeam:
+        return {"id": n["id"], "name": n["name"]}
+
+    return _linear_paginated(api_key, query, "teams", _team)
 
 
-def linear_projects(api_key: str) -> list[dict]:
+def linear_projects(api_key: str) -> list[LinearProject]:
+    """Return all Linear projects as ``{id, name, teamIds}`` rows."""
     query = (
         "query Projects($after: String) {"
         "  projects(first: 100, after: $after) {"
@@ -86,19 +103,19 @@ def linear_projects(api_key: str) -> list[dict]:
         "  }"
         "}"
     )
-    return _linear_paginated(
-        api_key,
-        query,
-        "projects",
-        lambda n: {
+
+    def _project(n: JsonObject) -> LinearProject:
+        return {
             "id": n["id"],
             "name": n["name"],
             "teamIds": [t["id"] for t in n["teams"]["nodes"]],
-        },
-    )
+        }
+
+    return _linear_paginated(api_key, query, "projects", _project)
 
 
-def linear_labels(api_key: str) -> list[dict]:
+def linear_labels(api_key: str) -> list[LinearLabel]:
+    """Return all Linear issue labels as ``{id, name, teamId}`` rows (teamId None when workspace-level)."""
     query = (
         "query Labels($after: String) {"
         "  issueLabels(first: 100, after: $after) {"
@@ -107,19 +124,19 @@ def linear_labels(api_key: str) -> list[dict]:
         "  }"
         "}"
     )
-    return _linear_paginated(
-        api_key,
-        query,
-        "issueLabels",
-        lambda n: {
+
+    def _label(n: JsonObject) -> LinearLabel:
+        return {
             "id": n["id"],
             "name": n["name"],
             "teamId": n["team"]["id"] if n.get("team") else None,
-        },
-    )
+        }
+
+    return _linear_paginated(api_key, query, "issueLabels", _label)
 
 
-def linear_users(api_key: str) -> list[dict]:
+def linear_users(api_key: str) -> list[LinearUser]:
+    """Return all Linear users as ``{id, name, email}`` rows."""
     query = (
         "query Users($after: String) {"
         "  users(first: 100, after: $after) {"
@@ -128,12 +145,11 @@ def linear_users(api_key: str) -> list[dict]:
         "  }"
         "}"
     )
-    return _linear_paginated(
-        api_key,
-        query,
-        "users",
-        lambda n: {"id": n["id"], "name": n["name"], "email": n["email"]},
-    )
+
+    def _user(n: JsonObject) -> LinearUser:
+        return {"id": n["id"], "name": n["name"], "email": n["email"]}
+
+    return _linear_paginated(api_key, query, "users", _user)
 
 
 def refresh_linear_cache(api_key: str) -> list[str]:
@@ -194,7 +210,7 @@ def refresh_linear_cache(api_key: str) -> list[str]:
     return warnings
 
 
-def linear_create_issue(api_key: str, input_dict: dict) -> dict:
+def linear_create_issue(api_key: str, input_dict: LinearIssueInput) -> JsonObject:
     query = (
         "mutation IssueCreate($input: IssueCreateInput!) {"
         "  issueCreate(input: $input) {"
@@ -219,7 +235,13 @@ def linear_create_issue(api_key: str, input_dict: dict) -> dict:
 def _push_linear(
     section: LinearSection, title: str, description: str,
     meta: dict[str, str], force_new: bool,
-) -> dict:
+) -> JsonObject:
+    """Create or update a Linear issue for this plan.
+
+    Updates the existing ticket when ``meta`` carries a "Linear Ticket" id and
+    ``force_new`` is False; otherwise creates a new issue from the configured
+    defaults.
+    """
     # apiKey/defaults/teamId are validated present by _validate_config_for_push
     # before this runs; the TypedDict still marks every key optional because a
     # half-configured section is a valid on-disk state. Read through .get and
@@ -231,11 +253,13 @@ def _push_linear(
     existing = (meta.get("Linear Ticket") or "").strip()
     if existing and not force_new:
         return _push_linear_update(api_key, existing, title, description)
-    input_dict = {
+    team_id = defaults.get("teamId")
+    input_dict: LinearIssueInput = {
         "title": title,
         "description": description,
-        "teamId": defaults.get("teamId"),
     }
+    if team_id:
+        input_dict["teamId"] = team_id
     project_id = defaults.get("projectId")
     if project_id:
         input_dict["projectId"] = project_id
@@ -255,7 +279,7 @@ def _push_linear(
     }
 
 
-def _push_linear_update(api_key: str, identifier: str, title: str, description: str) -> dict:
+def _push_linear_update(api_key: str, identifier: str, title: str, description: str) -> JsonObject:
     query = (
         "mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {"
         "  issueUpdate(id: $id, input: $input) {"
