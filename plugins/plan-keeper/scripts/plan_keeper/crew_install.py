@@ -239,16 +239,18 @@ def build_patched_config(config: str, pk: str) -> Optional[str]:
 def looks_like_json(config: str) -> bool:
     """Whether ``config`` is a JSON document (so the JSON patcher owns it).
 
-    A TS/JS config (``export default {…}``) never parses as JSON; a JSON config
-    always does — so a successful parse is the discriminator. Returns False for a
-    JSON value that isn't an object (a bare array/scalar): there's no ``sources``
-    key to host, so the JSON patcher would only reject it; routing it to the
-    safety valve via the False branch reports the same outcome.
+    Answers only the *format* question — "did it parse as JSON?" — and leaves
+    *shape* (is it a patchable object with a ``sources`` array?) to
+    :func:`build_patched_json_config`. A TS/JS config (``export default {…}``)
+    never parses as JSON, so this never misroutes one; a JSON value that parses
+    but isn't an object (a bare ``[]``/scalar) still routes here so the caller
+    prints the *JSON* safety-valve block, not the TS sentinel block.
     """
     try:
-        return isinstance(json.loads(config), dict)
+        json.loads(config)
     except (json.JSONDecodeError, UnicodeDecodeError):
         return False
+    return True
 
 
 def build_patched_json_config(config: str, pk: str) -> Optional[str]:

@@ -1346,7 +1346,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_crew_install.add_argument(
         "--config",
-        help="path to the groundcrew config (.ts or .json) "
+        help="path to the groundcrew config (.ts/.mjs/.js/.json; optional) "
              "(default: $GROUNDCREW_CONFIG or the first crew.config.* found in "
              "~/.config/groundcrew/)",
     )

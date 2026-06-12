@@ -217,11 +217,13 @@ class TestLooksLikeJson(unittest.TestCase):
         self.assertFalse(looks_like_json(BASE_CONFIG))
         self.assertFalse(looks_like_json(CREW_INIT_CONFIG))
 
-    def test_non_object_json_is_not_routed_to_json_patcher(self):
-        # A bare array/scalar parses as JSON but has no `sources` to host, so
-        # the discriminator declines it (caller's safety valve reports it).
-        self.assertFalse(looks_like_json("[1, 2, 3]"))
-        self.assertFalse(looks_like_json('"just a string"'))
+    def test_non_object_json_still_counts_as_json(self):
+        # A bare array/scalar parses as JSON, so the discriminator routes it to
+        # the JSON path — patchability (object with `sources`) is the patcher's
+        # job, and routing here is what gets the user the JSON safety-valve block
+        # rather than the wrong-format TS sentinel block.
+        self.assertTrue(looks_like_json("[1, 2, 3]"))
+        self.assertTrue(looks_like_json('"just a string"'))
 
     def test_empty_or_garbage_is_not_json(self):
         self.assertFalse(looks_like_json(""))
@@ -501,6 +503,22 @@ class TestRunCrewInstall(IsolatedHomeTestCase):
         self.assertEqual(json_cfg.read_text(), '{"sources": "oops"}')  # untouched
         # The printed block is JSON (an object the user can paste), not TS.
         self.assertNotIn(SENTINEL_START, self.out.getvalue())
+        self.assertIn('"name": "plankeeper"', self.out.getvalue())
+
+    def test_json_array_routes_to_json_safety_valve(self):
+        """A valid-JSON-but-not-object config (a bare array) routes through the
+        JSON path, so the safety valve prints the JSON block — not the TS
+        sentinel block it would have hit if `looks_like_json` rejected non-objects."""
+        json_cfg = self.home / "crew.config.json"
+        json_cfg.write_text("[]")
+        with self.assertRaises(PlanKeeperCliError) as ctx:
+            run_crew_install(
+                json_cfg, dry_run=False, pk=PK,
+                run_doctor=self._ok_doctor, out=self.out,
+            )
+        self.assertEqual(ctx.exception.code, 2)
+        self.assertEqual(json_cfg.read_text(), "[]")  # untouched
+        self.assertNotIn(SENTINEL_START, self.out.getvalue())  # not the TS block
         self.assertIn('"name": "plankeeper"', self.out.getvalue())
 
 
