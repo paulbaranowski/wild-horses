@@ -1012,16 +1012,19 @@ class TestDispatchGuards(IsolatedHomeTestCase):
     rejects truly-unknown subcommands at parse time, so these call _dispatch
     directly to exercise the unwired-but-parseable case."""
 
+    @staticmethod
+    def _handler(_args: object) -> int:
+        return 0
+
     def test_known_key_returns_handler(self) -> None:
         module = _import_cli_module()
-        sentinel = object()
-        handler = module._dispatch({"ok": sentinel}, "ok", "command")
-        self.assertIs(handler, sentinel)
+        handler = module._dispatch({"ok": self._handler}, "ok", "command")
+        self.assertIs(handler, self._handler)
 
     def test_unknown_top_level_command_raises_code_2(self) -> None:
         module = _import_cli_module()
         with self.assertRaises(module.PlanKeeperCliError) as ctx:
-            module._dispatch({"list": object()}, "bogus", "command")
+            module._dispatch({"list": self._handler}, "bogus", "command")
         self.assertEqual(ctx.exception.code, 2)
 
     def test_unknown_nested_crew_subcommand_raises_code_2(self) -> None:
@@ -1086,8 +1089,9 @@ class TestTypedArgDataclasses(IsolatedHomeTestCase):
 
     def test_file_meta_set_args_happy_path_maps_every_field(self) -> None:
         module = _import_cli_module()
+        plan_path = str(self.cwd / "plan.md")
         ns = self._parse([
-            "file-meta", "set", "--file", "/tmp/plan.md",
+            "file-meta", "set", "--file", plan_path,
             "--agent", "codex", "--status", "done",
             "--on-collision", "suffix", "--kind", "exec-plan",
             "--completed-on", "2026-03-04",
@@ -1096,7 +1100,7 @@ class TestTypedArgDataclasses(IsolatedHomeTestCase):
             "--blocked-by", "plan-3",
         ])
         a = module.FileMetaSetArgs.from_args(ns)
-        self.assertEqual(a.file, "/tmp/plan.md")
+        self.assertEqual(a.file, plan_path)
         self.assertIsNone(a.ticket)
         self.assertEqual(a.agent, "codex")
         self.assertEqual(a.status, "done")
@@ -1110,9 +1114,10 @@ class TestTypedArgDataclasses(IsolatedHomeTestCase):
 
     def test_file_meta_set_args_omitted_optionals_take_defaults(self) -> None:
         module = _import_cli_module()
-        ns = self._parse(["file-meta", "set", "--file", "/tmp/plan.md"])
+        plan_path = str(self.cwd / "plan.md")
+        ns = self._parse(["file-meta", "set", "--file", plan_path])
         a = module.FileMetaSetArgs.from_args(ns)
-        self.assertEqual(a.file, "/tmp/plan.md")
+        self.assertEqual(a.file, plan_path)
         self.assertIsNone(a.ticket)
         self.assertIsNone(a.agent)
         self.assertIsNone(a.status)

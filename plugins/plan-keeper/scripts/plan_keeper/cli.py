@@ -16,7 +16,7 @@ import sys
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Optional, cast
+from typing import Callable, Mapping, Optional, cast
 
 from plan_keeper import __version__, storage
 from plan_keeper.config import (
@@ -124,7 +124,7 @@ class RepoNameArgs:
     full: bool
 
     @classmethod
-    def from_args(cls, args) -> "RepoNameArgs":
+    def from_args(cls, args: argparse.Namespace) -> "RepoNameArgs":
         return cls(override=args.override, cwd=args.cwd, full=args.full)
 
 
@@ -137,7 +137,7 @@ class ListArgs:
     group: bool
 
     @classmethod
-    def from_args(cls, args) -> "ListArgs":
+    def from_args(cls, args: argparse.Namespace) -> "ListArgs":
         return cls(
             override=args.override,
             all_repos=args.all_repos,
@@ -158,7 +158,7 @@ class SaveArgs:
     on_collision: str
 
     @classmethod
-    def from_args(cls, args) -> "SaveArgs":
+    def from_args(cls, args: argparse.Namespace) -> "SaveArgs":
         return cls(
             override=args.override,
             topic=args.topic,
@@ -176,7 +176,7 @@ class ProviderConfigGetArgs:
     show_secrets: bool
 
     @classmethod
-    def from_args(cls, args) -> "ProviderConfigGetArgs":
+    def from_args(cls, args: argparse.Namespace) -> "ProviderConfigGetArgs":
         return cls(name=args.name, show_secrets=args.show_secrets)
 
 
@@ -185,7 +185,7 @@ class ProviderConfigSaveArgs:
     name: str
 
     @classmethod
-    def from_args(cls, args) -> "ProviderConfigSaveArgs":
+    def from_args(cls, args: argparse.Namespace) -> "ProviderConfigSaveArgs":
         return cls(name=args.name)
 
 
@@ -197,7 +197,7 @@ class ProviderConfigRefreshArgs:
     site: Optional[str]
 
     @classmethod
-    def from_args(cls, args) -> "ProviderConfigRefreshArgs":
+    def from_args(cls, args: argparse.Namespace) -> "ProviderConfigRefreshArgs":
         return cls(
             name=args.name,
             api_key=args.api_key,
@@ -212,7 +212,7 @@ class FileMetaLocatorArgs:
     ticket: Optional[str]
 
     @classmethod
-    def from_args(cls, args) -> "FileMetaLocatorArgs":
+    def from_args(cls, args: argparse.Namespace) -> "FileMetaLocatorArgs":
         return cls(file=args.file, ticket=args.ticket)
 
 
@@ -231,7 +231,7 @@ class FileMetaSetArgs:
     blocked_by: Optional[str]
 
     @classmethod
-    def from_args(cls, args) -> "FileMetaSetArgs":
+    def from_args(cls, args: argparse.Namespace) -> "FileMetaSetArgs":
         return cls(
             file=args.file,
             ticket=args.ticket,
@@ -255,7 +255,7 @@ class PushArgs:
     force_new: bool
 
     @classmethod
-    def from_args(cls, args) -> "PushArgs":
+    def from_args(cls, args: argparse.Namespace) -> "PushArgs":
         return cls(
             name=args.name,
             file=args.file,
@@ -274,7 +274,7 @@ class TicketApiArgs:
     project_key: Optional[str]
 
     @classmethod
-    def from_args(cls, args) -> "TicketApiArgs":
+    def from_args(cls, args: argparse.Namespace) -> "TicketApiArgs":
         return cls(
             name=args.name,
             api_kind=args.api_kind,
@@ -290,7 +290,7 @@ class CrewIdArgs:
     id: str
 
     @classmethod
-    def from_args(cls, args) -> "CrewIdArgs":
+    def from_args(cls, args: argparse.Namespace) -> "CrewIdArgs":
         return cls(id=args.id)
 
 
@@ -300,7 +300,7 @@ class CrewInstallArgs:
     dry_run: bool
 
     @classmethod
-    def from_args(cls, args) -> "CrewInstallArgs":
+    def from_args(cls, args: argparse.Namespace) -> "CrewInstallArgs":
         return cls(config=args.config, dry_run=args.dry_run)
 
 
@@ -311,7 +311,7 @@ class QueueAddArgs:
     agent: str
 
     @classmethod
-    def from_args(cls, args) -> "QueueAddArgs":
+    def from_args(cls, args: argparse.Namespace) -> "QueueAddArgs":
         return cls(files=args.files, repo=args.repo, agent=args.agent)
 
 
@@ -321,7 +321,7 @@ class QueueDropArgs:
     repo: Optional[str]
 
     @classmethod
-    def from_args(cls, args) -> "QueueDropArgs":
+    def from_args(cls, args: argparse.Namespace) -> "QueueDropArgs":
         return cls(files=args.files, repo=args.repo)
 
 
@@ -331,7 +331,7 @@ class QueueListArgs:
     repo: Optional[str]
 
     @classmethod
-    def from_args(cls, args) -> "QueueListArgs":
+    def from_args(cls, args: argparse.Namespace) -> "QueueListArgs":
         return cls(all=args.all, repo=args.repo)
 
 
@@ -974,10 +974,10 @@ def cmd_crew_fetch(args) -> int:
     return 0
 
 
-# The character class excludes `/` and `\`, so a crew id can never contain a
-# path separator. `_resolve_crew_id` joins the id under PLAN_ROOT to locate a
-# plan file; rejecting separators here keeps a crafted id (e.g. `../../etc`)
-# from traversing out of PLAN_ROOT during that resolution.
+# Constrains a crew ${id} to the same charset minted ids use, rejecting
+# malformed input early with a clear error. `_resolve_crew_id` matches a plan by
+# parsed-id equality (`issue["id"] == plan_id`) and never joins the id into a
+# filesystem path, so this is input hygiene, not a path-traversal fence.
 _GROUNDCREW_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -1698,12 +1698,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _dispatch(table: dict, key, label: str):
+def _dispatch(
+    table: Mapping[str, Callable[[argparse.Namespace], int]],
+    key: str,
+    label: str,
+) -> Callable[[argparse.Namespace], int]:
     """Look up `key` in a dispatch table and return the handler, raising a
     PlanKeeperCliError (exit code 2) when the key is absent. Guards every
     dispatch table against an unwired-but-parseable subcommand producing an
     uncaught KeyError; argparse normally rejects unknown subcommands first, so
-    this is defense-in-depth for a command that parses but has no handler."""
+    this is defense-in-depth for a command that parses but has no handler.
+
+    `table` is typed as a covariant Mapping so each module-level `_*_DISPATCH`
+    dict (whose value types pyright infers from its handler literals) is
+    assignable without annotating every table; the concrete value type lets
+    pyright flag a handler with the wrong call signature or return type."""
     handler = table.get(key)
     if handler is None:
         raise PlanKeeperCliError(f"unknown {label}: {key!r}", code=2)

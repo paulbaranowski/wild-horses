@@ -19,14 +19,14 @@ from plan_keeper import groundcrew, storage  # noqa: E402
 from plan_keeper.types import CrewIssue  # noqa: E402
 
 
-def _crew_issue(id: str, path: str) -> CrewIssue:
+def _crew_issue(issue_id: str, path: str) -> CrewIssue:
     """A complete CrewIssue fixture; only ``id``/``sourceRef`` vary per test.
 
     The collision guard reads only those two fields, so the rest are inert
     defaults that keep the literal a full, typed CrewIssue.
     """
     return {
-        "id": id,
+        "id": issue_id,
         "title": "",
         "description": "",
         "status": "todo",
