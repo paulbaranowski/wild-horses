@@ -1,16 +1,36 @@
 # wild-horses
 
-A [Claude Code](https://claude.ai/code) plugin marketplace for making code AI-readable and agent-friendly.
+A [Claude Code](https://claude.ai/code) plugin marketplace of tools for working on code with AI agents — making code agent-readable, planning and shipping work, and smoothing the day-to-day agent workflow.
 
 ## Overview
 
-Three questions an AI agent has to be able to answer before it can edit your code reliably:
+The plugins group into four themes, following the lifecycle of working on code with an agent. Each one-liner below links to the full plugin entry further down.
 
-1. _Does the type layer tell the truth?_ — answered by `/pyright:run-and-fix` (Python only).
-2. _If an AI agent read this code, what would it get wrong?_ — answered by `/harness:reasoning-gaps`.
-3. _Can an AI edit this code and know whether it got it right?_ — answered by `/harness:feedback-blockers`.
+**Make code agent-readable** — can an agent understand your code and safely edit it?
 
-Run them in that order on a PR or feature branch. Each step asks a harder question than the last: types, then comprehension, then verification.
+- **[pyright](#pyright)** — run pyright on a Python codebase and fix what it finds, using a documented playbook of fix patterns.
+- **[harness](#harness)** — diagnose where an agent would misread your code (`/harness:reasoning-gaps`) or couldn't tell whether it succeeded (`/harness:feedback-blockers`), then build, run, and inspect a remediation task list.
+- **[linting-hooks](#linting-hooks)** — auto-lint Markdown and Python the moment Claude edits them.
+
+Run the first three in order on a PR or feature branch — types (`/pyright:run-and-fix`), then comprehension (`/harness:reasoning-gaps`), then verification (`/harness:feedback-blockers`). Each asks a harder question than the last.
+
+**Plan and ship work** — turn an idea into a merged PR.
+
+- **[plan-keeper](#plan-keeper)** — save, route, and archive markdown plans in `~/plans/<repo>/` (also a standalone Homebrew CLI).
+- **[autonomous](#autonomous)** — drive a single issue or plan file all the way to an opened PR, with no human in the loop.
+- **[steelman](#steelman)** — argue the strongest good-faith case _against_ a plan before you commit to it.
+
+**Understand and scaffold** — see what's there, or stand up something new.
+
+- **[codepath-visualizer](#codepath-visualizer)** — map a codebase's call chains into an interactive architecture diagram.
+- **[marketplace](#marketplace)** — scaffold a new Claude Code plugin marketplace with proper structure and schema.
+- **[groundcrew-setup](#groundcrew-setup)** — interactive first-run wizard that installs and configures groundcrew.
+
+**Smooth the agent workflow** — quality-of-life hooks and utilities.
+
+- **[update-git-repos](#update-git-repos)** — pull every configured git repo from `origin` in one shot.
+- **[yes-no-questions-hook](#yes-no-questions-hook)** — nudge the agent to pose decisions as numbered yes/no questions.
+- **[pr-status-hook](#pr-status-hook)** — report PR / push / dirty-tree state at the end of every turn.
 
 ## Plugins
 
