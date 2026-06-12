@@ -96,6 +96,74 @@ Three skills for organizing markdown plans in `~/plans/<repo>/`. `plan-save` cap
 
 See **[plugins/plan-keeper/README.md](plugins/plan-keeper/README.md)** for the three-skill pipeline, the shared `~/plans/<repo>/` tree, and the bundled CLI.
 
+### [autonomous](plugins/autonomous/README.md)
+
+Drive a single task — an issue/ticket link or a plan/spec file — all the way to an opened pull request, with no human in the loop. Hand it a Linear/GitHub issue URL, a path to a plan file, or a plan already in the conversation, and it implements, tests, runs an independent sub-agent review to convergence, opens a PR following the target repo's own conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.
+
+```text
+/plugin install autonomous@wild-horses
+
+/autonomous https://linear.app/.../ISSUE-123
+/autonomous ~/plans/myrepo/feature.md
+"work this issue autonomously"          # model-invoked
+```
+
+See **[plugins/autonomous/README.md](plugins/autonomous/README.md)** for the autonomy contract, the code-style bar, and the review-to-convergence loop.
+
+### [steelman](plugins/steelman)
+
+Argue the strongest good-faith case _against_ the proposed changes in the current conversation or a named design/plan file — hidden costs, wrong assumptions, simpler alternatives, second-order effects, and the do-nothing option. A built-in red-team voice that stress-tests a plan before it ships.
+
+```text
+/plugin install steelman@wild-horses
+
+/steelman                               # red-team the proposal in the conversation
+/steelman path/to/design.md             # red-team a specific file
+```
+
+### [update-git-repos](plugins/update-git-repos/README.md)
+
+Pull every configured git repo from `origin/<branch>` in one shot. Maintains a repo list at `~/.config/wild-horses/update-git-repos/repos.json`, supports bootstrap auto-discovery under a root directory and manual add/remove, and applies a configurable dirty-tree action (`ask` / `skip` / `stash`) per repo. Uses `git merge --ff-only` so diverged histories never auto-merge silently. Backed by a bundled CLI with a PreToolUse hook that auto-approves its invocations.
+
+```text
+/plugin install update-git-repos@wild-horses
+
+/update-git-repos                       # pull every configured repo
+"update all my git repos"               # model-invoked
+```
+
+See **[plugins/update-git-repos/README.md](plugins/update-git-repos/README.md)** for the config schema, bootstrap discovery, and dirty-tree action resolution.
+
+### [groundcrew-setup](plugins/groundcrew-setup/README.md)
+
+Interactive first-run wizard for groundcrew. Installs `@clipboard-health/groundcrew` (npm) and `eugene1g/agent-safehouse` (Homebrew) if missing, scaffolds `~/.config/groundcrew/config.ts` conversationally with GitHub repo auto-discovery, writes the `clearance` egress allowlist + env sidecar and the safehouse env sidecar, and runs `crew doctor`. Pass `clearance` or `safehouse` to re-run just that slice.
+
+```text
+/plugin install groundcrew-setup@wild-horses
+
+/groundcrew-setup:setup                 # full end-to-end wizard
+/groundcrew-setup:setup clearance       # re-run just the clearance slice
+/groundcrew-setup:setup safehouse       # re-run just the safehouse slice
+```
+
+See **[plugins/groundcrew-setup/README.md](plugins/groundcrew-setup/README.md)** for the discovery/install/render flow and the bundled scripts.
+
+### [yes-no-questions-hook](plugins/yes-no-questions-hook)
+
+A `UserPromptSubmit` hook that injects a per-turn reminder to pose decision questions as numbered yes/no questions — collapsing every either/or into a single yes/no rather than an inline "X, or Y?" or a pick-one menu. A portable, shareable restatement of a personal `CLAUDE.md` rule. No command — it fires automatically once installed.
+
+```text
+/plugin install yes-no-questions-hook@wild-horses
+```
+
+### [pr-status-hook](plugins/pr-status-hook)
+
+A `Stop` hook that reports, at every turn-end, whether an open PR exists for the current branch (with its link), whether the last commits were actually pushed, and whether the working tree is dirty — all computed from real `git`/`gh` state, never from memory. Stays silent unless there is something worth reporting, and exits early on non-repos, detached HEAD, and default branches. No command — it fires automatically once installed.
+
+```text
+/plugin install pr-status-hook@wild-horses
+```
+
 ## Standalone CLI: `plan-keeper`
 
 The I/O backend behind the plan-keeper skills — `plan_keeper_cli.py`, a zero-dependency stdlib tool that manages the `~/plans/<repo>/` tree (save, list, archive, frontmatter, and Linear/Jira push) — is also distributed as a standalone command-line tool via Homebrew, for working with your plans outside an agent session:
