@@ -1043,5 +1043,133 @@ class TestDispatchGuards(IsolatedHomeTestCase):
         self.assertEqual(ctx.exception.code, 2)
 
 
+class TestTypedArgDataclasses(IsolatedHomeTestCase):
+    """The per-subcommand `*Args` dataclasses are the typed boundary between the
+    argparse Namespace and the `cmd_*` handlers. These tests pin that
+    `from_args` faithfully copies parser output: a fully-populated invocation
+    maps every field (happy path), omitted optional flags land on the parser's
+    defaults (edge), and a representative end-to-end run still produces the same
+    observable result through main (behavior preserved)."""
+
+    def _parse(self, argv: list[str]):
+        module = _import_cli_module()
+        return module.build_parser().parse_args(argv)
+
+    def test_save_args_happy_path_maps_every_field(self) -> None:
+        module = _import_cli_module()
+        ns = self._parse([
+            "save", "--override", "myrepo", "--topic", "Big Plan",
+            "--date", "2026-01-02", "--extension", "json",
+            "--kind", "spec", "--on-collision", "overwrite",
+        ])
+        a = module.SaveArgs.from_args(ns)
+        self.assertEqual(a.override, "myrepo")
+        self.assertEqual(a.topic, "Big Plan")
+        self.assertEqual(a.date, "2026-01-02")
+        self.assertEqual(a.extension, "json")
+        self.assertIsNone(a.from_path)
+        self.assertEqual(a.kind, "spec")
+        self.assertEqual(a.on_collision, "overwrite")
+
+    def test_save_args_omitted_optionals_take_defaults(self) -> None:
+        module = _import_cli_module()
+        ns = self._parse(["save", "--topic", "minimal"])
+        a = module.SaveArgs.from_args(ns)
+        self.assertEqual(a.topic, "minimal")
+        self.assertIsNone(a.override)
+        self.assertIsNone(a.date)
+        self.assertIsNone(a.extension)
+        self.assertIsNone(a.from_path)
+        self.assertIsNone(a.kind)
+        # --on-collision is the one non-None default on save.
+        self.assertEqual(a.on_collision, "fail")
+
+    def test_file_meta_set_args_happy_path_maps_every_field(self) -> None:
+        module = _import_cli_module()
+        ns = self._parse([
+            "file-meta", "set", "--file", "/tmp/plan.md",
+            "--agent", "codex", "--status", "done",
+            "--on-collision", "suffix", "--kind", "exec-plan",
+            "--completed-on", "2026-03-04",
+            "--plankeeper-ticket", "plan-7",
+            "--linear-ticket", "ENG-1", "--jira-ticket", "PROJ-2",
+            "--blocked-by", "plan-3",
+        ])
+        a = module.FileMetaSetArgs.from_args(ns)
+        self.assertEqual(a.file, "/tmp/plan.md")
+        self.assertIsNone(a.ticket)
+        self.assertEqual(a.agent, "codex")
+        self.assertEqual(a.status, "done")
+        self.assertEqual(a.on_collision, "suffix")
+        self.assertEqual(a.kind, "exec-plan")
+        self.assertEqual(a.completed_on, "2026-03-04")
+        self.assertEqual(a.plankeeper_ticket, "plan-7")
+        self.assertEqual(a.linear_ticket, "ENG-1")
+        self.assertEqual(a.jira_ticket, "PROJ-2")
+        self.assertEqual(a.blocked_by, "plan-3")
+
+    def test_file_meta_set_args_omitted_optionals_take_defaults(self) -> None:
+        module = _import_cli_module()
+        ns = self._parse(["file-meta", "set", "--file", "/tmp/plan.md"])
+        a = module.FileMetaSetArgs.from_args(ns)
+        self.assertEqual(a.file, "/tmp/plan.md")
+        self.assertIsNone(a.ticket)
+        self.assertIsNone(a.agent)
+        self.assertIsNone(a.status)
+        self.assertIsNone(a.kind)
+        self.assertIsNone(a.completed_on)
+        self.assertIsNone(a.plankeeper_ticket)
+        self.assertIsNone(a.linear_ticket)
+        self.assertIsNone(a.jira_ticket)
+        self.assertIsNone(a.blocked_by)
+        self.assertEqual(a.on_collision, "fail")
+
+    def test_ticket_api_args_jira_maps_provider_specific_fields(self) -> None:
+        module = _import_cli_module()
+        ns = self._parse([
+            "jira", "api", "components",
+            "--api-key", "tok", "--email", "p@x.com",
+            "--site", "x.atlassian.net", "--project-key", "PROJ",
+        ])
+        a = module.TicketApiArgs.from_args(ns)
+        # name is pinned via set_defaults(name="jira"), not a flag.
+        self.assertEqual(a.name, "jira")
+        self.assertEqual(a.api_kind, "components")
+        self.assertEqual(a.api_key, "tok")
+        self.assertEqual(a.email, "p@x.com")
+        self.assertEqual(a.site, "x.atlassian.net")
+        self.assertEqual(a.project_key, "PROJ")
+
+    def test_ticket_api_args_linear_lacks_jira_only_fields(self) -> None:
+        # The linear subtree never defines --site/--email/--project-key on its
+        # Namespace; from_args must still produce them as None via getattr.
+        module = _import_cli_module()
+        ns = self._parse(["linear", "api", "viewer", "--api-key", "k"])
+        a = module.TicketApiArgs.from_args(ns)
+        self.assertEqual(a.name, "linear")
+        self.assertEqual(a.api_kind, "viewer")
+        self.assertEqual(a.api_key, "k")
+        self.assertIsNone(a.site)
+        self.assertIsNone(a.email)
+        self.assertIsNone(a.project_key)
+
+    def test_save_handler_behavior_preserved_end_to_end(self) -> None:
+        # Behavior-preserved guard: a representative save still works through
+        # main, writing the expected file with the expected exit code. The arg
+        # dataclass sits on this path, so a from_args regression would surface
+        # here as a wrong path or non-zero exit.
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "typed args demo",
+            stdin="# Typed args demo\nbody\n",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        today = date.today().isoformat()
+        expected = self.plans_root / "scratch" / f"{today}-typed-args-demo.md"
+        self.assertEqual(r.stdout.strip(), str(expected))
+        self.assertTrue(expected.exists())
+        self.assertIn("Status: backlog", expected.read_text())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
