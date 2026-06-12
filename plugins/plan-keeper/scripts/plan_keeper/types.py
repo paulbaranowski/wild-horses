@@ -13,6 +13,88 @@ JSON array.
 from typing import Optional, TypedDict
 
 
+class LinearDefaults(TypedDict, total=False):
+    """Per-repo Linear push defaults stored under ``config['linear']['defaults']``.
+
+    Push validates ``teamId`` before reading it and treats everything else as
+    optional — applied to the create payload only when present. The ``*Name``
+    fields are display labels carried alongside their ids so cache-staleness
+    warnings can name what went missing. Every key is optional (``total=False``)
+    because the wizard writes ``defaults`` incrementally as the user picks each
+    value; read required fields through ``.get`` / post-validation.
+    """
+
+    teamId: str
+    teamName: str
+    projectId: str
+    projectName: str
+    assigneeId: str
+    assigneeName: str
+    labelIds: list[str]
+    labelNames: list[str]
+
+
+class JiraDefaults(TypedDict, total=False):
+    """Per-repo Jira push defaults stored under ``config['jira']['defaults']``.
+
+    Push validates ``projectKey`` before reading it; ``issueType`` falls back to
+    ``"Task"`` when absent; the id-list fields are applied to the create payload
+    only when non-empty. Every key is optional (``total=False``) for the same
+    incrementally-written reason as ``LinearDefaults``.
+    """
+
+    projectKey: str
+    issueType: str
+    componentIds: list[str]
+    componentNames: list[str]
+    assigneeAccountId: str
+    assigneeName: str
+    labels: list[str]
+
+
+class LinearSection(TypedDict, total=False):
+    """The ``config['linear']`` provider section.
+
+    ``apiKey`` is the credential; ``defaults`` drives the push payload; ``cache``
+    holds the last metadata refresh (teams/projects/labels/users). All optional
+    because a half-configured section (e.g. credential saved, defaults not yet
+    picked) is a valid on-disk intermediate state — push validates presence
+    before indexing in.
+    """
+
+    apiKey: str
+    defaults: LinearDefaults
+    cache: dict
+
+
+class JiraSection(TypedDict, total=False):
+    """The ``config['jira']`` provider section.
+
+    ``site``/``email``/``apiToken`` are the Basic-auth credentials; ``defaults``
+    drives the push payload; ``cache`` holds the last metadata refresh
+    (projects/components/users/issueTypes). All optional for the same
+    half-configured-is-valid reason as ``LinearSection``.
+    """
+
+    site: str
+    email: str
+    apiToken: str
+    defaults: JiraDefaults
+    cache: dict
+
+
+class PlanKeeperConfig(TypedDict, total=False):
+    """The per-repo ``.plankeeper.json`` document, keyed by ticket-system name.
+
+    Each provider gets at most one section; a section is absent until that
+    provider is configured for the repo. ``load_config`` returns ``{}`` (an
+    empty instance) when the file is missing.
+    """
+
+    linear: LinearSection
+    jira: JiraSection
+
+
 class Blocker(TypedDict):
     """One denormalized prerequisite snapshot embedded in a ``CrewIssue``.
 

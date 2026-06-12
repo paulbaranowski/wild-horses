@@ -9,6 +9,7 @@ from plan_keeper.dates import _iso_utc_now
 from plan_keeper.errors import PlanKeeperCliError
 from plan_keeper.http import http_post_json
 from plan_keeper.naming import derive_repo
+from plan_keeper.types import LinearSection
 
 LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
 LINEAR_DESCRIPTION_LIMIT = 65_000
@@ -147,6 +148,10 @@ def refresh_linear_cache(api_key: str) -> list[str]:
     users = linear_users(api_key)
     repo = derive_repo(None)
     config = load_config(repo)
+    # setdefault inserts {"linear": {}} when absent AND returns the same object
+    # now stored in config; the in-place mutation below (and at save_config) thus
+    # persists. Rewriting as config.get("linear", {}) would mutate a throwaway
+    # default that is never written back.
     section = config.setdefault("linear", {})
     section["cache"] = {
         "refreshedAt": _iso_utc_now(),
@@ -160,15 +165,17 @@ def refresh_linear_cache(api_key: str) -> list[str]:
     warnings: list[str] = []
     defaults = section.get("defaults", {})
     team_ids = {t["id"] for t in teams}
-    if defaults.get("teamId") and defaults["teamId"] not in team_ids:
+    team_id = defaults.get("teamId")
+    if team_id and team_id not in team_ids:
         warnings.append(
-            f"defaults.teamId={defaults['teamId']!r} ({defaults.get('teamName', '?')!r}) "
+            f"defaults.teamId={team_id!r} ({defaults.get('teamName', '?')!r}) "
             "no longer exists in Linear"
         )
     project_ids = {p["id"] for p in projects}
-    if defaults.get("projectId") and defaults["projectId"] not in project_ids:
+    project_id = defaults.get("projectId")
+    if project_id and project_id not in project_ids:
         warnings.append(
-            f"defaults.projectId={defaults['projectId']!r} ({defaults.get('projectName', '?')!r}) "
+            f"defaults.projectId={project_id!r} ({defaults.get('projectName', '?')!r}) "
             "no longer exists in Linear"
         )
     assignee_id = defaults.get("assigneeId")
@@ -209,23 +216,35 @@ def linear_create_issue(api_key: str, input_dict: dict) -> dict:
     return payload["issue"]
 
 
-def _push_linear(section: dict, title: str, description: str, meta: dict, force_new: bool) -> dict:
-    api_key = section["apiKey"]
-    defaults = section["defaults"]
+def _push_linear(
+    section: LinearSection, title: str, description: str,
+    meta: dict[str, str], force_new: bool,
+) -> dict:
+    # apiKey/defaults/teamId are validated present by _validate_config_for_push
+    # before this runs; the TypedDict still marks every key optional because a
+    # half-configured section is a valid on-disk state. Read through .get and
+    # narrow so a hand-edited config surfaces a clean error, not a KeyError.
+    api_key = section.get("apiKey")
+    defaults = section.get("defaults", {})
+    if not api_key:
+        raise PlanKeeperCliError("linear config missing apiKey", code=2)
     existing = (meta.get("Linear Ticket") or "").strip()
     if existing and not force_new:
         return _push_linear_update(api_key, existing, title, description)
     input_dict = {
         "title": title,
         "description": description,
-        "teamId": defaults["teamId"],
+        "teamId": defaults.get("teamId"),
     }
-    if defaults.get("projectId"):
-        input_dict["projectId"] = defaults["projectId"]
-    if defaults.get("assigneeId"):
-        input_dict["assigneeId"] = defaults["assigneeId"]
-    if defaults.get("labelIds"):
-        input_dict["labelIds"] = list(defaults["labelIds"])
+    project_id = defaults.get("projectId")
+    if project_id:
+        input_dict["projectId"] = project_id
+    assignee_id = defaults.get("assigneeId")
+    if assignee_id:
+        input_dict["assigneeId"] = assignee_id
+    label_ids = defaults.get("labelIds")
+    if label_ids:
+        input_dict["labelIds"] = list(label_ids)
     issue = linear_create_issue(api_key, input_dict)
     return {
         "action": "create",

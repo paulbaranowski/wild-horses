@@ -180,7 +180,8 @@ class TestTicketSystemConfigRefreshJira(unittest.TestCase):
         ):
             self.cli.refresh_jira_cache(site="herds.atlassian.net", email="p@x.com", api_token="tok")
         config = self.cli.load_config("workdir")
-        cache = config["jira"]["cache"]
+        section = config.get("jira", {})
+        cache = section.get("cache", {})
         self.assertEqual(len(cache["projects"]), 1)
         self.assertEqual(cache["components"][0]["projectKey"], "HERDS")
         self.assertEqual(cache["issueTypes"][0]["name"], "Task")

@@ -14,6 +14,7 @@ from plan_keeper.dates import _iso_utc_now
 from plan_keeper.errors import PlanKeeperCliError
 from plan_keeper.http import HTTP_TIMEOUT, http_get_json
 from plan_keeper.naming import derive_repo
+from plan_keeper.types import JiraSection
 
 
 def refresh_jira_cache(site: str, email: str, api_token: str) -> list[str]:
@@ -32,6 +33,10 @@ def refresh_jira_cache(site: str, email: str, api_token: str) -> list[str]:
         all_issuetypes.extend(jira_issuetypes(site, email, api_token, p["id"]))
     repo = derive_repo(None)
     config = load_config(repo)
+    # setdefault inserts {"jira": {}} when absent AND returns the same object
+    # now stored in config; the in-place mutation below (and at save_config) thus
+    # persists. Rewriting as config.get("jira", {}) would mutate a throwaway
+    # default that is never written back.
     section = config.setdefault("jira", {})
     section["cache"] = {
         "refreshedAt": _iso_utc_now(),
@@ -44,9 +49,10 @@ def refresh_jira_cache(site: str, email: str, api_token: str) -> list[str]:
     warnings: list[str] = []
     defaults = section.get("defaults", {})
     project_keys = {p["key"] for p in projects}
-    if defaults.get("projectKey") and defaults["projectKey"] not in project_keys:
+    project_key = defaults.get("projectKey")
+    if project_key and project_key not in project_keys:
         warnings.append(
-            f"defaults.projectKey={defaults['projectKey']!r} no longer exists in Jira"
+            f"defaults.projectKey={project_key!r} no longer exists in Jira"
         )
     component_ids = {c["id"] for c in all_components}
     for cid in defaults.get("componentIds", []):
@@ -225,11 +231,25 @@ def jira_update_issue(
         raise PlanKeeperCliError(f"Jira network error: {e.reason}", code=4)
 
 
-def _push_jira(section: dict, title: str, description: str, meta: dict, force_new: bool) -> dict:
-    site = _validate_jira_site(section["site"])
-    email = section["email"]
-    token = section["apiToken"]
-    defaults = section["defaults"]
+def _push_jira(
+    section: JiraSection, title: str, description: str,
+    meta: dict[str, str], force_new: bool,
+) -> dict:
+    # site/email/apiToken/defaults/projectKey are validated present by
+    # _validate_config_for_push before this runs; the TypedDict still marks
+    # every key optional because a half-configured section is a valid on-disk
+    # state. Read through .get and narrow so a hand-edited config surfaces a
+    # clean error, not a KeyError.
+    raw_site = section.get("site")
+    email = section.get("email")
+    token = section.get("apiToken")
+    defaults = section.get("defaults", {})
+    project_key = defaults.get("projectKey")
+    if not (raw_site and email and token):
+        raise PlanKeeperCliError("jira config missing site/email/apiToken", code=2)
+    if not project_key:
+        raise PlanKeeperCliError("jira config defaults missing projectKey", code=2)
+    site = _validate_jira_site(raw_site)
     existing = (meta.get("Jira Ticket") or "").strip()
     adf = _adf_paragraph(description)
     if existing and not force_new:
@@ -246,17 +266,20 @@ def _push_jira(section: dict, title: str, description: str, meta: dict, force_ne
             "title": title,
         }
     fields = {
-        "project": {"key": defaults["projectKey"]},
+        "project": {"key": project_key},
         "summary": title,
         "description": adf,
         "issuetype": {"name": defaults.get("issueType", "Task")},
     }
-    if defaults.get("componentIds"):
-        fields["components"] = [{"id": cid} for cid in defaults["componentIds"]]
-    if defaults.get("assigneeAccountId"):
-        fields["assignee"] = {"accountId": defaults["assigneeAccountId"]}
-    if defaults.get("labels"):
-        fields["labels"] = list(defaults["labels"])
+    component_ids = defaults.get("componentIds")
+    if component_ids:
+        fields["components"] = [{"id": cid} for cid in component_ids]
+    assignee_account_id = defaults.get("assigneeAccountId")
+    if assignee_account_id:
+        fields["assignee"] = {"accountId": assignee_account_id}
+    labels = defaults.get("labels")
+    if labels:
+        fields["labels"] = list(labels)
     created = jira_create_issue(site, email, token, fields)
     key = created["key"]
     return {
