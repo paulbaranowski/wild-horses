@@ -9,10 +9,24 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+from typing import Literal
 
 from plan_keeper.errors import PlanKeeperCliError
 from plan_keeper.frontmatter import parse_frontmatter
 
+# The closed lifecycle-Status vocabulary. Members mirror ``LIFECYCLE_STATES``
+# (``ACTIVE_STATES`` + the ``TERMINAL_DIRS`` keys) exactly; that tuple stays the
+# runtime source of truth and this Literal is the static mirror so signatures
+# can name the closed set.
+Status = Literal[
+    "backlog", "todo", "in-progress", "in-review", "done", "deferred"
+]
+
+# Runtime/test override point: always reference as ``storage.PLAN_ROOT`` so the
+# attribute is read live off this module. Never import it by value
+# (``from plan_keeper.storage import PLAN_ROOT``) — a value import binds at
+# import time and silently breaks test isolation and any runtime override, since
+# rebinding this attribute afterwards won't reach the already-captured copy.
 PLAN_ROOT = Path.home() / "plans"
 MAX_SLUG_LEN = 50
 MAX_SUFFIX = 99

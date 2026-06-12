@@ -8,6 +8,7 @@ from pathlib import Path
 
 from plan_keeper.errors import PlanKeeperCliError
 from plan_keeper.storage import CONFIG_FILE_NAME, repo_dir, write_atomic
+from plan_keeper.types import PlanKeeperConfig
 
 _SECRET_CONFIG_FIELDS = ("apiKey", "apiToken")
 
@@ -32,7 +33,7 @@ def config_path(repo: str) -> Path:
     return repo_dir(repo) / CONFIG_FILE_NAME
 
 
-def load_config(repo: str) -> dict:
+def load_config(repo: str) -> PlanKeeperConfig:
     """Read the per-repo config JSON. Returns {} if file is missing.
 
     Raises PlanKeeperCliError(5) on malformed JSON.
@@ -46,7 +47,7 @@ def load_config(repo: str) -> dict:
         raise PlanKeeperCliError(f"malformed config at {path}: {e}", code=5)
 
 
-def save_config(repo: str, data: dict) -> Path:
+def save_config(repo: str, data: PlanKeeperConfig) -> Path:
     """Atomically write the per-repo config JSON, then chmod 600.
 
     The chmod is best-effort — if it fails the write itself still

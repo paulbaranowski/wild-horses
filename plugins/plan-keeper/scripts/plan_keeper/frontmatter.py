@@ -1,10 +1,11 @@
 """Plan-file frontmatter: the canonical field set, parse/serialize round-trip,
 Kind validation, and default-field injection on save.
 """
-from typing import Optional
+from typing import Optional, cast
 
 from plan_keeper.dates import _iso_utc_now
 from plan_keeper.errors import PlanKeeperCliError
+from plan_keeper.types import Kind
 
 # Order matters in the output — keep this canonical so callers see a stable shape.
 # Each tracker gets its own id field: a plan can carry a plan-keeper id (always,
@@ -34,7 +35,7 @@ _LEGACY_SYSTEM_TO_FIELD = {
 VALID_KINDS = ("idea", "prd", "design", "spec", "exec-plan")
 
 
-def validate_kind(value: str) -> str:
+def validate_kind(value: str) -> Kind:
     """Return a normalized (lowercased) Kind, or raise if not in VALID_KINDS."""
     normalized = value.strip().lower()
     if normalized not in VALID_KINDS:
@@ -43,7 +44,9 @@ def validate_kind(value: str) -> str:
             + ", ".join(VALID_KINDS),
             code=2,
         )
-    return normalized
+    # Membership in VALID_KINDS is the runtime proof; cast tells pyright the
+    # narrowing the `in` check guarantees but cannot statically express.
+    return cast(Kind, normalized)
 
 
 def _migrate_legacy_ticket_fields(meta: dict[str, str]) -> None:
@@ -123,6 +126,11 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
         body = body[2:]
     elif body.startswith("\n"):
         body = body[1:]
+    # MUTATES meta IN PLACE: rewrites legacy ticket fields onto their current
+    # keys before returning. The returned dict already carries the migration,
+    # so any later serialize_frontmatter persists a legacy-field migration the
+    # caller never asked for — parsing a plan is enough to rewrite it on the
+    # next save.
     _migrate_legacy_ticket_fields(meta)
     return meta, body
 
@@ -158,7 +166,7 @@ def serialize_frontmatter(meta: dict[str, str], body: str) -> str:
 
 def _inject_default_frontmatter(
     body_text: str,
-    kind: Optional[str] = None,
+    kind: Optional[Kind] = None,
     created: Optional[str] = None,
     plankeeper_ticket: Optional[str] = None,
 ) -> str:

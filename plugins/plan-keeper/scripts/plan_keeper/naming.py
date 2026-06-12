@@ -11,6 +11,7 @@ from typing import Optional
 from plan_keeper.errors import PlanKeeperCliError
 from plan_keeper.frontmatter import VALID_KINDS
 from plan_keeper.storage import MAX_SLUG_LEN
+from plan_keeper.types import Kind
 
 
 def slugify_topic(text: str) -> str:
@@ -67,7 +68,7 @@ _NAME_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 _NAME_COLLISION_SUFFIX_RE = re.compile(r"-\d+$")
 
 
-def plan_filename(date_str: str, slug: str, ext: str, kind: Optional[str]) -> str:
+def plan_filename(date_str: str, slug: str, ext: str, kind: Optional[Kind]) -> str:
     """Build a plan's filename.
 
     `<date>-<slug>--<kind>.<ext>` on a markdown save that carries a Kind, else
@@ -164,6 +165,11 @@ def validate_extension(ext: str) -> str:
     return ext
 
 
+# Ambient-state dependency: the repo name resolved by _repo_from_git /
+# derive_repo — and therefore which ~/plans/<repo>/ dir and which
+# .plankeeper.json config get read and written — depends on os.getcwd() and the
+# git remote origin, resolved via subprocess. With no explicit `cwd`, the result
+# is a function of the process's current working directory.
 def _repo_from_git(cwd: Optional[str] = None) -> Optional[str]:
     """Return the repo folder name from `git remote origin`, or None.
 

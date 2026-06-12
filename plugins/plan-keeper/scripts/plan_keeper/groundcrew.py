@@ -10,7 +10,7 @@ rather than owning the algorithm.
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from plan_keeper import storage
 from plan_keeper.dates import _iso_utc_now
@@ -21,6 +21,7 @@ from plan_keeper.ids import (
     mint_into_path_if_absent,
     repo_for_plan,
 )
+from plan_keeper.types import Blocker, CrewIssue, IndexEntry
 
 # Re-export so existing callers/tests can read `groundcrew.plankeeper_id`. The
 # `as plankeeper_id` form marks this an intentional re-export (not a stray
@@ -31,6 +32,12 @@ from plan_keeper.ids import plankeeper_id as plankeeper_id
 # adapter's enum. `backlog` is fetched but never dispatched (confirm one via
 # `crew status <id>`; the aggregate `crew status` Queue lists only `todo`).
 # Anything else (typos, future values) falls through to "other".
+# The closed adapter-status vocabulary: the distinct values of
+# ``_GROUNDCREW_STATUS_MAP`` (``other`` is the catch-all). The map stays the
+# runtime source of truth; this Literal is the static mirror so signatures can
+# name the closed set.
+GroundcrewStatus = Literal["other", "todo", "in-progress", "in-review", "done"]
+
 _GROUNDCREW_STATUS_MAP = {
     "backlog": "other",
     "todo": "todo",
@@ -39,7 +46,7 @@ _GROUNDCREW_STATUS_MAP = {
     "done": "done",
 }
 
-def _assert_no_plankeeper_id_collisions(issues: list[dict]) -> None:
+def _assert_no_plankeeper_id_collisions(issues: list[CrewIssue]) -> None:
     """Raise if two plans carry the same stored ``Plan-keeper Ticket``.
 
     A collision would make groundcrew treat two distinct plans as one ticket
@@ -67,9 +74,9 @@ def _assert_no_plankeeper_id_collisions(issues: list[dict]) -> None:
 
 def _plan_to_issue(
     path: Path,
-    index: Optional[dict[str, dict]] = None,
+    index: Optional[dict[str, IndexEntry]] = None,
     warn_label: Optional[str] = None,
-) -> Optional[dict]:
+) -> Optional[CrewIssue]:
     """Convert one plan file to a shell-adapter issue dict. None if unparseable.
 
     Skips files that don't start with frontmatter (they're not plan-keeper
@@ -163,7 +170,7 @@ def _parse_blocked_by(value: str) -> list[str]:
     return ids
 
 
-def _build_repo_index(repo: str) -> dict[str, dict]:
+def _build_repo_index(repo: str) -> dict[str, IndexEntry]:
     """Index every plan in ``repo`` (active + done/ + deferred/) by identity.
 
     Returns a dict mapping each plan's identity strings to a shared entry
@@ -177,7 +184,7 @@ def _build_repo_index(repo: str) -> dict[str, dict]:
     or the computed one when unminted. Best-effort: unreadable/unparseable files
     are skipped.
     """
-    index: dict[str, dict] = {}
+    index: dict[str, IndexEntry] = {}
     repo_root = storage.PLAN_ROOT / repo
     for location, base in (
         ("active", repo_root),
@@ -205,7 +212,7 @@ def _build_repo_index(repo: str) -> dict[str, dict]:
                 status = _GROUNDCREW_STATUS_MAP.get(
                     meta.get("Status", "").strip(), "other"
                 )
-            entry = {
+            entry: IndexEntry = {
                 "id": primary,
                 "title": _extract_h1_safe(body) or plan.stem,
                 "status": status,
@@ -235,9 +242,9 @@ def _build_repo_index(repo: str) -> dict[str, dict]:
 
 def _blockers_for_plan(
     meta: dict,
-    index: dict[str, dict],
+    index: dict[str, IndexEntry],
     warn_label: Optional[str] = None,
-) -> tuple[list[dict], list[str]]:
+) -> tuple[list[Blocker], list[str]]:
     """Resolve a plan's ``Blocked-by`` refs into groundcrew blocker snapshots.
 
     Returns ``(blockers, unsatisfied_ids)`` where ``blockers`` is the list of
@@ -252,7 +259,7 @@ def _blockers_for_plan(
     raw = (meta.get("Blocked-by") or "").strip()
     if not raw:
         return [], []
-    blockers: list[dict] = []
+    blockers: list[Blocker] = []
     unsatisfied: list[str] = []
     for ref in _parse_blocked_by(raw):
         entry = index.get(ref)
@@ -286,7 +293,7 @@ def _blockers_for_plan(
     return blockers, unsatisfied
 
 
-def _detect_dependency_cycles(index: dict[str, dict]) -> list[list[str]]:
+def _detect_dependency_cycles(index: dict[str, IndexEntry]) -> list[list[str]]:
     """Return cyclic chains of canonical plan ids in a repo's Blocked-by graph.
 
     groundcrew can't see cycles (blockers are denormalized snapshots, not a
@@ -349,7 +356,7 @@ def _is_unassigned(path: Path) -> bool:
     ``backlog`` plan, a human-picked-up ``in-progress`` one, and an
     ``in-review`` one a human owns are all hidden alike. (This subsumes the
     older active-state-only "locally driven" rule.) Read from raw frontmatter,
-    not the issue dict, so the skip happens before ``_collect_crew_issues``
+    not the issue dict, so the skip happens before ``_collect_and_mint_crew_issues``
     mints an id into a plan it's about to drop. Best-effort: an
     unreadable/unparseable file is not treated as unassigned (it's filtered
     elsewhere anyway).
@@ -361,7 +368,7 @@ def _is_unassigned(path: Path) -> bool:
     return not meta.get("Agent", "").strip()
 
 
-def _collect_crew_issues() -> list[dict]:
+def _collect_and_mint_crew_issues() -> list[CrewIssue]:
     """Every active plan under ``~/plans/<repo>/*.md`` as shell-adapter issues.
 
     One level deep — ``done/`` and ``deferred/`` are excluded (they're not
@@ -374,7 +381,7 @@ def _collect_crew_issues() -> list[dict]:
     ``crew install``'s post-patch data-path check, so both see the exact same
     plan set.
     """
-    issues: list[dict] = []
+    issues: list[CrewIssue] = []
     if not storage.PLAN_ROOT.exists():
         return issues
     for repo_entry in sorted(storage.PLAN_ROOT.iterdir()):
@@ -407,7 +414,7 @@ def _collect_crew_issues() -> list[dict]:
     return issues
 
 
-def _resolve_crew_id(plan_id: str) -> Optional[dict]:
+def _resolve_crew_id(plan_id: str) -> Optional[CrewIssue]:
     """The issue dict whose stored ``Plan-keeper Ticket`` == ``plan_id``, or None.
 
     Reads each plan's stored, frozen id across active, then ``done/``, then

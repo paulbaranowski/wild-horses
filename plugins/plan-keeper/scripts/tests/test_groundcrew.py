@@ -16,6 +16,28 @@ from support import (  # noqa: E402  (inserts scripts dir on sys.path)
     run_cli,
 )
 from plan_keeper import groundcrew, storage  # noqa: E402
+from plan_keeper.types import CrewIssue  # noqa: E402
+
+
+def _crew_issue(issue_id: str, path: str) -> CrewIssue:
+    """A complete CrewIssue fixture; only ``id``/``sourceRef`` vary per test.
+
+    The collision guard reads only those two fields, so the rest are inert
+    defaults that keep the literal a full, typed CrewIssue.
+    """
+    return {
+        "id": issue_id,
+        "title": "",
+        "description": "",
+        "status": "todo",
+        "repository": "",
+        "agent": None,
+        "assignee": "",
+        "updatedAt": "",
+        "blockers": [],
+        "hasMoreBlockers": False,
+        "sourceRef": {"path": path},
+    }
 
 
 class TestGroundcrewFetch(IsolatedHomeTestCase):
@@ -348,8 +370,8 @@ class TestGroundcrewId(IsolatedHomeTestCase):
 
     def test_collision_guard_raises_with_both_paths(self):
         issues = [
-            {"id": "plan-1", "sourceRef": {"path": "/a.md"}},
-            {"id": "plan-1", "sourceRef": {"path": "/b.md"}},
+            _crew_issue("plan-1", "/a.md"),
+            _crew_issue("plan-1", "/b.md"),
         ]
         with self.assertRaises(self.cli.PlanKeeperCliError) as ctx:
             self.cli._assert_no_plankeeper_id_collisions(issues)
@@ -358,16 +380,16 @@ class TestGroundcrewId(IsolatedHomeTestCase):
 
     def test_collision_guard_passes_distinct_ids(self):
         issues = [
-            {"id": "plan-1", "sourceRef": {"path": "/a.md"}},
-            {"id": "plan-2", "sourceRef": {"path": "/b.md"}},
+            _crew_issue("plan-1", "/a.md"),
+            _crew_issue("plan-2", "/b.md"),
         ]
         self.cli._assert_no_plankeeper_id_collisions(issues)  # no raise
 
     def test_collision_guard_skips_empty_ids(self):
         # Unminted plans (empty id, before fetch mints) must not collide.
         issues = [
-            {"id": "", "sourceRef": {"path": "/a.md"}},
-            {"id": "", "sourceRef": {"path": "/b.md"}},
+            _crew_issue("", "/a.md"),
+            _crew_issue("", "/b.md"),
         ]
         self.cli._assert_no_plankeeper_id_collisions(issues)  # no raise
 
@@ -379,7 +401,7 @@ class TestFetchMintFailure(IsolatedHomeTestCase):
     def test_fetch_excludes_plan_when_mint_cannot_persist(self):
         d = self.plans_root / "r"
         d.mkdir(parents=True)
-        # Agent: claude clears the unassigned-plan gate in _collect_crew_issues
+        # Agent: claude clears the unassigned-plan gate in _collect_and_mint_crew_issues
         # so execution reaches mint_into_path_if_absent — without it the plan is
         # skipped early and the patched write-failure path below never runs.
         (d / "2026-01-01-x.md").write_text(
@@ -387,7 +409,7 @@ class TestFetchMintFailure(IsolatedHomeTestCase):
         )
         with patch.object(storage, "PLAN_ROOT", self.plans_root), \
                 patch("plan_keeper.ids.write_atomic", side_effect=OSError("disk full")):
-            issues = groundcrew._collect_crew_issues()
+            issues = groundcrew._collect_and_mint_crew_issues()
         # The plan couldn't get a frozen id, so it must not ship at all — never
         # with an empty id.
         self.assertEqual(issues, [])

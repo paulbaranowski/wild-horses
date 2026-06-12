@@ -14,6 +14,15 @@ from plan_keeper.dates import _iso_utc_now
 from plan_keeper.errors import PlanKeeperCliError
 from plan_keeper.http import HTTP_TIMEOUT, http_get_json
 from plan_keeper.naming import derive_repo
+from plan_keeper.types import (
+    JiraComponent,
+    JiraFields,
+    JiraIssueType,
+    JiraProject,
+    JiraSection,
+    JiraUser,
+    JsonObject,
+)
 
 
 def refresh_jira_cache(site: str, email: str, api_token: str) -> list[str]:
@@ -23,15 +32,19 @@ def refresh_jira_cache(site: str, email: str, api_token: str) -> list[str]:
     that aren't in the new cache). Empty list on clean refresh.
     """
     projects = jira_projects(site, email, api_token)
-    all_components: list[dict] = []
-    all_users: list[dict] = []
-    all_issuetypes: list[dict] = []
+    all_components: list[JiraComponent] = []
+    all_users: list[JiraUser] = []
+    all_issuetypes: list[JiraIssueType] = []
     for p in projects:
         all_components.extend(jira_components(site, email, api_token, p["key"]))
         all_users.extend(jira_users(site, email, api_token, p["key"]))
         all_issuetypes.extend(jira_issuetypes(site, email, api_token, p["id"]))
     repo = derive_repo(None)
     config = load_config(repo)
+    # setdefault inserts {"jira": {}} when absent AND returns the same object
+    # now stored in config; the in-place mutation below (and at save_config) thus
+    # persists. Rewriting as config.get("jira", {}) would mutate a throwaway
+    # default that is never written back.
     section = config.setdefault("jira", {})
     section["cache"] = {
         "refreshedAt": _iso_utc_now(),
@@ -44,9 +57,10 @@ def refresh_jira_cache(site: str, email: str, api_token: str) -> list[str]:
     warnings: list[str] = []
     defaults = section.get("defaults", {})
     project_keys = {p["key"] for p in projects}
-    if defaults.get("projectKey") and defaults["projectKey"] not in project_keys:
+    project_key = defaults.get("projectKey")
+    if project_key and project_key not in project_keys:
         warnings.append(
-            f"defaults.projectKey={defaults['projectKey']!r} no longer exists in Jira"
+            f"defaults.projectKey={project_key!r} no longer exists in Jira"
         )
     component_ids = {c["id"] for c in all_components}
     for cid in defaults.get("componentIds", []):
@@ -57,6 +71,10 @@ def refresh_jira_cache(site: str, email: str, api_token: str) -> list[str]:
     return warnings
 
 
+# Matches a bare hostname with an optional `:port` — the `(?::\d+)?` group is
+# that optional port. The pattern admits no scheme, path, userinfo, or `@`, so
+# a site value cannot smuggle a different authority into the constructed URL
+# and redirect the Basic-auth header to an attacker-controlled host.
 _JIRA_SITE_RE = re.compile(r"^[A-Za-z0-9.\-]+(?::\d+)?$")
 
 
@@ -83,23 +101,29 @@ def _jira_auth_header(email: str, api_token: str) -> str:
     return "Basic " + base64.b64encode(raw).decode("ascii")
 
 
-def jira_viewer(site: str, email: str, api_token: str) -> dict:
+def jira_viewer(site: str, email: str, api_token: str) -> JsonObject:
+    """Return the authenticated Jira user object from ``/myself``."""
     url = f"https://{site}/rest/api/3/myself"
-    return http_get_json(url, {"Authorization": _jira_auth_header(email, api_token)})
+    resp = http_get_json(url, {"Authorization": _jira_auth_header(email, api_token)})
+    if not isinstance(resp, dict):
+        raise PlanKeeperCliError(f"unexpected Jira myself response: {resp!r}", code=5)
+    return resp
 
 
 def _jira_paginated(
     site: str, email: str, api_token: str,
     path: str, query_params: dict[str, str],
-) -> list[dict]:
+) -> list[JsonObject]:
     """Walk Jira's startAt/maxResults pagination and return all `values`."""
-    all_values: list[dict] = []
+    all_values: list[JsonObject] = []
     start_at = 0
     page_size = 50
     while True:
         params = {**query_params, "startAt": str(start_at), "maxResults": str(page_size)}
         url = f"https://{site}/rest/api/3/{path}?{urlencode(params)}"
         resp = http_get_json(url, {"Authorization": _jira_auth_header(email, api_token)})
+        if not isinstance(resp, dict):
+            raise PlanKeeperCliError(f"unexpected Jira paginated response: {resp!r}", code=5)
         page_values = resp.get("values", [])
         all_values.extend(page_values)
         if "isLast" in resp:
@@ -111,12 +135,14 @@ def _jira_paginated(
     return all_values
 
 
-def jira_projects(site: str, email: str, api_token: str) -> list[dict]:
+def jira_projects(site: str, email: str, api_token: str) -> list[JiraProject]:
+    """Return all Jira projects as ``{key, id, name}`` rows."""
     raw = _jira_paginated(site, email, api_token, "project/search", {})
     return [{"key": p["key"], "id": p["id"], "name": p["name"]} for p in raw]
 
 
-def jira_components(site: str, email: str, api_token: str, project_key: str) -> list[dict]:
+def jira_components(site: str, email: str, api_token: str, project_key: str) -> list[JiraComponent]:
+    """Return a project's components as ``{id, name, projectKey}`` rows."""
     url = f"https://{site}/rest/api/3/project/{project_key}/components"
     raw = http_get_json(url, {"Authorization": _jira_auth_header(email, api_token)})
     # Endpoint returns a flat list, not a paginated object.
@@ -125,10 +151,14 @@ def jira_components(site: str, email: str, api_token: str, project_key: str) -> 
     return [{"id": c["id"], "name": c["name"], "projectKey": project_key} for c in raw]
 
 
-def jira_users(site: str, email: str, api_token: str, project_key: str) -> list[dict]:
-    all_users: list[dict] = []
+def jira_users(site: str, email: str, api_token: str, project_key: str) -> list[JiraUser]:
+    """Return assignable users for a project as ``{accountId, name, email}`` rows."""
+    all_users: list[JsonObject] = []
     start_at = 0
     page_size = 50
+    # The assignable-user endpoint returns a bare JSON list, not a paginated
+    # {values, isLast} object, so it cannot use _jira_paginated; pagination is
+    # driven by short final pages (len(page) < page_size) instead.
     while True:
         url = (
             f"https://{site}/rest/api/3/user/assignable/multiProjectSearch?"
@@ -152,7 +182,8 @@ def jira_users(site: str, email: str, api_token: str, project_key: str) -> list[
     ]
 
 
-def jira_issuetypes(site: str, email: str, api_token: str, project_id: str) -> list[dict]:
+def jira_issuetypes(site: str, email: str, api_token: str, project_id: str) -> list[JiraIssueType]:
+    """Return issue types as ``{id, name, projectId}`` rows; project_id is the numeric id, not the key (see _resolve_jira_project_id)."""
     url = (
         f"https://{site}/rest/api/3/issuetype/project?"
         + urlencode({"projectId": project_id})
@@ -163,7 +194,7 @@ def jira_issuetypes(site: str, email: str, api_token: str, project_id: str) -> l
     return [{"id": t["id"], "name": t["name"], "projectId": project_id} for t in raw]
 
 
-def _adf_paragraph(text: str) -> dict:
+def _adf_paragraph(text: str) -> JsonObject:
     return {
         "type": "doc",
         "version": 1,
@@ -174,8 +205,8 @@ def _adf_paragraph(text: str) -> dict:
 
 
 def jira_create_issue(
-    site: str, email: str, api_token: str, fields: dict,
-) -> dict:
+    site: str, email: str, api_token: str, fields: JiraFields,
+) -> JsonObject:
     url = f"https://{site}/rest/api/3/issue"
     req = urllib.request.Request(
         url,
@@ -199,7 +230,7 @@ def jira_create_issue(
 
 
 def jira_update_issue(
-    site: str, email: str, api_token: str, key: str, fields: dict,
+    site: str, email: str, api_token: str, key: str, fields: JiraFields,
 ) -> None:
     url = f"https://{site}/rest/api/3/issue/{key}"
     req = urllib.request.Request(
@@ -225,11 +256,31 @@ def jira_update_issue(
         raise PlanKeeperCliError(f"Jira network error: {e.reason}", code=4)
 
 
-def _push_jira(section: dict, title: str, description: str, meta: dict, force_new: bool) -> dict:
-    site = _validate_jira_site(section["site"])
-    email = section["email"]
-    token = section["apiToken"]
-    defaults = section["defaults"]
+def _push_jira(
+    section: JiraSection, title: str, description: str,
+    meta: dict[str, str], force_new: bool,
+) -> JsonObject:
+    """Create or update a Jira issue for this plan.
+
+    Updates the existing ticket when ``meta`` carries a "Jira Ticket" key and
+    ``force_new`` is False; otherwise creates a new issue from the configured
+    defaults.
+    """
+    # site/email/apiToken/defaults/projectKey are validated present by
+    # _validate_config_for_push before this runs; the TypedDict still marks
+    # every key optional because a half-configured section is a valid on-disk
+    # state. Read through .get and narrow so a hand-edited config surfaces a
+    # clean error, not a KeyError.
+    raw_site = section.get("site")
+    email = section.get("email")
+    token = section.get("apiToken")
+    defaults = section.get("defaults", {})
+    project_key = defaults.get("projectKey")
+    if not (raw_site and email and token):
+        raise PlanKeeperCliError("jira config missing site/email/apiToken", code=2)
+    if not project_key:
+        raise PlanKeeperCliError("jira config defaults missing projectKey", code=2)
+    site = _validate_jira_site(raw_site)
     existing = (meta.get("Jira Ticket") or "").strip()
     adf = _adf_paragraph(description)
     if existing and not force_new:
@@ -245,18 +296,21 @@ def _push_jira(section: dict, title: str, description: str, meta: dict, force_ne
             "url": f"https://{site}/browse/{key}",
             "title": title,
         }
-    fields = {
-        "project": {"key": defaults["projectKey"]},
+    fields: JiraFields = {
+        "project": {"key": project_key},
         "summary": title,
         "description": adf,
         "issuetype": {"name": defaults.get("issueType", "Task")},
     }
-    if defaults.get("componentIds"):
-        fields["components"] = [{"id": cid} for cid in defaults["componentIds"]]
-    if defaults.get("assigneeAccountId"):
-        fields["assignee"] = {"accountId": defaults["assigneeAccountId"]}
-    if defaults.get("labels"):
-        fields["labels"] = list(defaults["labels"])
+    component_ids = defaults.get("componentIds")
+    if component_ids:
+        fields["components"] = [{"id": cid} for cid in component_ids]
+    assignee_account_id = defaults.get("assigneeAccountId")
+    if assignee_account_id:
+        fields["assignee"] = {"accountId": assignee_account_id}
+    labels = defaults.get("labels")
+    if labels:
+        fields["labels"] = list(labels)
     created = jira_create_issue(site, email, token, fields)
     key = created["key"]
     return {

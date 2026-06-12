@@ -13,9 +13,10 @@ import os
 import re
 import shutil
 import sys
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Mapping, Optional, cast
 
 from plan_keeper import __version__, storage
 from plan_keeper.config import (
@@ -41,13 +42,14 @@ from plan_keeper.groundcrew import (
     _assert_no_plankeeper_id_collisions,
     _blockers_for_plan,
     _build_repo_index,
-    _collect_crew_issues,
+    _collect_and_mint_crew_issues,
     _resolve_crew_id,
 )
 from plan_keeper.ids import (
     ensure_id,
     id_for_path,
 )
+from plan_keeper.types import QueueRow
 
 # Re-export so existing tests can read `cli.plankeeper_id`. The `as plankeeper_id`
 # form marks this an intentional re-export; the single definition lives in `ids`.
@@ -85,6 +87,7 @@ from plan_keeper.push import push_subcommand
 from plan_keeper.upgrade import default_capture, default_stream, run_upgrade
 from plan_keeper.storage import (
     LIFECYCLE_STATES,
+    Status,
     TERMINAL_DIRS,
     emit_collision,
     find_unused_suffix,
@@ -104,14 +107,243 @@ from plan_keeper.storage import (
 PROG = Path(sys.argv[0]).stem or "plan_keeper_cli"
 
 
+# --- Typed arg boundaries ---------------------------------------------------
+# Each ``cmd_*`` handler builds the matching dataclass from the argparse
+# Namespace at its top, then reads typed fields instead of implicit-Any
+# ``args.X`` attributes. Fields mirror exactly the attributes that subcommand's
+# parser configures (dest names, store_true defaults, set_defaults values).
+# Provider-shared handlers (linear/jira) carry jira-only fields that the linear
+# subtree never sets — those are read with ``getattr(..., None)`` so the same
+# dataclass serves both subtrees.
+
+
+@dataclass
+class RepoNameArgs:
+    override: Optional[str]
+    cwd: Optional[str]
+    full: bool
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "RepoNameArgs":
+        return cls(override=args.override, cwd=args.cwd, full=args.full)
+
+
+@dataclass
+class ListArgs:
+    override: Optional[str]
+    all_repos: bool
+    state: str
+    status: Optional[str]
+    group: bool
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "ListArgs":
+        return cls(
+            override=args.override,
+            all_repos=args.all_repos,
+            state=args.state,
+            status=getattr(args, "status", None),
+            group=getattr(args, "group", False),
+        )
+
+
+@dataclass
+class SaveArgs:
+    override: Optional[str]
+    topic: Optional[str]
+    date: Optional[str]
+    extension: Optional[str]
+    from_path: Optional[str]
+    kind: Optional[str]
+    on_collision: str
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "SaveArgs":
+        return cls(
+            override=args.override,
+            topic=args.topic,
+            date=args.date,
+            extension=args.extension,
+            from_path=args.from_path,
+            kind=args.kind,
+            on_collision=args.on_collision,
+        )
+
+
+@dataclass
+class ProviderConfigGetArgs:
+    name: str
+    show_secrets: bool
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "ProviderConfigGetArgs":
+        return cls(name=args.name, show_secrets=args.show_secrets)
+
+
+@dataclass
+class ProviderConfigSaveArgs:
+    name: str
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "ProviderConfigSaveArgs":
+        return cls(name=args.name)
+
+
+@dataclass
+class ProviderConfigRefreshArgs:
+    name: str
+    api_key: Optional[str]
+    email: Optional[str]
+    site: Optional[str]
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "ProviderConfigRefreshArgs":
+        return cls(
+            name=args.name,
+            api_key=args.api_key,
+            email=getattr(args, "email", None),
+            site=getattr(args, "site", None),
+        )
+
+
+@dataclass
+class FileMetaLocatorArgs:
+    file: Optional[str]
+    ticket: Optional[str]
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "FileMetaLocatorArgs":
+        return cls(file=args.file, ticket=args.ticket)
+
+
+@dataclass
+class FileMetaSetArgs:
+    file: Optional[str]
+    ticket: Optional[str]
+    agent: Optional[str]
+    status: Optional[str]
+    on_collision: str
+    kind: Optional[str]
+    completed_on: Optional[str]
+    plankeeper_ticket: Optional[str]
+    linear_ticket: Optional[str]
+    jira_ticket: Optional[str]
+    blocked_by: Optional[str]
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "FileMetaSetArgs":
+        return cls(
+            file=args.file,
+            ticket=args.ticket,
+            agent=args.agent,
+            status=args.status,
+            on_collision=args.on_collision,
+            kind=args.kind,
+            completed_on=args.completed_on,
+            plankeeper_ticket=args.plankeeper_ticket,
+            linear_ticket=args.linear_ticket,
+            jira_ticket=args.jira_ticket,
+            blocked_by=args.blocked_by,
+        )
+
+
+@dataclass
+class PushArgs:
+    name: str
+    file: Optional[str]
+    ticket: Optional[str]
+    force_new: bool
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "PushArgs":
+        return cls(
+            name=args.name,
+            file=args.file,
+            ticket=args.ticket,
+            force_new=args.force_new,
+        )
+
+
+@dataclass
+class TicketApiArgs:
+    name: str
+    api_kind: str
+    api_key: Optional[str]
+    email: Optional[str]
+    site: Optional[str]
+    project_key: Optional[str]
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "TicketApiArgs":
+        return cls(
+            name=args.name,
+            api_kind=args.api_kind,
+            api_key=args.api_key,
+            email=getattr(args, "email", None),
+            site=getattr(args, "site", None),
+            project_key=getattr(args, "project_key", None),
+        )
+
+
+@dataclass
+class CrewIdArgs:
+    id: str
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "CrewIdArgs":
+        return cls(id=args.id)
+
+
+@dataclass
+class CrewInstallArgs:
+    config: Optional[str]
+    dry_run: bool
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "CrewInstallArgs":
+        return cls(config=args.config, dry_run=args.dry_run)
+
+
+@dataclass
+class QueueAddArgs:
+    files: list[str]
+    repo: Optional[str]
+    agent: str
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "QueueAddArgs":
+        return cls(files=args.files, repo=args.repo, agent=args.agent)
+
+
+@dataclass
+class QueueDropArgs:
+    files: list[str]
+    repo: Optional[str]
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "QueueDropArgs":
+        return cls(files=args.files, repo=args.repo)
+
+
+@dataclass
+class QueueListArgs:
+    all: bool
+    repo: Optional[str]
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "QueueListArgs":
+        return cls(all=args.all, repo=args.repo)
+
+
 # --- Subcommands ------------------------------------------------------------
 
 
 def cmd_repo_name(args) -> int:
-    if args.full:
-        print(derive_repo_full(args.cwd))
+    a = RepoNameArgs.from_args(args)
+    if a.full:
+        print(derive_repo_full(a.cwd))
     else:
-        print(derive_repo(args.override, args.cwd))
+        print(derive_repo(a.override, a.cwd))
     return 0
 
 
@@ -252,18 +484,19 @@ def cmd_list(args) -> int:
     # nonexistent ~/plans/<cwd-basename>/ and print nothing. --all-repos and
     # --override are mutually exclusive — argparse rejects the combination
     # (exit 2) before we get here.
-    raw_filter = getattr(args, "status", None)
+    a = ListArgs.from_args(args)
+    raw_filter = a.status
 
-    if args.override:
-        explicit: Optional[str] = validate_repo_name(normalize_override(args.override))
+    if a.override:
+        explicit: Optional[str] = validate_repo_name(normalize_override(a.override))
     else:
         explicit = _repo_from_git()
 
-    if args.all_repos or explicit is None:
-        items = _all_repos_items(args.state)
+    if a.all_repos or explicit is None:
+        items = _all_repos_items(a.state)
     else:
-        items = [(p.name, p) for p in list_plans(explicit, args.state)]
-    if getattr(args, "group", False):
+        items = [(p.name, p) for p in list_plans(explicit, a.state)]
+    if a.group:
         return _render_grouped(items)
     return _render_listing(items, raw_filter)
 
@@ -299,7 +532,8 @@ def cmd_repo_list(args) -> int:
 
 
 def cmd_save(args) -> int:
-    repo = derive_repo(args.override)
+    a = SaveArgs.from_args(args)
+    repo = derive_repo(a.override)
 
     # Two distinct shapes, picked by whether --from-path is given:
     #
@@ -314,14 +548,14 @@ def cmd_save(args) -> int:
     #      <date>-<runid>-<short>.<slug>.{json,md}). Always a move (not a copy):
     #      the realistic workflow is relocating an already-on-disk artifact,
     #      and leaving stale duplicates behind is just confusion.
-    kind = validate_kind(args.kind) if args.kind is not None else None
+    kind = validate_kind(a.kind) if a.kind is not None else None
 
-    if args.from_path:
+    if a.from_path:
         for flag, value in (
-            ("--topic", args.topic),
-            ("--extension", args.extension),
-            ("--date", args.date),
-            ("--kind", args.kind),
+            ("--topic", a.topic),
+            ("--extension", a.extension),
+            ("--date", a.date),
+            ("--kind", a.kind),
         ):
             if value is not None:
                 raise PlanKeeperCliError(
@@ -331,7 +565,7 @@ def cmd_save(args) -> int:
                     "(set Kind afterward via `file-meta set --kind ...`)",
                     code=2,
                 )
-        source = Path(args.from_path)
+        source = Path(a.from_path)
         if not source.exists():
             raise PlanKeeperCliError(f"source not found: {source}", code=3)
         if not source.is_file():
@@ -340,18 +574,18 @@ def cmd_save(args) -> int:
         ext = None  # --from-path never reaches the frontmatter-injection branch
     else:
         source = None
-        if args.topic is None:
+        if a.topic is None:
             raise PlanKeeperCliError(
                 "--topic is required (unless --from-path is given, in which "
                 "case the source basename is used and --topic is rejected)",
                 code=2,
             )
-        slug = slugify_topic(args.topic)
+        slug = slugify_topic(a.topic)
         if not slug:
             raise PlanKeeperCliError(
-                f"topic {args.topic!r} slugified to empty string", code=2
+                f"topic {a.topic!r} slugified to empty string", code=2
             )
-        ext = validate_extension(args.extension) if args.extension is not None else "md"
+        ext = validate_extension(a.extension) if a.extension is not None else "md"
         if kind and ext != "md":
             raise PlanKeeperCliError(
                 f"--kind only applies to .md saves (frontmatter lives in markdown); "
@@ -359,17 +593,17 @@ def cmd_save(args) -> int:
                 code=2,
             )
         date_str = (
-            parse_date_arg(args.date) if args.date else date.today().isoformat()
+            parse_date_arg(a.date) if a.date else date.today().isoformat()
         )
         target = repo_dir(repo) / plan_filename(date_str, slug, ext, kind)
 
     if target.exists():
-        if args.on_collision == "fail":
+        if a.on_collision == "fail":
             # Critical: emit BEFORE any source mutation, so a `--move-source`
             # caller can safely retry without losing the source file.
             emit_collision(target)
             return 2
-        if args.on_collision == "suffix":
+        if a.on_collision == "suffix":
             target = find_unused_suffix(target)
         # "overwrite" → fall through
 
@@ -431,20 +665,22 @@ def cmd_save(args) -> int:
 
 
 def cmd_ticket_system_config_get(args) -> int:
+    a = ProviderConfigGetArgs.from_args(args)
     repo = derive_repo(None)
     config = load_config(repo)
-    section = config.get(args.name)
+    section = config.get(a.name)
     if section is None:
         raise PlanKeeperCliError(
-            f"no config for ticket system {args.name!r} in repo {repo!r}",
+            f"no config for ticket system {a.name!r} in repo {repo!r}",
             code=3,
         )
-    output = section if args.show_secrets else _redact_section(section)
+    output = section if a.show_secrets else _redact_section(section)
     print(json.dumps(output))
     return 0
 
 
 def cmd_ticket_system_config_save(args) -> int:
+    a = ProviderConfigSaveArgs.from_args(args)
     raw = sys.stdin.read()
     try:
         new_section = json.loads(raw)
@@ -454,30 +690,31 @@ def cmd_ticket_system_config_save(args) -> int:
         raise PlanKeeperCliError("stdin must be a JSON object", code=2)
     repo = derive_repo(None)
     config = load_config(repo)
-    config[args.name] = new_section
+    config[a.name] = new_section
     path = save_config(repo, config)
     print(path)
     return 0
 
 
 def cmd_ticket_system_config_refresh(args) -> int:
-    if args.name == "linear":
-        if not args.api_key:
+    a = ProviderConfigRefreshArgs.from_args(args)
+    if a.name == "linear":
+        if not a.api_key:
             raise PlanKeeperCliError(
                 "linear refresh requires --api-key", code=2,
             )
-        refresh_linear_cache(args.api_key)
-    elif args.name == "jira":
-        if not args.site or not args.email or not args.api_key:
+        refresh_linear_cache(a.api_key)
+    elif a.name == "jira":
+        if not a.site or not a.email or not a.api_key:
             raise PlanKeeperCliError(
                 "jira refresh requires --site, --email, --api-key", code=2,
             )
-        _validate_jira_site(args.site)
-        refresh_jira_cache(args.site, args.email, args.api_key)
+        _validate_jira_site(a.site)
+        refresh_jira_cache(a.site, a.email, a.api_key)
     return 0
 
 
-def _resolve_file_meta_path(args) -> Path:
+def _resolve_file_meta_path(a: "FileMetaLocatorArgs | FileMetaSetArgs") -> Path:
     """Resolve and validate the target for a file-meta subcommand.
 
     Locate by --ticket (cross-repo) or --file, then assert it's a regular
@@ -485,7 +722,7 @@ def _resolve_file_meta_path(args) -> Path:
     read_text() with IsADirectoryError. The "not a file" contract (exit 3)
     keeps every path-taking command failing the same clean way.
     """
-    path = resolve_ticket_to_path(args.ticket) if args.ticket else Path(args.file)
+    path = resolve_ticket_to_path(a.ticket) if a.ticket else Path(a.file or "")
     if not path.exists():
         raise PlanKeeperCliError(f"plan file not found: {path}", code=3)
     if not path.is_file():
@@ -494,7 +731,8 @@ def _resolve_file_meta_path(args) -> Path:
 
 
 def cmd_file_meta_get(args) -> int:
-    path = _resolve_file_meta_path(args)
+    a = FileMetaLocatorArgs.from_args(args)
+    path = _resolve_file_meta_path(a)
     text = path.read_text(encoding="utf-8")
     meta, _ = parse_frontmatter(text)
     print(json.dumps(meta))
@@ -502,7 +740,8 @@ def cmd_file_meta_get(args) -> int:
 
 
 def cmd_file_meta_strip(args) -> int:
-    path = _resolve_file_meta_path(args)
+    a = FileMetaLocatorArgs.from_args(args)
+    path = _resolve_file_meta_path(a)
     text = path.read_text(encoding="utf-8")
     _, body = parse_frontmatter(text)
     sys.stdout.write(body)
@@ -523,26 +762,34 @@ def cmd_file_meta_set(args) -> int:
     The file must already have frontmatter — a bare file is rejected (exit 2)
     so a half-managed plan can't be created out from under plan-save's
     Agent/Status/Created defaults.
+
+    MUTATES DISK — RELOCATES AND STAMPS: a terminal ``--status`` (done /
+    deferred) does not rewrite in place. It writes the plan to the matching
+    terminal subdir (done/ or deferred/) and unlinks the source, so the plan's
+    on-disk path moves. A ``done`` status additionally stamps ``Completed on``
+    with today's date (unless the caller already supplied ``--completed-on``).
+    Active statuses are a pure in-place rewrite.
     """
+    a = FileMetaSetArgs.from_args(args)
     # Map each value flag to its frontmatter key, in canonical order. Building
     # this first means validate_kind/parse_date_arg run before any file I/O.
     updates: list[tuple[str, str]] = []
-    if args.plankeeper_ticket is not None:
-        updates.append(("Plan-keeper Ticket", args.plankeeper_ticket))
-    if args.linear_ticket is not None:
-        updates.append(("Linear Ticket", args.linear_ticket))
-    if args.jira_ticket is not None:
-        updates.append(("Jira Ticket", args.jira_ticket))
-    if args.completed_on is not None:
-        updates.append(("Completed on", parse_date_arg(args.completed_on)))
-    if args.agent is not None:
-        updates.append(("Agent", args.agent))
-    if args.status is not None:
-        updates.append(("Status", args.status))
-    if args.kind is not None:
-        updates.append(("Kind", validate_kind(args.kind)))
-    if args.blocked_by is not None:
-        updates.append(("Blocked-by", args.blocked_by))
+    if a.plankeeper_ticket is not None:
+        updates.append(("Plan-keeper Ticket", a.plankeeper_ticket))
+    if a.linear_ticket is not None:
+        updates.append(("Linear Ticket", a.linear_ticket))
+    if a.jira_ticket is not None:
+        updates.append(("Jira Ticket", a.jira_ticket))
+    if a.completed_on is not None:
+        updates.append(("Completed on", parse_date_arg(a.completed_on)))
+    if a.agent is not None:
+        updates.append(("Agent", a.agent))
+    if a.status is not None:
+        updates.append(("Status", a.status))
+    if a.kind is not None:
+        updates.append(("Kind", validate_kind(a.kind)))
+    if a.blocked_by is not None:
+        updates.append(("Blocked-by", a.blocked_by))
     if not updates:
         raise PlanKeeperCliError(
             "file-meta set requires at least one of --plankeeper-ticket, "
@@ -550,7 +797,7 @@ def cmd_file_meta_set(args) -> int:
             "--kind, --blocked-by",
             code=2,
         )
-    path = _resolve_file_meta_path(args)
+    path = _resolve_file_meta_path(a)
     text = path.read_text(encoding="utf-8")
     if not (text.startswith("---\n") or text.startswith("---\r\n")):
         raise PlanKeeperCliError(
@@ -565,24 +812,24 @@ def cmd_file_meta_set(args) -> int:
     # into the matching subdir so Status and directory never disagree. Active
     # statuses are a pure in-place rewrite. `done` stamps Completed on (today,
     # unless the caller already supplied --completed-on).
-    if args.status in TERMINAL_DIRS:
-        if args.status == "done" and args.completed_on is None:
+    if a.status in TERMINAL_DIRS:
+        if a.status == "done" and a.completed_on is None:
             meta["Completed on"] = date.today().isoformat()
-        target = _terminal_target(path, args.status)
+        target = _terminal_target(path, cast(Status, a.status))
         if target != path and target.exists():
-            if args.on_collision == "fail":
+            if a.on_collision == "fail":
                 emit_collision(target)
                 return 2
-            if args.on_collision == "suffix":
+            if a.on_collision == "suffix":
                 target = find_unused_suffix(target)
             # "overwrite" → write_atomic replaces it below
-    elif args.status is not None and path.parent.name in TERMINAL_DIRS:
+    elif a.status is not None and path.parent.name in TERMINAL_DIRS:
         # Reactivating a terminal plan (moving it back to the active root) is
         # out of scope. Refuse loudly rather than rewrite in place and leave an
         # active-status plan parked in done/ or deferred/, where active list,
         # push --ticket, and ticket resolution would never find it.
         raise PlanKeeperCliError(
-            f"cannot set active status {args.status!r} on a plan in "
+            f"cannot set active status {a.status!r} on a plan in "
             f"{path.parent.name}/ — reactivating a {path.parent.name} plan is "
             f"not supported; move the file back to the active dir first",
             code=2,
@@ -600,7 +847,7 @@ def cmd_file_meta_set(args) -> int:
     return 0
 
 
-def _terminal_target(source: Path, status: str) -> Path:
+def _terminal_target(source: Path, status: Status) -> Path:
     """Destination path for relocating `source` to a terminal `status`.
 
     The repo root is `source`'s parent, unless `source` already sits in a
@@ -615,8 +862,9 @@ def _terminal_target(source: Path, status: str) -> Path:
 
 
 def cmd_push(args) -> int:
-    path = resolve_ticket_to_path(args.ticket) if args.ticket else Path(args.file)
-    result = push_subcommand(args.name, str(path), force_new=args.force_new)
+    a = PushArgs.from_args(args)
+    path = resolve_ticket_to_path(a.ticket) if a.ticket else Path(a.file or "")
+    result = push_subcommand(a.name, str(path), force_new=a.force_new)
     print(json.dumps(result))
     return 0
 
@@ -628,7 +876,7 @@ _PROVIDER_API_KINDS = {
 _JIRA_KINDS_NEED_PROJECT_KEY = {"components", "users", "issuetypes"}
 
 
-def _validate_ticket_api_args(args) -> None:
+def _validate_ticket_api_args(a: "TicketApiArgs") -> None:
     """Verify required flags are present for the requested (name, kind).
 
     Per-provider argparse `choices` already guarantee the kind is valid for
@@ -637,24 +885,25 @@ def _validate_ticket_api_args(args) -> None:
     clear CLI message instead of a downstream `jira_viewer(None, None, None)`
     network error.
     """
-    kind = args.api_kind
-    if args.name == "linear":
-        if not args.api_key:
+    kind = a.api_kind
+    if a.name == "linear":
+        if not a.api_key:
             raise PlanKeeperCliError(
                 f"linear api {kind} requires --api-key", code=2,
             )
     else:  # jira
         for flag, value in (
-            ("--site", args.site),
-            ("--email", args.email),
-            ("--api-key", args.api_key),
+            ("--site", a.site),
+            ("--email", a.email),
+            ("--api-key", a.api_key),
         ):
             if not value:
                 raise PlanKeeperCliError(
                     f"jira api {kind} requires {flag}", code=2,
                 )
-        _validate_jira_site(args.site)
-        if kind in _JIRA_KINDS_NEED_PROJECT_KEY and not args.project_key:
+        # The loop above raised if --site was missing, so it is non-None here.
+        _validate_jira_site(cast(str, a.site))
+        if kind in _JIRA_KINDS_NEED_PROJECT_KEY and not a.project_key:
             raise PlanKeeperCliError(
                 f"jira api {kind} requires --project-key", code=2,
             )
@@ -664,22 +913,30 @@ def cmd_ticket_api(args) -> int:
     """Dispatch `<provider> api <kind>`.
 
     Each kind is implemented by a per-system function. Output is always JSON
-    to stdout. `args.name` arrives from the provider subparser's set_defaults,
+    to stdout. `name` arrives from the provider subparser's set_defaults,
     and the kind is constrained to this provider's valid set by argparse
     `choices`, so the `impl` lookup below always hits.
     """
-    _validate_ticket_api_args(args)
-    if args.name == "linear":
+    a = TicketApiArgs.from_args(args)
+    # Asserts the credential/flag preconditions each (provider, kind) needs;
+    # raises on any missing one before we reach the impl table. The casts below
+    # encode that post-validation invariant for the type checker — the required
+    # credentials are non-None here by construction.
+    _validate_ticket_api_args(a)
+    if a.name == "linear":
+        api_key = cast(str, a.api_key)
         impl = {
-            "viewer": lambda: linear_viewer(args.api_key),
-            "teams": lambda: linear_teams(args.api_key),
-            "projects": lambda: linear_projects(args.api_key),
-            "labels": lambda: linear_labels(args.api_key),
-            "users": lambda: linear_users(args.api_key),
+            "viewer": lambda: linear_viewer(api_key),
+            "teams": lambda: linear_teams(api_key),
+            "projects": lambda: linear_projects(api_key),
+            "labels": lambda: linear_labels(api_key),
+            "users": lambda: linear_users(api_key),
         }
     else:  # jira
-        site, email, token = args.site, args.email, args.api_key
-        pkey = args.project_key
+        site = cast(str, a.site)
+        email = cast(str, a.email)
+        token = cast(str, a.api_key)
+        pkey = cast(str, a.project_key)
         impl = {
             "viewer":     lambda: jira_viewer(site, email, token),
             "projects":   lambda: jira_projects(site, email, token),
@@ -690,7 +947,7 @@ def cmd_ticket_api(args) -> int:
                 _resolve_jira_project_id(site, email, token, pkey),
             ),
         }
-    print(json.dumps(impl[args.api_kind]()))
+    print(json.dumps(impl[a.api_kind]()))
     return 0
 
 
@@ -701,35 +958,45 @@ def cmd_crew_fetch(args) -> int:
     """Emit a JSON array of issues for groundcrew's shell adapter to consume.
 
     Scans ~/plans/*/*.md (one level deep — skips done/ and deferred/). For each
-    plan, ``_collect_crew_issues`` mints a frozen ``Plan-keeper Ticket`` if one
-    is absent (mint-once, never overwritten); this asserts no two plans carry
-    the same id.
+    plan, ``_collect_and_mint_crew_issues`` mints a frozen ``Plan-keeper
+    Ticket`` if one is absent (mint-once, never overwritten); this asserts no
+    two plans carry the same id.
+
+    MUTATES DISK: despite the read-flavoured name, fetch is not pure — for any
+    scanned plan that lacks a ``Plan-keeper Ticket``, it mints one and persists
+    it back into that plan file. A plain ``crew fetch`` can therefore rewrite
+    plans on disk.
     """
     del args
-    issues = _collect_crew_issues()
+    issues = _collect_and_mint_crew_issues()
     _assert_no_plankeeper_id_collisions(issues)
     print(json.dumps(issues))
     return 0
 
 
+# Constrains a crew ${id} to the same charset minted ids use, rejecting
+# malformed input early with a clear error. `_resolve_crew_id` matches a plan by
+# parsed-id equality (`issue["id"] == plan_id`) and never joins the id into a
+# filesystem path, so this is input hygiene, not a path-traversal fence.
 _GROUNDCREW_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 def cmd_crew_get(args) -> int:
     """Print one issue JSON for `${id}`, exit 3 if not found."""
-    if not _GROUNDCREW_ID_RE.match(args.id):
+    a = CrewIdArgs.from_args(args)
+    if not _GROUNDCREW_ID_RE.match(a.id):
         raise PlanKeeperCliError(
-            f"invalid id {args.id!r}: must match [A-Za-z0-9._-]+ (no path separators)",
+            f"invalid id {a.id!r}: must match [A-Za-z0-9._-]+ (no path separators)",
             code=2,
         )
-    issue = _resolve_crew_id(args.id)
+    issue = _resolve_crew_id(a.id)
     if issue is None:
         return 3
     print(json.dumps(issue))
     return 0
 
 
-def _crew_set_status(plan_id: str, status: str) -> int:
+def _crew_set_status(plan_id: str, status: Status) -> int:
     """Flip the plan named by `${id}` to `Status: <status>`, exit 3 if no plan
     maps to that id. Shared body of `crew start` (in-progress) and `crew review`
     (in-review) — the two markIn* legs of the groundcrew TicketSource adapter.
@@ -764,14 +1031,16 @@ def _crew_set_status(plan_id: str, status: str) -> int:
 def cmd_crew_start(args) -> int:
     """Flip the plan named by `${id}` to Status: in-progress (groundcrew's
     markInProgress leg). See `_crew_set_status` for the resolve-and-write body."""
-    return _crew_set_status(args.id, "in-progress")
+    a = CrewIdArgs.from_args(args)
+    return _crew_set_status(a.id, "in-progress")
 
 
 def cmd_crew_review(args) -> int:
     """Flip the plan named by `${id}` to Status: in-review (groundcrew's
     markInReview leg — auto-advance an in-progress ticket once its PR opens).
     See `_crew_set_status` for the resolve-and-write body."""
-    return _crew_set_status(args.id, "in-review")
+    a = CrewIdArgs.from_args(args)
+    return _crew_set_status(a.id, "in-review")
 
 
 def cmd_crew_install(args) -> int:
@@ -781,11 +1050,12 @@ def cmd_crew_install(args) -> int:
     binary, then hands the real ``crew doctor`` runner to the orchestration in
     ``crew_install`` (kept separate so its patch logic is unit-testable).
     """
-    config_path = resolve_config_path(args.config, dict(os.environ), Path.home())
+    a = CrewInstallArgs.from_args(args)
+    config_path = resolve_config_path(a.config, dict(os.environ), Path.home())
     pk = shutil.which("plan-keeper") or "plan-keeper"
     return run_crew_install(
         config_path,
-        dry_run=args.dry_run,
+        dry_run=a.dry_run,
         pk=pk,
         run_doctor=default_run_doctor,
         out=sys.stdout,
@@ -893,8 +1163,9 @@ def cmd_queue_add(args) -> int:
     with none, atomic) is `_apply_queue_status`. Re-adding an already-todo plan
     is a harmless re-write.
     """
-    resolved = _resolve_repo_plan_names(args.files, args.repo)
-    return _apply_queue_status(resolved, "todo", args.agent)
+    a = QueueAddArgs.from_args(args)
+    resolved = _resolve_repo_plan_names(a.files, a.repo)
+    return _apply_queue_status(resolved, "todo", a.agent)
 
 
 def cmd_queue_drop(args) -> int:
@@ -906,7 +1177,8 @@ def cmd_queue_drop(args) -> int:
     `_resolve_repo_plan_names`. Dropping an already-backlog plan is a no-op
     re-write.
     """
-    resolved = _resolve_repo_plan_names(args.files, args.repo)
+    a = QueueDropArgs.from_args(args)
+    resolved = _resolve_repo_plan_names(a.files, a.repo)
     return _apply_queue_status(resolved, "backlog", None)
 
 
@@ -929,13 +1201,14 @@ def cmd_queue_list(args) -> int:
     named repo (normalized like any repo override). The two flags are mutually
     exclusive at the parser, so at most one of ``args.all``/``args.repo`` is set.
     """
-    if args.all:
+    a = QueueListArgs.from_args(args)
+    if a.all:
         scope: Optional[str] = None
-    elif args.repo:
-        scope = validate_repo_name(normalize_override(args.repo))
+    elif a.repo:
+        scope = validate_repo_name(normalize_override(a.repo))
     else:
         scope = derive_repo(None)
-    rows: list[dict] = []
+    rows: list[QueueRow] = []
     if not storage.PLAN_ROOT.exists():
         print("[]")
         return 0
@@ -950,7 +1223,7 @@ def cmd_queue_list(args) -> int:
         # The repo index resolves each plan's Blocked-by refs so the row can
         # report dispatch-readiness for the plan-crew UI.
         index = _build_repo_index(repo_entry.name)
-        keyed: list[tuple[tuple[str, str], dict]] = []
+        keyed: list[tuple[tuple[str, str], QueueRow]] = []
         for plan in sorted(repo_entry.iterdir()):
             if not plan.is_file() or not plan.name.endswith(".md"):
                 continue
@@ -965,14 +1238,15 @@ def cmd_queue_list(args) -> int:
             except PlanKeeperCliError:
                 continue
             _, unsatisfied = _blockers_for_plan(meta, index)
-            keyed.append((plan_recency_key(meta, plan.name), {
+            row: QueueRow = {
                 "repo": repo_entry.name,
                 "file": plan.name,
                 "status": meta.get("Status", "").strip(),
                 "agent": meta.get("Agent", "").strip(),
                 "blocked": bool(unsatisfied),
                 "blockedBy": unsatisfied,
-            }))
+            }
+            keyed.append((plan_recency_key(meta, plan.name), row))
         keyed.sort(key=lambda kr: kr[0], reverse=True)
         rows.extend(row for _, row in keyed)
     print(json.dumps(rows))
@@ -1424,6 +1698,27 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _dispatch(
+    table: Mapping[str, Callable[[argparse.Namespace], int]],
+    key: str,
+    label: str,
+) -> Callable[[argparse.Namespace], int]:
+    """Look up `key` in a dispatch table and return the handler, raising a
+    PlanKeeperCliError (exit code 2) when the key is absent. Guards every
+    dispatch table against an unwired-but-parseable subcommand producing an
+    uncaught KeyError; argparse normally rejects unknown subcommands first, so
+    this is defense-in-depth for a command that parses but has no handler.
+
+    `table` is typed as a covariant Mapping so each module-level `_*_DISPATCH`
+    dict (whose value types pyright infers from its handler literals) is
+    assignable without annotating every table; the concrete value type lets
+    pyright flag a handler with the wrong call signature or return type."""
+    handler = table.get(key)
+    if handler is None:
+        raise PlanKeeperCliError(f"unknown {label}: {key!r}", code=2)
+    return handler
+
+
 # Sub-dispatch table for `file-meta <get|set|strip>`. Each entry handles one
 # `file_meta_cmd`. Kept as a module-level constant so tasks adding `set` and
 # `strip` only need to add one line here, not edit a lambda body in main().
@@ -1444,7 +1739,9 @@ _PROVIDER_CONFIG_DISPATCH = {
 _PROVIDER_DISPATCH = {
     "api": cmd_ticket_api,
     "push": cmd_push,
-    "config": lambda a: _PROVIDER_CONFIG_DISPATCH[a.config_cmd](a),
+    "config": lambda a: _dispatch(
+        _PROVIDER_CONFIG_DISPATCH, a.config_cmd, "config command"
+    )(a),
 }
 
 _QUEUE_DISPATCH = {
@@ -1459,7 +1756,7 @@ _CREW_DISPATCH = {
     "start": cmd_crew_start,
     "review": cmd_crew_review,
     "install": cmd_crew_install,
-    "queue": lambda a: _QUEUE_DISPATCH[a.queue_cmd](a),
+    "queue": lambda a: _dispatch(_QUEUE_DISPATCH, a.queue_cmd, "queue command")(a),
 }
 
 _REPO_DISPATCH = {
@@ -1471,18 +1768,29 @@ _REPO_DISPATCH = {
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    # Top-level command table. Nested subcommands are not resolved here: each
+    # group delegates to its module-level `_*_DISPATCH` table, which may itself
+    # delegate again. E.g. `crew queue add` runs `crew` -> `_CREW_DISPATCH` ->
+    # `queue` -> `_QUEUE_DISPATCH` -> `add`. Look in those tables for the leaf
+    # handlers, not here.
     dispatch = {
-        "repo": lambda a: _REPO_DISPATCH[a.repo_cmd](a),
+        "repo": lambda a: _dispatch(_REPO_DISPATCH, a.repo_cmd, "repo command")(a),
         "list": cmd_list,
         "save": cmd_save,
-        "file-meta": lambda a: _FILE_META_DISPATCH[a.file_meta_cmd](a),
-        "linear": lambda a: _PROVIDER_DISPATCH[a.provider_cmd](a),
-        "jira": lambda a: _PROVIDER_DISPATCH[a.provider_cmd](a),
-        "crew": lambda a: _CREW_DISPATCH[a.crew_cmd](a),
+        "file-meta": lambda a: _dispatch(
+            _FILE_META_DISPATCH, a.file_meta_cmd, "file-meta command"
+        )(a),
+        "linear": lambda a: _dispatch(
+            _PROVIDER_DISPATCH, a.provider_cmd, "linear command"
+        )(a),
+        "jira": lambda a: _dispatch(
+            _PROVIDER_DISPATCH, a.provider_cmd, "jira command"
+        )(a),
+        "crew": lambda a: _dispatch(_CREW_DISPATCH, a.crew_cmd, "crew command")(a),
         "upgrade": cmd_upgrade,
     }
     try:
-        return dispatch[args.cmd](args)
+        return _dispatch(dispatch, args.cmd, "command")(args)
     except PlanKeeperCliError as e:
         print(f"{PROG}: {e}", file=sys.stderr)
         return e.code

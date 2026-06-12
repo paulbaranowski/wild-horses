@@ -220,7 +220,8 @@ class TestTicketSystemConfigRefreshLinear(unittest.TestCase):
         ):
             self.cli.refresh_linear_cache(api_key="k")
         config = self.cli.load_config("workdir")
-        cache = config["linear"]["cache"]
+        section = config.get("linear", {})
+        cache = section.get("cache", {})
         self.assertEqual(len(cache["teams"]), 1)
         self.assertEqual(cache["teams"][0]["name"], "Engineering")
         self.assertEqual(len(cache["projects"]), 1)
