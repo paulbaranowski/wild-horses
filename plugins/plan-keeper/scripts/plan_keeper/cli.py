@@ -1346,8 +1346,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_crew_install.add_argument(
         "--config",
-        help="path to crew.config.ts "
-             "(default: $GROUNDCREW_CONFIG or ~/.config/groundcrew/crew.config.ts)",
+        help="path to the groundcrew config (.ts/.mjs/.js/.json; optional) "
+             "(default: $GROUNDCREW_CONFIG or the first crew.config.* found in "
+             "~/.config/groundcrew/)",
     )
     p_crew_install.add_argument(
         "--dry-run",

@@ -1,21 +1,38 @@
 """`crew install`: wire ~/plans/* into a groundcrew config with a connection
 that survives plan-keeper upgrades.
 
-The patch is sentinel-wrapped and idempotent: one managed region inside the
-config's ``sources:`` array is inserted on first run and replaced in place on
-every re-run. The command strings call the resolved absolute ``plan-keeper``
-binary directly, so dispatch never depends on groundcrew's runtime ``$PATH``
-and the wiring doesn't rot when the plugin version bumps (brew relinks the
-binary in place on upgrade).
+groundcrew configs come in two shapes and ``crew install`` patches both:
+
+* **TS/JS** (``crew.config.ts``, what ``crew init`` writes) is patched by string
+  surgery. The managed region is bracketed by comment sentinels and sits flush
+  inside the ``sources:`` array's ``[``: inserted on first run, replaced in
+  place on every re-run.
+* **JSON** (``crew.config.json``, ``.crewrc``) has no comments, so sentinels are
+  impossible. It is patched by parse → upsert the ``plankeeper`` entry into the
+  ``sources`` array (matched by ``name``) → re-serialize. Finding the entry by
+  name is what makes re-runs idempotent: the existing block is replaced in
+  place, never blindly appended.
+
+Format is decided by content, not extension: a TS config (``export default
+{…}``) never parses as JSON and a JSON config always does, so ``json.loads``
+succeeding is an unambiguous discriminator (and it also catches extensionless
+``.crewrc`` configs).
+
+The command strings call the resolved absolute ``plan-keeper`` binary directly,
+so dispatch never depends on groundcrew's runtime ``$PATH`` and the wiring
+doesn't rot when the plugin version bumps (brew relinks the binary in place on
+upgrade).
 
 plan-keeper does not touch ``workspace.knownRepositories`` — registering the
 repos groundcrew may dispatch into is left to the config owner.
 
-The pure patcher (:func:`build_patched_config`) is separated from the IO/process
-orchestration (:func:`run_crew_install`) so the anchoring + idempotency logic is
-unit-testable without a real groundcrew install on the machine.
+The pure patchers (:func:`build_patched_config`, :func:`build_patched_json_config`)
+are separated from the IO/process orchestration (:func:`run_crew_install`) so the
+anchoring + idempotency logic is unit-testable without a real groundcrew install
+on the machine.
 """
 import difflib
+import json
 import os
 import re
 import subprocess
@@ -31,8 +48,25 @@ from plan_keeper.storage import write_atomic
 SENTINEL_START = "/* plan-keeper:managed:start */"
 SENTINEL_END = "/* plan-keeper:managed:end */"
 
-# Default config location when neither --config nor $GROUNDCREW_CONFIG is set.
-_DEFAULT_CONFIG_REL = Path(".config") / "groundcrew" / "crew.config.ts"
+# The shell source's ``name``; the upsert key for the JSON patcher and the
+# label groundcrew shows.
+_SOURCE_NAME = "plankeeper"
+
+# Directory holding the XDG groundcrew config, relative to home.
+_XDG_CONFIG_DIR_REL = Path(".config") / "groundcrew"
+
+# Candidate config filenames under the XDG dir, highest priority first. Mirrors
+# groundcrew's own XDG fallback order (see groundcrew ``config.ts``
+# ``XDG_FALLBACK_NAMES``) so ``crew install`` resolves the same file ``crew``
+# would load — including a ``crew.config.json``, which is why the bare
+# ``crew.config.ts`` default missed it before.
+_XDG_CONFIG_NAMES = (
+    "crew.config.ts",
+    "crew.config.mjs",
+    "crew.config.js",
+    "crew.config.json",
+    "config.ts",
+)
 
 # Type of the injected `crew doctor` runner: takes the config path, returns
 # (exit_code, combined_output).
@@ -42,7 +76,14 @@ DoctorRunner = Callable[[Path], "tuple[int, str]"]
 def resolve_config_path(config_arg: Optional[str], env: "dict[str, str]",
                         home: Path) -> Path:
     """Resolve the groundcrew config path: ``--config`` > ``$GROUNDCREW_CONFIG``
-    > ``~/.config/groundcrew/crew.config.ts``.
+    > the first existing ``~/.config/groundcrew/`` config among
+    :data:`_XDG_CONFIG_NAMES`.
+
+    Searching the candidate names (not hardcoding ``crew.config.ts``) is what
+    lets a no-arg ``crew install`` find a ``crew.config.json``. When none of the
+    candidates exist, the canonical ``crew.config.ts`` path is returned so the
+    caller's "not found; run ``crew init``" error points at the conventional
+    location.
 
     Env and home are passed in (not read off ``os.environ``/``Path.home()``
     here) so the resolution is a pure function the tests can pin.
@@ -52,23 +93,54 @@ def resolve_config_path(config_arg: Optional[str], env: "dict[str, str]",
     env_path = env.get("GROUNDCREW_CONFIG", "").strip()
     if env_path:
         return Path(env_path).expanduser()
-    return home / _DEFAULT_CONFIG_REL
+    base = home / _XDG_CONFIG_DIR_REL
+    for name in _XDG_CONFIG_NAMES:
+        candidate = base / name
+        if candidate.exists():
+            return candidate
+    return base / "crew.config.ts"
 
 
-def _render_source_region(pk: str) -> str:
-    """The shell-source object injected into ``sources:``.
+def _source_commands(pk: str) -> "dict[str, str]":
+    """The shell-source ``commands`` map, the single source of truth shared by
+    the TS and JSON renderers.
 
     ``${id}`` is groundcrew's token (substituted into the argv before the
     command runs); it is intentionally literal here, not a Python value.
     """
+    return {
+        "verify": f"{pk} crew fetch >/dev/null",
+        "fetch": f"{pk} crew fetch",
+        "resolveOne": f"{pk} crew get ${{id}}",
+        "markInProgress": f"{pk} crew start ${{id}}",
+        "markInReview": f"{pk} crew review ${{id}}",
+        # markDone is terminal — unlike the start/review legs (an in-place
+        # Status rewrite), it archives the plan: file-meta set --status done
+        # relocates it into done/ and stamps Completed on. We reuse that tested
+        # engine (addressed by the plan's Plan-keeper Ticket, which is exactly
+        # groundcrew's ${id}) instead of a bespoke `crew done`. --on-collision
+        # suffix keeps the unattended hook non-blocking and non-destructive: a
+        # same-name plan already in done/ is suffixed, never overwritten, and
+        # the leg never fails the dispatch.
+        "markDone": f"{pk} file-meta set --ticket ${{id}} --status done "
+                    f"--on-collision suffix",
+    }
+
+
+def _render_source_object(pk: str) -> dict:
+    """The shell-source as a plain dict, for the JSON patcher and JSON safety
+    valve."""
+    return {"kind": "shell", "name": _SOURCE_NAME, "commands": _source_commands(pk)}
+
+
+def _render_source_region(pk: str) -> str:
+    """The shell-source object injected into a TS ``sources:`` array."""
+    cmds = _source_commands(pk)
+    lines = ",\n".join(f'          {key}: "{val}"' for key, val in cmds.items())
     return (
-        '      { kind: "shell", name: "plankeeper",\n'
+        f'      {{ kind: "shell", name: "{_SOURCE_NAME}",\n'
         "        commands: {\n"
-        f'          verify: "{pk} crew fetch >/dev/null",\n'
-        f'          fetch: "{pk} crew fetch",\n'
-        f'          resolveOne: "{pk} crew get ${{id}}",\n'
-        f'          markInProgress: "{pk} crew start ${{id}}",\n'
-        f'          markInReview: "{pk} crew review ${{id}}" }} }},'
+        f"{lines} }} }},"
     )
 
 
@@ -164,8 +236,69 @@ def build_patched_config(config: str, pk: str) -> Optional[str]:
     return patched
 
 
-def _managed_blocks_text(pk: str) -> str:
-    """The managed ``sources`` region, labeled, for the manual-paste safety valve."""
+def looks_like_json(config: str) -> bool:
+    """Whether ``config`` is a JSON document (so the JSON patcher owns it).
+
+    Answers only the *format* question — "did it parse as JSON?" — and leaves
+    *shape* (is it a patchable object with a ``sources`` array?) to
+    :func:`build_patched_json_config`. A TS/JS config (``export default {…}``)
+    never parses as JSON, so this never misroutes one; a JSON value that parses
+    but isn't an object (a bare ``[]``/scalar) still routes here so the caller
+    prints the *JSON* safety-valve block, not the TS sentinel block.
+    """
+    try:
+        json.loads(config)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    return True
+
+
+def build_patched_json_config(config: str, pk: str) -> Optional[str]:
+    """Upsert the ``plankeeper`` shell source into a JSON config's ``sources``
+    array, returning the re-serialized JSON (2-space indent, trailing newline).
+
+    Idempotent by construction: the source is matched by ``name`` and the
+    matching slot is overwritten in place, so re-runs (and a binary-path change)
+    converge instead of stacking duplicates. A missing ``sources`` key is
+    created; a foreign entry (e.g. ``{"kind": "linear"}``) is left untouched.
+
+    None signals the caller's safety valve: the document isn't a JSON object, or
+    its ``sources`` value is present but not an array (a shape we won't silently
+    overwrite). Re-serializing reformats the whole file — acceptable for JSON,
+    which has no comments to lose and no canonical layout to preserve, and far
+    safer than string-surgery on structured data.
+    """
+    try:
+        data = json.loads(config)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    sources = data.get("sources")
+    if sources is None:
+        sources = []
+        data["sources"] = sources
+    elif not isinstance(sources, list):
+        return None  # malformed: `sources` is present but not an array
+    entry = _render_source_object(pk)
+    for index, source in enumerate(sources):
+        if isinstance(source, dict) and source.get("name") == _SOURCE_NAME:
+            sources[index] = entry
+            break
+    else:
+        sources.append(entry)
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+
+def _managed_blocks_text(pk: str, is_json: bool = False) -> str:
+    """The managed ``sources`` block, labeled, for the manual-paste safety valve.
+
+    Format-matched to the config so the user pastes valid syntax: a JSON object
+    for a JSON config, the sentinel-wrapped TS region otherwise.
+    """
+    if is_json:
+        obj = json.dumps(_render_source_object(pk), indent=2, ensure_ascii=False)
+        return f"# Add this object to your config's `sources` array:\n{obj}"
     return (
         f"# Paste inside your config's `sources: [` array:\n"
         f"{SENTINEL_START}\n{_render_source_region(pk)}\n{SENTINEL_END}"
@@ -227,17 +360,29 @@ def run_crew_install(
             code=2,
         )
     original = config_path.read_text(encoding="utf-8")
-    patched = build_patched_config(original, pk)
+    # Decide JSON vs TS by content: a TS config never parses as JSON, a JSON one
+    # always does — so each patcher only ever sees a config it can handle.
+    is_json = looks_like_json(original)
+    if is_json:
+        patched = build_patched_json_config(original, pk)
+    else:
+        patched = build_patched_config(original, pk)
 
     if patched is None:
-        # Safety valve: no place to anchor `sources`. Write nothing; hand the
-        # user the exact block to paste themselves.
-        print(
-            f"plan-keeper: could not locate a `sources:` array or an "
-            f"`export default {{` object in {config_path} — nothing was written.\n",
-            file=out,
-        )
-        print(_managed_blocks_text(pk), file=out)
+        # Safety valve: nowhere to put the source. Write nothing; hand the user
+        # the exact block to paste themselves, in the config's own format.
+        if is_json:
+            reason = (
+                f"{config_path} is not a JSON object with a patchable "
+                f"`sources` array"
+            )
+        else:
+            reason = (
+                f"could not locate a `sources:` array or an "
+                f"`export default {{` object in {config_path}"
+            )
+        print(f"plan-keeper: {reason} — nothing was written.\n", file=out)
+        print(_managed_blocks_text(pk, is_json=is_json), file=out)
         raise PlanKeeperCliError(
             "config anchor not found; printed the managed block for manual "
             "paste (nothing written)",
