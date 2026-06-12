@@ -1005,5 +1005,43 @@ class TestFileMetaSetBlockedBy(IsolatedHomeTestCase):
         self.assertNotIn("Blocked-by:", p.read_text())
 
 
+class TestDispatchGuards(IsolatedHomeTestCase):
+    """`_dispatch` resolves a known key to its handler and converts an unknown
+    key into a PlanKeeperCliError (exit code 2) rather than a raw KeyError, for
+    both the top-level command table and the nested subcommand tables. argparse
+    rejects truly-unknown subcommands at parse time, so these call _dispatch
+    directly to exercise the unwired-but-parseable case."""
+
+    def test_known_key_returns_handler(self) -> None:
+        module = _import_cli_module()
+        sentinel = object()
+        handler = module._dispatch({"ok": sentinel}, "ok", "command")
+        self.assertIs(handler, sentinel)
+
+    def test_unknown_top_level_command_raises_code_2(self) -> None:
+        module = _import_cli_module()
+        with self.assertRaises(module.PlanKeeperCliError) as ctx:
+            module._dispatch({"list": object()}, "bogus", "command")
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_unknown_nested_crew_subcommand_raises_code_2(self) -> None:
+        module = _import_cli_module()
+        with self.assertRaises(module.PlanKeeperCliError) as ctx:
+            module._dispatch(module._CREW_DISPATCH, "bogus", "crew command")
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_unknown_nested_file_meta_subcommand_raises_code_2(self) -> None:
+        module = _import_cli_module()
+        with self.assertRaises(module.PlanKeeperCliError) as ctx:
+            module._dispatch(module._FILE_META_DISPATCH, "bogus", "file-meta command")
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_unknown_nested_queue_subcommand_raises_code_2(self) -> None:
+        module = _import_cli_module()
+        with self.assertRaises(module.PlanKeeperCliError) as ctx:
+            module._dispatch(module._QUEUE_DISPATCH, "bogus", "queue command")
+        self.assertEqual(ctx.exception.code, 2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
