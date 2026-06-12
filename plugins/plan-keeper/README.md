@@ -70,7 +70,7 @@ conversation ──► plan-save ──► ~/plans/<repo>/*.md ──► plan-do
 
 ## Groundcrew integration
 
-The groundcrew integration is the **autonomous** counterpart to `plan-do`: groundcrew treats `~/plans/<repo>/*.md` as a ticket source and dispatches plans on its own, with no Linear/Jira round-trip. Run [`/plan-crew`](#managing-the-queue-with-plan-crew) to promote a plan to `Status: todo` and set its `Agent`; groundcrew then picks it up, flips it to `in-progress`, runs that agent against it, and — when the PR opens — flips it to `in-review`.
+The groundcrew integration is the **autonomous** counterpart to `plan-do`: groundcrew treats `~/plans/<repo>/*.md` as a ticket source and dispatches plans on its own, with no Linear/Jira round-trip. Run [`/plan-crew`](#managing-the-queue-with-plan-crew) to promote a plan to `Status: todo` and set its `Agent`; groundcrew then picks it up, flips it to `in-progress`, runs that agent against it, flips it to `in-review` when the PR opens, and — once that PR merges — archives it to `done/` with a `Completed on` stamp.
 
 ### Wiring it up
 
@@ -78,19 +78,20 @@ groundcrew runs _outside_ Claude Code, so it can't reach the in-plugin CLI scrip
 
 ```bash
 brew install paulbaranowski/tap/plan-keeper   # stable entrypoint on $PATH
-plan-keeper crew install                       # wire it into crew.config.ts (idempotent)
+plan-keeper crew install                       # wire it into your crew config (idempotent)
 ```
 
-`crew install` patches your groundcrew config (`~/.config/groundcrew/crew.config.ts` by default, or `$GROUNDCREW_CONFIG` / `--config`). It injects one **sentinel-wrapped** region — a `plans` shell source in `sources:` — backs the config up first, validates the patch by having `crew doctor` load it, and rolls back if the patch broke the TypeScript. Re-running replaces the managed region in place (idempotent). It does **not** touch `workspace.knownRepositories` — registering the repos groundcrew dispatches into is left to you. Full walkthrough — `--dry-run`, the manual-paste fallback, and exactly what gets injected — is in [`groundcrew/README.md`](groundcrew/README.md).
+`crew install` patches your groundcrew config — by default the first `crew.config.*` it finds in `~/.config/groundcrew/` (matching groundcrew's own search order), or `$GROUNDCREW_CONFIG` / `--config`. Both config shapes are supported: a **TS/JS** config gets a `plankeeper` shell source injected into `sources:` as a sentinel-wrapped region, and a **JSON** config (which has no comments) is parsed and gets the `plankeeper` entry upserted into its `sources` array by name. Either way it backs the config up first, validates the patch by having `crew doctor` load it, and rolls back if the patch broke the config. Re-running replaces the managed source in place (idempotent). It does **not** touch `workspace.knownRepositories` — registering the repos groundcrew dispatches into is left to you. Full walkthrough — `--dry-run`, the manual-paste fallback, and exactly what gets injected — is in [`groundcrew/README.md`](groundcrew/README.md).
 
 ### How dispatch works
 
-groundcrew talks to plan-keeper through four `crew` subcommands baked into the injected config:
+groundcrew talks to plan-keeper through the commands baked into the injected config:
 
 - **`crew fetch`** — globs `~/plans/*/*.md` (one level deep, skipping `done/` and `deferred/`) and emits one issue per plan that carries an `Agent:` tag — **agent-less plans are skipped in every status, including `todo`** (the `Agent` tag is a required dispatch gate, not a default-to-claude). Among emitted plans, `Status: todo` ones are dispatchable (once their repo is registered in `workspace.knownRepositories` and they aren't blocked); `Status: backlog` ones are held out of the pool. Each issue's id is the plan's **`Plan-keeper Ticket`** (`plan-<digits>`), minted once and then frozen — so a renamed plan keeps its id. The full gate list is in [`groundcrew/README.md`](groundcrew/README.md#what-makes-a-plan-dispatchable).
 - **`crew get ${id}`** — resolves one plan by its `Plan-keeper Ticket`, searching active, then `done/`, then `deferred/`.
 - **`crew start ${id}`** — flips that plan's `Status` to `in-progress` so the next fetch drops it from the dispatch pool.
 - **`crew review ${id}`** — flips it to `in-review` once its PR opens.
+- **`file-meta set --ticket ${id} --status done`** (groundcrew's `markDone` leg) — once the PR merges, archives the plan: it relocates the file into `done/` and stamps `Completed on`. Unlike the in-place `start`/`review` flips, `done` is terminal, so this reuses the same `file-meta set` engine `plan-done` uses (addressed by the plan's `Plan-keeper Ticket`, which _is_ `${id}`) rather than a bespoke `crew done`. The wiring passes `--on-collision suffix` so an unattended archive never overwrites a same-name plan already in `done/` and never fails the dispatch.
 
 Because an `${id}` can only ever name a plan inside `~/plans/`, the resolver never globs anywhere else — there's no path to validate.
 

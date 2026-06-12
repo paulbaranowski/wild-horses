@@ -30,25 +30,37 @@ plan-keeper crew install
 ```
 
 `crew install` resolves your config path from `--config`, then `$GROUNDCREW_CONFIG`,
-then `~/.config/groundcrew/crew.config.ts`. If you don't have a config yet, run
-`crew init` first.
+then the first `crew.config.*` it finds in `~/.config/groundcrew/` — searching the
+same names groundcrew does (`crew.config.ts`, `.mjs`, `.js`, `.json`, …), so a
+`crew.config.json` is found just like a `crew.config.ts`. If you don't have a
+config yet, run `crew init` first.
+
+Both config shapes are supported, decided by content (a TS config never parses as
+JSON; a JSON one always does):
+
+- **TS/JS** (`crew.config.ts`) is patched by string surgery with a
+  **sentinel-wrapped** managed region (see [What gets injected](#what-gets-injected)).
+- **JSON** (`crew.config.json`, `.crewrc`) has no comments, so it's parsed and the
+  `plankeeper` entry is upserted into the `sources` array **by name** — the
+  matching entry is replaced in place, foreign entries (e.g. `{ "kind": "linear" }`)
+  are left untouched, and the file is re-serialized.
 
 What it does:
 
 1. Resolves the absolute path to your `plan-keeper` binary (via `which`) and bakes
    it into the injected command strings, so dispatch never depends on groundcrew's
    runtime `$PATH`.
-2. Backs up your config to `crew.config.ts.bak`.
-3. Injects one **sentinel-wrapped** region — a `plans` shell source in
-   `sources:` — delimited by
-   `/* plan-keeper:managed:start */ … /* plan-keeper:managed:end */`. Re-running
-   replaces this region in place (no duplication), so it's fully idempotent. The
-   default `crew init` config ships `sources:` commented out (the Linear adapter
-   is implicit); when there's no active `sources:` array, `crew install` adds
-   one. `crew install` does **not** touch `workspace.knownRepositories` —
-   registering the repos groundcrew may dispatch into is left to you.
+2. Backs up your config alongside it (`<config>.bak`).
+3. Injects the `plankeeper` shell source into `sources:`. Re-running replaces it in
+   place (no duplication), so it's fully idempotent — for a TS config via the
+   sentinel region, for a JSON config via the by-name upsert. The default `crew
+init` (TS) config ships `sources:` commented out (the Linear adapter is
+   implicit); when there's no active `sources:` array, `crew install` adds one. A
+   JSON config with no `sources` key gets one created. `crew install` does **not**
+   touch `workspace.knownRepositories` — registering the repos groundcrew may
+   dispatch into is left to you.
 4. Validates the patched config with `crew doctor`. The gate is whether doctor
-   can **load** the config — a patch that broke the TS is rolled back from the
+   can **load** the config — a patch that broke it is rolled back from the
    backup. Doctor failures unrelated to the plans source (a missing Linear API
    key, an absent `projectDir`) do **not** roll back: the plans wiring stays in
    place and `crew install` prints a note pointing you at `crew doctor` to
@@ -56,13 +68,15 @@ What it does:
 5. Reports how many plans are visible to `fetch`.
 
 `plan-keeper crew install --dry-run` prints the diff it would apply and writes
-nothing. If your config has no active `sources:` array and no `export default`
-object to add one to, `crew install` writes nothing and prints the exact block
-for you to paste manually.
+nothing. If a TS config has no active `sources:` array and no `export default`
+object to add one to (or a JSON config isn't an object with a patchable `sources`
+array), `crew install` writes nothing and prints the exact block — in the config's
+own format — for you to paste manually.
 
 ## What gets injected
 
-One region, into `sources:`:
+A `plankeeper` shell source, into `sources:`. For a TS config, as a
+sentinel-wrapped region:
 
 ```ts
 /* plan-keeper:managed:start */
@@ -72,8 +86,26 @@ One region, into `sources:`:
           fetch: "/opt/homebrew/bin/plan-keeper crew fetch",
           resolveOne: "/opt/homebrew/bin/plan-keeper crew get ${id}",
           markInProgress: "/opt/homebrew/bin/plan-keeper crew start ${id}",
-          markInReview: "/opt/homebrew/bin/plan-keeper crew review ${id}" } },
+          markInReview: "/opt/homebrew/bin/plan-keeper crew review ${id}",
+          markDone: "/opt/homebrew/bin/plan-keeper file-meta set --ticket ${id} --status done --on-collision suffix" } },
 /* plan-keeper:managed:end */
+```
+
+For a JSON config, the same source as an object in the `sources` array:
+
+```json
+{
+  "kind": "shell",
+  "name": "plankeeper",
+  "commands": {
+    "verify": "/opt/homebrew/bin/plan-keeper crew fetch >/dev/null",
+    "fetch": "/opt/homebrew/bin/plan-keeper crew fetch",
+    "resolveOne": "/opt/homebrew/bin/plan-keeper crew get ${id}",
+    "markInProgress": "/opt/homebrew/bin/plan-keeper crew start ${id}",
+    "markInReview": "/opt/homebrew/bin/plan-keeper crew review ${id}",
+    "markDone": "/opt/homebrew/bin/plan-keeper file-meta set --ticket ${id} --status done --on-collision suffix"
+  }
+}
 ```
 
 `crew install` does not modify `workspace.knownRepositories` — register the
@@ -121,6 +153,16 @@ Ticket` across active, then `done/`, then `deferred/`, and returns the match.
   `in-progress` so the next `fetch` sees it out of the dispatch pool. Because the
   id can only ever name a plan inside `~/plans/`, there's no path to validate —
   the resolver never globs anywhere else.
+- **markInReview** (`crew review ${id}`) — same resolver, atomic-write flips the
+  plan's `Status` to `in-review` when its PR opens.
+- **markDone** (`file-meta set --ticket ${id} --status done --on-collision
+suffix`) — once the PR merges. Unlike the in-place `start`/`review` flips,
+  `done` is **terminal**: it relocates the plan into `done/` and stamps
+  `Completed on`. So this leg reuses the same `file-meta set` engine `plan-done`
+  uses (addressed by the plan's `Plan-keeper Ticket`, which _is_ `${id}`) rather
+  than a bespoke `crew done`. `--on-collision suffix` keeps the unattended
+  archive safe: a same-name plan already in `done/` is suffixed (`-N`), never
+  overwritten, and the leg never fails the dispatch.
 
 ## Promoting a plan
 
