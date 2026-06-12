@@ -1439,6 +1439,18 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _dispatch(table: dict, key, label: str):
+    """Look up `key` in a dispatch table and return the handler, raising a
+    PlanKeeperCliError (exit code 2) when the key is absent. Guards every
+    dispatch table against an unwired-but-parseable subcommand producing an
+    uncaught KeyError; argparse normally rejects unknown subcommands first, so
+    this is defense-in-depth for a command that parses but has no handler."""
+    handler = table.get(key)
+    if handler is None:
+        raise PlanKeeperCliError(f"unknown {label}: {key!r}", code=2)
+    return handler
+
+
 # Sub-dispatch table for `file-meta <get|set|strip>`. Each entry handles one
 # `file_meta_cmd`. Kept as a module-level constant so tasks adding `set` and
 # `strip` only need to add one line here, not edit a lambda body in main().
@@ -1459,7 +1471,9 @@ _PROVIDER_CONFIG_DISPATCH = {
 _PROVIDER_DISPATCH = {
     "api": cmd_ticket_api,
     "push": cmd_push,
-    "config": lambda a: _PROVIDER_CONFIG_DISPATCH[a.config_cmd](a),
+    "config": lambda a: _dispatch(
+        _PROVIDER_CONFIG_DISPATCH, a.config_cmd, "config command"
+    )(a),
 }
 
 _QUEUE_DISPATCH = {
@@ -1474,7 +1488,7 @@ _CREW_DISPATCH = {
     "start": cmd_crew_start,
     "review": cmd_crew_review,
     "install": cmd_crew_install,
-    "queue": lambda a: _QUEUE_DISPATCH[a.queue_cmd](a),
+    "queue": lambda a: _dispatch(_QUEUE_DISPATCH, a.queue_cmd, "queue command")(a),
 }
 
 _REPO_DISPATCH = {
@@ -1487,17 +1501,23 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     dispatch = {
-        "repo": lambda a: _REPO_DISPATCH[a.repo_cmd](a),
+        "repo": lambda a: _dispatch(_REPO_DISPATCH, a.repo_cmd, "repo command")(a),
         "list": cmd_list,
         "save": cmd_save,
-        "file-meta": lambda a: _FILE_META_DISPATCH[a.file_meta_cmd](a),
-        "linear": lambda a: _PROVIDER_DISPATCH[a.provider_cmd](a),
-        "jira": lambda a: _PROVIDER_DISPATCH[a.provider_cmd](a),
-        "crew": lambda a: _CREW_DISPATCH[a.crew_cmd](a),
+        "file-meta": lambda a: _dispatch(
+            _FILE_META_DISPATCH, a.file_meta_cmd, "file-meta command"
+        )(a),
+        "linear": lambda a: _dispatch(
+            _PROVIDER_DISPATCH, a.provider_cmd, "linear command"
+        )(a),
+        "jira": lambda a: _dispatch(
+            _PROVIDER_DISPATCH, a.provider_cmd, "jira command"
+        )(a),
+        "crew": lambda a: _dispatch(_CREW_DISPATCH, a.crew_cmd, "crew command")(a),
         "upgrade": cmd_upgrade,
     }
     try:
-        return dispatch[args.cmd](args)
+        return _dispatch(dispatch, args.cmd, "command")(args)
     except PlanKeeperCliError as e:
         print(f"{PROG}: {e}", file=sys.stderr)
         return e.code
