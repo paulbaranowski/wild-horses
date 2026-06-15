@@ -780,6 +780,124 @@ class TestFileMetaSetStatus(IsolatedHomeTestCase):
         self.assertIn("invalid choice", r.stderr)
 
 
+class TestFileMetaSetAdoptsUnmanaged(IsolatedHomeTestCase):
+    """`file-meta set` adopts an unmanaged plan file (one not created via
+    plan-save) instead of rejecting it: the plans tree is plan-keeper's domain,
+    so a hand-dropped file is normalized through plan-save's default frontmatter
+    on first mutation. Bare and partial blocks are filled (existing values win);
+    only genuinely malformed frontmatter is still refused."""
+
+    def _scratch_dir(self) -> Path:
+        d = self.plans_root / "scratch"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def test_bare_file_is_adopted_then_archived(self) -> None:
+        # The original failing scenario: a plan written directly to the plans
+        # tree (no frontmatter at all) must auto-archive to done/ rather than
+        # erroring. Adoption stamps Status/Created/Plan-keeper Ticket, then the
+        # done relocation stamps Completed on.
+        source = self._scratch_dir() / "hand-written.md"
+        source.write_text("# Hand-written plan\nbody, no frontmatter\n")
+        old = 1_600_000_000.0  # 2020-09-13T12:26:40Z — distinct from "now"
+        os.utime(source, (old, old))
+        expected_created = datetime.fromtimestamp(old, timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("adopted unmanaged plan", r.stderr)
+        target = self.plans_root / "scratch" / "done" / source.name
+        self.assertEqual(r.stdout.strip(), str(target))
+        self.assertTrue(target.exists())
+        self.assertFalse(source.exists(), "source must be unlinked after relocate")
+        front = target.read_text().split("\n---\n", 1)[0]
+        self.assertIn("Status: done", front)
+        self.assertIn(f"Created: {expected_created}", front)
+        self.assertIn(f"Completed on: {date.today().isoformat()}", front)
+        # Adoption must never mint an Agent tag — that field is the groundcrew
+        # dispatch signal, written only by plan-crew on promote.
+        self.assertNotIn("Agent:", front)
+        ticket_lines = [
+            line for line in front.splitlines()
+            if line.startswith("Plan-keeper Ticket:")
+        ]
+        self.assertEqual(len(ticket_lines), 1, "adoption must mint a Plan-keeper Ticket")
+        self.assertTrue(ticket_lines[0].split(":", 1)[1].strip(), "ticket must be non-empty")
+        self.assertIn("# Hand-written plan", target.read_text())
+
+    def test_partial_block_backfills_only_absent_fields(self) -> None:
+        # A file that already has a frontmatter block but is missing managed
+        # fields gets only the gaps filled — existing values always win — and
+        # the requested mutation is applied on top.
+        source = self._scratch_dir() / "partial.md"
+        source.write_text("---\nAgent: codex\nStatus: todo\n---\n\n# Body\n")
+        old = 1_600_000_000.0
+        os.utime(source, (old, old))
+        expected_created = datetime.fromtimestamp(old, timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        r = run_cli("file-meta", "set", "--file", str(source), "--kind", "design",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("adopted unmanaged plan", r.stderr)
+        front = Path(r.stdout.strip()).read_text().split("\n---\n", 1)[0]
+        self.assertIn("Status: todo", front, "existing Status must be preserved")
+        self.assertIn("Agent: codex", front, "existing Agent must be preserved")
+        self.assertIn(f"Created: {expected_created}", front, "Created backfilled from birthtime")
+        self.assertIn("Kind: design", front, "requested --kind applied")
+
+    def test_already_managed_file_is_not_re_adopted(self) -> None:
+        # A fully managed file (saved via plan-save) already carries every
+        # default, so adoption is a no-op and emits no notice.
+        r = run_cli("save", "--override", "scratch", "--topic", "managed plan",
+                    stdin="# Body\ntext\n", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        source = Path(r.stdout.strip())
+        r2 = run_cli("file-meta", "set", "--file", str(source), "--status", "in-progress",
+                     home=self.home)
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        self.assertNotIn("adopted unmanaged plan", r2.stderr)
+        self.assertIn("Status: in-progress", source.read_text().split("\n---\n", 1)[0])
+
+    def test_managed_file_in_noncanonical_order_is_not_re_adopted(self) -> None:
+        # A file carrying every managed field but in a non-canonical order still
+        # re-serializes to different bytes (serialize_frontmatter canonicalizes),
+        # so the adoption notice must be gated on a field actually being ABSENT,
+        # not on text inequality — otherwise this managed file would be falsely
+        # reported as adopted though nothing was backfilled.
+        source = self._scratch_dir() / "managed-unordered.md"
+        source.write_text(
+            "---\nCreated: 2020-01-01T00:00:00Z\nPlan-keeper Ticket: abc123\n"
+            "Status: backlog\n---\n\n# Body\n"
+        )
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "in-progress",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("adopted unmanaged plan", r.stderr)
+        front = source.read_text().split("\n---\n", 1)[0]
+        self.assertIn("Status: in-progress", front)
+        self.assertIn("Created: 2020-01-01T00:00:00Z", front, "existing Created untouched")
+        self.assertIn("Plan-keeper Ticket: abc123", front, "existing ticket untouched")
+
+    def test_malformed_frontmatter_is_still_rejected(self) -> None:
+        # A `---` opener with no closing fence is corrupt, not merely unmanaged:
+        # adoption must not silently rewrite it. It stays a hard error (exit 5)
+        # and the file is left untouched.
+        source = self._scratch_dir() / "broken.md"
+        source.write_text("---\nAgent: codex\n\n# No closing fence\n")
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                    home=self.home)
+        self.assertEqual(r.returncode, 5)
+        self.assertIn("malformed frontmatter", r.stderr)
+        self.assertTrue(source.exists(), "malformed file must be left untouched")
+        self.assertFalse(
+            (self.plans_root / "scratch" / "done").exists(),
+            "no relocation may happen on a malformed-frontmatter failure",
+        )
+
+
 class TestFileMetaSetKindRename(IsolatedHomeTestCase):
     """A Kind change via `file-meta set --kind` re-stamps the filename's
     `--<kind>` segment so the name and the `Kind:` frontmatter never disagree.

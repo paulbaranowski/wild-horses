@@ -177,7 +177,7 @@ class TestFileMetaSet(IsolatedHomeTestCase):
         return path
 
     def _managed(self, *extra: str) -> Path:
-        """A plan that already has frontmatter (set rejects bare files)."""
+        """A plan that already has frontmatter (so set mutates without adopting)."""
         return self._write_plan(
             "---\nAgent: claude\nStatus: backlog\n" + "".join(extra) + "---\n\n# Body\n"
         )
@@ -194,16 +194,25 @@ class TestFileMetaSet(IsolatedHomeTestCase):
         self.assertIn("Linear Ticket: ENG-123", text)
         self.assertIn("Jira Ticket: PROJ-9", text)
 
-    def test_rejects_bare_file(self) -> None:
+    def test_adopts_bare_file(self) -> None:
+        # The plans tree is plan-keeper's domain, so a bare file (no frontmatter)
+        # is adopted on mutation rather than rejected: it gets plan-save's
+        # defaults stamped (Status/Created/minted Plan-keeper Ticket) and the
+        # requested edit applied on top, with an "adopted" notice on stderr.
         path = self._write_plan("# Heading\n\nBody.\n")
-        original = path.read_text(encoding="utf-8")
         result = run_cli(
             "file-meta", "set", "--file", str(path), "--linear-ticket", "ENG-123",
             home=self.home, cwd=self.cwd,
         )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("no frontmatter", result.stderr)
-        self.assertEqual(path.read_text(encoding="utf-8"), original)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("adopted unmanaged plan", result.stderr)
+        text = path.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("---\n"), f"expected frontmatter, got: {text[:80]!r}")
+        self.assertIn("Linear Ticket: ENG-123", text)
+        self.assertIn("Status: backlog", text)
+        self.assertIn("Created:", text)
+        self.assertIn("Plan-keeper Ticket:", text)
+        self.assertIn("# Heading", text)
 
     def test_updates_existing_ticket_in_place(self) -> None:
         path = self._managed("Linear Ticket: OLD-1\n")
