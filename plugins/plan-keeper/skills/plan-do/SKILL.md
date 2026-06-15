@@ -21,7 +21,8 @@ For plans that aren't execution-ready yet (idea, spec), the skill suggests the s
 
 - **Lists:** the **not-yet-started** plans only — `Status: todo` and `Status: backlog` (`list --status todo,backlog`). In-progress / in-review / done plans are excluded (you're picking something to _start_). Classified `.md` plans carry a `--<kind>` suffix in their filename (e.g. `…-noun-first-provider-commands--design.md`); this is expected — the picker still resolves the whole filename (the part after the tab) verbatim, the `--status` machine contract is unchanged.
 - **Human view:** to show a project's stages clustered (design → exec-plan) rather than the flat startable list, run `list --group` (mutually exclusive with `--status`). That's a presentation aid; the `--status todo,backlog` form below is what this skill parses to pick from.
-- **Writes:** one frontmatter update when it starts a plan (step 6) — flips `Status` to `in-progress` and clears the `Agent` tag (so groundcrew won't claim a plan you're driving). It never moves, deletes, or rewrites the body.
+- **Writes:** one frontmatter update when it starts a plan (step 7) — flips `Status` to `in-progress` and clears the `Agent` tag (so groundcrew won't claim a plan you're driving). It never moves, deletes, or rewrites the body.
+- **Worktree refresh:** before handing off (step 6), it fast-forwards the **current repo** onto its base branch (`main`/`master`) — automatically, no confirmation — but **only when the worktree is untouched** (clean tree _and_ no commits ahead of base), so the update is always a conflict-free fast-forward. Dirty or ahead branches are left as-is. This is the current repo only, not the full `update-git-repos` skill.
 - **`<repo>`:** auto-derived or override — see [../../repo-derivation.md](../../repo-derivation.md).
 - **Classification (tier 1, readiness):** idea / spec / execution-ready. Read the plan's `Kind:` frontmatter first (authoritative — see [../../plan-kinds.md](../../plan-kinds.md)); infer from content only when `Kind` is absent.
 - **Classification (tier 2, shape — only for execution-ready):** picks which of the three execution engines to recommend first; all three are always offered.
@@ -159,7 +160,40 @@ Which one? (1 is recommended because <shape-based reason>.)
 
 Reorder 1–3 so the recommended engine is first; keep its `[recommended]` tag and adjust the closing rationale to match. Wait for the user's pick, then go to step 6.
 
-### 6. Mark the plan in-progress, then invoke the chosen skill
+### 6. Refresh the worktree from the base branch (when untouched)
+
+Once the user has confirmed a route in step 5 (any of them — idea, spec, or an execution engine), bring the **current repo** up to date with its base branch before handing off, so the next skill builds on the latest `main`/`master`. This runs **automatically — do not ask for confirmation.** It only ever fast-forwards, and only when the worktree is _untouched_, so it can never lose work or hit a merge conflict.
+
+"Untouched" means **both** of these hold:
+
+- the working tree is clean — no staged, unstaged, or untracked changes; **and**
+- the current branch has **no commits ahead** of the base branch (nothing local to rebase).
+
+If either fails, the CLI below skips the fast-forward and leaves the repo untouched — just read its result and continue to step 7. **Never** stash, reset, discard, or force-rebase to make the worktree "untouched" yourself; a dirty or ahead branch is left exactly as-is.
+
+This refreshes **only the current repo**. It deliberately does _not_ invoke the `update-git-repos` skill (which pulls every configured repo); if the user wants all their repos synced, that's a separate `update-git-repos` run. The bundled `refresh_worktree_cli.py` reuses update-git-repos's race-safe fetch/`--ff-only` mechanics (timeout, process-group teardown, disk-floor guard), so don't hand-roll `git fetch`/`rebase` here — run the CLI:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/refresh_worktree_cli.py" refresh
+```
+
+It auto-detects the base branch (`origin/HEAD` → `main` → `master`), runs in the current directory by default, and prints one JSON object on stdout (exit 0; a bad invocation is the only non-zero exit). Read the `status` field:
+
+| `status`                                      | meaning                                                                                                                | what to tell the user                                                          |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `refreshed`                                   | fast-forwarded onto `origin/<base>`; carries `behind` (commits pulled) and a `stat` when the diff is non-empty         | "Fast-forwarded onto origin/`<base>` (`behind` new commits)" — show the `stat` |
+| `up-to-date`                                  | already current with `origin/<base>` — nothing to do                                                                   | one line: already up to date                                                   |
+| `ahead`                                       | branch has local commits ahead of base (not untouched); left as-is, no fast-forward                                    | one line: has local work, skipped refresh                                      |
+| `dirty`                                       | working tree has tracked changes; left as-is                                                                           | one line: working tree dirty, skipped refresh                                  |
+| `detached-head`                               | no branch checked out; nothing to fast-forward                                                                         | one line: detached HEAD, skipped refresh                                       |
+| `fetch-failed`                                | `git fetch` failed (offline, no `origin`, auth needed); carries `error`                                                | note it briefly — **not** a blocker, proceed to step 7                         |
+| `timed-out`                                   | the fetch exceeded the timeout; repo untouched; carries `error`                                                        | note it briefly — proceed to step 7                                            |
+| `low-disk`                                    | free space under the floor; refused before fetching; carries `error`                                                   | note it briefly — proceed to step 7                                            |
+| `bare-misconfig` / `not-a-repo` / `ff-failed` | repo can't be refreshed (stray `core.bare`, not a git repo, or a non-fast-forward race); carries `error` when relevant | note it briefly — proceed to step 7                                            |
+
+Only `refreshed` mutates the repo (a pure fast-forward — never a merge commit or a conflict-prone rebase). Every other status leaves the worktree exactly as found. Whatever the status, report the one-line outcome and **continue to step 7** — the refresh is best-effort and never gates starting the plan.
+
+### 7. Mark the plan in-progress, then invoke the chosen skill
 
 Once the user has confirmed a route (any next skill — `brainstorming`, `writing-plans`, or an execution engine), **first** flip the plan's status so it stops showing up as "to start" and starts showing up in `plan-done`'s finish list — and in the same call clear the `Agent` field so groundcrew won't also claim a plan you're now driving yourself:
 
@@ -187,13 +221,16 @@ If the user wants to steer manually, just stop the skill here. The plan is read 
 
 - **Don't re-display a previously shown plan list from memory.** Step 1's `list` command must be re-run on every invocation — even a re-invocation moments later. The plan set changes between turns (a plan saved mid-conversation won't appear if you reprint a cached list), so the numbered list you show must always come from the output of the command you just ran, never from recall.
 - **Reading and classifying multiple plans before the user picks.** Step 1 lists `status<TAB>filename` lines only. Reading multiple plans wastes context and biases classification toward whatever was read last.
-- **Marking in-progress too early (or on manual-steer).** Step 6 flips `Status` to `in-progress` and clears `Agent` only _after_ the user confirms a skill handoff. Don't mark it on the manual-steer path, and don't mark it before confirmation — a plan the user hasn't committed to should stay in plan-do's not-yet-started list with its queue tag intact.
+- **Marking in-progress too early (or on manual-steer).** Step 7 flips `Status` to `in-progress` and clears `Agent` only _after_ the user confirms a skill handoff. Don't mark it on the manual-steer path, and don't mark it before confirmation — a plan the user hasn't committed to should stay in plan-do's not-yet-started list with its queue tag intact.
 - **Saying "no plans" when stdout is empty but stderr has a hidden-plans note.** Empty stdout with a `note: N other active plan(s) hidden` line means everything is already in-progress/in-review — surface that, don't claim the repo is empty.
 - **Auto-invoking the next skill without confirmation.** Steps 5a/5b/5c require a check-in even when the classification feels obvious. The skill's job is to _offer_ the next stage, not jump to it.
 - **Collapsing the execution menu to a single suggestion.** For execution-ready plans, all three engines are always offered (step 5c). The shape classification only sets which one is _recommended first_ — it does not hide the others.
 - **Treating the recommendation as a decision.** The recommended engine is a best guess from plan shape; how hands-off to be is the user's call. Lead with the recommendation, but let them pick any engine.
 - **Passing a `Ticket:` URL to `autonomous:autonomous`.** The in-context plan is the Task — do not resolve or hand autonomous a frontmatter ticket URL.
 - **Silently falling back when the current repo has no plans.** Step 1 says: tell the user, run `repo list`, wait for direction. Don't auto-route to another folder.
+- **Don't refresh a worktree that isn't untouched.** Step 6 fast-forwards only when the tree is clean _and_ the branch has no commits ahead of base. Don't stash, reset, discard, or force-rebase to coerce a dirty or ahead branch into being updatable — leave it exactly as-is and proceed to step 7.
+- **Don't invoke the `update-git-repos` skill from step 6.** The refresh is the current repo only (decision: one repo, fast-forward). Pulling every configured repo is a separate, user-initiated `update-git-repos` run, not part of starting a plan.
+- **Don't treat a failed `git fetch` as a blocker.** Step 6's refresh is best-effort — if `fetch` fails (offline, no `origin`), note it and continue to the handoff; freshness never gates starting work.
 
 ## Edge cases
 
@@ -203,10 +240,12 @@ If the user wants to steer manually, just stop the skill here. The plan is read 
 - **Plan fits no readiness bucket** — say so explicitly; offer to read into context and let the user steer.
 - **Plan is ambiguous between spec and execution-ready** — offer both the `superpowers:writing-plans` path and the execution menu; let the user choose.
 - **Filename fragment matches multiple plans** — ask the user to disambiguate; do not pick one arbitrarily.
+- **Worktree is dirty or has local commits ahead of base** — step 6's refresh skips the fast-forward (it would risk losing work or hitting a conflict) and proceeds straight to the handoff. Report the skip in one line; don't try to clean or rebase it.
+- **`git fetch` fails during step 6** (offline, no `origin`, auth needed) — note it and proceed; the refresh is best-effort and never blocks starting the plan.
 
 ## Notes
 
-- This skill's only write to `~/plans/` is flipping the picked plan's `Status` to `in-progress` when it starts one (step 6). It never moves, deletes, or rewrites a plan's body. Sibling skill `plan-done` archives completed plans (moving files into `done/`).
+- This skill's only write to `~/plans/` is flipping the picked plan's `Status` to `in-progress` when it starts one (step 7). It never moves, deletes, or rewrites a plan's body. Sibling skill `plan-done` archives completed plans (moving files into `done/`).
 - Status is the link between the `plan-*` skills: `plan-save` writes `backlog`, `plan-do` lists `todo`/`backlog` and flips the started plan to `in-progress`, and `plan-done` lists `in-progress`/`todo` (in-progress first). A plan therefore flows `backlog → todo → in-progress → done` across the family.
 - Classification is two-tier. Tier 1 (readiness: idea / spec / execution-ready) gates _which path_ the plan takes — driven by the `Kind:` frontmatter when present (set by `plan-save`), falling back to content inference otherwise. Tier 2 (shape) runs only for execution-ready plans and only sets _which engine is recommended first_ in the menu — all three are always offered.
 - `Kind` is the persisted form of the tier-1 readiness call: `plan-save` records it once with full context, so `plan-do` reads it instead of re-inferring on every pickup. The mapping (idea→idea, prd/design/spec→spec, exec-plan→execution-ready) lives in [../../plan-kinds.md](../../plan-kinds.md).
