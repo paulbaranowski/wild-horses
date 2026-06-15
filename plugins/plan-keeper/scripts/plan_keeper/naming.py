@@ -107,6 +107,31 @@ def plan_group_key(name: str) -> str:
     return rest
 
 
+def rename_for_kind(name: str, new_kind: Kind) -> str:
+    """Re-stamp a plan filename's `--<kind>` segment for a Kind change.
+
+    Inverse of `plan_group_key`'s `--<kind>[-N]` recovery: strip a trailing
+    `--<valid-kind>` segment (including any `-N` collision suffix), then append
+    `--<new_kind>`. The result is always the canonical
+    `<date>-<slug>--<new_kind>.<ext>` shape; any collision suffix is dropped so
+    the caller (`cmd_file_meta_set`) re-resolves collisions against the new name
+    via its `--on-collision` policy. A dated name with no `--<kind>` segment
+    (saved without `--kind`) simply gains one. Gated on a real date prefix,
+    matching `plan_group_key`: only dated plan names carry a meaningful Kind
+    segment, so a hand-named no-date file (`plan.md`, `README.md`) is returned
+    unchanged rather than gaining a segment the grouping logic would ignore.
+    """
+    stem, dotext = os.path.splitext(name)
+    m = _NAME_DATE_PREFIX_RE.match(stem)
+    if not m:
+        return name
+    rest = stem[m.end():]
+    head, sep, tail = rest.rpartition(KIND_SEP)
+    if sep and _NAME_COLLISION_SUFFIX_RE.sub("", tail) in VALID_KINDS:
+        stem = stem[: m.end()] + head
+    return f"{stem}{KIND_SEP}{new_kind}{dotext}"
+
+
 def normalize_override(name: str) -> str:
     """Apply repo-derivation.md step-2 normalization.
 

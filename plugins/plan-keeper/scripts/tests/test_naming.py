@@ -12,7 +12,11 @@ from support import (  # noqa: F401 — also inserts scripts/ onto sys.path
     run_cli,
 )
 
-from plan_keeper.naming import plan_filename, plan_group_key  # noqa: E402
+from plan_keeper.naming import (  # noqa: E402
+    plan_filename,
+    plan_group_key,
+    rename_for_kind,
+)
 
 
 class TestRepoDerivation(IsolatedHomeTestCase):
@@ -179,6 +183,54 @@ class TestPlanGroupKey(unittest.TestCase):
         # stem, so a hand-named `README--spec.md` is NOT mistaken for a `spec`
         # stage of project `README`.
         self.assertEqual(plan_group_key("README--spec.md"), "README--spec")
+
+
+class TestRenameForKind(unittest.TestCase):
+    """`rename_for_kind` re-stamps a plan filename's `--<kind>` segment so the
+    name tracks a frontmatter Kind change. Inverse of `plan_group_key`'s
+    `--<kind>[-N]` recovery: it drops the old kind tail and appends the new."""
+
+    def test_reclassify_swaps_kind_segment(self) -> None:
+        self.assertEqual(
+            rename_for_kind("2026-06-15-surfaces-recently-done--design.md", "exec-plan"),
+            "2026-06-15-surfaces-recently-done--exec-plan.md",
+        )
+
+    def test_adds_kind_to_unsegmented_name(self) -> None:
+        # A plan saved without --kind has no segment; reclassifying stamps one on.
+        self.assertEqual(
+            rename_for_kind("2026-06-15-my-topic.md", "exec-plan"),
+            "2026-06-15-my-topic--exec-plan.md",
+        )
+
+    def test_drops_collision_suffix_when_reclassifying(self) -> None:
+        # `find_unused_suffix` appends `-N` after the kind; reclassify produces
+        # the canonical `--<newkind>.md` and lets the caller re-resolve collisions.
+        self.assertEqual(
+            rename_for_kind("2026-06-15-dup--design-2.md", "exec-plan"),
+            "2026-06-15-dup--exec-plan.md",
+        )
+
+    def test_same_kind_is_idempotent(self) -> None:
+        self.assertEqual(
+            rename_for_kind("2026-06-15-topic--spec.md", "spec"),
+            "2026-06-15-topic--spec.md",
+        )
+
+    def test_topic_ending_in_kind_word_is_preserved(self) -> None:
+        # Only the post-`--` segment is the Kind; a slug that merely ends in a
+        # kind word ("auth-design") keeps that word.
+        self.assertEqual(
+            rename_for_kind("2026-06-15-auth-design--design.md", "exec-plan"),
+            "2026-06-15-auth-design--exec-plan.md",
+        )
+
+    def test_no_date_prefix_is_returned_unchanged(self) -> None:
+        # Mirrors plan_group_key: the `--<kind>` segment is meaningful only on a
+        # dated plan name, so a hand-named file is left alone (frontmatter still
+        # updates) rather than gaining a segment the grouping logic would ignore.
+        self.assertEqual(rename_for_kind("README--spec.md", "design"), "README--spec.md")
+        self.assertEqual(rename_for_kind("plan.md", "exec-plan"), "plan.md")
 
 
 if __name__ == "__main__":
