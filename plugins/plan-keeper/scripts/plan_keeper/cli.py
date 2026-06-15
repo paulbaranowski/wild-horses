@@ -49,7 +49,7 @@ from plan_keeper.ids import (
     ensure_id,
     id_for_path,
 )
-from plan_keeper.types import QueueRow
+from plan_keeper.types import Kind, QueueRow
 
 # Re-export so existing tests can read `cli.plankeeper_id`. The `as plankeeper_id`
 # form marks this an intentional re-export; the single definition lives in `ids`.
@@ -79,6 +79,7 @@ from plan_keeper.naming import (
     normalize_override,
     plan_filename,
     plan_group_key,
+    rename_for_kind,
     slugify_topic,
     validate_extension,
     validate_repo_name,
@@ -786,8 +787,10 @@ def cmd_file_meta_set(args) -> int:
         updates.append(("Agent", a.agent))
     if a.status is not None:
         updates.append(("Status", a.status))
+    normalized_kind: Optional[str] = None
     if a.kind is not None:
-        updates.append(("Kind", validate_kind(a.kind)))
+        normalized_kind = validate_kind(a.kind)
+        updates.append(("Kind", normalized_kind))
     if a.blocked_by is not None:
         updates.append(("Blocked-by", a.blocked_by))
     if not updates:
@@ -808,21 +811,19 @@ def cmd_file_meta_set(args) -> int:
     for key, value in updates:
         meta[key] = value
 
-    # A terminal status (done/deferred) is also a location: relocate the plan
-    # into the matching subdir so Status and directory never disagree. Active
-    # statuses are a pure in-place rewrite. `done` stamps Completed on (today,
-    # unless the caller already supplied --completed-on).
+    # The target path can move on two independent axes, which compose:
+    #   1. Directory: a terminal status (done/deferred) relocates the plan into
+    #      the matching subdir so Status and directory never disagree; active
+    #      statuses and pure-metadata edits stay in the current dir.
+    #   2. Basename: a Kind change re-stamps the filename's `--<kind>` segment
+    #      (.md only) so the name tracks the new `Kind:` frontmatter. Frontmatter
+    #      stays the source of truth; this just keeps the display/sort segment
+    #      honest.
+    # `done` also stamps Completed on (today, unless the caller supplied one).
     if a.status in TERMINAL_DIRS:
         if a.status == "done" and a.completed_on is None:
             meta["Completed on"] = date.today().isoformat()
-        target = _terminal_target(path, cast(Status, a.status))
-        if target != path and target.exists():
-            if a.on_collision == "fail":
-                emit_collision(target)
-                return 2
-            if a.on_collision == "suffix":
-                target = find_unused_suffix(target)
-            # "overwrite" → write_atomic replaces it below
+        target_dir = _terminal_target(path, cast(Status, a.status)).parent
     elif a.status is not None and path.parent.name in TERMINAL_DIRS:
         # Reactivating a terminal plan (moving it back to the active root) is
         # out of scope. Refuse loudly rather than rewrite in place and leave an
@@ -835,7 +836,20 @@ def cmd_file_meta_set(args) -> int:
             code=2,
         )
     else:
-        target = path
+        target_dir = path.parent
+
+    target_name = path.name
+    if normalized_kind is not None and path.suffix.lower() == ".md":
+        target_name = rename_for_kind(path.name, cast(Kind, normalized_kind))
+
+    target = target_dir / target_name
+    if target != path and target.exists():
+        if a.on_collision == "fail":
+            emit_collision(target)
+            return 2
+        if a.on_collision == "suffix":
+            target = find_unused_suffix(target)
+        # "overwrite" → write_atomic replaces it below
 
     new_text = serialize_frontmatter(meta, body)
     if not new_text.endswith("\n"):

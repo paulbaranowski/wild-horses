@@ -124,6 +124,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set \
   --file "<path the CLI returned>" --kind <corrected value>
 ```
 
+This **renames** the file's `--<kind>` segment to match the new Kind (frontmatter stays the source of truth; the segment is kept in sync), so the path changes. The CLI prints the new path on stdout, use that in your reply.
+
 For paired saves, list both paths on consecutive lines.
 
 ## Choosing the extension
@@ -154,6 +156,11 @@ For `.md` saves, infer the **document type** from the content and conversation a
 | `exec-plan` | an executable plan / task list: phased steps or independent tasks, ready to run |
 
 This is the same axis `plan-do` uses to route a plan, recorded once at save time so `plan-do` doesn't have to re-infer it. Classify, pass `--kind`, and **surface the value in your step-5 confirmation** so the user can correct it in one reply (infer-and-confirm).
+
+**Classify by stage, not by genre.** The decision procedure (the "Choosing the right Kind" section of [../../plan-kinds.md](../../plan-kinds.md)) is the source of truth; the load-bearing rules:
+
+- **Most-advanced-stage-present wins.** Classify by the furthest stage the _content_ supports, not by the document's title or tone. A doc framed as an architecture write-up (`# Design:`, trade-offs, a rejected alternative) is still `exec-plan` if its body could be built end-to-end with no further design decisions: named touch points + concrete logic/pseudocode + an acceptance/test list + a verification step. Design rationale is provenance; it never demotes a buildable doc.
+- The `design` vs `spec` slip is cheap (both route to planning); the `design`/`spec` vs `exec-plan` slip is the costly one (only `exec-plan` routes straight to execution), so lean toward `exec-plan` when the executability test is met.
 
 - **If the inference is genuinely ambiguous** between two kinds (e.g. a doc that's half-PRD, half-design), ask the user which before saving rather than guessing.
 - **Don't pass `--kind` for non-`.md` saves** — the CLI rejects it (frontmatter only lives in markdown). For a paired `.json` + `.md`, the `.md` carries the Kind.

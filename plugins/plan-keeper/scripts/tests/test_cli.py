@@ -753,18 +753,23 @@ class TestFileMetaSetStatus(IsolatedHomeTestCase):
         self.assertTrue(done_path.exists())
         self.assertIn("Status: done", done_path.read_text().split("\n---\n", 1)[0])
 
-    def test_non_status_edit_on_terminal_plan_in_place(self) -> None:
-        # Editing a non-status field (e.g. Kind) on a done plan is still a
-        # legal in-place edit — only an active --status is refused.
+    def test_non_status_edit_on_terminal_plan_renames_in_done(self) -> None:
+        # Editing a non-status field (e.g. Kind) on a done plan is a legal edit
+        # (only an active --status is refused). A Kind change re-stamps the
+        # filename's `--<kind>` segment, but stays within done/ (no relocation).
         source = self._save_one("edit done plan")
         run_cli("file-meta", "set", "--file", str(source), "--status", "done",
                 home=self.home)
-        done_path = self.plans_root / "scratch" / "done" / source.name
+        done_dir = self.plans_root / "scratch" / "done"
+        done_path = done_dir / source.name
         r = run_cli("file-meta", "set", "--file", str(done_path), "--kind", "spec",
                     home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertTrue(done_path.exists())
-        self.assertIn("Kind: spec", done_path.read_text().split("\n---\n", 1)[0])
+        renamed = Path(r.stdout.strip())
+        self.assertEqual(renamed.parent, done_dir, "must stay in done/")
+        self.assertTrue(renamed.name.endswith("--spec.md"))
+        self.assertFalse(done_path.exists(), "old name must be unlinked")
+        self.assertIn("Kind: spec", renamed.read_text().split("\n---\n", 1)[0])
 
     def test_archive_subcommand_removed(self) -> None:
         # archive was folded into `file-meta set --status done`; the old
@@ -773,6 +778,108 @@ class TestFileMetaSetStatus(IsolatedHomeTestCase):
                     home=self.home)
         self.assertEqual(r.returncode, 2)
         self.assertIn("invalid choice", r.stderr)
+
+
+class TestFileMetaSetKindRename(IsolatedHomeTestCase):
+    """A Kind change via `file-meta set --kind` re-stamps the filename's
+    `--<kind>` segment so the name and the `Kind:` frontmatter never disagree.
+    Frontmatter stays the source of truth; the rename keeps the display/sort
+    segment honest."""
+
+    def _save_with_kind(self, topic: str, kind: str) -> Path:
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", topic, "--kind", kind,
+            stdin="# Body\nsome text\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return Path(r.stdout.strip())
+
+    def test_reclassify_renames_file(self) -> None:
+        source = self._save_with_kind("recently done", "design")
+        self.assertTrue(source.name.endswith("--design.md"))
+        r = run_cli("file-meta", "set", "--file", str(source), "--kind", "exec-plan",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        renamed = Path(r.stdout.strip())
+        self.assertTrue(renamed.name.endswith("--exec-plan.md"), renamed.name)
+        self.assertEqual(renamed.parent, source.parent)
+        self.assertFalse(source.exists(), "old name must be unlinked")
+        self.assertIn("Kind: exec-plan", renamed.read_text().split("\n---\n", 1)[0])
+
+    def test_adding_kind_to_unsegmented_name_renames(self) -> None:
+        # A plan saved without --kind has no segment; setting one renames it.
+        r = run_cli("save", "--override", "scratch", "--topic", "no kind yet",
+                    stdin="# Body\n", home=self.home)
+        source = Path(r.stdout.strip())
+        self.assertFalse(source.name.endswith("--exec-plan.md"))
+        r = run_cli("file-meta", "set", "--file", str(source), "--kind", "exec-plan",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        renamed = Path(r.stdout.strip())
+        self.assertTrue(renamed.name.endswith("--exec-plan.md"), renamed.name)
+        self.assertFalse(source.exists())
+
+    def test_same_kind_is_in_place_noop(self) -> None:
+        source = self._save_with_kind("already spec", "spec")
+        r = run_cli("file-meta", "set", "--file", str(source), "--kind", "spec",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), str(source), "same Kind must not rename")
+        self.assertTrue(source.exists())
+
+    def test_rename_collision_fail_is_default(self) -> None:
+        source = self._save_with_kind("clash", "design")
+        # Occupy the target name (...--exec-plan.md) so the rename collides.
+        self._save_with_kind("clash", "exec-plan")
+        r = run_cli("file-meta", "set", "--file", str(source), "--kind", "exec-plan",
+                    home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("existing:", r.stderr)
+        self.assertTrue(source.exists(), "source must be untouched on collision")
+        self.assertIn("Kind: design", source.read_text().split("\n---\n", 1)[0])
+
+    def test_rename_collision_suffix(self) -> None:
+        source = self._save_with_kind("clash two", "design")
+        self._save_with_kind("clash two", "exec-plan")
+        r = run_cli("file-meta", "set", "--file", str(source), "--kind", "exec-plan",
+                    "--on-collision", "suffix", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.strip().endswith("--exec-plan-2.md"), r.stdout)
+        self.assertFalse(source.exists())
+
+    def test_uppercase_md_extension_is_renamed(self) -> None:
+        # The `.md` gate is case-insensitive: a `*.MD` plan must get its
+        # `--<kind>` segment re-stamped too, so name and frontmatter stay in
+        # sync. (Plan-keeper writes lowercase `.md`, but a hand-named file can
+        # carry any case.)
+        repo = self.plans_root / "scratch"
+        repo.mkdir(parents=True, exist_ok=True)
+        source = repo / "2026-06-15-upper--design.MD"
+        source.write_text(
+            "---\nStatus: backlog\nKind: design\n---\n# Body\n", encoding="utf-8",
+        )
+        r = run_cli("file-meta", "set", "--file", str(source), "--kind", "exec-plan",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        renamed = Path(r.stdout.strip())
+        self.assertTrue(renamed.name.endswith("--exec-plan.MD"), renamed.name)
+        self.assertFalse(source.exists(), "old name must be unlinked")
+        self.assertIn("Kind: exec-plan", renamed.read_text().split("\n---\n", 1)[0])
+
+    def test_status_done_and_kind_compose(self) -> None:
+        # One call relocates into done/ AND re-stamps the Kind segment.
+        source = self._save_with_kind("compose me", "design")
+        r = run_cli("file-meta", "set", "--file", str(source),
+                    "--status", "done", "--kind", "exec-plan", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        target = Path(r.stdout.strip())
+        self.assertEqual(target.parent, self.plans_root / "scratch" / "done")
+        self.assertTrue(target.name.endswith("--exec-plan.md"), target.name)
+        self.assertFalse(source.exists())
+        front = target.read_text().split("\n---\n", 1)[0]
+        self.assertIn("Status: done", front)
+        self.assertIn("Kind: exec-plan", front)
+        self.assertIn(f"Completed on: {date.today().isoformat()}", front)
 
 
 class TestTicketApiArgValidation(IsolatedHomeTestCase):
