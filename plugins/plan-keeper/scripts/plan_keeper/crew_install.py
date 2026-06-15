@@ -52,6 +52,13 @@ SENTINEL_END = "/* plan-keeper:managed:end */"
 # label groundcrew shows.
 _SOURCE_NAME = "plankeeper"
 
+# Local directories the sandbox opens read+write while an agent works a
+# plankeeper task. groundcrew masks ``$HOME`` and re-opens only an allowlist, so
+# without this grant a sandboxed agent can't read or write the plan files that
+# back this source. groundcrew expands the leading ``~`` at config load, so the
+# literal stays portable across machines instead of baking in an absolute home.
+_SANDBOX_WRITE_PATHS = ["~/plans"]
+
 # Directory holding the XDG groundcrew config, relative to home.
 _XDG_CONFIG_DIR_REL = Path(".config") / "groundcrew"
 
@@ -130,15 +137,22 @@ def _source_commands(pk: str) -> "dict[str, str]":
 def _render_source_object(pk: str) -> dict:
     """The shell-source as a plain dict, for the JSON patcher and JSON safety
     valve."""
-    return {"kind": "shell", "name": _SOURCE_NAME, "commands": _source_commands(pk)}
+    return {
+        "kind": "shell",
+        "name": _SOURCE_NAME,
+        "sandboxWritePaths": list(_SANDBOX_WRITE_PATHS),
+        "commands": _source_commands(pk),
+    }
 
 
 def _render_source_region(pk: str) -> str:
     """The shell-source object injected into a TS ``sources:`` array."""
     cmds = _source_commands(pk)
     lines = ",\n".join(f'          {key}: "{val}"' for key, val in cmds.items())
+    paths = ", ".join(f'"{p}"' for p in _SANDBOX_WRITE_PATHS)
     return (
         f'      {{ kind: "shell", name: "{_SOURCE_NAME}",\n'
+        f"        sandboxWritePaths: [{paths}],\n"
         "        commands: {\n"
         f"{lines} }} }},"
     )
