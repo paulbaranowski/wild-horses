@@ -123,6 +123,14 @@ class TestBuildPatchedConfig(unittest.TestCase):
             out,
         )
 
+    def test_grants_plans_dir_to_the_sandbox(self):
+        """The shell source declares sandboxWritePaths so groundcrew opens
+        ~/plans read+write inside the sandbox; without it a sandboxed agent
+        can't reach the plan files this source is built on."""
+        out = build_patched_config(BASE_CONFIG, PK)
+        assert out is not None
+        self.assertIn('sandboxWritePaths: ["~/plans"]', out)
+
     def test_known_repositories_left_untouched(self):
         """plan-keeper no longer manages knownRepositories: the array and its
         entries must come through the patch byte-identical, with no sentinel."""
@@ -275,6 +283,16 @@ class TestBuildPatchedJsonConfig(unittest.TestCase):
             f"{PK} file-meta set --ticket ${{id}} --status done "
             f"--on-collision suffix",
         )
+
+    def test_grants_plans_dir_to_the_sandbox(self):
+        """The JSON shell source carries sandboxWritePaths just like the TS one,
+        so a JSON-config install grants ~/plans to the sandbox too."""
+        out = build_patched_json_config(JSON_CONFIG, PK)
+        assert out is not None
+        entry = next(
+            s for s in self._sources(out) if s.get("name") == "plankeeper"
+        )
+        self.assertEqual(entry["sandboxWritePaths"], ["~/plans"])
 
     def test_creates_sources_when_absent(self):
         out = build_patched_json_config('{"workspace": {}}', PK)

@@ -81,6 +81,7 @@ sentinel-wrapped region:
 ```ts
 /* plan-keeper:managed:start */
       { kind: "shell", name: "plankeeper",
+        sandboxWritePaths: ["~/plans"],
         commands: {
           verify: "/opt/homebrew/bin/plan-keeper crew fetch >/dev/null",
           fetch: "/opt/homebrew/bin/plan-keeper crew fetch",
@@ -97,6 +98,7 @@ For a JSON config, the same source as an object in the `sources` array:
 {
   "kind": "shell",
   "name": "plankeeper",
+  "sandboxWritePaths": ["~/plans"],
   "commands": {
     "verify": "/opt/homebrew/bin/plan-keeper crew fetch >/dev/null",
     "fetch": "/opt/homebrew/bin/plan-keeper crew fetch",
@@ -107,6 +109,12 @@ For a JSON config, the same source as an object in the `sources` array:
   }
 }
 ```
+
+`sandboxWritePaths: ["~/plans"]` grants the agent read+write access to your
+plans tree from inside groundcrew's sandbox. groundcrew masks `$HOME` and
+re-opens only an allowlist, so without this grant a sandboxed agent couldn't read
+or write the plan files this source dispatches from. groundcrew expands the
+leading `~` at config load.
 
 `crew install` does not modify `workspace.knownRepositories` — register the
 repos groundcrew may dispatch into yourself.

@@ -1,7 +1,7 @@
 {
   "name": "plan-keeper",
   "description": "A local task-management system built around plans in a ~/plans/<repo>/ tree: a task is a plan that either spawns more plans or gets built into code. Capture from conversation, route to the next step, archive, dispatch via groundcrew, and optionally export to Linear/Jira.",
-  "version": "6.7.0",
+  "version": "6.8.0",
   "author": {
     "name": "Paul Baranowski"
   }
