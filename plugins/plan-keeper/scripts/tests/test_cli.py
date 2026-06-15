@@ -847,6 +847,25 @@ class TestFileMetaSetKindRename(IsolatedHomeTestCase):
         self.assertTrue(r.stdout.strip().endswith("--exec-plan-2.md"), r.stdout)
         self.assertFalse(source.exists())
 
+    def test_uppercase_md_extension_is_renamed(self) -> None:
+        # The `.md` gate is case-insensitive: a `*.MD` plan must get its
+        # `--<kind>` segment re-stamped too, so name and frontmatter stay in
+        # sync. (Plan-keeper writes lowercase `.md`, but a hand-named file can
+        # carry any case.)
+        repo = self.plans_root / "scratch"
+        repo.mkdir(parents=True, exist_ok=True)
+        source = repo / "2026-06-15-upper--design.MD"
+        source.write_text(
+            "---\nStatus: backlog\nKind: design\n---\n# Body\n", encoding="utf-8",
+        )
+        r = run_cli("file-meta", "set", "--file", str(source), "--kind", "exec-plan",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        renamed = Path(r.stdout.strip())
+        self.assertTrue(renamed.name.endswith("--exec-plan.MD"), renamed.name)
+        self.assertFalse(source.exists(), "old name must be unlinked")
+        self.assertIn("Kind: exec-plan", renamed.read_text().split("\n---\n", 1)[0])
+
     def test_status_done_and_kind_compose(self) -> None:
         # One call relocates into done/ AND re-stamps the Kind segment.
         source = self._save_with_kind("compose me", "design")

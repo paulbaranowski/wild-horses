@@ -839,7 +839,7 @@ def cmd_file_meta_set(args) -> int:
         target_dir = path.parent
 
     target_name = path.name
-    if normalized_kind is not None and path.suffix == ".md":
+    if normalized_kind is not None and path.suffix.lower() == ".md":
         target_name = rename_for_kind(path.name, cast(Kind, normalized_kind))
 
     target = target_dir / target_name
