@@ -760,9 +760,12 @@ def cmd_file_meta_set(args) -> int:
 
     Inputs are validated (Kind enum, Completed-on date) BEFORE the file is
     located or read, so a typo fails with exit 2 and never touches the file.
-    The file must already have frontmatter — a bare file is rejected (exit 2)
-    so a half-managed plan can't be created out from under plan-save's
-    Agent/Status/Created defaults.
+    An unmanaged file is adopted rather than rejected: a bare file (no
+    frontmatter) or a partial block is run through plan-save's
+    _inject_default_frontmatter to stamp the missing Status/Created/Plan-keeper
+    Ticket defaults before the requested mutation, so the plans tree can be
+    normalized in place. Only genuinely malformed frontmatter (a ``---`` opener
+    with no closing ``---``) is still rejected (exit 5).
 
     MUTATES DISK — RELOCATES AND STAMPS: a terminal ``--status`` (done /
     deferred) does not rewrite in place. It writes the plan to the matching
@@ -801,13 +804,34 @@ def cmd_file_meta_set(args) -> int:
             code=2,
         )
     path = _resolve_file_meta_path(a)
-    text = path.read_text(encoding="utf-8")
-    if not (text.startswith("---\n") or text.startswith("---\r\n")):
-        raise PlanKeeperCliError(
-            f"{path} has no frontmatter — re-save via plan-save to get defaults",
-            code=2,
+    original = path.read_text(encoding="utf-8")
+    # Parse first: this is where genuinely malformed frontmatter (a `---` opener
+    # with no closing `---`) raises PlanKeeperCliError(5), before any write —
+    # silently rewriting corrupt YAML is the failure mode the atomic-write
+    # discipline exists to prevent, so adoption never touches such a file.
+    meta, body = parse_frontmatter(original)  # may raise PlanKeeperCliError(5)
+    # Adopt unmanaged files instead of rejecting them: the plans tree is
+    # plan-keeper's domain, so a file dropped in by hand (or by a tool that
+    # bypassed plan-save) is normalized on first mutation. _inject_default_-
+    # frontmatter fills exactly Status/Created/Plan-keeper Ticket when absent
+    # (fill-if-absent — existing values always win), so "any of those three is
+    # missing" is precisely "this file is unmanaged". Gate on that, not on text
+    # inequality: a managed file in non-canonical field order would re-serialize
+    # to different bytes while backfilling nothing, which must NOT be reported as
+    # an adoption. Created is sourced from the file's birthtime, not now() — like
+    # plan-save's --from-path move, the plan pre-existed this mutation. Agent is
+    # never injected (it stays the groundcrew dispatch signal).
+    if not (meta["Status"] and meta["Created"] and meta["Plan-keeper Ticket"]):
+        adopted = _inject_default_frontmatter(
+            original,
+            created=_iso_from_stat(path.stat()),
+            plankeeper_ticket=id_for_path(path),
         )
-    meta, body = parse_frontmatter(text)  # may raise PlanKeeperCliError(5)
+        meta, body = parse_frontmatter(adopted)
+        print(
+            f"adopted unmanaged plan {path.name}: stamped plan-keeper defaults",
+            file=sys.stderr,
+        )
     for key, value in updates:
         meta[key] = value
 

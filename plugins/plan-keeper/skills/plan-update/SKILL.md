@@ -82,7 +82,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta get \
 
 ## Edge cases
 
-- **Plan has no frontmatter** — CLI exits 2 with "no frontmatter". Tell the user to re-save via plan-save (which injects defaults) and retry.
+- **Plan has no frontmatter (or a partial block)** — the CLI adopts it: it stamps plan-save's defaults (Status/Created/minted Plan-keeper Ticket), backfilling only the absent managed fields, before applying your edit, and prints `adopted unmanaged plan ...` on stderr. No re-save step is needed. Only genuinely malformed frontmatter (a `---` opener with no closing `---`) is still rejected — there the CLI exits 5 with "malformed frontmatter" and leaves the file untouched.
 - **Field has no flag** — `set` only edits the known fields (the field→flag list above). A field with no flag isn't editable here; for a genuinely new custom field, point the user at the spec for extending `_FRONTMATTER_FIELDS`.
 - **Invalid `--kind` / `--completed-on`** — CLI exits 2 (Kind must be in the closed set; date must be `YYYY-MM-DD`) and the file is left untouched (inputs are validated before any write).
 
