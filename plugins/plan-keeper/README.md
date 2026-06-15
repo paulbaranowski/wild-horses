@@ -28,13 +28,13 @@ Two install paths — pick by what you need:
 /plugin install plan-keeper@wild-horses
 ```
 
-**Homebrew CLI** — the version-stable standalone `plan-keeper` binary on your `$PATH`:
+**Homebrew CLI** — the version-stable standalone `pk` binary on your `$PATH`:
 
 ```bash
 brew install paulbaranowski/tap/plan-keeper
 ```
 
-The binary is the same tool the plugin's bundled CLI script provides, just delivered as a version-locked executable from the `paulbaranowski/tap` tap (see [Command-line usage](#command-line-usage)). It exists because `plan-keeper crew install` wires it into your groundcrew config, and groundcrew then invokes it — outside Claude Code, where the in-plugin script isn't reachable — to dispatch plans straight from `~/plans/<repo>/*.md`. Details in [Groundcrew integration](#groundcrew-integration).
+The binary is the same tool the plugin's bundled CLI script provides, just delivered as a version-locked executable from the `paulbaranowski/tap` tap (see [Command-line usage](#command-line-usage)). It installs as `pk` (with `plan-keeper` kept as an equivalent alias). It exists because `pk crew install` wires it into your groundcrew config, and groundcrew then invokes it — outside Claude Code, where the in-plugin script isn't reachable — to dispatch plans straight from `~/plans/<repo>/*.md`. Details in [Groundcrew integration](#groundcrew-integration).
 
 ## Skills
 
@@ -78,8 +78,10 @@ groundcrew runs _outside_ Claude Code, so it can't reach the in-plugin CLI scrip
 
 ```bash
 brew install paulbaranowski/tap/plan-keeper   # stable entrypoint on $PATH
-plan-keeper crew install                       # wire it into your crew config (idempotent)
+pk crew install                                # wire it into your crew config (idempotent)
 ```
+
+The command is `pk` (`plan-keeper` still works as an equivalent alias — same binary, same subcommands).
 
 `crew install` patches your groundcrew config — by default the first `crew.config.*` it finds in `~/.config/groundcrew/` (matching groundcrew's own search order), or `$GROUNDCREW_CONFIG` / `--config`. Both config shapes are supported: a **TS/JS** config gets a `plankeeper` shell source injected into `sources:` as a sentinel-wrapped region, and a **JSON** config (which has no comments) is parsed and gets the `plankeeper` entry upserted into its `sources` array by name. Either way it backs the config up first, validates the patch by having `crew doctor` load it, and rolls back if the patch broke the config. Re-running replaces the managed source in place (idempotent). It does **not** touch `workspace.knownRepositories` — registering the repos groundcrew dispatches into is left to you. Full walkthrough — `--dry-run`, the manual-paste fallback, and exactly what gets injected — is in [`groundcrew/README.md`](groundcrew/README.md).
 
@@ -122,12 +124,12 @@ The override and auto-derive paths normalize differently: auto-derived names are
 
 ## Command-line usage
 
-`scripts/plan_keeper_cli.py` is the canonical interface behind every skill — the skills never write to `~/plans/` directly. The same source file ships two ways: the plugin invokes `plan_keeper_cli.py` in place, while `brew install paulbaranowski/tap/plan-keeper` packages that exact source into the version-stable standalone `plan-keeper` binary (one source, two delivery vehicles — no second copy to drift). The skills call the in-tree script; groundcrew, which runs outside Claude Code, calls the brew binary.
+`scripts/plan_keeper_cli.py` is the canonical interface behind every skill — the skills never write to `~/plans/` directly. The same source file ships two ways: the plugin invokes `plan_keeper_cli.py` in place, while `brew install paulbaranowski/tap/plan-keeper` packages that exact source into the version-stable standalone `pk` binary (one source, two delivery vehicles — no second copy to drift). The skills call the in-tree script; groundcrew, which runs outside Claude Code, calls the brew binary.
 
 Invoke it either way — they're the same tool:
 
 ```bash
-plan-keeper <subcommand> …                                  # Homebrew binary
+pk <subcommand> …                                           # Homebrew binary (alias: plan-keeper)
 python3 "$CLAUDE_PLUGIN_ROOT/scripts/plan_keeper_cli.py" …  # in-plugin script
 ```
 

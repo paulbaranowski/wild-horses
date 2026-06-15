@@ -36,6 +36,10 @@ Homepage = "https://github.com/paulbaranowski/wild-horses"
 Source = "https://github.com/paulbaranowski/wild-horses/tree/main/plugins/plan-keeper"
 
 [project.scripts]
+# `pk` is the primary typed command; `plan-keeper` stays as an equivalent alias
+# (same entry point). The brew formula/package name is unchanged — one package,
+# two installed binaries.
+pk = "plan_keeper.cli:main"
 plan-keeper = "plan_keeper.cli:main"
 
 [tool.setuptools]

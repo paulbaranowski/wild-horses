@@ -1084,13 +1084,17 @@ def cmd_crew_review(args) -> int:
 def cmd_crew_install(args) -> int:
     """Patch the groundcrew config so it dispatches plans from ~/plans/*.
 
-    Composition root: resolves the config path and our own ``plan-keeper``
-    binary, then hands the real ``crew doctor`` runner to the orchestration in
+    Composition root: resolves the config path and our own ``pk`` binary, then
+    hands the real ``crew doctor`` runner to the orchestration in
     ``crew_install`` (kept separate so its patch logic is unit-testable).
+
+    Prefers the ``pk`` binary over the ``plan-keeper`` alias so re-running
+    ``crew install`` repoints existing wiring to the primary name; the
+    ``plan-keeper`` fallback covers installs that predate the ``pk`` rename.
     """
     a = CrewInstallArgs.from_args(args)
     config_path = resolve_config_path(a.config, dict(os.environ), Path.home())
-    pk = shutil.which("plan-keeper") or "plan-keeper"
+    pk = shutil.which("pk") or shutil.which("plan-keeper") or "pk"
     return run_crew_install(
         config_path,
         dry_run=a.dry_run,

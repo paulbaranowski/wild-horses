@@ -14,9 +14,11 @@ import io
 import json
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from support import IsolatedHomeTestCase
+from plan_keeper import cli
 from plan_keeper import storage
 from plan_keeper.crew_install import (
     SENTINEL_END,
@@ -538,6 +540,46 @@ class TestRunCrewInstall(IsolatedHomeTestCase):
         self.assertEqual(json_cfg.read_text(), "[]")  # untouched
         self.assertNotIn(SENTINEL_START, self.out.getvalue())  # not the TS block
         self.assertIn('"name": "plankeeper"', self.out.getvalue())
+
+
+class TestCrewInstallBinaryPreference(unittest.TestCase):
+    """`cmd_crew_install` resolves which binary path gets baked into the wiring.
+
+    `pk` is the primary command and `plan-keeper` a same-entry-point alias, so
+    re-running `crew install` must repoint existing wiring to `pk` when it's
+    present, falling back to `plan-keeper` only on installs that predate it.
+    """
+
+    def _resolved_pk(self, which_map: dict) -> str:
+        captured = {}
+
+        def fake_run_crew_install(config_path, *, dry_run, pk, run_doctor, out):
+            captured["pk"] = pk
+            return 0
+
+        with patch.object(
+            cli.shutil, "which", side_effect=lambda name: which_map.get(name)
+        ), patch.object(
+            cli, "resolve_config_path", return_value=Path("/cfg.ts")
+        ), patch.object(
+            cli, "run_crew_install", side_effect=fake_run_crew_install
+        ):
+            cli.cmd_crew_install(SimpleNamespace(config=None, dry_run=True))
+        return captured["pk"]
+
+    def test_prefers_pk_when_both_present(self):
+        pk = self._resolved_pk(
+            {"pk": "/opt/homebrew/bin/pk",
+             "plan-keeper": "/opt/homebrew/bin/plan-keeper"}
+        )
+        self.assertEqual(pk, "/opt/homebrew/bin/pk")
+
+    def test_falls_back_to_plan_keeper_alias(self):
+        pk = self._resolved_pk({"plan-keeper": "/opt/homebrew/bin/plan-keeper"})
+        self.assertEqual(pk, "/opt/homebrew/bin/plan-keeper")
+
+    def test_literal_pk_when_neither_on_path(self):
+        self.assertEqual(self._resolved_pk({}), "pk")
 
 
 if __name__ == "__main__":
