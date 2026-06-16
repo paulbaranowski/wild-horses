@@ -12,6 +12,7 @@ Dependency direction: ``ids -> storage, frontmatter`` (both leaf-ward); the
 adapter (``groundcrew``) and the CLI import from here, never the reverse.
 """
 import hashlib
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -32,6 +33,26 @@ from plan_keeper.storage import write_atomic
 # 3 -> 24-bit / 8 digits (tighter, ~3% at 1000), 5 -> 40-bit / 13 digits (more
 # headroom). This is the seam the "shorter ids" change flips; nothing else moves.
 ID_DIGEST_SIZE = 4
+
+# The exact shape `plankeeper_id` produces and the only shape downstream
+# (groundcrew worktree dirs, branches, run-state filenames) is built around.
+# Used as the "is this field already a real minted id?" test in `ensure_id` so
+# placeholders like the legacy `Ticket: TBD` sentinel — which the lazy
+# frontmatter migration carries forward into `Plan-keeper Ticket` — are treated
+# as absent and re-minted rather than honored as authoritative. Anything not
+# matching this (empty, `TBD`, a Linear `ENG-123` pasted into the wrong field,
+# a typo) loses to a fresh mint; a properly-minted value stays frozen.
+_MINTED_ID_RE = re.compile(r"plan-\d+")
+
+
+def _is_minted_plankeeper_id(value: str) -> bool:
+    """True iff ``value`` is the canonical shape ``plankeeper_id`` mints to.
+
+    Used by ``ensure_id`` to gate the "already minted" branch — see
+    ``_MINTED_ID_RE`` for the rationale (TBD and other non-conforming values
+    must lose to a fresh mint, not be treated as authoritative).
+    """
+    return bool(_MINTED_ID_RE.fullmatch(value))
 
 
 def plankeeper_id(repo: str, stem: str) -> str:
@@ -80,15 +101,18 @@ def id_for_path(path: Path) -> str:
 
 def ensure_id(meta: dict, path: Path) -> str:
     """Mint-once into a parsed ``meta`` dict: return the plan's stored
-    ``Plan-keeper Ticket``, setting it to ``id_for_path(path)`` if absent.
+    ``Plan-keeper Ticket``, minting one (``id_for_path(path)``) if the field
+    isn't already a real ``plan-<digits>`` id.
 
     The caller owns persistence — this only mutates the in-memory ``meta`` so it
     composes with whatever write the caller was already doing (a queue-set
-    rewrite, a fetch-time stamp). A present value is authoritative and never
-    overwritten, so a renamed plan keeps its frozen id.
+    rewrite, a fetch-time stamp). A canonically-shaped value is authoritative
+    and never overwritten, so a renamed plan keeps its frozen id. Anything else
+    (empty, the legacy ``TBD`` placeholder, a Linear id pasted into the wrong
+    field, a typo) loses to a fresh mint — see ``_is_minted_plankeeper_id``.
     """
     existing = (meta.get("Plan-keeper Ticket") or "").strip()
-    if existing:
+    if _is_minted_plankeeper_id(existing):
         return existing
     minted = id_for_path(path)
     meta["Plan-keeper Ticket"] = minted
@@ -97,14 +121,15 @@ def ensure_id(meta: dict, path: Path) -> str:
 
 def mint_into_path_if_absent(path: Path) -> Optional[str]:
     """Return the plan's stored ``Plan-keeper Ticket``, minting and persisting
-    one if absent.
+    one if it isn't already a real ``plan-<digits>`` id.
 
     The file-reading wrapper around ``ensure_id`` for callers that hold only a
-    path (``crew fetch``). Mint-once: a present value is never recomputed or
-    overwritten, and only the first call for a plan writes — steady-state
-    fetches don't churn the file. Best-effort: a read/parse/write error is
-    swallowed and returns None, so one unwritable file can't abort the whole
-    fetch.
+    path (``crew fetch``). A canonically-shaped id is never recomputed or
+    overwritten, and only the call that changes the value writes — steady-state
+    fetches don't churn the file. A placeholder like the legacy ``TBD`` sentinel
+    is rewritten in place with a fresh mint (see ``ensure_id``). Best-effort: a
+    read/parse/write error is swallowed and returns None, so one unwritable file
+    can't abort the whole fetch.
     """
     try:
         text = path.read_text(encoding="utf-8")
@@ -121,8 +146,8 @@ def mint_into_path_if_absent(path: Path) -> Optional[str]:
         return None
     before = (meta.get("Plan-keeper Ticket") or "").strip()
     minted = ensure_id(meta, path)
-    if before:
-        return minted  # already minted — no write needed
+    if before == minted:
+        return minted  # field already held the canonical id — no write needed
     try:
         write_atomic(path, serialize_frontmatter(meta, body))
     except OSError:
