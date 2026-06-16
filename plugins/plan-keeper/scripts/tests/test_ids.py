@@ -66,6 +66,28 @@ class TestEnsureId(IsolatedHomeTestCase):
         self.assertEqual(returned, "plan-99999")
         self.assertEqual(meta["Plan-keeper Ticket"], "plan-99999")
 
+    def test_remints_over_tbd_placeholder(self):
+        # The legacy `Ticket: TBD` pattern survives `_migrate_legacy_ticket_fields`
+        # as `Plan-keeper Ticket: TBD`. Two such plans would otherwise collide at
+        # `_assert_no_plankeeper_id_collisions` (both ids = "TBD"); the validator
+        # treats TBD as not-an-id so ensure_id mints a real one in its place.
+        p = self.plans_root / "r" / "2026-06-08-x.md"
+        meta = {"Plan-keeper Ticket": "TBD"}
+        returned = ids.ensure_id(meta, p)
+        self.assertEqual(returned, ids.id_for_path(p))
+        self.assertEqual(meta["Plan-keeper Ticket"], returned)
+
+    def test_remints_over_malformed_value(self):
+        # Anything that doesn't match `plan-<digits>` — typos, a Linear id pasted
+        # into the wrong field, an in-progress sentinel — is treated as absent.
+        p = self.plans_root / "r" / "2026-06-08-x.md"
+        for bogus in ("ENG-123", "plan-abc", "PLAN-99", "tbd", "?", "  "):
+            meta = {"Plan-keeper Ticket": bogus}
+            returned = ids.ensure_id(meta, p)
+            self.assertEqual(returned, ids.id_for_path(p),
+                             f"failed to re-mint over {bogus!r}")
+            self.assertEqual(meta["Plan-keeper Ticket"], returned)
+
 
 class TestMintIntoPathIfAbsent(IsolatedHomeTestCase):
     """`mint_into_path_if_absent` is the file-reading wrapper around ensure_id."""
@@ -92,6 +114,38 @@ class TestMintIntoPathIfAbsent(IsolatedHomeTestCase):
         returned = ids.mint_into_path_if_absent(p)
         self.assertEqual(returned, "plan-77")
         self.assertEqual(p.read_text(encoding="utf-8"), before)  # untouched
+
+    def test_remints_and_persists_over_tbd(self):
+        # The on-disk twin of TestEnsureId.test_remints_over_tbd_placeholder:
+        # mint_into_path_if_absent must also rewrite the file when the stored
+        # value is the TBD placeholder, not skip the write because the field
+        # is non-empty. Without this, two TBD plans break crew fetch with an
+        # id-collision error and the only recovery is hand-editing.
+        p = self._write(
+            "r/2026-06-08-x.md",
+            "---\nPlan-keeper Ticket: TBD\nStatus: todo\n---\n# X\n",
+        )
+        minted = ids.mint_into_path_if_absent(p)
+        self.assertEqual(minted, ids.id_for_path(p))
+        meta, _ = parse_frontmatter(p.read_text(encoding="utf-8"))
+        self.assertEqual(meta["Plan-keeper Ticket"], minted)
+
+    def test_remints_and_persists_over_legacy_ticket_tbd(self):
+        # End-to-end of the user's bug: a plan written with the legacy
+        # `Ticket: TBD` + `Ticket System: groundcrew` pair must end up with a
+        # real id on disk after a single mint pass. parse_frontmatter migrates
+        # the legacy fields to `Plan-keeper Ticket: TBD`, and the validator
+        # then re-mints; the write persists both the new id and the migration.
+        p = self._write(
+            "r/2026-06-08-x.md",
+            "---\nTicket: TBD\nTicket System: groundcrew\nStatus: todo\n---\n# X\n",
+        )
+        minted = ids.mint_into_path_if_absent(p)
+        self.assertEqual(minted, ids.id_for_path(p))
+        text = p.read_text(encoding="utf-8")
+        self.assertIn(f"Plan-keeper Ticket: {minted}", text)
+        self.assertNotIn("Ticket: TBD", text)
+        self.assertNotIn("Ticket System:", text)
 
     def test_skips_non_frontmatter_file(self):
         # A stray .md with no frontmatter is not a plan — never grow one onto it.
