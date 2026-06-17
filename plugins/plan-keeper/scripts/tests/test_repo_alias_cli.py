@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""`plan-keeper repo alias add/list/remove` CRUD subcommands.
+
+Exercises the user-facing CLI for editing ~/plans/.plankeeper-global.json's
+`aliases` list. Part of the plan_keeper test suite; shared harness lives in
+support.py.
+
+Run all: python3 -m unittest discover -s plugins/plan-keeper/scripts/tests
+"""
+import json
+import unittest
+
+from support import (  # noqa: F401 — also inserts scripts/ onto sys.path
+    IsolatedHomeTestCase,
+    run_cli,
+)
+
+
+class TestRepoAliasAdd(IsolatedHomeTestCase):
+    def _read_global(self) -> dict:
+        path = self.plans_root / ".plankeeper-global.json"
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def test_add_creates_global_config_on_first_use(self) -> None:
+        # No ~/plans/ tree yet; add must create the file and the parent dir.
+        self.assertFalse(self.plans_root.exists())
+        r = run_cli(
+            "repo", "alias", "add", "carrot/catalog/flawless-inventory", "maple",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._read_global(), {"aliases": [
+            {"remote": "carrot", "subpath": "catalog/flawless-inventory",
+             "name": "maple"}
+        ]})
+
+    def test_add_splits_first_segment_as_remote_rest_as_subpath(self) -> None:
+        # The positional uses the user's slash-separated `<remote>/<subpath>`
+        # mental model — first segment is the remote, the rest is the subpath.
+        r = run_cli(
+            "repo", "alias", "add", "carrot/frontend/web-app", "frontend-web",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._read_global()["aliases"][0], {
+            "remote": "carrot",
+            "subpath": "frontend/web-app",
+            "name": "frontend-web",
+        })
+
+    def test_add_repo_root_alias_via_bare_remote(self) -> None:
+        # A bare `<remote>` with no subpath registers a repo-root alias
+        # (subpath="") — matches at the toplevel.
+        r = run_cli(
+            "repo", "alias", "add", "carrot", "carrot-aliased",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._read_global()["aliases"][0], {
+            "remote": "carrot", "subpath": "", "name": "carrot-aliased",
+        })
+
+    def test_add_replaces_existing_remote_subpath_in_place(self) -> None:
+        # Idempotent re-run: same (remote, subpath) updates the existing entry
+        # rather than appending a duplicate.
+        run_cli("repo", "alias", "add", "carrot/catalog/flawless-inventory",
+                "old-name", home=self.home, cwd=self.cwd)
+        r = run_cli("repo", "alias", "add", "carrot/catalog/flawless-inventory",
+                    "new-name", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        aliases = self._read_global()["aliases"]
+        self.assertEqual(len(aliases), 1)
+        self.assertEqual(aliases[0]["name"], "new-name")
+
+    def test_add_warns_on_duplicate_name_but_succeeds(self) -> None:
+        # A different (remote, subpath) mapping to the same name is allowed
+        # (user might want two subpaths routed to the same bucket) but the CLI
+        # warns on stderr so the user notices.
+        run_cli("repo", "alias", "add", "carrot/a", "shared",
+                home=self.home, cwd=self.cwd)
+        r = run_cli("repo", "alias", "add", "carrot/b", "shared",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("warning", r.stderr.lower())
+        self.assertIn("shared", r.stderr)
+        self.assertEqual(len(self._read_global()["aliases"]), 2)
+
+    def test_add_rejects_empty_remote(self) -> None:
+        # A leading slash leaves the remote empty after the first split.
+        r = run_cli("repo", "alias", "add", "/catalog", "maple",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("remote", r.stderr.lower())
+
+    def test_add_rejects_empty_name(self) -> None:
+        r = run_cli("repo", "alias", "add", "carrot/catalog", "",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("name", r.stderr.lower())
+
+
+class TestRepoAliasList(IsolatedHomeTestCase):
+    def _seed(self, aliases: list[dict]) -> None:
+        self.plans_root.mkdir(parents=True, exist_ok=True)
+        (self.plans_root / ".plankeeper-global.json").write_text(
+            json.dumps({"aliases": aliases}), encoding="utf-8"
+        )
+
+    def test_list_empty_config_prints_nothing(self) -> None:
+        # No file at all -> empty output, exit 0 (matches the rest of the
+        # CLI's machine-readable style — no header noise on empty results).
+        r = run_cli("repo", "alias", "list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "")
+
+    def test_list_empty_aliases_list_prints_nothing(self) -> None:
+        # Config exists but `aliases` is empty -> same as missing file.
+        self._seed([])
+        r = run_cli("repo", "alias", "list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "")
+
+    def test_list_prints_tab_separated_sorted_by_remote_then_subpath(self) -> None:
+        # Multiple aliases: sorted by (remote, subpath), one tab-separated row
+        # per alias. Sorting is stable for downstream piping into `cut` / `awk`.
+        self._seed([
+            {"remote": "carrot", "subpath": "frontend/web-app",
+             "name": "frontend-web"},
+            {"remote": "apple", "subpath": "", "name": "apple-root"},
+            {"remote": "carrot", "subpath": "catalog/flawless-inventory",
+             "name": "maple"},
+        ])
+        r = run_cli("repo", "alias", "list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = r.stdout.splitlines()
+        self.assertEqual(rows, [
+            "apple\t\tapple-root",
+            "carrot\tcatalog/flawless-inventory\tmaple",
+            "carrot\tfrontend/web-app\tfrontend-web",
+        ])
+
+
+class TestRepoAliasRemove(IsolatedHomeTestCase):
+    def _seed(self, aliases: list[dict]) -> None:
+        self.plans_root.mkdir(parents=True, exist_ok=True)
+        (self.plans_root / ".plankeeper-global.json").write_text(
+            json.dumps({"aliases": aliases}), encoding="utf-8"
+        )
+
+    def _read_global(self) -> dict:
+        path = self.plans_root / ".plankeeper-global.json"
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def test_remove_by_name_deletes_entry(self) -> None:
+        self._seed([
+            {"remote": "carrot", "subpath": "catalog/flawless-inventory",
+             "name": "maple"},
+            {"remote": "carrot", "subpath": "frontend/web-app",
+             "name": "frontend-web"},
+        ])
+        r = run_cli("repo", "alias", "remove", "maple",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        aliases = self._read_global()["aliases"]
+        self.assertEqual(len(aliases), 1)
+        self.assertEqual(aliases[0]["name"], "frontend-web")
+
+    def test_remove_missing_name_exits_3(self) -> None:
+        # Exit 3 is the "not found" code used elsewhere in the CLI.
+        self._seed([
+            {"remote": "carrot", "subpath": "catalog/flawless-inventory",
+             "name": "maple"},
+        ])
+        r = run_cli("repo", "alias", "remove", "nonexistent",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 3)
+        # State untouched on miss.
+        self.assertEqual(len(self._read_global()["aliases"]), 1)
+
+    def test_remove_against_missing_config_exits_3(self) -> None:
+        # No global config at all -> nothing to remove -> exit 3.
+        r = run_cli("repo", "alias", "remove", "maple",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 3)
+
+    def test_remove_removes_all_matching_when_duplicates_exist(self) -> None:
+        # `add` warns but allows duplicate names; remove deletes every entry
+        # whose name matches so the same name can't survive a remove.
+        self._seed([
+            {"remote": "carrot", "subpath": "a", "name": "shared"},
+            {"remote": "carrot", "subpath": "b", "name": "shared"},
+            {"remote": "carrot", "subpath": "c", "name": "other"},
+        ])
+        r = run_cli("repo", "alias", "remove", "shared",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        names = [a["name"] for a in self._read_global()["aliases"]]
+        self.assertEqual(names, ["other"])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

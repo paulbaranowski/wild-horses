@@ -24,6 +24,7 @@ from plan_keeper.config import (
     save_config,
     _redact_section,
 )
+from plan_keeper.global_config import load_global_config, save_global_config
 from plan_keeper.dates import _iso_from_stat, parse_date_arg
 from plan_keeper.errors import HelpfulArgumentParser, PlanKeeperCliError
 from plan_keeper.frontmatter import (
@@ -336,6 +337,25 @@ class QueueListArgs:
         return cls(all=args.all, repo=args.repo)
 
 
+@dataclass
+class RepoAliasAddArgs:
+    target: str
+    name: str
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "RepoAliasAddArgs":
+        return cls(target=args.target, name=args.name)
+
+
+@dataclass
+class RepoAliasRemoveArgs:
+    name: str
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "RepoAliasRemoveArgs":
+        return cls(name=args.name)
+
+
 # --- Subcommands ------------------------------------------------------------
 
 
@@ -529,6 +549,88 @@ def cmd_repo_list(args) -> int:
         if deferred:
             parts.append(f"deferred={deferred}")
         print(f"{entry.name}: {' '.join(parts)}")
+    return 0
+
+
+def _split_alias_target(target: str) -> tuple[str, str]:
+    """Split `<remote>[/<subpath>]` into (remote, subpath).
+
+    First segment is the remote; everything after the first slash is the
+    subpath (kept as one slash-joined string for direct comparison with
+    `_subpath_from_toplevel`'s output). A bare `<remote>` registers a
+    repo-root alias (subpath="").
+    """
+    if "/" in target:
+        head, _, rest = target.partition("/")
+        return head, rest
+    return target, ""
+
+
+def cmd_repo_alias_add(args) -> int:
+    a = RepoAliasAddArgs.from_args(args)
+    remote, subpath = _split_alias_target(a.target)
+    if not remote:
+        raise PlanKeeperCliError(
+            f"empty remote in {a.target!r} (expected <remote>[/<subpath>])",
+            code=2,
+        )
+    if not a.name:
+        raise PlanKeeperCliError("alias name must be non-empty", code=2)
+    config = load_global_config()
+    aliases = list(config.get("aliases") or [])
+    # Warn (but allow) when another (remote, subpath) is already mapped to
+    # this name — two subpaths routed to the same bucket is a legitimate
+    # configuration, just usually a typo.
+    for existing in aliases:
+        if (existing.get("name") == a.name
+                and (existing.get("remote"), existing.get("subpath"))
+                != (remote, subpath)):
+            print(
+                f"warning: alias name {a.name!r} is already used by "
+                f"{existing.get('remote')}/{existing.get('subpath')}",
+                file=sys.stderr,
+            )
+            break
+    # Replace in place on (remote, subpath) match so a re-run with the same
+    # target is idempotent rather than appending a duplicate entry.
+    new_entry = {"remote": remote, "subpath": subpath, "name": a.name}
+    for idx, existing in enumerate(aliases):
+        if (existing.get("remote"), existing.get("subpath")) == (remote, subpath):
+            aliases[idx] = new_entry
+            break
+    else:
+        aliases.append(new_entry)
+    config["aliases"] = aliases
+    save_global_config(config)
+    return 0
+
+
+def cmd_repo_alias_list(args) -> int:
+    del args
+    config = load_global_config()
+    aliases = config.get("aliases") or []
+    rows = sorted(
+        aliases,
+        key=lambda e: (e.get("remote") or "", e.get("subpath") or ""),
+    )
+    for entry in rows:
+        print(
+            f"{entry.get('remote', '')}\t"
+            f"{entry.get('subpath', '')}\t"
+            f"{entry.get('name', '')}"
+        )
+    return 0
+
+
+def cmd_repo_alias_remove(args) -> int:
+    a = RepoAliasRemoveArgs.from_args(args)
+    config = load_global_config()
+    aliases = list(config.get("aliases") or [])
+    kept = [e for e in aliases if e.get("name") != a.name]
+    if len(kept) == len(aliases):
+        raise PlanKeeperCliError(f"no alias named {a.name!r}", code=3)
+    config["aliases"] = kept
+    save_global_config(config)
     return 0
 
 
@@ -1430,6 +1532,39 @@ def build_parser() -> argparse.ArgumentParser:
         "list", help="list all repos under ~/plans/ with per-state counts"
     )
 
+    # `repo alias` is a pure parent: add / list / remove are the three CRUD
+    # subcommands that edit ~/plans/.plankeeper-global.json's `aliases` list.
+    p_repo_alias = repo_sub.add_parser(
+        "alias",
+        help="add/list/remove monorepo-subpath -> alias mappings",
+    )
+    repo_alias_sub = p_repo_alias.add_subparsers(
+        dest="repo_alias_cmd", required=True, metavar="<subcommand>",
+        parser_class=HelpfulArgumentParser,
+    )
+    p_repo_alias_add = repo_alias_sub.add_parser(
+        "add",
+        help="register a monorepo subpath as a groundcrew alias",
+    )
+    p_repo_alias_add.add_argument(
+        "target",
+        help="<remote>[/<subpath>] — first segment is the remote, the rest is "
+        "the subpath under the monorepo (e.g., 'carrot/catalog/flawless-inventory')",
+    )
+    p_repo_alias_add.add_argument(
+        "name", help="the alias name plan-keeper routes to (e.g., 'maple')"
+    )
+
+    repo_alias_sub.add_parser(
+        "list",
+        help="print every alias, tab-separated: remote<TAB>subpath<TAB>name",
+    )
+
+    p_repo_alias_remove = repo_alias_sub.add_parser(
+        "remove", help="remove every alias entry whose name matches"
+    )
+    p_repo_alias_remove.add_argument("name", help="the alias name to remove")
+
     p_list = sub.add_parser(
         "list",
         help="list plans for a repo (or every repo) newest-first",
@@ -1801,9 +1936,18 @@ _CREW_DISPATCH = {
     "queue": lambda a: _dispatch(_QUEUE_DISPATCH, a.queue_cmd, "queue command")(a),
 }
 
+_REPO_ALIAS_DISPATCH = {
+    "add": cmd_repo_alias_add,
+    "list": cmd_repo_alias_list,
+    "remove": cmd_repo_alias_remove,
+}
+
 _REPO_DISPATCH = {
     "name": cmd_repo_name,
     "list": cmd_repo_list,
+    "alias": lambda a: _dispatch(
+        _REPO_ALIAS_DISPATCH, a.repo_alias_cmd, "alias command"
+    )(a),
 }
 
 
