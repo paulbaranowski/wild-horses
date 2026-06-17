@@ -606,6 +606,15 @@ def cmd_repo_alias_add(args) -> int:
             f"empty remote in {a.target!r} (expected <remote>[/<subpath>])",
             code=2,
         )
+    # Reject `"<remote>/"` (target with a trailing slash but no subpath):
+    # the trailing slash signals a typo, not an explicit repo-root request.
+    # A user who wants a repo-root alias types just `"<remote>"`.
+    if a.target.endswith("/") and subpath == "":
+        raise PlanKeeperCliError(
+            f"invalid subpath in {a.target!r}: trailing slash with no subpath "
+            "(use bare `<remote>` for a repo-root alias)",
+            code=2,
+        )
     # `name` is the user-supplied alias that will become a `~/plans/<name>/`
     # bucket — apply the same fence the rest of the CLI uses on every other
     # path that lands a repo name. Catches "", ".", "..", "foo/bar", and any

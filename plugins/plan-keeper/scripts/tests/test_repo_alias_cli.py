@@ -149,6 +149,17 @@ class TestRepoAliasAdd(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("subpath", r.stderr.lower())
 
+    def test_add_rejects_target_with_only_trailing_slash(self) -> None:
+        # `"carrot/"` (target ending in `/` with no subpath after) is a typo:
+        # the user typed a slash thinking it was meaningful but the subpath
+        # ends up empty. Silently treating it as a repo-root alias hides the
+        # mistake. Reject with the same exit-2 contract as the other slash-
+        # malformed inputs.
+        r = run_cli("repo", "alias", "add", "carrot/", "maple",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("subpath", r.stderr.lower())
+
     def test_add_dup_warning_for_repo_root_alias_has_no_trailing_slash(self) -> None:
         # Format for the duplicate-name stderr warning when the existing entry
         # is a repo-root alias (subpath=""): the printed identifier should be

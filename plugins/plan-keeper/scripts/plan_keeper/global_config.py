@@ -101,8 +101,11 @@ def save_global_config(data: PlanKeeperGlobalConfig) -> Path:
 
     Creates the parent ``~/plans/`` directory if it doesn't exist yet (the
     first-ever ``alias add`` runs against a fresh $HOME with no plans tree).
-    No chmod — this file carries no secrets, so it stays at the user's umask
-    default.
+    No explicit chmod here — this file carries no secrets, so the per-repo
+    ``.plankeeper.json``'s 0600 hardening is unnecessary. ``write_atomic``
+    uses ``tempfile.mkstemp`` internally, which lands the file at 0600 anyway
+    (incidentally more restrictive than umask); intentional or not, it costs
+    nothing.
     """
     path = global_config_path()
     write_atomic(path, json.dumps(data, indent=2) + "\n")
