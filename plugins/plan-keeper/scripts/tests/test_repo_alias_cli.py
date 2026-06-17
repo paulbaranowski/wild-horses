@@ -98,6 +98,76 @@ class TestRepoAliasAdd(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("name", r.stderr.lower())
 
+    def test_add_rejects_alias_name_with_slash(self) -> None:
+        # A name containing `/` would compose a multi-segment path under
+        # ~/plans/ — exactly what validate_repo_name guards against on
+        # --override / git-remote / cwd. The same fence applies here:
+        # malformed-at-write beats fail-loud-at-resolve.
+        r = run_cli("repo", "alias", "add", "carrot/catalog", "foo/bar",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("name", r.stderr.lower())
+
+    def test_add_rejects_dot_alias_name(self) -> None:
+        r = run_cli("repo", "alias", "add", "carrot/catalog", ".",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("name", r.stderr.lower())
+
+    def test_add_rejects_dotdot_alias_name(self) -> None:
+        # `..` would resolve outside ~/plans/<repo>/ and is the canonical
+        # path-traversal attack vector. validate_repo_name already rejects it
+        # everywhere else; the alias `add` boundary must too.
+        r = run_cli("repo", "alias", "add", "carrot/catalog", "..",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("name", r.stderr.lower())
+
+    def test_add_rejects_subpath_with_trailing_slash(self) -> None:
+        # `_subpath_from_toplevel` never produces a trailing slash, so a stored
+        # `subpath=catalog/` would silently never match. Reject at write rather
+        # than letting the alias sit dead in the config.
+        r = run_cli("repo", "alias", "add", "carrot/catalog/", "maple",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("subpath", r.stderr.lower())
+
+    def test_add_rejects_subpath_with_empty_segment(self) -> None:
+        # `carrot//catalog` splits to remote=carrot, subpath=/catalog — leading
+        # slash will never match `_subpath_from_toplevel`'s output.
+        r = run_cli("repo", "alias", "add", "carrot//catalog", "maple",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("subpath", r.stderr.lower())
+
+    def test_add_rejects_subpath_with_dotdot_segment(self) -> None:
+        # A `..` segment in subpath escapes the intended directory; even though
+        # `_subpath_from_toplevel` doesn't produce `..`, allowing it in storage
+        # makes the config a path-traversal vector when consumers compose paths.
+        r = run_cli("repo", "alias", "add", "carrot/../etc", "maple",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("subpath", r.stderr.lower())
+
+    def test_add_dup_warning_for_repo_root_alias_has_no_trailing_slash(self) -> None:
+        # Format for the duplicate-name stderr warning when the existing entry
+        # is a repo-root alias (subpath=""): the printed identifier should be
+        # the bare `<remote>`, NOT `<remote>/` — the trailing slash is a
+        # confusing artifact of naive `f"{remote}/{subpath}"` formatting.
+        run_cli("repo", "alias", "add", "carrot", "shared",
+                home=self.home, cwd=self.cwd)
+        r = run_cli("repo", "alias", "add", "carrot/deep", "shared",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("warning", r.stderr.lower())
+        # The bare remote with NO trailing slash should appear; the trailing
+        # `carrot/` form is the bug.
+        self.assertNotIn("carrot/\n", r.stderr)
+        self.assertNotIn("'carrot/'", r.stderr)
+        self.assertNotIn("carrot/ ", r.stderr)
+        # And the formatted identifier should mention `carrot`.
+        self.assertIn("carrot", r.stderr)
+
 
 class TestRepoAliasList(IsolatedHomeTestCase):
     def _seed(self, aliases: list[dict]) -> None:

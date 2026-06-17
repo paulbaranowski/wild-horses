@@ -6,6 +6,7 @@ The algorithm for repo derivation lives in
 import os
 import re
 import subprocess
+import sys
 from typing import Optional
 
 from plan_keeper.errors import PlanKeeperCliError
@@ -341,11 +342,19 @@ def _maybe_alias(remote: str, cwd: Optional[str]) -> Optional[str]:
         return None
     try:
         config = load_global_config()
-    except PlanKeeperCliError:
-        # Malformed global config is the user's problem; derive_repo's contract
-        # is to always return a name, so we fall through to the bare remote and
-        # leave surfacing the parse error to the explicit `alias list` /
-        # `alias add` paths that load it directly.
+    except PlanKeeperCliError as e:
+        # derive_repo's contract is to always return a name (so `plan-save`
+        # doesn't crash on a corrupted config). But silently routing plans to
+        # the bare remote — the documented prior-incident class from CLAUDE.md
+        # ("missing structural comma survived 19 iterations") — is exactly the
+        # failure mode this codebase is allergic to. A one-line stderr warning
+        # preserves the contract while making the corruption visible on the
+        # very next `plan-save` / `plan-do` / dispatch.
+        print(
+            f"warning: ignoring malformed global config ({e}); "
+            "falling back to bare remote",
+            file=sys.stderr,
+        )
         return None
     aliases = config.get("aliases") or []
     if not aliases:

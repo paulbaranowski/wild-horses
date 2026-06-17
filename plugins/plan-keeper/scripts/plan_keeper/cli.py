@@ -50,7 +50,7 @@ from plan_keeper.ids import (
     ensure_id,
     id_for_path,
 )
-from plan_keeper.types import Kind, QueueRow
+from plan_keeper.types import Kind, QueueRow, RepoAlias
 
 # Re-export so existing tests can read `cli.plankeeper_id`. The `as plankeeper_id`
 # form marks this an intentional re-export; the single definition lives in `ids`.
@@ -566,6 +566,38 @@ def _split_alias_target(target: str) -> tuple[str, str]:
     return target, ""
 
 
+def _validate_alias_subpath(subpath: str) -> str:
+    """Reject subpaths that can never match `_subpath_from_toplevel`'s output.
+
+    Valid: "" (repo-root alias) or POSIX-style `a/b/c` with no empty / `.` /
+    `..` segments and no backslashes. The fence catches typos at write time
+    (`carrot//catalog`, `carrot/catalog/`, `carrot/../etc`) which would
+    otherwise sit dead in the config forever — `_subpath_from_toplevel` never
+    produces a trailing slash or an empty segment, so a dead entry has no
+    way to fix itself on the resolve side.
+    """
+    if subpath == "":
+        return subpath
+    if "\\" in subpath:
+        raise PlanKeeperCliError(
+            f"invalid subpath {subpath!r}: backslashes are not allowed",
+            code=2,
+        )
+    for segment in subpath.split("/"):
+        if segment == "":
+            raise PlanKeeperCliError(
+                f"invalid subpath {subpath!r}: empty path segment "
+                "(leading/trailing/double slash)",
+                code=2,
+            )
+        if segment in {".", ".."}:
+            raise PlanKeeperCliError(
+                f"invalid subpath {subpath!r}: '.' / '..' segments are not allowed",
+                code=2,
+            )
+    return subpath
+
+
 def cmd_repo_alias_add(args) -> int:
     a = RepoAliasAddArgs.from_args(args)
     remote, subpath = _split_alias_target(a.target)
@@ -574,10 +606,14 @@ def cmd_repo_alias_add(args) -> int:
             f"empty remote in {a.target!r} (expected <remote>[/<subpath>])",
             code=2,
         )
-    if not a.name:
-        raise PlanKeeperCliError("alias name must be non-empty", code=2)
+    # `name` is the user-supplied alias that will become a `~/plans/<name>/`
+    # bucket — apply the same fence the rest of the CLI uses on every other
+    # path that lands a repo name. Catches "", ".", "..", "foo/bar", and any
+    # backslash form before they get baked into the config.
+    validate_repo_name(a.name)
+    _validate_alias_subpath(subpath)
     config = load_global_config()
-    aliases = list(config.get("aliases") or [])
+    aliases: list[RepoAlias] = list(config.get("aliases") or [])
     # Warn (but allow) when another (remote, subpath) is already mapped to
     # this name — two subpaths routed to the same bucket is a legitimate
     # configuration, just usually a typo.
@@ -585,15 +621,18 @@ def cmd_repo_alias_add(args) -> int:
         if (existing.get("name") == a.name
                 and (existing.get("remote"), existing.get("subpath"))
                 != (remote, subpath)):
+            existing_id = _format_alias_target(
+                existing.get("remote", ""), existing.get("subpath", ""),
+            )
             print(
                 f"warning: alias name {a.name!r} is already used by "
-                f"{existing.get('remote')}/{existing.get('subpath')}",
+                f"{existing_id}",
                 file=sys.stderr,
             )
             break
     # Replace in place on (remote, subpath) match so a re-run with the same
     # target is idempotent rather than appending a duplicate entry.
-    new_entry = {"remote": remote, "subpath": subpath, "name": a.name}
+    new_entry: RepoAlias = {"remote": remote, "subpath": subpath, "name": a.name}
     for idx, existing in enumerate(aliases):
         if (existing.get("remote"), existing.get("subpath")) == (remote, subpath):
             aliases[idx] = new_entry
@@ -603,6 +642,15 @@ def cmd_repo_alias_add(args) -> int:
     config["aliases"] = aliases
     save_global_config(config)
     return 0
+
+
+def _format_alias_target(remote: str, subpath: str) -> str:
+    """Render `(remote, subpath)` in the same `<remote>[/<subpath>]` form the
+    user typed at `alias add` time. A repo-root alias (subpath=="") prints as
+    the bare remote — NOT `<remote>/` with a trailing slash, which would
+    confuse the user looking at the warning back at their original input.
+    """
+    return f"{remote}/{subpath}" if subpath else remote
 
 
 def cmd_repo_alias_list(args) -> int:
@@ -1548,8 +1596,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_repo_alias_add.add_argument(
         "target",
-        help="<remote>[/<subpath>] — first segment is the remote, the rest is "
-        "the subpath under the monorepo (e.g., 'carrot/catalog/flawless-inventory')",
+        help="<remote>[/<subpath>] — first segment is the remote (the bare "
+        "repo basename as `repo name` would print it without aliasing, NOT "
+        "the GitHub owner/name form), everything after the first slash is the "
+        "subpath under the monorepo (e.g., 'carrot/catalog/flawless-inventory')",
     )
     p_repo_alias_add.add_argument(
         "name", help="the alias name plan-keeper routes to (e.g., 'maple')"

@@ -44,6 +44,17 @@ The positional argument to `add` is the slash-separated `<remote>[/<subpath>]` f
 
 `remove` deletes every entry whose `name` matches (so the same name can't survive). Exits 0 on hit, exits 3 when no alias has that name.
 
+## Validation
+
+`add` rejects malformed input at write time so a dead alias never sits in the config waiting to surprise the user at resolve time:
+
+- `name` follows the same rules as any other `~/plans/<repo>/` folder name — non-empty, no `/`, no `\`, not `.` or `..`. (Exit 2.)
+- `subpath` is POSIX-style with no leading/trailing/double slash, no `.` / `..` segments, and no backslashes. The empty string (repo-root alias) is the only special case. (Exit 2.)
+
+The loader also validates shape: a payload that isn't a JSON object, an `aliases` value that isn't a list, or an entry missing required string keys raises a malformed-config error (exit 5) — caught at the boundary rather than crashing somewhere deeper with an opaque `AttributeError`.
+
+When `pk repo name` encounters a corrupted global config, it prints a one-line warning to stderr and falls back to the bare remote (preserving derive's "always return a name" contract). The warning is intentional: silent corruption that routes plans to the wrong bucket is exactly the failure mode this repo has been bitten by before.
+
 ## How aliases route plans
 
 When `pk repo name` is invoked:

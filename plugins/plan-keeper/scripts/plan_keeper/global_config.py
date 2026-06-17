@@ -32,15 +32,68 @@ def global_config_path() -> Path:
 def load_global_config() -> PlanKeeperGlobalConfig:
     """Read the global config JSON. Returns ``{"aliases": []}`` if missing.
 
-    Raises PlanKeeperCliError(5) on malformed JSON.
+    Raises PlanKeeperCliError(5) on malformed JSON or out-of-shape contents.
+    Shape validation (top-level dict, ``aliases`` is a list of dicts with the
+    required string keys) happens here rather than at every read site —
+    TypedDicts give no runtime guarantee, so this is the boundary that
+    converts untrusted JSON into something the rest of the package can trust.
     """
     path = global_config_path()
     if not path.exists():
         return {"aliases": []}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         raise PlanKeeperCliError(f"malformed global config at {path}: {e}", code=5)
+    _validate_shape(data, path)
+    return data
+
+
+def _validate_shape(data: object, path: Path) -> None:
+    """Reject a global-config payload that can't be a ``PlanKeeperGlobalConfig``.
+
+    Cheap, single-pass structural check: top-level dict, ``aliases`` (if
+    present) is a list of dicts where ``remote``/``subpath``/``name`` are all
+    strings. Anything that fails this would crash downstream code with an
+    opaque ``AttributeError`` / ``TypeError``; raising at the boundary
+    converts that into the standard ``PlanKeeperCliError(code=5)`` malformed
+    contract that ``load_config`` already uses for the per-repo file.
+    """
+    if not isinstance(data, dict):
+        raise PlanKeeperCliError(
+            f"malformed global config at {path}: top level must be a JSON "
+            f"object, got {type(data).__name__}",
+            code=5,
+        )
+    if "aliases" not in data:
+        return
+    aliases = data["aliases"]
+    if not isinstance(aliases, list):
+        raise PlanKeeperCliError(
+            f"malformed global config at {path}: 'aliases' must be a list, "
+            f"got {type(aliases).__name__}",
+            code=5,
+        )
+    for i, entry in enumerate(aliases):
+        if not isinstance(entry, dict):
+            raise PlanKeeperCliError(
+                f"malformed global config at {path}: aliases[{i}] must be an "
+                f"object, got {type(entry).__name__}",
+                code=5,
+            )
+        for key in ("remote", "subpath", "name"):
+            if key not in entry:
+                raise PlanKeeperCliError(
+                    f"malformed global config at {path}: aliases[{i}] is "
+                    f"missing required key {key!r}",
+                    code=5,
+                )
+            if not isinstance(entry[key], str):
+                raise PlanKeeperCliError(
+                    f"malformed global config at {path}: aliases[{i}][{key!r}] "
+                    f"must be a string, got {type(entry[key]).__name__}",
+                    code=5,
+                )
 
 
 def save_global_config(data: PlanKeeperGlobalConfig) -> Path:

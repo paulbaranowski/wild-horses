@@ -109,6 +109,67 @@ class TestGlobalConfigLoader(IsolatedHomeTestCase):
         save_global_config(loaded)
         self.assertEqual(load_global_config(), future)
 
+    def test_load_rejects_non_object_top_level(self) -> None:
+        # A JSON array (or any non-object) at the top level can't carry the
+        # `aliases` key — every downstream consumer assumes a dict. Reject at
+        # the boundary with code 5 (malformed) rather than letting an
+        # AttributeError surface from `.get('aliases')` somewhere deeper.
+        self.plans_root.mkdir(parents=True, exist_ok=True)
+        global_config_path().write_text("[]", encoding="utf-8")
+        with self.assertRaises(PlanKeeperCliError) as ctx:
+            load_global_config()
+        self.assertEqual(ctx.exception.code, 5)
+
+    def test_load_rejects_non_list_aliases_value(self) -> None:
+        # `aliases` must be a list of entries. A string (or any non-list)
+        # would silently iterate char-by-char in downstream code paths.
+        self.plans_root.mkdir(parents=True, exist_ok=True)
+        global_config_path().write_text(
+            json.dumps({"aliases": "carrot"}), encoding="utf-8"
+        )
+        with self.assertRaises(PlanKeeperCliError) as ctx:
+            load_global_config()
+        self.assertEqual(ctx.exception.code, 5)
+
+    def test_load_rejects_alias_entry_that_is_not_a_dict(self) -> None:
+        # Each alias must be a dict — a bare string in the list would
+        # AttributeError on `.get('remote')` and crash the CLI with no
+        # actionable diagnostic.
+        self.plans_root.mkdir(parents=True, exist_ok=True)
+        global_config_path().write_text(
+            json.dumps({"aliases": ["not-a-dict"]}), encoding="utf-8"
+        )
+        with self.assertRaises(PlanKeeperCliError) as ctx:
+            load_global_config()
+        self.assertEqual(ctx.exception.code, 5)
+
+    def test_load_rejects_alias_with_non_string_name(self) -> None:
+        # Required keys must be strings. A numeric name would slip past
+        # `validate_repo_name`'s truthiness check and `TypeError` on the
+        # `'/' in name` test deeper in.
+        self.plans_root.mkdir(parents=True, exist_ok=True)
+        global_config_path().write_text(
+            json.dumps({"aliases": [{"remote": "r", "subpath": "s",
+                                      "name": 42}]}),
+            encoding="utf-8",
+        )
+        with self.assertRaises(PlanKeeperCliError) as ctx:
+            load_global_config()
+        self.assertEqual(ctx.exception.code, 5)
+
+    def test_load_rejects_alias_missing_required_key(self) -> None:
+        # An entry that omits a required key is the same class of corruption
+        # as a non-string value — reject at load time rather than letting
+        # `.get()` return None and propagate.
+        self.plans_root.mkdir(parents=True, exist_ok=True)
+        global_config_path().write_text(
+            json.dumps({"aliases": [{"remote": "r", "subpath": "s"}]}),
+            encoding="utf-8",
+        )
+        with self.assertRaises(PlanKeeperCliError) as ctx:
+            load_global_config()
+        self.assertEqual(ctx.exception.code, 5)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

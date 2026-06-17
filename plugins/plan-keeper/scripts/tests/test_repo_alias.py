@@ -160,6 +160,42 @@ class TestRepoNameAliasResolution(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), "general")
 
+    def test_repo_root_alias_matches_deep_cwd_as_last_resort(self) -> None:
+        # A user with ONLY a repo-root alias configured (`subpath=""`) deep
+        # inside the monorepo: the empty-prefix is the final entry in the
+        # prefix walk, so it absorbs deep paths when no longer prefix matches.
+        # Locks in the deliberate "root alias is the catch-all" behavior so a
+        # future change can't silently demote it to a toplevel-only match.
+        self._init_monorepo()
+        deep = self._subdir("catalog", "foo", "bar")
+        self._write_global_config({"aliases": [
+            {"remote": "carrot", "subpath": "", "name": "carrot-root"},
+        ]})
+        r = run_cli("repo", "name", home=self.home, cwd=deep)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "carrot-root")
+
+    def test_malformed_global_config_warns_on_stderr_and_falls_back(self) -> None:
+        # A corrupted global config (the documented "silent corruption across
+        # 19 iterations" failure class from CLAUDE.md) must NOT silently route
+        # plans to the wrong bucket. derive_repo's contract still requires
+        # returning *some* name (so `plan-save` doesn't crash), but the user
+        # has to see the warning the next time they run anything that resolves
+        # the repo — otherwise the corruption survives undetected.
+        self._init_monorepo()
+        deep = self._subdir("catalog", "flawless-inventory")
+        self.plans_root.mkdir(parents=True, exist_ok=True)
+        (self.plans_root / ".plankeeper-global.json").write_text(
+            "not json at all", encoding="utf-8"
+        )
+        r = run_cli("repo", "name", home=self.home, cwd=deep)
+        # Fallback: bare remote, exit 0. derive_repo's contract is preserved.
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "carrot")
+        # But the user is told about the corruption.
+        self.assertIn("warning", r.stderr.lower())
+        self.assertIn("global config", r.stderr.lower())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
