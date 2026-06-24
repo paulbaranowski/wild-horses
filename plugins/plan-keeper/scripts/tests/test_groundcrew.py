@@ -7,6 +7,7 @@ Run all: python3 -m unittest discover -s plugins/plan-keeper/scripts/tests
 import json
 import tempfile
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -324,6 +325,168 @@ class TestGroundcrewFetch(IsolatedHomeTestCase):
             self.assertNotIn("2026-01-01-todo-bare", stems)
             self.assertNotIn("2026-01-02-backlog-bare", stems)
             self.assertIn("2026-01-03-todo-assigned", stems)
+
+class TestGroundcrewFetchRecentDone(IsolatedHomeTestCase):
+    """fetch surfaces recently-completed plans (within CREW_DONE_WINDOW_DAYS) as
+    top-level `done` issues so groundcrew's cleaner can match and tear down their
+    worktrees. Active-plan behavior is unchanged; the done pass is read-only over
+    done/ (no mint, no rewrite, no relocation)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.cli = _import_cli_module()
+
+    def _make_done_plan(
+        self,
+        repo: str,
+        stem: str,
+        completed_on: str,
+        agent: str = "claude",
+        ticket: "str | None" = "__auto__",
+    ) -> Path:
+        """Write ~/plans/<repo>/done/<stem>.md as a completed plan.
+
+        ``ticket`` defaults to the plan's own minted id (the frozen
+        Plan-keeper Ticket a real done plan carries); pass ``None`` to omit it
+        (an unminted plan) or an explicit id to force a collision.
+        """
+        d = self.plans_root / repo / "done"
+        d.mkdir(parents=True, exist_ok=True)
+        if ticket == "__auto__":
+            ticket = self.cli.plankeeper_id(repo, stem)
+        fm = ["---"]
+        if ticket is not None:
+            fm.append(f"Plan-keeper Ticket: {ticket}")
+        if agent:
+            fm.append(f"Agent: {agent}")
+        fm.append("Status: done")
+        fm.append(f"Completed on: {completed_on}")
+        fm.append("---")
+        p = d / f"{stem}.md"
+        p.write_text("\n".join(fm) + f"\n# {stem}\nDone body.\n", encoding="utf-8")
+        return p
+
+    @staticmethod
+    def _days_ago(n: int) -> str:
+        return (date.today() - timedelta(days=n)).isoformat()
+
+    def _fetch(self) -> list:
+        r = run_cli("crew", "fetch", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        return json.loads(r.stdout)
+
+    def test_done_plan_completed_today_is_emitted_top_level(self):
+        plan = self._make_done_plan("r", "2026-06-20-finished", self._days_ago(0))
+        ticket = self.cli.plankeeper_id("r", "2026-06-20-finished")
+        issues = self._fetch()
+        by_id = {i["id"]: i for i in issues}
+        self.assertIn(ticket, by_id)
+        self.assertEqual(by_id[ticket]["status"], "done")
+        self.assertEqual(by_id[ticket]["repository"], "r")
+        self.assertEqual(
+            by_id[ticket]["sourceRef"]["path"], str(plan.resolve())
+        )
+
+    def test_done_plan_completed_at_window_edge_is_emitted(self):
+        # CREW_DONE_WINDOW_DAYS is inclusive: exactly 7 days ago still counts.
+        self._make_done_plan(
+            "r", "2026-06-13-edge",
+            self._days_ago(groundcrew.CREW_DONE_WINDOW_DAYS),
+        )
+        ticket = self.cli.plankeeper_id("r", "2026-06-13-edge")
+        self.assertIn(ticket, {i["id"] for i in self._fetch()})
+
+    def test_done_plan_completed_past_window_is_not_emitted(self):
+        self._make_done_plan(
+            "r", "2026-06-12-stale",
+            self._days_ago(groundcrew.CREW_DONE_WINDOW_DAYS + 1),
+        )
+        self.assertEqual(self._fetch(), [])
+
+    def test_done_plan_missing_completed_on_is_not_emitted(self):
+        d = self.plans_root / "r" / "done"
+        d.mkdir(parents=True)
+        ticket = self.cli.plankeeper_id("r", "2026-06-20-nostamp")
+        (d / "2026-06-20-nostamp.md").write_text(
+            f"---\nPlan-keeper Ticket: {ticket}\nAgent: claude\nStatus: done\n---\n# X\n"
+        )
+        self.assertEqual(self._fetch(), [])
+
+    def test_done_plan_unparseable_completed_on_is_not_emitted(self):
+        self._make_done_plan("r", "2026-06-20-bad", "not-a-date")
+        self.assertEqual(self._fetch(), [])
+
+    def test_done_plan_without_agent_is_not_emitted(self):
+        # Human-driven (plan-do) completions clear the Agent tag; only
+        # groundcrew-owned (Agent-tagged) done plans should be surfaced.
+        self._make_done_plan("r", "2026-06-20-human", self._days_ago(1), agent="")
+        self.assertEqual(self._fetch(), [])
+
+    def test_done_plan_without_ticket_is_not_emitted(self):
+        # An empty id is groundcrew's worktree/branch/run-state key; never emit
+        # a done plan that was never minted (no stored Plan-keeper Ticket).
+        self._make_done_plan(
+            "r", "2026-06-20-unminted", self._days_ago(1), ticket=None
+        )
+        self.assertEqual(self._fetch(), [])
+
+    def test_active_wins_over_recent_done_sharing_an_id(self):
+        # An active and a done/ plan carrying the same stored id: the active one
+        # is emitted, the done one is deduped out, and no collision is raised.
+        ticket = "plan-555555"
+        active_dir = self.plans_root / "r"
+        active_dir.mkdir(parents=True)
+        active = active_dir / "2026-06-20-shared.md"
+        active.write_text(
+            f"---\nPlan-keeper Ticket: {ticket}\nAgent: claude\nStatus: todo\n---\n# Shared\n"
+        )
+        self._make_done_plan(
+            "r", "2026-06-19-shared-done", self._days_ago(1), ticket=ticket
+        )
+        issues = self._fetch()
+        matching = [i for i in issues if i["id"] == ticket]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0]["status"], "todo")  # the active one won
+        self.assertEqual(
+            matching[0]["sourceRef"]["path"], str(active.resolve())
+        )
+
+    def test_absent_done_dir_leaves_active_fetch_unchanged(self):
+        d = self.plans_root / "r"
+        d.mkdir(parents=True)
+        (d / "2026-06-20-active.md").write_text(
+            "---\nAgent: claude\nStatus: todo\n---\n# Active\n"
+        )
+        issues = self._fetch()
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["status"], "todo")
+
+    def test_recently_completed_deferred_plan_is_not_surfaced(self):
+        # The done window covers done/ only. A plan in deferred/ — even one that
+        # looks recently completed — is paused, not terminal-for-cleanup (it may
+        # resume), so it must never be surfaced.
+        d = self.plans_root / "r" / "deferred"
+        d.mkdir(parents=True)
+        ticket = self.cli.plankeeper_id("r", "2026-06-20-paused")
+        (d / "2026-06-20-paused.md").write_text(
+            f"---\nPlan-keeper Ticket: {ticket}\nAgent: claude\nStatus: done\n"
+            f"Completed on: {self._days_ago(1)}\n---\n# Paused\n"
+        )
+        self.assertEqual(self._fetch(), [])
+
+    def test_mixed_repo_emits_active_in_review_and_recent_done(self):
+        d = self.plans_root / "r"
+        d.mkdir(parents=True)
+        (d / "2026-06-20-review.md").write_text(
+            "---\nAgent: claude\nStatus: in-review\n---\n# In review\n"
+        )
+        done_ticket = self.cli.plankeeper_id("r", "2026-06-19-shipped")
+        self._make_done_plan("r", "2026-06-19-shipped", self._days_ago(2))
+        by_id = {i["id"]: i["status"] for i in self._fetch()}
+        review_ticket = self.cli.plankeeper_id("r", "2026-06-20-review")
+        self.assertEqual(by_id.get(review_ticket), "in-review")
+        self.assertEqual(by_id.get(done_ticket), "done")
+
 
 class TestGroundcrewId(IsolatedHomeTestCase):
     """Synthesized groundcrew ticket id (stateless deterministic hash)."""

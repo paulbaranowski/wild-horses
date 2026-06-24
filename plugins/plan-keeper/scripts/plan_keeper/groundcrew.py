@@ -8,7 +8,7 @@ helpers (``plankeeper_id``, ``id_for_path``, ``mint_into_path_if_absent``)
 rather than owning the algorithm.
 """
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -45,6 +45,14 @@ _GROUNDCREW_STATUS_MAP = {
     "in-review": "in-review",
     "done": "done",
 }
+
+# How many days a completed plan stays surfaced by `crew fetch` as a top-level
+# `done` issue. groundcrew's cleaner only tears down a worktree when its task
+# reappears with status "done"; once a plan is marked done it relocates into
+# done/ and vanishes from the active scan, so without this window the worktree
+# is orphaned. 7d hugely exceeds the cleaner's ~poll interval (120s) and
+# tolerates an offline crew, while bounding how many done plans fetch carries.
+CREW_DONE_WINDOW_DAYS = 7
 
 def _assert_no_plankeeper_id_collisions(issues: list[CrewIssue]) -> None:
     """Raise if two plans carry the same stored ``Plan-keeper Ticket``.
@@ -368,20 +376,91 @@ def _is_unassigned(path: Path) -> bool:
     return not meta.get("Agent", "").strip()
 
 
-def _collect_and_mint_crew_issues() -> list[CrewIssue]:
-    """Every active plan under ``~/plans/<repo>/*.md`` as shell-adapter issues.
+def _completed_within_days(path: Path, days: int) -> bool:
+    """True if the plan's ``Completed on`` date is within the past ``days``
+    (inclusive). Non-raising: a missing field, an unparseable date, an
+    unreadable/unparseable file, or a future date all yield ``False`` (treated
+    as outside the window, so the plan is not surfaced).
 
-    One level deep — ``done/`` and ``deferred/`` are excluded (they're not
+    ``Completed on`` is a bare ``YYYY-MM-DD`` calendar date stamped by
+    ``file-meta set --status done`` at completion; compared against
+    ``date.today()`` in local time. The window's day granularity absorbs any
+    timezone edge (fetch runs on the same machine that stamped it).
+    """
+    try:
+        meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+    except (OSError, PlanKeeperCliError):
+        return False
+    raw = (meta.get("Completed on") or "").strip()
+    if not raw:
+        return False
+    try:
+        completed = date.fromisoformat(raw)
+    except ValueError:
+        return False
+    delta_days = (date.today() - completed).days
+    return 0 <= delta_days <= days
+
+
+def _recent_done_issues(
+    done_dir: Path,
+    index: dict[str, IndexEntry],
+    emitted_ids: set[str],
+) -> list[CrewIssue]:
+    """Plans in ``done_dir`` completed within ``CREW_DONE_WINDOW_DAYS`` as
+    top-level ``done`` issues, so groundcrew's cleaner (which only tears down a
+    worktree when its task reappears with status ``done``) can match them.
+
+    Read-only over ``done/``: never mints, rewrites, or relocates. Applies the
+    same gates as the active scan — ``_is_unassigned`` (groundcrew-owned only;
+    human-driven completions clear the ``Agent`` tag) and a non-empty stored id
+    (an empty id is groundcrew's worktree/branch/run-state key). Skips any id
+    already in ``emitted_ids`` so an active plan always wins over a same-id done
+    copy (avoids tripping ``_assert_no_plankeeper_id_collisions``). Pure: the
+    caller updates ``emitted_ids`` from the returned issues.
+    """
+    out: list[CrewIssue] = []
+    if not done_dir.is_dir():
+        return out
+    seen = set(emitted_ids)
+    for plan in sorted(done_dir.iterdir()):
+        if not plan.is_file() or not plan.name.endswith(".md"):
+            continue
+        if _is_unassigned(plan):
+            continue
+        if not _completed_within_days(plan, CREW_DONE_WINDOW_DAYS):
+            continue
+        issue = _plan_to_issue(plan, index=index)
+        if issue is not None and issue["id"] and issue["id"] not in seen:
+            out.append(issue)
+            seen.add(issue["id"])
+    return out
+
+
+def _collect_and_mint_crew_issues() -> list[CrewIssue]:
+    """Active plans under ``~/plans/<repo>/*.md`` plus recently-completed plans,
+    as shell-adapter issues.
+
+    The active scan is one level deep — ``deferred/`` is excluded (not
     dispatchable). Agent-less plans (no ``Agent:`` tag — see ``_is_unassigned``)
     are excluded too, in every status: groundcrew only tracks plans explicitly
     assigned for dispatch, never untriaged backlog or work a human picked up in
-    their own session. Mints a frozen ``Plan-keeper Ticket`` for any plan that
-    lacks one (mint-once, no overwrite) so every emitted issue has a stable id.
-    Shared by ``crew fetch`` (which then asserts no id collisions) and
-    ``crew install``'s post-patch data-path check, so both see the exact same
-    plan set.
+    their own session. Mints a frozen ``Plan-keeper Ticket`` for any active plan
+    that lacks one (mint-once, no overwrite) so every emitted issue has a stable
+    id.
+
+    After each repo's active scan, a read-only ``done/`` pass surfaces plans
+    completed within ``CREW_DONE_WINDOW_DAYS`` as top-level ``done`` issues (see
+    ``_recent_done_issues``) so groundcrew's cleaner can tear down their
+    worktrees; ``emitted_ids`` is threaded across all repos so a done plan never
+    duplicates an already-emitted id. Shared by ``crew fetch`` (which then
+    asserts no id collisions) and ``crew install``'s post-patch data-path check,
+    so both see the exact same plan set.
     """
     issues: list[CrewIssue] = []
+    # Every id already emitted (active scans first, then done passes), threaded
+    # across all repos so the done pass can dedup against active winners.
+    emitted_ids: set[str] = set()
     if not storage.PLAN_ROOT.exists():
         return issues
     for repo_entry in sorted(storage.PLAN_ROOT.iterdir()):
@@ -411,6 +490,14 @@ def _collect_and_mint_crew_issues() -> list[CrewIssue]:
             # corrupt the adapter. It'll be retried on the next fetch.
             if issue is not None and issue["id"]:
                 issues.append(issue)
+                emitted_ids.add(issue["id"])
+        # Recency-bounded done/ pass: emit recently-completed plans so the
+        # cleaner can match and tear down their worktrees (read-only; no mint).
+        done_issues = _recent_done_issues(
+            repo_entry / "done", index, emitted_ids
+        )
+        issues.extend(done_issues)
+        emitted_ids.update(issue["id"] for issue in done_issues)
     return issues
 
 
