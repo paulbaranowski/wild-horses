@@ -461,6 +461,46 @@ class TestGroundcrewFetchRecentDone(IsolatedHomeTestCase):
         self.assertEqual(len(issues), 1)
         self.assertEqual(issues[0]["status"], "todo")
 
+    def test_done_plan_with_non_done_status_is_emitted_as_done(self):
+        # A plan physically in done/ is archived by location; its emitted status
+        # must be "done" regardless of frontmatter drift, so the cleaner sees a
+        # terminal task (and the reviewer never wakes on a stale in-review tag).
+        # Mirrors how _build_repo_index already forces done for the done/ location.
+        d = self.plans_root / "r" / "done"
+        d.mkdir(parents=True)
+        ticket = self.cli.plankeeper_id("r", "2026-06-20-drift")
+        (d / "2026-06-20-drift.md").write_text(
+            f"---\nPlan-keeper Ticket: {ticket}\nAgent: claude\n"
+            f"Status: in-review\nCompleted on: {self._days_ago(1)}\n---\n# Drift\n"
+        )
+        by_id = {i["id"]: i for i in self._fetch()}
+        self.assertIn(ticket, by_id)
+        self.assertEqual(by_id[ticket]["status"], "done")
+
+    def test_active_in_later_repo_wins_over_done_in_earlier_repo(self):
+        # Active-wins must hold globally: a done/ plan in an alphabetically
+        # earlier repo must not preempt — or collide with — an active plan
+        # carrying the same stored id in a later repo. Every repo's active scan
+        # must complete before any done/ pass runs, else the duplicate id trips
+        # _assert_no_plankeeper_id_collisions and the whole fetch dies.
+        ticket = "plan-777777"
+        self._make_done_plan(
+            "a-repo", "2026-06-19-done", self._days_ago(1), ticket=ticket
+        )
+        later = self.plans_root / "z-repo"
+        later.mkdir(parents=True)
+        active = later / "2026-06-20-active.md"
+        active.write_text(
+            f"---\nPlan-keeper Ticket: {ticket}\nAgent: claude\nStatus: todo\n---\n# Active\n"
+        )
+        issues = self._fetch()  # must not raise the collision assert
+        matching = [i for i in issues if i["id"] == ticket]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0]["status"], "todo")  # the active one won
+        self.assertEqual(
+            matching[0]["sourceRef"]["path"], str(active.resolve())
+        )
+
     def test_recently_completed_deferred_plan_is_not_surfaced(self):
         # The done window covers done/ only. A plan in deferred/ — even one that
         # looks recently completed — is paused, not terminal-for-cleanup (it may

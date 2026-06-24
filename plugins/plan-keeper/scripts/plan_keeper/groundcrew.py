@@ -418,6 +418,12 @@ def _recent_done_issues(
     already in ``emitted_ids`` so an active plan always wins over a same-id done
     copy (avoids tripping ``_assert_no_plankeeper_id_collisions``). Pure: the
     caller updates ``emitted_ids`` from the returned issues.
+
+    The emitted status is forced to ``done``: a plan's physical location in
+    ``done/`` is the source of truth for its terminal state (the same rule
+    ``_build_repo_index`` applies), so frontmatter drift — a stale ``Status:
+    in-review`` left on an archived plan — can't surface it as a non-done issue
+    that would defeat the cleaner or wake the reviewer.
     """
     out: list[CrewIssue] = []
     if not done_dir.is_dir():
@@ -432,6 +438,7 @@ def _recent_done_issues(
             continue
         issue = _plan_to_issue(plan, index=index)
         if issue is not None and issue["id"] and issue["id"] not in seen:
+            issue["status"] = "done"
             out.append(issue)
             seen.add(issue["id"])
     return out
@@ -449,20 +456,28 @@ def _collect_and_mint_crew_issues() -> list[CrewIssue]:
     that lacks one (mint-once, no overwrite) so every emitted issue has a stable
     id.
 
-    After each repo's active scan, a read-only ``done/`` pass surfaces plans
-    completed within ``CREW_DONE_WINDOW_DAYS`` as top-level ``done`` issues (see
+    Two-phase: every repo's active scan runs first (collecting all active ids),
+    then a read-only ``done/`` pass per repo surfaces plans completed within
+    ``CREW_DONE_WINDOW_DAYS`` as top-level ``done`` issues (see
     ``_recent_done_issues``) so groundcrew's cleaner can tear down their
-    worktrees; ``emitted_ids`` is threaded across all repos so a done plan never
-    duplicates an already-emitted id. Shared by ``crew fetch`` (which then
-    asserts no id collisions) and ``crew install``'s post-patch data-path check,
-    so both see the exact same plan set.
+    worktrees. Phasing matters: ``emitted_ids`` must hold *every* repo's active
+    ids before any done pass dedups against it, so an active plan always wins
+    over a same-id done copy in another repo — interleaving the passes would let
+    an earlier repo's done plan preempt (and collide with) a later repo's active
+    plan, tripping ``_assert_no_plankeeper_id_collisions``. Shared by ``crew
+    fetch`` (which then asserts no id collisions) and ``crew install``'s
+    post-patch data-path check, so both see the exact same plan set.
     """
     issues: list[CrewIssue] = []
-    # Every id already emitted (active scans first, then done passes), threaded
-    # across all repos so the done pass can dedup against active winners.
+    # Every active id, collected across all repos before any done pass dedups
+    # against it (active wins globally — see the two-phase note above).
     emitted_ids: set[str] = set()
+    # Each repo's (dir, index) captured during phase 1 so phase 2's done passes
+    # reuse the already-built index without re-walking the repo.
+    repo_contexts: list[tuple[Path, dict[str, IndexEntry]]] = []
     if not storage.PLAN_ROOT.exists():
         return issues
+    # Phase 1: active scan for every repo (mints ids, populates emitted_ids).
     for repo_entry in sorted(storage.PLAN_ROOT.iterdir()):
         if not repo_entry.is_dir() or repo_entry.name.startswith("."):
             continue
@@ -472,6 +487,7 @@ def _collect_and_mint_crew_issues() -> list[CrewIssue]:
         # index keys unminted plans by their computed id, which is exactly what
         # the mint below assigns, so build order doesn't affect resolution.
         index = _build_repo_index(repo_entry.name)
+        repo_contexts.append((repo_entry, index))
         for cycle in _detect_dependency_cycles(index):
             print(
                 f"note: dependency cycle in repo {repo_entry.name!r}: "
@@ -491,8 +507,9 @@ def _collect_and_mint_crew_issues() -> list[CrewIssue]:
             if issue is not None and issue["id"]:
                 issues.append(issue)
                 emitted_ids.add(issue["id"])
-        # Recency-bounded done/ pass: emit recently-completed plans so the
-        # cleaner can match and tear down their worktrees (read-only; no mint).
+    # Phase 2: recency-bounded done/ pass per repo, deduped against the full
+    # active-id set so the cleaner can match and tear down worktrees (read-only).
+    for repo_entry, index in repo_contexts:
         done_issues = _recent_done_issues(
             repo_entry / "done", index, emitted_ids
         )
