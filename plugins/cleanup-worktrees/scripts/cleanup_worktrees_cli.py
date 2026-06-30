@@ -25,6 +25,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -183,15 +184,26 @@ def _nonempty_str(v: object) -> bool:
 
 
 def write_atomic(path: Path, content: str) -> None:
-    """Write via tmp + fsync + os.replace so a crash never leaves a half-written
-    config that the next run would choke on."""
+    """Write via a unique tmp file + fsync + os.replace so a crash never leaves a
+    half-written config that the next run would choke on.
+
+    The tmp name is per-call (mkstemp) rather than a shared `<name>.tmp`, so two
+    `config` commands running at once can't trample each other's tmp file and
+    publish the wrong payload. The tmp is removed on any failure before
+    os.replace; after a successful replace it no longer exists (it was renamed).
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp, "w") as f:
-        f.write(content)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+    fd, tmp_name = tempfile.mkstemp(prefix=f"{path.name}.", suffix=".tmp", dir=path.parent, text=True)
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
 
 
 def save_config(cfg: dict) -> None:
@@ -918,6 +930,12 @@ def cmd_config_add_repo(args: argparse.Namespace) -> None:
 
 
 def cmd_config_add_parent(args: argparse.Namespace) -> None:
+    # Reject a bad depth here, before it reaches disk: a saved depth < 1 would
+    # make the very next load_config() exit 3, bricking the config until it is
+    # hand-edited.
+    if args.depth is not None and args.depth < 1:
+        sys.stderr.write("ERROR: depth must be >= 1\n")
+        sys.exit(2)
     extra = {"depth": args.depth} if args.depth is not None else None
     _add_path_entry("parents", args.path, extra)
 

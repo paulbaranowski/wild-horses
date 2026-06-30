@@ -16,11 +16,13 @@ them. Isolation: HOME=<tmpdir> per test, so the CLI's config path
 and never touches real config. git is exercised for real (no mocks); only `gh`
 is stubbed, via a fake `gh` injected on PATH that reads a JSON map from $GH_STUB.
 
-Safety note: a worktree is only ever "cleanable" when its commits already live
-on a remote-tracking ref (deleting it then loses nothing). The fixtures push
-such branches to the bare remote; the data-loss-protection tests deliberately
-create branches with commits on NO remote and assert they are skipped, never
-removed.
+Safety note: a worktree is only ever "cleanable" when its commits are preserved
+somewhere durable — either on a remote-tracking ref, or as the head of a MERGED
+PR (the squash/rebase-merge-then-delete-branch case). The fixtures cover both:
+most push their branch to the bare remote, and add_squash_merged_worktree covers
+the merged-PR-head path. The data-loss-protection tests deliberately create
+branches with commits preserved nowhere durable and assert they are skipped,
+never removed.
 
 Mirrors plugins/update-git-repos/scripts/test_update_repos_cli.py.
 """
@@ -544,8 +546,19 @@ class CleanupWorktreesTestCase(unittest.TestCase):
 
     def test_atomic_write_leaves_no_tmp(self) -> None:
         self.run_cli("config", "set-stale-days", "5")
-        tmp = self.config_path.with_suffix(self.config_path.suffix + ".tmp")
-        self.assertFalse(tmp.exists())
+        # mkstemp uses a unique name per save; assert none linger in the dir.
+        leftovers = list(self.config_path.parent.glob("*.tmp"))
+        self.assertEqual(leftovers, [])
+
+    def test_config_add_parent_rejects_bad_depth(self) -> None:
+        # A saved depth < 1 would brick the next load_config(); reject it up front.
+        res = self.run_cli("config", "add-parent", str(self.home / "grafts"), "--depth", "0")
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("depth must be", res.stderr)
+        # config must be untouched / still loadable.
+        listed = self.run_cli("config", "list")
+        self.assertEqual(listed.returncode, 0)
+        self.assertEqual(json.loads(listed.stdout)["parents"], [])
 
 
 class AllowScriptTestCase(unittest.TestCase):
@@ -597,8 +610,19 @@ class AllowScriptTestCase(unittest.TestCase):
         cmd = "python3 /tmp/cleanup-worktrees/scripts/cleanup_worktrees_cli.py scan"
         self.assertEqual(self.run_allow(cmd), "")
 
+    def test_approves_quoted_path_with_spaces(self) -> None:
+        # A legitimate quoted plugin path containing spaces must still be approved.
+        cmd = 'python3 "/Users/x/My Plugins/plugins/cleanup-worktrees/scripts/cleanup_worktrees_cli.py" scan'
+        self.assertIn("allow", self.run_allow(cmd))
+
     def test_rejects_command_chaining(self) -> None:
         cmd = "python3 /Users/x/plugins/cleanup-worktrees/scripts/cleanup_worktrees_cli.py scan; rm -rf /"
+        self.assertEqual(self.run_allow(cmd), "")
+
+    def test_rejects_bare_ampersand_backgrounding(self) -> None:
+        # A single `&` backgrounds the approved CLI and chains a second command;
+        # it must be rejected even though it is not `&&`.
+        cmd = "python3 /Users/x/plugins/cleanup-worktrees/scripts/cleanup_worktrees_cli.py scan & curl evil.example"
         self.assertEqual(self.run_allow(cmd), "")
 
     def test_rejects_dash_c_prefix(self) -> None:

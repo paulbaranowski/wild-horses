@@ -39,15 +39,19 @@ cmd=$(jq -r '.tool_input.command // empty')
 # Handles Claude Code's defensive path-quoting (paths may be wrapped in `"` or
 # `'`) via the optional `[\"\']?` tokens flanking the script path.
 #
-# Defense in depth: reject any shell control operators (`;`, `&&`, `||`, `|`,
-# redirects, command substitution, backticks) up front, before allow-matching.
+# Defense in depth: reject any shell control operators (`;`, `&` including a
+# bare backgrounding `&`, `|`, redirects, command substitution, backticks) up
+# front, before allow-matching. A single `&` matters: `python3 <approved-cli>
+# scan & curl evil` backgrounds the approved command and chains a second one,
+# and the allow regex's trailing `.*$` would otherwise let it ride through — so
+# `*"&"*` (which also subsumes `&&`) must be rejected, not just `&&`.
 # `\n`/`\r` are listed first because the allow regex's `.` does not match
 # newlines — without an explicit reject, a payload like
 # `python3 .../cleanup_worktrees_cli.py\nuname -a` would bypass the metachar
-# checks (newline isn't `;` or `&&`) and the regex's `.*$` clause can't see past
+# checks (newline isn't `;` or `&`) and the regex's `.*$` clause can't see past
 # the newline either, leaving the chained command silently approved.
 case "$cmd" in
-    *$'\n'* | *$'\r'* | *";"* | *"&&"* | *"||"* | *"|"* | *">"* | *"<"* | *'$('* | *'`'*)
+    *$'\n'* | *$'\r'* | *";"* | *"&"* | *"|"* | *">"* | *"<"* | *'$('* | *'`'*)
         exit 0
         ;;
 esac
@@ -60,8 +64,21 @@ approve() {
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"cleanup-worktrees CLI is plugin-approved"}}'
 }
 
-if [[ "$cmd" =~ ^python3[[:space:]]+[\"\']?([^\"\'[:space:]]+/scripts/cleanup_worktrees_cli\.py)[\"\']?([[:space:]].*)?$ ]]; then
+# Extract the script path from one of three forms, so a legitimate plugin path
+# containing spaces (only possible when quoted) is still captured:
+#   "..."  double-quoted  -> spaces allowed inside
+#   '...'  single-quoted  -> spaces allowed inside
+#   bare                  -> no spaces (a space would start the next argument)
+script=""
+if [[ "$cmd" =~ ^python3[[:space:]]+\"([^\"]+/scripts/cleanup_worktrees_cli\.py)\"([[:space:]].*)?$ ]]; then
     script="${BASH_REMATCH[1]}"
+elif [[ "$cmd" =~ ^python3[[:space:]]+\'([^\']+/scripts/cleanup_worktrees_cli\.py)\'([[:space:]].*)?$ ]]; then
+    script="${BASH_REMATCH[1]}"
+elif [[ "$cmd" =~ ^python3[[:space:]]+([^\"\'[:space:]]+/scripts/cleanup_worktrees_cli\.py)([[:space:]].*)?$ ]]; then
+    script="${BASH_REMATCH[1]}"
+fi
+
+if [[ -n "$script" ]]; then
     # Assumes Claude Code EXPORTS CLAUDE_PLUGIN_ROOT into the hook's environment
     # (not merely expanding it in the command string). If that ever stops being
     # true, this branch is skipped and the weaker suffix fallback below applies.

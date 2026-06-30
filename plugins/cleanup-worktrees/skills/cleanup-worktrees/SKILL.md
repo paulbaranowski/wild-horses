@@ -40,7 +40,7 @@ The output is `{scanned, cleanable: [...], skipped: [...], errors: [...]}`. Each
 
 **Empty `cleanable`:** report `Nothing to clean. Scanned N worktrees.` Summarize the `skipped` count if non-zero (e.g. `3 skipped: 2 dirty, 1 unpushed`). Surface any `errors` briefly. Done.
 
-`errors[]` carries non-fatal problems (a missing parent dir, a `gh` lookup that failed, a path refused for being outside `$HOME`). A `gh-failed` / `gh-unavailable` error means PR signals were unknown for some worktrees - they were still classified by the non-PR reasons. Mention it in one line; it never blocks the flow.
+`errors[]` carries non-fatal problems (a missing parent dir, a `gh` lookup that failed, a path refused for being outside `$HOME`). A `gh-failed` / `gh-unavailable` error means PR signals were unknown for some worktrees: a worktree still classifies under any non-PR reason that applies, but one whose only cleanable signal would have been a merged PR (a squash/rebase merge with local-only commits) drops out of `cleanable` and is reported as `skipped: unpushed` until `gh` is reachable. So treat a `gh-unavailable` scan as **possibly incomplete**, not just a harmless banner - tell the user some merged worktrees may be missing and a re-run once `gh` works could surface more. It still never blocks the flow.
 
 ### 3. Render the report
 
@@ -68,19 +68,19 @@ Ask a single yes/no: `Remove all 9 cleanable worktrees (reclaim ~31.4G)? (no = t
 
 ### 5. Remove
 
-Call `remove` with the chosen worktrees' canonical paths:
+Call `remove` with the chosen worktrees' canonical paths. **Shell-quote every path** - they come from the filesystem and may contain spaces, which would otherwise split into the wrong arguments:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cleanup_worktrees_cli.py" remove --paths /Users/you/a /Users/you/b
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cleanup_worktrees_cli.py" remove --paths "/Users/you/a" "/Users/you/b"
 ```
 
 The output is `{removed, skipped, errors, total_bytes_reclaimed, total_human}`:
 
-| field       | meaning                                                                                                                                                                                                                                                                          |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `removed[]` | `{path, branch, bytes_reclaimed}`; may carry `warning: "branch-prune-skipped"` + `warning_detail` when the worktree was removed but its branch was kept (it carries commits on no remote, or could not be deleted) - the branch ref is preserved so the commits stay recoverable |
-| `skipped[]` | `{path, reason, detail?}`; `reason` is `now-dirty` / `unpushed` / `locked` (state changed since the scan), `already-gone` (path vanished), or `main-worktree` (refused)                                                                                                          |
-| `errors[]`  | `{path, error, detail?}`; `error` is `remove-failed`, `not-a-worktree`, or `outside-home`                                                                                                                                                                                        |
+| field       | meaning                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `removed[]` | `{path, branch, bytes_reclaimed}`; may carry `warning: "branch-prune-skipped"` + `warning_detail`. A removed worktree was always safe to remove (worktrees with unique local commits are skipped as `unpushed`, never removed); the warning only means the orphaned branch ref could not be deleted afterward (e.g. it is checked out in another worktree), so the ref is kept |
+| `skipped[]` | `{path, reason, detail?}`; `reason` is `now-dirty` / `unpushed` / `locked` (state changed since the scan), `already-gone` (path vanished), or `main-worktree` (refused)                                                                                                                                                                                                        |
+| `errors[]`  | `{path, error, detail?}`; `error` is `remove-failed`, `not-a-worktree`, or `outside-home`                                                                                                                                                                                                                                                                                      |
 
 `remove` re-validates every path before touching it, so a worktree that became dirty or gained unpushed commits between the scan and now is left untouched and reported under `skipped`. This is expected, not a failure.
 
