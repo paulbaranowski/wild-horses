@@ -68,10 +68,10 @@ Ask a single yes/no: `Remove all 9 cleanable worktrees (reclaim ~31.4G)? (no = t
 
 ### 5. Remove
 
-Call `remove` with the chosen worktrees' canonical paths. **Shell-quote every path** - they come from the filesystem and may contain spaces, which would otherwise split into the wrong arguments:
+Call `remove` with the chosen worktrees' canonical paths. **Single-quote every path.** These paths come from the filesystem, so a path could contain spaces (which would split into the wrong arguments) or shell metacharacters like `$(...)`, backticks, or `;`. Single quotes are required, not double quotes: `"$(...)"` and ``"`...`"`` still run command substitution inside double quotes, so a crafted worktree path could inject a command. Single quotes suppress all expansion. If a path itself contains a single quote, escape it as `'\''`.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cleanup_worktrees_cli.py" remove --paths "/Users/you/a" "/Users/you/b"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cleanup_worktrees_cli.py" remove --paths '/Users/you/a' '/Users/you/b'
 ```
 
 The output is `{removed, skipped, errors, total_bytes_reclaimed, total_human}`:
