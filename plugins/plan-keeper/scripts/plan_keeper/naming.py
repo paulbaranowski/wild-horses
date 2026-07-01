@@ -6,12 +6,13 @@ The algorithm for repo derivation lives in
 import os
 import re
 import subprocess
+import sys
 from typing import Optional
 
 from plan_keeper.errors import PlanKeeperCliError
 from plan_keeper.frontmatter import VALID_KINDS
 from plan_keeper.storage import MAX_SLUG_LEN
-from plan_keeper.types import Kind
+from plan_keeper.types import Kind, RepoAlias
 
 
 def slugify_topic(text: str) -> str:
@@ -226,20 +227,142 @@ def _repo_from_git(cwd: Optional[str] = None) -> Optional[str]:
     return None
 
 
+def _git_toplevel(cwd: Optional[str] = None) -> Optional[str]:
+    """Return the absolute path of the git toplevel for `cwd`, or None.
+
+    Used by alias resolution to compute the subpath from the monorepo root to
+    `cwd`. None when `cwd` is not in a git repo, mirroring `_repo_from_git`'s
+    swallow-everything failure mode.
+    """
+    cwd = cwd or os.getcwd()
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            top = result.stdout.strip()
+            if top:
+                return top
+    except (subprocess.SubprocessError, OSError):
+        pass
+    return None
+
+
+def _subpath_from_toplevel(toplevel: str, cwd: str) -> Optional[str]:
+    """Return the relative path from `toplevel` to `cwd`, or None if outside.
+
+    The empty string is a legitimate return value (cwd IS the toplevel) — only
+    a cwd that resolves outside the toplevel returns None. Uses real paths so a
+    symlinked or `..`-laced cwd still aligns correctly.
+    """
+    try:
+        rel = os.path.relpath(os.path.realpath(cwd), os.path.realpath(toplevel))
+    except ValueError:
+        return None
+    if rel == ".":
+        return ""
+    if rel.startswith(".."):
+        return None
+    return rel
+
+
+def _alias_prefixes(subpath: str) -> list[str]:
+    """All path-segment-aligned prefixes of `subpath`, longest first.
+
+    Includes the empty string at the end so a repo-root alias (subpath="")
+    matches as the last resort. Path-segment alignment is the load-bearing
+    property — `catalog/flawless-inventory` is NOT a prefix of
+    `catalog/flawless-inventory-archive` (sibling) but IS a prefix of
+    `catalog/flawless-inventory/sub` (child).
+    """
+    if not subpath:
+        return [""]
+    parts = subpath.split("/")
+    return ["/".join(parts[:n]) for n in range(len(parts), 0, -1)] + [""]
+
+
+def _resolve_alias(
+    aliases: list[RepoAlias], remote: str, subpath: str,
+) -> Optional[str]:
+    """Walk subpath prefixes longest-first; return the first matching alias name.
+
+    The (remote, subpath) tuple is the join key — both must match exactly. Two
+    aliases with the same prefix but different remotes do not interfere.
+    """
+    for prefix in _alias_prefixes(subpath):
+        for entry in aliases:
+            if entry.get("remote") == remote and entry.get("subpath") == prefix:
+                return entry.get("name")
+    return None
+
+
 def derive_repo(override: Optional[str], cwd: Optional[str] = None) -> str:
     """Resolve <repo> per repo-derivation.md.
 
-    Contract unchanged: override (normalized) → git origin → cwd basename. The
-    git lookup is delegated to _repo_from_git; this still always returns exactly
-    one repo name (the cwd-basename fallback guarantees a value).
+    Contract: override (normalized) → alias mapping → git origin → cwd basename.
+    The alias step (added with the monorepo-subpath mapping) sits between the
+    git lookup and its bare result so every consumer that already calls
+    `repo name` picks up alias resolution transparently.
     """
     if override:
         return validate_repo_name(normalize_override(override))
     from_git = _repo_from_git(cwd)
     if from_git is not None:
+        aliased = _maybe_alias(from_git, cwd)
+        if aliased is not None:
+            return aliased
         return from_git
     cwd = cwd or os.getcwd()
     return validate_repo_name(os.path.basename(os.path.abspath(cwd)))
+
+
+def _maybe_alias(remote: str, cwd: Optional[str]) -> Optional[str]:
+    """Resolve a monorepo-subpath alias for (remote, cwd), or None.
+
+    Returns the alias name (validated) when the global config maps the
+    `(remote, subpath)` tuple. None for every miss — no global config, empty
+    aliases list, cwd outside the git toplevel, no matching prefix. Imported
+    lazily so a `naming.py` consumer that doesn't need alias resolution
+    (e.g. a unit test stubbing `_repo_from_git`) doesn't pay the cost.
+    """
+    # Local import: global_config -> storage -> frontmatter. Importing at
+    # module top would form a wider dependency surface for callers that never
+    # touch the global config.
+    from plan_keeper.global_config import load_global_config
+
+    toplevel = _git_toplevel(cwd)
+    if toplevel is None:
+        return None
+    subpath = _subpath_from_toplevel(toplevel, cwd or os.getcwd())
+    if subpath is None:
+        return None
+    try:
+        config = load_global_config()
+    except PlanKeeperCliError as e:
+        # derive_repo's contract is to always return a name (so `plan-save`
+        # doesn't crash on a corrupted config). But silently routing plans to
+        # the bare remote — the documented prior-incident class from CLAUDE.md
+        # ("missing structural comma survived 19 iterations") — is exactly the
+        # failure mode this codebase is allergic to. A one-line stderr warning
+        # preserves the contract while making the corruption visible on the
+        # very next `plan-save` / `plan-do` / dispatch.
+        print(
+            f"warning: ignoring malformed global config ({e}); "
+            "falling back to bare remote",
+            file=sys.stderr,
+        )
+        return None
+    aliases = config.get("aliases") or []
+    if not aliases:
+        return None
+    name = _resolve_alias(aliases, remote, subpath)
+    if name is None:
+        return None
+    return validate_repo_name(name)
 
 
 _GITHUB_URL_RE = re.compile(
