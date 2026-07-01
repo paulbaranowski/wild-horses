@@ -126,6 +126,16 @@
       },
       "category": "development",
       "license": "MIT"
+    },
+    {
+      "name": "cleanup-worktrees",
+      "source": "./plugins/cleanup-worktrees",
+      "description": "Reclaim disk space from stale git worktrees. Scans configured roots (direct repos and parent dirs), classifies each worktree as cleanable (merged PR, upstream gone, merged into the default branch, or stale) or skipped (dirty, locked, unpushed), shows the cleanable set grouped by reason with sizes, and removes the ones you pick — re-validating before each removal, never --force, pruning the orphaned branch. Backed by a bundled cleanup_worktrees_cli.py with atomic config writes and JSON-on-stdout, plus a PreToolUse hook that auto-approves the CLI.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
     }
   ]
 }
