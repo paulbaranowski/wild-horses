@@ -107,11 +107,11 @@ discipline that gets you there.
    and include a "Decisions" section recording any ambiguous calls and the
    alternatives considered. **Don't** append a "Generated with Claude Code"
    footer and **don't** add any "Co-Authored-By: Claude" trailer.
-5. Tend the PR with `core:babysit-pr`: invoke it on the PR you just opened to
+5. Tend the PR with `core:cb-babysit`: invoke it on the PR you just opened to
    snapshot CI, auto-fix high-confidence failures, and reply to review threads.
    Loop this 3 times — after each run, push any fixes back through steps 2–3,
-   wait for review and CI to settle, then re-invoke `core:babysit-pr` (stop early
-   once CI is green and the review threads are addressed). If `core:babysit-pr`
+   wait for review and CI to settle, then re-invoke `core:cb-babysit` (stop early
+   once CI is green and the review threads are addressed). If `core:cb-babysit`
    is not available in this session, tend the PR manually instead: address CI
    failures and review comments over the same 3 rounds, then stop.
 6. Stop. The human review loop happens out-of-session — **don't** keep polling
