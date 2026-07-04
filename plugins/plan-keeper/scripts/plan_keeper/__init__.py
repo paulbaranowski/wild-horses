@@ -11,6 +11,7 @@ Module map (leaf → top of tree):
   frontmatter — parse/serialize frontmatter, Kind validation, default injection
   storage     — path constants, atomic write, listing, sort order
   naming      — repo derivation, slugify, name/extension validation
+  roots       - the multi-root registry (union reads, save routing, ticket resolve)
   config      — per-repo .plankeeper.json load/save + redaction
   http        — outbound JSON HTTP chokepoint
   linear      — Linear GraphQL client + push
@@ -24,4 +25,4 @@ Module map (leaf → top of tree):
 # attribute (dynamic = ["version"]) so the Homebrew package and the CLI's
 # `--version` output never drift, and it is kept in lockstep with the
 # plan-keeper plugin.json version. Bump both together when releasing.
-__version__ = "6.9.1"
+__version__ = "6.10.0"

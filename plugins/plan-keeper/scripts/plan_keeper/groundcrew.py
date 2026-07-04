@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
 
-from plan_keeper import storage
+from plan_keeper import roots
 from plan_keeper.dates import _iso_utc_now
 from plan_keeper.errors import PlanKeeperCliError
 from plan_keeper.frontmatter import parse_frontmatter
@@ -170,8 +170,13 @@ def _parse_blocked_by(value: str) -> list[str]:
     return ids
 
 
-def _build_repo_index(repo: str) -> dict[str, IndexEntry]:
-    """Index every plan in ``repo`` (active + done/ + deferred/) by identity.
+def _build_repo_index(repo_root: Path) -> dict[str, IndexEntry]:
+    """Index every plan in one ``<root>/<repo>/`` dir (active + done/ + deferred/).
+
+    ``repo_root`` is the concrete repo directory (a specific root's copy of the
+    repo), not a bare repo name - Blocked-by refs are scoped to the plans that
+    physically sit together, so a repo straddling two roots gets an independent
+    index per root.
 
     Returns a dict mapping each plan's identity strings to a shared entry
     ``{id, title, status, location, key, blocked_by}``. A plan is keyed under
@@ -185,7 +190,6 @@ def _build_repo_index(repo: str) -> dict[str, IndexEntry]:
     are skipped.
     """
     index: dict[str, IndexEntry] = {}
-    repo_root = storage.PLAN_ROOT / repo
     for location, base in (
         ("active", repo_root),
         ("done", repo_root / "done"),
@@ -369,30 +373,28 @@ def _is_unassigned(path: Path) -> bool:
 
 
 def _collect_and_mint_crew_issues() -> list[CrewIssue]:
-    """Every active plan under ``~/plans/<repo>/*.md`` as shell-adapter issues.
+    """Every active plan under ``<root>/<repo>/*.md`` as shell-adapter issues.
 
-    One level deep — ``done/`` and ``deferred/`` are excluded (they're not
-    dispatchable). Agent-less plans (no ``Agent:`` tag — see ``_is_unassigned``)
-    are excluded too, in every status: groundcrew only tracks plans explicitly
-    assigned for dispatch, never untriaged backlog or work a human picked up in
-    their own session. Mints a frozen ``Plan-keeper Ticket`` for any plan that
-    lacks one (mint-once, no overwrite) so every emitted issue has a stable id.
-    Shared by ``crew fetch`` (which then asserts no id collisions) and
-    ``crew install``'s post-patch data-path check, so both see the exact same
-    plan set.
+    Unions every registered root (``roots.iter_repo_dirs``), so groundcrew sees
+    work and personal plans alike; the ``Agent:`` gate (``_is_unassigned``) is
+    what keeps un-triaged plans out of dispatch, not the root. One level deep -
+    ``done/`` and ``deferred/`` are excluded (they're not dispatchable).
+    Agent-less plans are excluded too, in every status: groundcrew only tracks
+    plans explicitly assigned for dispatch, never untriaged backlog or work a
+    human picked up in their own session. Mints a frozen ``Plan-keeper Ticket``
+    for any plan that lacks one (mint-once, no overwrite) so every emitted issue
+    has a stable id. Shared by ``crew fetch`` (which then asserts no id
+    collisions across the union) and ``crew install``'s post-patch data-path
+    check, so both see the exact same plan set.
     """
     issues: list[CrewIssue] = []
-    if not storage.PLAN_ROOT.exists():
-        return issues
-    for repo_entry in sorted(storage.PLAN_ROOT.iterdir()):
-        if not repo_entry.is_dir() or repo_entry.name.startswith("."):
-            continue
+    for _, repo_entry in roots.iter_repo_dirs():
         # Build the repo's plan index once so each plan's Blocked-by refs
         # resolve to a live status snapshot; warn on any dependency cycle
         # (groundcrew can't see cycles — denormalized blockers, no graph). The
         # index keys unminted plans by their computed id, which is exactly what
         # the mint below assigns, so build order doesn't affect resolution.
-        index = _build_repo_index(repo_entry.name)
+        index = _build_repo_index(repo_entry)
         for cycle in _detect_dependency_cycles(index):
             print(
                 f"note: dependency cycle in repo {repo_entry.name!r}: "
@@ -418,18 +420,15 @@ def _resolve_crew_id(plan_id: str) -> Optional[CrewIssue]:
     """The issue dict whose stored ``Plan-keeper Ticket`` == ``plan_id``, or None.
 
     Reads each plan's stored, frozen id across active, then ``done/``, then
-    ``deferred/`` (a live plan wins over an archived one sharing its stem).
-    The single resolver behind both ``crew get`` and ``crew start``: because
-    they share this lookup, "if get can find it, start can mark it" holds by
-    construction. Read-only — it never mints; an id only reaches groundcrew via
-    a prior ``fetch`` (which mints), so every resolvable plan already has one.
-    An unminted plan (empty id) can never match a real ``plan_id``.
+    ``deferred/`` (a live plan wins over an archived one sharing its stem),
+    unioning every registered root. The single resolver behind both ``crew get``
+    and ``crew start``: because they share this lookup, "if get can find it,
+    start can mark it" holds by construction. Read-only - it never mints; an id
+    only reaches groundcrew via a prior ``fetch`` (which mints), so every
+    resolvable plan already has one. An unminted plan (empty id) can never match
+    a real ``plan_id``.
     """
-    if not storage.PLAN_ROOT.exists():
-        return None
-    for repo_entry in sorted(storage.PLAN_ROOT.iterdir()):
-        if not repo_entry.is_dir() or repo_entry.name.startswith("."):
-            continue
+    for _, repo_entry in roots.iter_repo_dirs():
         for subdir in (repo_entry, repo_entry / "done", repo_entry / "deferred"):
             if not subdir.exists():
                 continue
@@ -441,6 +440,12 @@ def _resolve_crew_id(plan_id: str) -> Optional[CrewIssue]:
                     # Rebuild with the repo index so `crew get` carries the same
                     # blocker snapshot as `crew fetch` (or a held plan could slip
                     # through the resolveOne path). No warn label — get is quiet.
-                    index = _build_repo_index(repo_for_plan(plan))
+                    # repo_root is the plan's dir (grandparent when archived).
+                    plan_repo_root = (
+                        plan.parent.parent
+                        if plan.parent.name in ("done", "deferred")
+                        else plan.parent
+                    )
+                    index = _build_repo_index(plan_repo_root)
                     return _plan_to_issue(plan, index=index)
     return None

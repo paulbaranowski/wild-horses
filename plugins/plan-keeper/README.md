@@ -122,6 +122,17 @@ plan-crew is the multi-select, cross-repo counterpart to `plan-update` (the sing
 
 The override and auto-derive paths normalize differently: auto-derived names are kept verbatim (so `herds_mobile_app` stays `herds_mobile_app`), but user-typed overrides are lowercased with whitespace-to-hyphen ("General Folder" → `general-folder`). The asymmetry is deliberate — a git remote name is already canonical, but a user-typed phrase usually isn't.
 
+## Multiple plan roots
+
+By default there is one root, `~/plans/`. You can register more (say a `work` tree and a `personal` tree, each with its own backup/sync/git boundary) in `~/.config/plan-keeper/config.json`, managed with `pk root add|list|remove|set-default`. `~/plans/` stays the default root, and with no config file the tool behaves exactly as a single-root install.
+
+The division of labor is asymmetric:
+
+- **Reads union across every root.** `plan-do`, `plan-list`, the queue, and ticket resolution show plans from all roots at once; when more than one root exists, each plan is labelled `root/…`. Narrow to one with `--root <name>`.
+- **Only saves pick a root**, by routing (never prompting): the one root the repo already lives in, else the default root (this also covers a repo that straddles two roots). Name a root explicitly with `--root`, and relocate a mis-routed plan with `pk move --file <path> --root <dest>` (it preserves the plan's id, its `done/`/`deferred/` subdir, and any paired `.json`/`.md`).
+
+Roots must be disjoint subtrees - `root add` rejects a path that nests inside or contains an existing root, so plans can never be double-counted. See [`repo-derivation.md`](repo-derivation.md) for the full root-selection rules.
+
 ## Command-line usage
 
 `scripts/plan_keeper_cli.py` is the canonical interface behind every skill — the skills never write to `~/plans/` directly. The same source file ships two ways: the plugin invokes `plan_keeper_cli.py` in place, while `brew install paulbaranowski/tap/plan-keeper` packages that exact source into the version-stable standalone `pk` binary (one source, two delivery vehicles — no second copy to drift). The skills call the in-tree script; groundcrew, which runs outside Claude Code, calls the brew binary.
@@ -140,16 +151,26 @@ Every subcommand takes `--help`. Mutations are atomic (tmp file + `fsync` + `os.
 #### Repo resolution
 
 - `repo name [--override NAME] [--full]` — print the resolved `<repo>` folder name (`--full` emits `owner/name` from the git remote). See [Repo derivation](#repo-derivation).
-- `repo list` — list every repo under `~/plans/` with per-state counts (`active`/`done`/`deferred`).
+- `repo list` - list every repo across every root with per-state counts (`active`/`done`/`deferred`).
+
+#### Plan roots (`root`)
+
+See [Multiple plan roots](#multiple-plan-roots):
+
+- `root list` - print the root registry as JSON (`{name, path, default}`).
+- `root add NAME PATH` - register a new root (rejects a duplicate name or a path overlapping an existing root; creates the dir).
+- `root remove NAME` - unregister a root (never the default or the last one).
+- `root set-default NAME` - make a root the default (where new-repo saves route).
 
 #### Listing plans
 
-- `list [--override NAME | --all-repos] [--state active|done|deferred] [--status <csv> | --group]` — list plans newest-first. `--status in-progress,todo` filters to those states and tiers the output; `--group` clusters by project along the `idea → exec-plan` Kind pipeline.
+- `list [--override NAME | --all-repos] [--root NAME] [--state active|done|deferred] [--status <csv> | --group]` - list plans newest-first, unioned across roots. `--root` narrows to one root; plans are labelled `root/…` whenever the listing spans more than one. `--status in-progress,todo` filters to those states and tiers the output; `--group` clusters by project along the `idea → exec-plan` Kind pipeline.
 
 #### Saving plans
 
-- `save --topic "…" [--kind <kind>] [--extension md] [--date YYYY-MM-DD] [--on-collision fail|suffix|overwrite]` — write the stdin body to `~/plans/<repo>/<date>-<slug>.<ext>` (markdown saves get default `Status`/`Created` frontmatter).
-- `save --from-path /path/to/file` — move an existing on-disk file into the tree verbatim (the `.json`+`.md` task-list-builder pair uses this).
+- `save --topic "…" [--root NAME] [--kind <kind>] [--extension md] [--date YYYY-MM-DD] [--on-collision fail|suffix|overwrite]` - write the stdin body to `<root>/<repo>/<date>-<slug>.<ext>` (markdown saves get default `Status`/`Created` frontmatter). `--root` overrides the routing (else: the repo's existing root, or the default).
+- `save --from-path /path/to/file [--root NAME]` - move an existing on-disk file into the tree verbatim (the `.json`+`.md` task-list-builder pair uses this).
+- `move (--file PATH | --ticket ID) --root DEST [--on-collision fail|suffix|overwrite]` - relocate a plan (and its paired files) to another root, preserving its id and `done/`/`deferred/` subdir.
 
 #### Frontmatter (`file-meta`)
 
@@ -173,7 +194,7 @@ See [Groundcrew integration](#groundcrew-integration):
 
 - `crew install [--config PATH] [--dry-run]` — wire `~/plans/*` into a groundcrew config.
 - `crew fetch` / `crew get ${id}` / `crew start ${id}` / `crew review ${id}` — the machine protocol groundcrew's config calls directly.
-- `crew queue list [--all | --repo NAME]` — emit the queue as a JSON array of `{repo, file, status, agent, blocked, blockedBy}`.
+- `crew queue list [--all | --repo NAME] [--root NAME]` - emit the queue (unioned across roots) as a JSON array of `{root, repo, file, status, agent, blocked, blockedBy}`.
 - `crew queue add [--repo NAME] [--agent claude] <file>...` — promote plans to `Status: todo` by bare filename (the current repo by default), minting the `Plan-keeper Ticket` and filling `Agent` where missing.
 - `crew queue drop [--repo NAME] <file>...` — dequeue plans back to `Status: backlog` by bare filename; never touches `Agent`.
 
@@ -204,20 +225,20 @@ A PreToolUse hook (`hooks/hooks.json`) auto-approves `python3 .../plan_keeper_cl
 
 ## Files in this plugin
 
-| Path                               | Purpose                                                                                                                       |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `skills/plan-list/SKILL.md`        | Instructions for the read-only listing flow                                                                                   |
-| `skills/plan-save/SKILL.md`        | Instructions for the save flow                                                                                                |
-| `skills/plan-do/SKILL.md`          | Instructions for the list-and-route flow                                                                                      |
-| `skills/plan-split/SKILL.md`       | Instructions for the decompose-into-dependency-wired-slices flow                                                              |
-| `skills/plan-done/SKILL.md`        | Instructions for the archive flow                                                                                             |
-| `scripts/plan_keeper_cli.py`       | Bundled CLI entry shim — the only sanctioned mutator for `~/plans/`                                                           |
-| `scripts/plan_keeper/`             | CLI implementation package (errors, naming, storage, frontmatter, config, http, linear, jira, push, groundcrew, upgrade, cli) |
-| `scripts/tests/`                   | Stdlib `unittest` suite — one `test_<module>.py` per package module, shared harness in `support.py`                           |
-| `scripts/plan-keeper-cli-allow.sh` | PreToolUse hook script — auto-approves CLI Bash invocations                                                                   |
-| `hooks/hooks.json`                 | PreToolUse hook registration                                                                                                  |
-| `repo-derivation.md`               | Shared algorithm — auto-derive + override normalization rules                                                                 |
-| `groundcrew/README.md`             | Deep reference for the groundcrew connection — `crew install`, dispatch protocol, dependencies                                |
+| Path                               | Purpose                                                                                                                              |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `skills/plan-list/SKILL.md`        | Instructions for the read-only listing flow                                                                                          |
+| `skills/plan-save/SKILL.md`        | Instructions for the save flow                                                                                                       |
+| `skills/plan-do/SKILL.md`          | Instructions for the list-and-route flow                                                                                             |
+| `skills/plan-split/SKILL.md`       | Instructions for the decompose-into-dependency-wired-slices flow                                                                     |
+| `skills/plan-done/SKILL.md`        | Instructions for the archive flow                                                                                                    |
+| `scripts/plan_keeper_cli.py`       | Bundled CLI entry shim - the only sanctioned mutator for `~/plans/`                                                                  |
+| `scripts/plan_keeper/`             | CLI implementation package (errors, naming, storage, roots, frontmatter, config, http, linear, jira, push, groundcrew, upgrade, cli) |
+| `scripts/tests/`                   | Stdlib `unittest` suite - one `test_<module>.py` per package module, shared harness in `support.py`                                  |
+| `scripts/plan-keeper-cli-allow.sh` | PreToolUse hook script - auto-approves CLI Bash invocations                                                                          |
+| `hooks/hooks.json`                 | PreToolUse hook registration                                                                                                         |
+| `repo-derivation.md`               | Shared algorithm - auto-derive + override normalization rules                                                                        |
+| `groundcrew/README.md`             | Deep reference for the groundcrew connection - `crew install`, dispatch protocol, dependencies                                       |
 
 Run the CLI tests from the repo root (stdlib only — no pytest/uv needed):
 

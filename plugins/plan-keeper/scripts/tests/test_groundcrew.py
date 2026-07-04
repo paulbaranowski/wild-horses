@@ -730,11 +730,11 @@ class TestQueue(IsolatedHomeTestCase):
         by_file = {row["file"]: row for row in rows}
         self.assertEqual(
             by_file["2026-05-01-a.md"],
-            {"repo": "alpha", "file": "2026-05-01-a.md", "status": "todo", "agent": "codex", "blocked": False, "blockedBy": []},
+            {"root": "default", "repo": "alpha", "file": "2026-05-01-a.md", "status": "todo", "agent": "codex", "blocked": False, "blockedBy": []},
         )
         self.assertEqual(
             by_file["2026-05-02-b.md"],
-            {"repo": "beta", "file": "2026-05-02-b.md", "status": "backlog", "agent": "", "blocked": False, "blockedBy": []},
+            {"root": "default", "repo": "beta", "file": "2026-05-02-b.md", "status": "backlog", "agent": "", "blocked": False, "blockedBy": []},
         )
 
     def test_queue_list_groups_repos_and_orders_newest_first_within_each(self) -> None:
@@ -1152,7 +1152,7 @@ class TestBlockerHelpers(IsolatedHomeTestCase):
         done = d / "done"
         done.mkdir()
         (done / "2025-12-31-b.md").write_text("---\nStatus: done\n---\n# B title\n")
-        index = groundcrew._build_repo_index("r")
+        index = groundcrew._build_repo_index(self.plans_root / "r")
         # keyed by stored plan-keeper id, stored linear id, AND computed id
         self.assertEqual(index["plan-555"]["status"], "in-review")
         self.assertEqual(index["plan-555"]["title"], "A title")
@@ -1172,7 +1172,7 @@ class TestBlockerHelpers(IsolatedHomeTestCase):
         done = d / "done"
         done.mkdir()
         (done / "2025-12-31-dep-done.md").write_text("---\nStatus: done\n---\n# Dep Done\n")
-        index = groundcrew._build_repo_index("r")
+        index = groundcrew._build_repo_index(self.plans_root / "r")
         todo_id = groundcrew.plankeeper_id("r", "2026-01-01-dep-todo")
         done_id = groundcrew.plankeeper_id("r", "2025-12-31-dep-done")
         meta = {"Blocked-by": f"{todo_id}, {done_id}"}
@@ -1184,7 +1184,7 @@ class TestBlockerHelpers(IsolatedHomeTestCase):
         self.assertEqual(unsatisfied, [todo_id])
 
     def test_blockers_for_plan_unresolved_ref_holds(self) -> None:
-        index = groundcrew._build_repo_index("r")  # empty repo
+        index = groundcrew._build_repo_index(self.plans_root / "r")  # empty repo
         blockers, unsatisfied = groundcrew._blockers_for_plan(
             {"Blocked-by": "plan-404"}, index
         )
@@ -1199,14 +1199,14 @@ class TestBlockerHelpers(IsolatedHomeTestCase):
         (deferred / "2025-06-01-paused.md").write_text(
             "---\nStatus: backlog\n---\n# Paused\n"
         )
-        index = groundcrew._build_repo_index("r")
+        index = groundcrew._build_repo_index(self.plans_root / "r")
         pid = groundcrew.plankeeper_id("r", "2025-06-01-paused")
         blockers, unsatisfied = groundcrew._blockers_for_plan({"Blocked-by": pid}, index)
         self.assertEqual(blockers[0]["status"], "other")  # held (not done)
         self.assertEqual(unsatisfied, [pid])
 
     def test_blockers_for_plan_no_field(self) -> None:
-        index = groundcrew._build_repo_index("r")
+        index = groundcrew._build_repo_index(self.plans_root / "r")
         self.assertEqual(groundcrew._blockers_for_plan({}, index), ([], []))
 
     def test_build_repo_index_tolerates_stray_done_file(self) -> None:
@@ -1216,7 +1216,7 @@ class TestBlockerHelpers(IsolatedHomeTestCase):
         d.mkdir(parents=True)
         (d / "2026-01-01-x.md").write_text("---\nStatus: todo\n---\n# X\n")
         (d / "done").write_text("i am a file, not a directory\n")
-        index = groundcrew._build_repo_index("r")  # must not raise
+        index = groundcrew._build_repo_index(self.plans_root / "r")  # must not raise
         self.assertIn(groundcrew.plankeeper_id("r", "2026-01-01-x"), index)
 
     def test_build_repo_index_active_wins_over_archived_same_stem(self) -> None:
@@ -1230,7 +1230,7 @@ class TestBlockerHelpers(IsolatedHomeTestCase):
         done = d / "done"
         done.mkdir()
         (done / "2026-01-01-x.md").write_text("---\nStatus: done\n---\n# X done\n")
-        index = groundcrew._build_repo_index("r")
+        index = groundcrew._build_repo_index(self.plans_root / "r")
         shared = groundcrew.plankeeper_id("r", "2026-01-01-x")
         self.assertEqual(index[shared]["location"], "active")
         self.assertEqual(index[shared]["status"], "todo")
@@ -1245,7 +1245,7 @@ class TestBlockerHelpers(IsolatedHomeTestCase):
         b = groundcrew.plankeeper_id("r", "2026-01-02-b")
         (d / "2026-01-01-a.md").write_text(f"---\nStatus: todo\nBlocked-by: {b}\n---\n# A\n")
         (d / "2026-01-02-b.md").write_text(f"---\nStatus: todo\nBlocked-by: {a}\n---\n# B\n")
-        index = groundcrew._build_repo_index("r")
+        index = groundcrew._build_repo_index(self.plans_root / "r")
         cycles = groundcrew._detect_dependency_cycles(index)
         self.assertTrue(cycles, "expected a cycle")
         flat = {node for cyc in cycles for node in cyc}
@@ -1261,7 +1261,7 @@ class TestBlockerHelpers(IsolatedHomeTestCase):
         (d / "2026-01-01-a.md").write_text(f"---\nStatus: todo\nBlocked-by: {b}\n---\n# A\n")
         (d / "2026-01-02-b.md").write_text(f"---\nStatus: todo\nBlocked-by: {c}\n---\n# B\n")
         (d / "2026-01-03-c.md").write_text(f"---\nStatus: todo\nBlocked-by: {a}\n---\n# C\n")
-        index = groundcrew._build_repo_index("r")
+        index = groundcrew._build_repo_index(self.plans_root / "r")
         cycles = groundcrew._detect_dependency_cycles(index)
         self.assertTrue(cycles, "expected a cycle")
         self.assertEqual({node for cyc in cycles for node in cyc}, {a, b, c})
@@ -1271,7 +1271,7 @@ class TestBlockerHelpers(IsolatedHomeTestCase):
         d.mkdir(parents=True)
         a = groundcrew.plankeeper_id("r", "2026-01-01-a")
         (d / "2026-01-01-a.md").write_text(f"---\nStatus: todo\nBlocked-by: {a}\n---\n# A\n")
-        index = groundcrew._build_repo_index("r")
+        index = groundcrew._build_repo_index(self.plans_root / "r")
         cycles = groundcrew._detect_dependency_cycles(index)
         self.assertTrue(cycles, "expected a self-cycle")
         self.assertIn(a, {node for cyc in cycles for node in cyc})
@@ -1282,7 +1282,7 @@ class TestBlockerHelpers(IsolatedHomeTestCase):
         b = groundcrew.plankeeper_id("r", "2026-01-02-b")
         (d / "2026-01-01-a.md").write_text(f"---\nStatus: todo\nBlocked-by: {b}\n---\n# A\n")
         (d / "2026-01-02-b.md").write_text("---\nStatus: todo\n---\n# B\n")
-        index = groundcrew._build_repo_index("r")
+        index = groundcrew._build_repo_index(self.plans_root / "r")
         self.assertEqual(groundcrew._detect_dependency_cycles(index), [])
 
 

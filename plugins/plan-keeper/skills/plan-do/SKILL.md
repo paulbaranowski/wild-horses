@@ -65,6 +65,8 @@ Add `--override <name>` if you found one. The CLI handles repo derivation. With 
 
 **If stdout has lines**, display them as a numbered list — show each plan's status tag so the user sees what's queued vs. untriaged — and ask which one. If stderr carried a hidden-plans note, mention it below the list. Do not read or classify any files yet — classification only happens on the picked plan.
 
+**Multiple roots:** the list already unions every plan root. When more than one root is configured, each filename is prefixed `root/...` (e.g. `personal/2026-…-foo.md`); keep that prefix in the numbered list and in the path you resolve, so a plan in `personal` isn't confused with a same-named one in `default`. The picked plan's full path (from the CLI output) already points at the right root - never re-derive it.
+
 Example output to the user:
 
 ```text

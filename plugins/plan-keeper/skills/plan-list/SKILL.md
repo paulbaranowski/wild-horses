@@ -42,6 +42,8 @@ Add `--override <name>` if step 1 found one. The CLI groups the active plans in 
 
 **Run this command every time you reach this step — including on a re-invocation later in the same conversation.** Plans get saved, started, archived, and re-statused between turns, so a list you printed a moment ago may already be stale. The list you show must come from the output you just ran, never from memory.
 
+**Multiple roots:** the listing **unions across every plan root** automatically - you never choose a root to read from. When more than one root is configured, each line is prefixed `root/...` so plans from different trees (e.g. `work` vs `personal`) stay distinguishable; a single-root install shows no prefix. If the user wants only one tree ("just my personal plans"), add `--root <name>`.
+
 If the user asked for archived or shelved plans instead, swap the flags:
 
 ```bash

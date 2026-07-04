@@ -52,6 +52,14 @@ If you cannot confidently identify a single file or paired group, stop and ask t
 - "put it in `<name>`"
 - "in the `<name>` folder/bucket"
 
+**Root selection (only when more than one root exists):** most installs have a single root and you skip this - omit `--root` and the plan routes automatically. If `pk root list` returns more than one root, a named destination may be a **root** rather than a repo. Resolve it against the root names:
+
+- The destination matches a configured root name (e.g. "save to personal", and `personal` is a root) → pass `--root personal`; leave `--override` to auto-derivation.
+- Slash form "save to `<root>`/`<repo>`" → pass `--root <root> --override <repo>`.
+- The destination is not a root name → it's a repo (`--override <name>`), no `--root`.
+
+With no `--root`, save routes by rule: the one root the repo already lives in, else the default root (see [../../repo-derivation.md](../../repo-derivation.md)). Do not prompt the user to choose a root; route or accept the default, and offer `pk move` if it landed wrong.
+
 ### 3. Save via the CLI
 
 Two delivery shapes — pick the one that fits the source:
@@ -83,6 +91,7 @@ Use this whenever the source filename is already a good final name — most nota
 Common to both shapes (3a and 3b):
 
 - Add `--override <name>` if step 2 found one.
+- Add `--root <name>` if step 2's root selection found one (only meaningful when more than one root is configured).
 - For a **paired save**, run this step once per file. See [Paired-output handling](#paired-output-handling).
 
 **On exit 0:** the CLI prints the written absolute path on stdout. Use that path verbatim in step 5.

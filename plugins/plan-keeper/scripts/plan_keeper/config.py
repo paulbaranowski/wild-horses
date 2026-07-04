@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 
+from plan_keeper import roots
 from plan_keeper.errors import PlanKeeperCliError
 from plan_keeper.storage import CONFIG_FILE_NAME, repo_dir, write_atomic
 from plan_keeper.types import PlanKeeperConfig
@@ -30,7 +31,14 @@ def _redact_section(section: dict) -> dict:
 
 
 def config_path(repo: str) -> Path:
-    return repo_dir(repo) / CONFIG_FILE_NAME
+    """The per-repo ``.plankeeper.json`` path, in the repo's *routed* root.
+
+    A repo's ticket-system config lives beside its plans, so it follows the same
+    root-routing rule save does (``roots.route_root``): the one root the repo
+    lives in, else the default. Single-root installs resolve to
+    ``PLAN_ROOT/<repo>/`` exactly as before.
+    """
+    return repo_dir(repo, roots.route_root(repo).path) / CONFIG_FILE_NAME
 
 
 def load_config(repo: str) -> PlanKeeperConfig:
