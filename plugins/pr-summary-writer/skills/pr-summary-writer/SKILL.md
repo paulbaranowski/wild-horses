@@ -15,10 +15,17 @@ code; the description exists to give the reader the mental model the diff
 assumes.
 
 **Core principle: one idea per PR, stated once, up front.** Every PR worth a
-description has a single load-bearing architectural move (the "core move").
-Find it, name it in one sentence, and let everything else hang off it. If you
-can't name the one idea, the PR is either trivial (short description, stop) or
-doing too much (suggest splitting).
+description has a single load-bearing structural idea. Find it, state it in
+one sentence, and let everything else hang off it. If you can't state the one
+idea, the PR is either trivial (short description, stop) or doing too much
+(suggest splitting).
+
+**State the idea directly; never announce it.** The opening sentence of the
+architecture section is a claim about the system ("Event extraction is now
+decoupled from persistence behind the EventSink seam"), not a preamble about
+the description itself ("The core move is...", "The main change here is...",
+"At a high level, this PR..."). Start talking about the change; delete the
+sentence that says you're about to.
 
 ## Triage first
 
@@ -30,7 +37,7 @@ doing too much (suggest splitting).
 ## The description is a translation, not a transcript
 
 Task lists, acceptance criteria, review logs, and per-file change logs are
-**process artifacts**. They are input you read to _find_ the core move and the
+**process artifacts**. They are input you read to _find_ the one idea and the
 load-bearing decisions; the description then states those findings in prose.
 An artifact's content may inform every sentence, yet the artifact itself never
 appears.
@@ -40,9 +47,16 @@ appears.
 1. **What this is** - one short paragraph: what the PR enables plus the
    smallest framing needed to understand the rest (prior state, "slice 2 of N").
 
-2. **The architecture** - the heart; the only mandatory section for a design PR:
-   - The core move, named in one sentence. ("The core move is decoupling X
-     from Y behind the Z seam.")
+2. **Requirements** - what the change had to satisfy: the functional needs,
+   constraints, and invariants that shaped the design, plus explicit
+   non-goals. Short bullets are fine here; this is the problem statement the
+   architecture answers, and it lets the reviewer check the design against
+   what it was supposed to do.
+
+3. **The architecture** - the heart; the only mandatory section for a design PR:
+   - The one idea, stated directly as a fact about the system, in the opening
+     sentence. ("Event extraction is now decoupled from persistence behind
+     the EventSink seam.")
    - Before/after: what the old structure assumed or hard-wired, and why that
      blocked the goal. This is where the _why_ lives - a refactor only makes
      sense against the constraint it removes.
@@ -55,17 +69,17 @@ appears.
      untouched-but-at-risk surface is often the most reassuring thing a
      reviewer can read.
 
-3. **Data / contract model** - only when a schema or contract changed: the one
+4. **Data / contract model** - only when a schema or contract changed: the one
    or two field-level semantics a reviewer must hold in their head. Not the
    full schema.
 
-4. **Testing** - one paragraph: the approach (what's driven end-to-end vs.
+5. **Testing** - one paragraph: the approach (what's driven end-to-end vs.
    stubbed, and why) and the top-line result.
 
-5. **Sequence / follow-ups** - when part of a series: one line on where this
+6. **Sequence / follow-ups** - when part of a series: one line on where this
    sits and what's deferred.
 
-6. Footer per the target repo's convention (often none). Never add
+7. Footer per the target repo's convention (often none). Never add
    "Generated with Claude Code" footers or Co-Authored-By trailers.
 
 ## Method
@@ -74,21 +88,28 @@ appears.
    makes all these edits necessary? That sentence is the spine.
 2. **Recover the constraint.** What did the old code assume or hard-wire that
    the goal couldn't live with? That's your before/after.
-3. **Keep only the 2-4 decisions that shape the design.** Drop anything with
+3. **Recover the requirements.** What did the change have to satisfy: needs,
+   constraints, invariants, non-goals? Keep the ones a reviewer needs in
+   order to judge whether the design answers them.
+4. **Keep only the 2-4 decisions that shape the design.** Drop anything with
    an obvious default or that's a local implementation detail.
-4. **Identify the at-risk untouched surface** and how it's protected.
-5. **Draft in prose, architecture section first.** Core-move sentence, then
-   before/after, then decisions, then what-didn't-change.
-6. **Ruthlessly demote detail.** If removing a line loses no _understanding_,
+5. **Identify the at-risk untouched surface** and how it's protected.
+6. **Draft in prose, architecture section first.** The one-idea sentence,
+   then before/after, then decisions, then what-didn't-change.
+7. **Ruthlessly demote detail.** If removing a line loses no _understanding_,
    remove it; the commits and code already carry it.
-7. **One-pass read.** If a reviewer can't get the mental model in a single
+8. **One-pass read.** If a reviewer can't get the mental model in a single
    read, it's still too granular.
 
 ## Smell tests (revise if any are true)
 
 - The first substantive section is a bulleted list of files or edits: lead
   with the idea instead.
-- You can't find a single-sentence core move: the PR is trivial or too big.
+- You can't state the idea in a single sentence: the PR is trivial or too big.
+- The architecture section opens with a preamble ("The core move is...",
+  "The main change is..."): delete it and open with the claim itself.
+- No requirements are stated: the reviewer can't check the design against
+  what it was supposed to satisfy.
 - A reviewer would learn nothing they couldn't get faster from
   `git diff --stat`: it's a changelog, not a description.
 - Acceptance-criteria checkboxes or a review-round log are present: cut them;
@@ -109,14 +130,18 @@ appears.
   already shows them.
 - **Don't pad with an inventory to look thorough.** Thoroughness is the
   mental model being complete, not the edit list being long.
+- **Don't announce the idea before stating it** ("The core move is...",
+  "The key change here is...", "At a high level..."). Open with the claim
+  about the system itself.
 
 ## Worked reference
 
 From herds PR #260 ("text extraction via EventAlgorithmV4 + EventSink
 refactor"), the shape a good description takes:
 
-- Core move, one sentence: decoupling event _extraction_ from event
-  _persistence_ behind the `EventSink` seam.
+- The idea in one sentence, stated as a fact about the system: event
+  _extraction_ is decoupled from event _persistence_ behind the `EventSink`
+  seam.
 - Before/after: the algorithm base class persisted inline via
   `add_event(image_id=...)`, hard-wiring "an event always comes from an
   image" - the exact assumption that blocked reusing extraction for URLs. Now
