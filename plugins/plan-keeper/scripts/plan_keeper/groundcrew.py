@@ -427,7 +427,16 @@ def _resolve_crew_id(plan_id: str) -> Optional[CrewIssue]:
     only reaches groundcrew via a prior ``fetch`` (which mints), so every
     resolvable plan already has one. An unminted plan (empty id) can never match
     a real ``plan_id``.
+
+    The full union is scanned before answering: a ``plan_id`` matching plans in
+    MORE THAN ONE repo dir (the same ``(repo, stem)`` duplicated across roots
+    mints the same id, or a hand-copied frozen id) raises loudly instead of
+    silently picking whichever the registry order visits first. Otherwise
+    ``crew start`` could flip a different file than the one ``fetch`` queued.
+    Matches *within* one repo dir keep the active-wins-over-archived priority
+    (the subdir scan order).
     """
+    matches: "list[tuple[Path, Path]]" = []  # (plan, its repo dir), scan order
     for _, repo_entry in roots.iter_repo_dirs():
         for subdir in (repo_entry, repo_entry / "done", repo_entry / "deferred"):
             # `is_dir()` (not `exists()`): a stray plain file named `done` or
@@ -440,15 +449,30 @@ def _resolve_crew_id(plan_id: str) -> Optional[CrewIssue]:
                     continue
                 issue = _plan_to_issue(plan)
                 if issue is not None and issue["id"] and issue["id"] == plan_id:
-                    # Rebuild with the repo index so `crew get` carries the same
-                    # blocker snapshot as `crew fetch` (or a held plan could slip
-                    # through the resolveOne path). No warn label — get is quiet.
-                    # repo_root is the plan's dir (grandparent when archived).
-                    plan_repo_root = (
-                        plan.parent.parent
-                        if plan.parent.name in ("done", "deferred")
-                        else plan.parent
-                    )
-                    index = _build_repo_index(plan_repo_root)
-                    return _plan_to_issue(plan, index=index)
-    return None
+                    matches.append((plan, repo_entry))
+    if not matches:
+        return None
+    distinct_repo_dirs = {repo_dir for _, repo_dir in matches}
+    if len(distinct_repo_dirs) > 1:
+        # Same contract as _assert_no_plankeeper_id_collisions: a shared id is
+        # never silently merged onto one file. The user breaks the tie by
+        # changing one plan's Plan-keeper Ticket (or moving/renaming the copy).
+        listing = "\n".join(f"  {plan}" for plan, _ in matches)
+        raise PlanKeeperCliError(
+            f"plan-keeper id {plan_id!r} matches plans in "
+            f"{len(distinct_repo_dirs)} repo dirs; refusing to pick one. "
+            f"Change one plan's Plan-keeper Ticket to break the tie:\n{listing}",
+            code=2,
+        )
+    plan, _ = matches[0]
+    # Rebuild with the repo index so `crew get` carries the same blocker
+    # snapshot as `crew fetch` (or a held plan could slip through the
+    # resolveOne path). No warn label (get is quiet). The repo root is the
+    # plan's dir (grandparent when archived).
+    plan_repo_root = (
+        plan.parent.parent
+        if plan.parent.name in ("done", "deferred")
+        else plan.parent
+    )
+    index = _build_repo_index(plan_repo_root)
+    return _plan_to_issue(plan, index=index)

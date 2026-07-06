@@ -206,6 +206,45 @@ class TestCrossRootReads(RootTestCase):
         self.assertEqual(repos, {"work-repo", "home-repo"})
 
 
+class TestConfigUnionRead(RootTestCase):
+    def test_load_config_falls_back_across_roots_after_straddle(self) -> None:
+        # Creds written while the repo lived only in personal must stay
+        # findable after the repo starts straddling (routing then points at
+        # the default root, where no config exists).
+        self._add_root("personal", str(self.home / "personal" / "plans"))
+        # cwd-derived repo is 'workdir'; put it in personal only.
+        self._save("--topic", "Seed", "--override", "workdir", "--root", "personal")
+        r = run_cli(
+            "linear", "config", "save",
+            stdin='{"apiKey": "k"}', home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("/personal/plans/workdir/", r.stdout.strip())
+        # Straddle: materialize the repo in the default root too.
+        self._save("--topic", "Other", "--override", "workdir", "--root", "default")
+        r = run_cli("linear", "config", "get", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["apiKey"], "***redacted***")
+
+
+class TestCrewIdCrossRootCollision(RootTestCase):
+    def test_crew_get_refuses_duplicate_id_across_roots(self) -> None:
+        # The same (repo, stem) in two roots mints the same id; the resolver
+        # must refuse loudly rather than pick whichever root scans first.
+        self._add_root("personal", str(self.home / "personal" / "plans"))
+        self._save("--topic", "Twin", "--override", "proj", "--root", "default")
+        self._save("--topic", "Twin", "--override", "proj", "--root", "personal")
+        r = run_cli(
+            "file-meta", "get",
+            "--file", str(self.plans_root / "proj" / f"{DATE}-twin.md"),
+            home=self.home, cwd=self.cwd,
+        )
+        ticket = json.loads(r.stdout)["Plan-keeper Ticket"]
+        r = run_cli("crew", "get", ticket, home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("refusing to pick one", r.stderr)
+
+
 class TestMove(RootTestCase):
     def setUp(self) -> None:
         super().setUp()

@@ -31,22 +31,46 @@ def _redact_section(section: dict) -> dict:
 
 
 def config_path(repo: str) -> Path:
-    """The per-repo ``.plankeeper.json`` path, in the repo's *routed* root.
+    """The per-repo ``.plankeeper.json`` *write* path, in the repo's routed root.
 
-    A repo's ticket-system config lives beside its plans, so it follows the same
-    root-routing rule save does (``roots.route_root``): the one root the repo
-    lives in, else the default. Single-root installs resolve to
-    ``PLAN_ROOT/<repo>/`` exactly as before.
+    A repo's ticket-system config lives beside its plans, so writes follow the
+    same root-routing rule save does (``roots.route_root``): the one root the
+    repo lives in, else the default. Single-root installs resolve to
+    ``PLAN_ROOT/<repo>/`` exactly as before. Reads go through ``load_config``,
+    which falls back to the other roots - routing is time-dependent (a repo can
+    start straddling after its config was written), so a read pinned to the
+    routed root alone could strand credentials in the tree they were saved to.
     """
     return repo_dir(repo, roots.route_root(repo).path) / CONFIG_FILE_NAME
 
 
+def _find_config_path(repo: str) -> Path:
+    """The config path to *read*: the routed root's file, else the first root
+    (registry order) whose ``<root>/<repo>/.plankeeper.json`` exists.
+
+    The union fallback mirrors the multi-root read rule (reads union, writes
+    route): credentials written while the repo lived in one root stay findable
+    after the repo's routing changes (a new straddle, a moved plan set). When
+    no root has the file, the routed path is returned so the caller's
+    missing-file handling reports the canonical location.
+    """
+    routed = config_path(repo)
+    if routed.exists():
+        return routed
+    for root in roots.load_roots():
+        candidate = repo_dir(repo, root.path) / CONFIG_FILE_NAME
+        if candidate.exists():
+            return candidate
+    return routed
+
+
 def load_config(repo: str) -> PlanKeeperConfig:
-    """Read the per-repo config JSON. Returns {} if file is missing.
+    """Read the per-repo config JSON, unioning across roots (see
+    ``_find_config_path``). Returns {} if no root has the file.
 
     Raises PlanKeeperCliError(5) on malformed JSON.
     """
-    path = config_path(repo)
+    path = _find_config_path(repo)
     if not path.exists():
         return {}
     try:
