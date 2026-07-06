@@ -24,4 +24,4 @@ Module map (leaf → top of tree):
 # attribute (dynamic = ["version"]) so the Homebrew package and the CLI's
 # `--version` output never drift, and it is kept in lockstep with the
 # plan-keeper plugin.json version. Bump both together when releasing.
-__version__ = "6.9.1"
+__version__ = "6.10.1"
