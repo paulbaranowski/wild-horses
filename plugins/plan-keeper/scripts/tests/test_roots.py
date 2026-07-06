@@ -203,7 +203,7 @@ class TestMove(RootTestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         dest = r.stdout.strip()
         self.assertIn(f"{self.plans_root}/proj/", dest)
-        self.assertFalse((self.personal / "proj" / "2026-07-03-movable.md").exists())
+        self.assertFalse((self.personal / "proj" / f"{DATE}-movable.md").exists())
         # Id is unchanged (root is not in the id seed).
         self.assertEqual(self._ticket(dest), ticket)
 

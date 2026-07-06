@@ -430,7 +430,10 @@ def _resolve_crew_id(plan_id: str) -> Optional[CrewIssue]:
     """
     for _, repo_entry in roots.iter_repo_dirs():
         for subdir in (repo_entry, repo_entry / "done", repo_entry / "deferred"):
-            if not subdir.exists():
+            # `is_dir()` (not `exists()`): a stray plain file named `done` or
+            # `deferred` would pass exists() and crash iterdir() with
+            # NotADirectoryError - same fence as _build_repo_index.
+            if not subdir.is_dir():
                 continue
             for plan in sorted(subdir.iterdir()):
                 if not plan.is_file() or not plan.name.endswith(".md"):
