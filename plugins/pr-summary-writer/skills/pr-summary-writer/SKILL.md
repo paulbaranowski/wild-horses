@@ -161,8 +161,10 @@ architecture themselves. The rewrite led with the one idea.
 
 ## Delivery
 
-1. Check for an open PR on the current branch first:
-   `gh pr view --json number,title,url,body` (non-zero exit means none).
+1. Check for an open PR first. With no argument, use the current branch:
+   `gh pr view --json number,title,url,body` (non-zero exit means none). When
+   a PR number or branch was passed as the argument, target it instead:
+   `gh pr view <arg> --json number,title,url,body`.
 2. Generate the title alongside the body: concise, intent-and-impact,
    conventional style when the repo uses it (`refactor(events): ...`).
 3. If a PR exists, offer to update it directly; on confirmation:
