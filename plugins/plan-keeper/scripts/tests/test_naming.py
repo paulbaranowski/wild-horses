@@ -75,6 +75,48 @@ class TestRepoDerivation(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("invalid repo name", r.stderr)
 
+class TestValidateRepoName(unittest.TestCase):
+    """Direct API-level tests for `validate_repo_name`.
+
+    The `--override` CLI path is a poor test surface for this validator
+    because `normalize_override` runs first and rewrites whitespace (incl.
+    tabs / newlines) to hyphens — so a `--override "foo\\tbar"` invocation
+    never reaches `validate_repo_name` with the tab intact. But other
+    callers (the alias-add path, the git-remote path, the alias-resolve
+    path) hit `validate_repo_name` directly with un-normalized input, and
+    those paths must reject control whitespace.
+    """
+
+    def test_rejects_tab(self) -> None:
+        # `repo alias list` uses `\t` as the TSV field separator; a tab
+        # inside `name` would silently corrupt the `remote\tsubpath\tname`
+        # contract and leak a mangled bucket identifier downstream.
+        from plan_keeper.errors import PlanKeeperCliError
+        from plan_keeper.naming import validate_repo_name
+        with self.assertRaises(PlanKeeperCliError) as ctx:
+            validate_repo_name("foo\tbar")
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_rejects_newline(self) -> None:
+        # A newline in the name would split into two output rows under
+        # `repo alias list`, silently duplicating the entry from a
+        # line-based consumer's view.
+        from plan_keeper.errors import PlanKeeperCliError
+        from plan_keeper.naming import validate_repo_name
+        with self.assertRaises(PlanKeeperCliError) as ctx:
+            validate_repo_name("foo\nbar")
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_rejects_carriage_return(self) -> None:
+        # `\r` is the sibling of `\n` for line-based tools (many split on
+        # either); same silent-line-duplication class of failure.
+        from plan_keeper.errors import PlanKeeperCliError
+        from plan_keeper.naming import validate_repo_name
+        with self.assertRaises(PlanKeeperCliError) as ctx:
+            validate_repo_name("foo\rbar")
+        self.assertEqual(ctx.exception.code, 2)
+
+
 class TestRepoFull(IsolatedHomeTestCase):
     def _init_git_repo(self, remote_url: str) -> None:
         """Initialize a minimal git repo in self.cwd with the given origin URL."""

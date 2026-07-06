@@ -105,6 +105,34 @@ class PlanKeeperConfig(TypedDict, total=False):
     jira: JiraSection
 
 
+class RepoAlias(TypedDict):
+    """One monorepo-subpath → groundcrew-alias entry in the global config.
+
+    ``remote`` is the git origin URL basename (the canonical repo name returned
+    by ``derive_repo`` step 3); ``subpath`` is the path from the git toplevel to
+    the project (empty string for a repo-root alias); ``name`` is the alias
+    plan-keeper routes to (becomes the ``~/plans/<name>/`` bucket and the
+    ``repository`` field on dispatch).
+    """
+
+    remote: str
+    subpath: str
+    name: str
+
+
+class PlanKeeperGlobalConfig(TypedDict, total=False):
+    """The ``~/plans/.plankeeper-global.json`` document.
+
+    Global plan-keeper state (parallel to the per-repo ``.plankeeper.json``).
+    ``aliases`` is the monorepo-subpath → groundcrew-alias mapping consumed by
+    ``derive_repo``. ``total=False`` so unknown top-level keys round-trip
+    untouched — newer clients may write keys this version doesn't know about
+    (``defaults``, ``hooks``, …) and the loader preserves them.
+    """
+
+    aliases: list[RepoAlias]
+
+
 class Blocker(TypedDict):
     """One denormalized prerequisite snapshot embedded in a ``CrewIssue``.
 

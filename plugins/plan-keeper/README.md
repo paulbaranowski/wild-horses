@@ -154,6 +154,7 @@ Every subcommand takes `--help`. Mutations are atomic (tmp file + `fsync` + `os.
 
 - `repo name [--override NAME] [--full]` — print the resolved `<repo>` folder name (`--full` emits `owner/name` from the git remote). See [Repo derivation](#repo-derivation).
 - `repo list` - list every repo across every root with per-state counts (`active`/`done`/`deferred`).
+- `repo alias add <remote>[/<subpath>] <name>` / `repo alias list` / `repo alias remove <name>` — register monorepo-subpath → groundcrew-alias mappings so a subdirectory of a monorepo gets its own `~/plans/<name>/` bucket and dispatches to the named groundcrew alias. See [Global config](global-config.md).
 
 #### Plan roots (`root`)
 
