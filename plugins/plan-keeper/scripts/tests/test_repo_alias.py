@@ -175,6 +175,30 @@ class TestRepoNameAliasResolution(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), "carrot-root")
 
+    def test_shape_valid_alias_with_invalid_name_warns_and_falls_back(self) -> None:
+        # A config that passes `_validate_shape` (all strings, all keys
+        # present) but whose alias `name` fails `validate_repo_name` (e.g.,
+        # contains `/` or is `..`) currently crashes `pk repo name` with an
+        # opaque exit-2 error. The malformed-config path already has warn-
+        # then-fallback semantics; an invalid alias name is the same failure
+        # class from the user's perspective and should get the same treatment.
+        # Otherwise a single bad row poisons every command that touches
+        # derive_repo — the "silent corruption survives 19 iterations"
+        # failure mode this codebase is allergic to.
+        self._init_monorepo()
+        deep = self._subdir("catalog", "flawless-inventory")
+        self._write_global_config({"aliases": [
+            {"remote": "carrot", "subpath": "catalog/flawless-inventory",
+             "name": "../oops"},
+        ]})
+        r = run_cli("repo", "name", home=self.home, cwd=deep)
+        # Fallback: bare remote, exit 0. derive_repo's contract is preserved.
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "carrot")
+        # But the user is told about the bad alias.
+        self.assertIn("warning", r.stderr.lower())
+        self.assertIn("alias", r.stderr.lower())
+
     def test_malformed_global_config_warns_on_stderr_and_falls_back(self) -> None:
         # A corrupted global config (the documented "silent corruption across
         # 19 iterations" failure class from CLAUDE.md) must NOT silently route

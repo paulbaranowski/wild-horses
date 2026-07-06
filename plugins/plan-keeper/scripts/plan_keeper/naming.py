@@ -162,9 +162,14 @@ def validate_repo_name(name: str) -> str:
     odd-shaped git remote URL, or a weird cwd basename. Empty / "." /
     ".." would resolve `PLAN_ROOT / repo` outside the intended dir;
     a slash- or backslash-containing name would compose multiple path
-    components and skip past `~/plans/`.
+    components and skip past `~/plans/`. Control whitespace (\\t / \\n /
+    \\r) would silently corrupt the TSV contract that ``repo alias list``
+    prints (`remote\\tsubpath\\tname` — a tab or newline inside `name`
+    duplicates fields or rows from a downstream consumer's view).
     """
     if not name or name in {".", ".."} or "/" in name or "\\" in name:
+        raise PlanKeeperCliError(f"invalid repo name: {name!r}", code=2)
+    if any(ch in name for ch in ("\t", "\n", "\r")):
         raise PlanKeeperCliError(f"invalid repo name: {name!r}", code=2)
     return name
 
@@ -362,7 +367,21 @@ def _maybe_alias(remote: str, cwd: Optional[str]) -> Optional[str]:
     name = _resolve_alias(aliases, remote, subpath)
     if name is None:
         return None
-    return validate_repo_name(name)
+    try:
+        return validate_repo_name(name)
+    except PlanKeeperCliError as e:
+        # A shape-valid config can still resolve to an alias name that
+        # fails validate_repo_name (e.g., "../oops" or "team/app" written
+        # in by hand). Treat that as the same failure class as a malformed
+        # config: warn on stderr and fall back to the bare remote so a
+        # single bad row doesn't poison every command that touches
+        # derive_repo. See the malformed-config branch above.
+        print(
+            f"warning: ignoring invalid alias name in global config ({e}); "
+            "falling back to bare remote",
+            file=sys.stderr,
+        )
+        return None
 
 
 _GITHUB_URL_RE = re.compile(

@@ -43,8 +43,17 @@ def load_global_config() -> PlanKeeperGlobalConfig:
         return {"aliases": []}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        raise PlanKeeperCliError(f"malformed global config at {path}: {e}", code=5)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+        # OSError covers IsADirectoryError, PermissionError, and other
+        # filesystem-side failures on read_text; UnicodeDecodeError catches
+        # non-UTF-8 bytes. Both classes raise the same
+        # PlanKeeperCliError(code=5) that JSON errors do so `_maybe_alias`
+        # can recover with its warn-then-fallback path instead of the
+        # command crashing with an opaque traceback. `from e` preserves
+        # the original cause.
+        raise PlanKeeperCliError(
+            f"malformed global config at {path}: {e}", code=5
+        ) from e
     _validate_shape(data, path)
     return data
 

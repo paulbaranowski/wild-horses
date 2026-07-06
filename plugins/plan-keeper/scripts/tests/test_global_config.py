@@ -157,6 +157,31 @@ class TestGlobalConfigLoader(IsolatedHomeTestCase):
             load_global_config()
         self.assertEqual(ctx.exception.code, 5)
 
+    def test_load_rejects_undecodable_utf8_bytes(self) -> None:
+        # `path.read_text(encoding="utf-8")` raises UnicodeDecodeError on
+        # non-UTF-8 bytes — a class of corruption distinct from bad JSON, so
+        # the loader must catch it and re-raise as the same PlanKeeperCliError
+        # code=5 that `_maybe_alias` already knows how to recover from.
+        # Otherwise `pk repo name` would crash instead of warning + falling
+        # back to the bare remote.
+        self.plans_root.mkdir(parents=True, exist_ok=True)
+        global_config_path().write_bytes(b"\xff\xfe\xfd not utf-8")
+        with self.assertRaises(PlanKeeperCliError) as ctx:
+            load_global_config()
+        self.assertEqual(ctx.exception.code, 5)
+
+    def test_load_rejects_when_config_path_is_a_directory(self) -> None:
+        # `read_text` raises IsADirectoryError (an OSError subclass) when the
+        # config path resolves to a directory — an edge case that can happen
+        # if a user creates it by mistake with `mkdir ~/plans/.plankeeper-...`.
+        # Same recovery contract as bad JSON: PlanKeeperCliError code=5 so
+        # `_maybe_alias` can warn and fall back.
+        self.plans_root.mkdir(parents=True, exist_ok=True)
+        global_config_path().mkdir()
+        with self.assertRaises(PlanKeeperCliError) as ctx:
+            load_global_config()
+        self.assertEqual(ctx.exception.code, 5)
+
     def test_load_rejects_alias_missing_required_key(self) -> None:
         # An entry that omits a required key is the same class of corruption
         # as a non-string value — reject at load time rather than letting

@@ -160,6 +160,25 @@ class TestRepoAliasAdd(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("subpath", r.stderr.lower())
 
+    def test_add_rejects_alias_name_with_tab(self) -> None:
+        # A tab inside the alias name would corrupt `repo alias list`'s
+        # `remote<TAB>subpath<TAB>name` TSV contract — downstream `cut -f3`
+        # would see two fields instead of one and silently pick up a
+        # mangled bucket identifier. The alias-add boundary must reject
+        # control whitespace before it ever reaches disk.
+        r = run_cli("repo", "alias", "add", "carrot/catalog", "maple\twest",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("name", r.stderr.lower())
+
+    def test_add_rejects_alias_name_with_newline(self) -> None:
+        # `\n` in the name splits into two output rows under `repo alias list`,
+        # silently duplicating the entry from a line-based consumer's view.
+        r = run_cli("repo", "alias", "add", "carrot/catalog", "maple\nwest",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("name", r.stderr.lower())
+
     def test_add_dup_warning_for_repo_root_alias_has_no_trailing_slash(self) -> None:
         # Format for the duplicate-name stderr warning when the existing entry
         # is a repo-root alias (subpath=""): the printed identifier should be
