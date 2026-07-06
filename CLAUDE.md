@@ -102,6 +102,10 @@ Five canonical triage roles mapped to `triage:`-prefixed Linear labels. See `doc
 
 Single-context (`CONTEXT.md` and `docs/adr/` at the repo root). See `docs/agents/domain.md`.
 
+### PR descriptions
+
+Architecture-first: lead with the one structural idea, not a file inventory. Before writing or revising any PR body, invoke the `pr-summary-writer` skill (`plugins/pr-summary-writer/skills/pr-summary-writer/SKILL.md`) - it is the single source of truth for the format; don't restate its rules elsewhere.
+
 ## Reference Marketplaces
 
 - Official (canonical, 119 plugins): <https://github.com/anthropics/claude-plugins-official>
