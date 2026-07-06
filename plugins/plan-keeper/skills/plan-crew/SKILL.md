@@ -186,6 +186,12 @@ If the user selected plans across several repos (an `--all` listing), issue one 
 each call is atomic over its own repo's batch. Always pass `--repo <repo>` from the JSON row rather than
 relying on the cwd, so the call targets the listed repo regardless of where you're running from.
 
+**Multiple roots:** when more than one distinct `root` appears in the listing, also pass `--root <root>`
+from the JSON row on every `add`/`drop` call (and group calls per `(root, repo)` pair, not just per
+repo). Without it, a repo that lives in two roots resolves against the default root, so the call can
+mutate the same-named plan in the wrong tree or fail with "plan not found" despite a matching queue row.
+On a single-root install, omit `--root` as before.
+
 ### 5. Re-show the queue
 
 Re-run step 1 and show the updated queue so the user sees the result.

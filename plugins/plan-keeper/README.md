@@ -133,6 +133,8 @@ The division of labor is asymmetric:
 
 Roots must be disjoint subtrees - `root add` rejects a path that nests inside or contains an existing root, so plans can never be double-counted. See [`repo-derivation.md`](repo-derivation.md) for the full root-selection rules.
 
+Groundcrew integration follows the union: `crew install` grants **every registered root** to the dispatch sandbox (`sandboxWritePaths`), so re-run it after `root add` (the command reminds you) or plans in the new root will be fetchable but not writable by dispatched agents.
+
 ## Command-line usage
 
 `scripts/plan_keeper_cli.py` is the canonical interface behind every skill — the skills never write to `~/plans/` directly. The same source file ships two ways: the plugin invokes `plan_keeper_cli.py` in place, while `brew install paulbaranowski/tap/plan-keeper` packages that exact source into the version-stable standalone `pk` binary (one source, two delivery vehicles — no second copy to drift). The skills call the in-tree script; groundcrew, which runs outside Claude Code, calls the brew binary.
@@ -195,8 +197,8 @@ See [Groundcrew integration](#groundcrew-integration):
 - `crew install [--config PATH] [--dry-run]` — wire `~/plans/*` into a groundcrew config.
 - `crew fetch` / `crew get ${id}` / `crew start ${id}` / `crew review ${id}` — the machine protocol groundcrew's config calls directly.
 - `crew queue list [--all | --repo NAME] [--root NAME]` - emit the queue (unioned across roots) as a JSON array of `{root, repo, file, status, agent, blocked, blockedBy}`.
-- `crew queue add [--repo NAME] [--agent claude] <file>...` — promote plans to `Status: todo` by bare filename (the current repo by default), minting the `Plan-keeper Ticket` and filling `Agent` where missing.
-- `crew queue drop [--repo NAME] <file>...` — dequeue plans back to `Status: backlog` by bare filename; never touches `Agent`.
+- `crew queue add [--repo NAME] [--root NAME] [--agent claude] <file>...` - promote plans to `Status: todo` by bare filename (the current repo by default), minting the `Plan-keeper Ticket` and filling `Agent` where missing. `--root` pins the tree; without it the repo routes like save (its one root, else the default).
+- `crew queue drop [--repo NAME] [--root NAME] <file>...` - dequeue plans back to `Status: backlog` by bare filename; never touches `Agent`.
 
 #### Maintenance
 

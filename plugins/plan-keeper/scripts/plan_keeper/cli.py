@@ -316,21 +316,29 @@ class CrewInstallArgs:
 class QueueAddArgs:
     files: list[str]
     repo: Optional[str]
+    root: Optional[str]
     agent: str
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "QueueAddArgs":
-        return cls(files=args.files, repo=args.repo, agent=args.agent)
+        return cls(
+            files=args.files, repo=args.repo,
+            root=getattr(args, "root", None), agent=args.agent,
+        )
 
 
 @dataclass
 class QueueDropArgs:
     files: list[str]
     repo: Optional[str]
+    root: Optional[str]
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "QueueDropArgs":
-        return cls(files=args.files, repo=args.repo)
+        return cls(
+            files=args.files, repo=args.repo,
+            root=getattr(args, "root", None),
+        )
 
 
 @dataclass
@@ -1215,15 +1223,19 @@ def cmd_upgrade(args) -> int:
 
 
 def _resolve_repo_plan_names(
-    files: list[str], repo_override: Optional[str]
+    files: list[str], repo_override: Optional[str],
+    root_override: Optional[str] = None,
 ) -> list[Path]:
-    """Resolve bare plan filenames against one repo's ~/plans/<repo>/ dir.
+    """Resolve bare plan filenames against one repo's `<root>/<repo>/` dir.
 
     Shared front half of `queue add` and `queue drop`: turns the user's bare
     filenames into validated absolute paths, all-or-nothing. `repo_override`
     (the `--repo` flag) names the repo; when None the repo is derived from the
-    cwd exactly like `queue list`'s default scope. `.md` is appended when
-    omitted.
+    cwd exactly like `queue list`'s default scope. `root_override` (the `--root`
+    flag) pins the root tree; when None it routes like save (the one root the
+    repo lives in, else the default). Pass it whenever the queue row being
+    acted on came from a non-default root, or a straddling repo's promote
+    would resolve against the wrong tree. `.md` is appended when omitted.
 
     Every name must land *directly* inside the repo dir (so a `../other-repo/
     x.md` name can't cross repos), point at an existing file, and carry
@@ -1231,9 +1243,7 @@ def _resolve_repo_plan_names(
     validated before any caller writes, so a typo can't half-mutate the queue.
     """
     repo = derive_repo(repo_override)
-    # Route the repo to its root (one root -> that; else default), so a bare
-    # filename resolves against the tree the plan actually lives in.
-    repo_root = repo_dir(repo, roots.route_root(repo).path).resolve()
+    repo_root = repo_dir(repo, roots.route_root(repo, root_override).path).resolve()
     resolved_paths: list[Path] = []
     for raw_name in files:
         name = raw_name if raw_name.endswith(".md") else raw_name + ".md"
@@ -1302,7 +1312,7 @@ def cmd_queue_add(args) -> int:
     is a harmless re-write.
     """
     a = QueueAddArgs.from_args(args)
-    resolved = _resolve_repo_plan_names(a.files, a.repo)
+    resolved = _resolve_repo_plan_names(a.files, a.repo, a.root)
     return _apply_queue_status(resolved, "todo", a.agent)
 
 
@@ -1316,7 +1326,7 @@ def cmd_queue_drop(args) -> int:
     re-write.
     """
     a = QueueDropArgs.from_args(args)
-    resolved = _resolve_repo_plan_names(a.files, a.repo)
+    resolved = _resolve_repo_plan_names(a.files, a.repo, a.root)
     return _apply_queue_status(resolved, "backlog", None)
 
 
@@ -1512,6 +1522,14 @@ def cmd_root_add(args) -> int:
     a = RootAddArgs.from_args(args)
     created = roots.add_root(a.name, a.path)
     print(created.path)
+    # The groundcrew sandbox grant (sandboxWritePaths) is baked into the crew
+    # config at install time, so a root added afterward isn't writable by
+    # dispatched agents until the config is re-generated.
+    print(
+        "note: if groundcrew is wired, re-run `pk crew install` so the new "
+        "root is granted to the dispatch sandbox",
+        file=sys.stderr,
+    )
     return 0
 
 
@@ -1964,6 +1982,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="repo to resolve filenames against (default: the current repo)",
     )
     p_queue_add.add_argument(
+        "--root",
+        help="root tree to resolve filenames in (default: the one root the "
+             "repo lives in, else the default root). Pass the queue row's "
+             "root when acting on a non-default-root plan.",
+    )
+    p_queue_add.add_argument(
         "--agent", default="claude",
         help="Agent to stamp on plans with none (default: claude); a plan "
              "that already names an Agent keeps it",
@@ -1981,6 +2005,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_queue_drop.add_argument(
         "--repo",
         help="repo to resolve filenames against (default: the current repo)",
+    )
+    p_queue_drop.add_argument(
+        "--root",
+        help="root tree to resolve filenames in (default: the one root the "
+             "repo lives in, else the default root). Pass the queue row's "
+             "root when acting on a non-default-root plan.",
     )
 
     # `move` relocates a plan (and its paired .json/.md) to another root,

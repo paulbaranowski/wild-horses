@@ -39,6 +39,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Optional, TextIO
 
+from plan_keeper import roots
 from plan_keeper.errors import PlanKeeperCliError
 from plan_keeper.groundcrew import _collect_and_mint_crew_issues
 from plan_keeper.storage import write_atomic
@@ -57,7 +58,31 @@ _SOURCE_NAME = "plankeeper"
 # without this grant a sandboxed agent can't read or write the plan files that
 # back this source. groundcrew expands the leading ``~`` at config load, so the
 # literal stays portable across machines instead of baking in an absolute home.
+# This constant is the single-root default the pure patchers fall back to;
+# ``run_crew_install`` derives the live list from the root registry via
+# ``sandbox_write_paths`` so every registered root is granted (fetch unions all
+# roots, so a dispatched plan can live in any of them).
 _SANDBOX_WRITE_PATHS = ["~/plans"]
+
+
+def sandbox_write_paths(home: Path) -> "list[str]":
+    """Every registered plan root as a sandbox write path.
+
+    Paths under ``home`` are emitted in ``~/...`` form so the config stays
+    portable across machines (groundcrew expands ``~`` at load); a root outside
+    home is emitted absolute. With no registry file this is exactly
+    ``["~/plans"]`` (the implicit default root), matching the historic literal.
+    ``home`` is passed in (not read off ``Path.home()`` here) so the derivation
+    is a pure function of the registry the tests can pin.
+    """
+    out: "list[str]" = []
+    for root in roots.load_roots():
+        path = root.path.expanduser()
+        try:
+            out.append("~/" + str(path.relative_to(home)))
+        except ValueError:
+            out.append(str(path))
+    return out
 
 # Directory holding the XDG groundcrew config, relative to home.
 _XDG_CONFIG_DIR_REL = Path(".config") / "groundcrew"
@@ -134,22 +159,27 @@ def _source_commands(pk: str) -> "dict[str, str]":
     }
 
 
-def _render_source_object(pk: str) -> dict:
+def _render_source_object(
+    pk: str, sandbox_paths: "Optional[list[str]]" = None
+) -> dict:
     """The shell-source as a plain dict, for the JSON patcher and JSON safety
-    valve."""
+    valve. ``sandbox_paths`` defaults to the single-root literal; the live
+    install passes the registry-derived list (see ``sandbox_write_paths``)."""
     return {
         "kind": "shell",
         "name": _SOURCE_NAME,
-        "sandboxWritePaths": list(_SANDBOX_WRITE_PATHS),
+        "sandboxWritePaths": list(sandbox_paths or _SANDBOX_WRITE_PATHS),
         "commands": _source_commands(pk),
     }
 
 
-def _render_source_region(pk: str) -> str:
+def _render_source_region(
+    pk: str, sandbox_paths: "Optional[list[str]]" = None
+) -> str:
     """The shell-source object injected into a TS ``sources:`` array."""
     cmds = _source_commands(pk)
     lines = ",\n".join(f'          {key}: "{val}"' for key, val in cmds.items())
-    paths = ", ".join(f'"{p}"' for p in _SANDBOX_WRITE_PATHS)
+    paths = ", ".join(f'"{p}"' for p in (sandbox_paths or _SANDBOX_WRITE_PATHS))
     return (
         f'      {{ kind: "shell", name: "{_SOURCE_NAME}",\n'
         f"        sandboxWritePaths: [{paths}],\n"
@@ -222,7 +252,9 @@ def _create_sources_array(config: str, body: str) -> Optional[str]:
     return config[:at] + block + config[at:]
 
 
-def build_patched_config(config: str, pk: str) -> Optional[str]:
+def build_patched_config(
+    config: str, pk: str, sandbox_paths: "Optional[list[str]]" = None
+) -> Optional[str]:
     """Patch the managed ``sources`` region into ``config``, returning the new text.
 
     ``sources`` is upserted into the active array when present, else a fresh
@@ -234,7 +266,7 @@ def build_patched_config(config: str, pk: str) -> Optional[str]:
     (a start sentinel with no matching end), where failing fast beats minting a
     duplicate ``sources`` key.
     """
-    sources_body = _render_source_region(pk)
+    sources_body = _render_source_region(pk, sandbox_paths)
     # _upsert_managed_region returns None for two distinct reasons: there is no
     # active `sources:` array to anchor in, or the array exists but its managed
     # region is malformed (a SENTINEL_START with no matching SENTINEL_END). Only
@@ -267,7 +299,9 @@ def looks_like_json(config: str) -> bool:
     return True
 
 
-def build_patched_json_config(config: str, pk: str) -> Optional[str]:
+def build_patched_json_config(
+    config: str, pk: str, sandbox_paths: "Optional[list[str]]" = None
+) -> Optional[str]:
     """Upsert the ``plankeeper`` shell source into a JSON config's ``sources``
     array, returning the re-serialized JSON (2-space indent, trailing newline).
 
@@ -294,7 +328,7 @@ def build_patched_json_config(config: str, pk: str) -> Optional[str]:
         data["sources"] = sources
     elif not isinstance(sources, list):
         return None  # malformed: `sources` is present but not an array
-    entry = _render_source_object(pk)
+    entry = _render_source_object(pk, sandbox_paths)
     for index, source in enumerate(sources):
         if isinstance(source, dict) and source.get("name") == _SOURCE_NAME:
             sources[index] = entry
@@ -304,18 +338,23 @@ def build_patched_json_config(config: str, pk: str) -> Optional[str]:
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
-def _managed_blocks_text(pk: str, is_json: bool = False) -> str:
+def _managed_blocks_text(
+    pk: str, is_json: bool = False,
+    sandbox_paths: "Optional[list[str]]" = None,
+) -> str:
     """The managed ``sources`` block, labeled, for the manual-paste safety valve.
 
     Format-matched to the config so the user pastes valid syntax: a JSON object
     for a JSON config, the sentinel-wrapped TS region otherwise.
     """
     if is_json:
-        obj = json.dumps(_render_source_object(pk), indent=2, ensure_ascii=False)
+        obj = json.dumps(
+            _render_source_object(pk, sandbox_paths), indent=2, ensure_ascii=False
+        )
         return f"# Add this object to your config's `sources` array:\n{obj}"
     return (
         f"# Paste inside your config's `sources: [` array:\n"
-        f"{SENTINEL_START}\n{_render_source_region(pk)}\n{SENTINEL_END}"
+        f"{SENTINEL_START}\n{_render_source_region(pk, sandbox_paths)}\n{SENTINEL_END}"
     )
 
 
@@ -374,13 +413,19 @@ def run_crew_install(
             code=2,
         )
     original = config_path.read_text(encoding="utf-8")
+    # The sandbox grant covers every registered root, not just ~/plans: crew
+    # fetch unions all roots, so a dispatched plan can live in any of them and
+    # the sandboxed agent must be able to read/write its file. Derived here
+    # (the composition root) and threaded into the pure patchers. Re-run
+    # `crew install` after `root add` to grant a newly registered root.
+    sandbox_paths = sandbox_write_paths(Path.home())
     # Decide JSON vs TS by content: a TS config never parses as JSON, a JSON one
     # always does — so each patcher only ever sees a config it can handle.
     is_json = looks_like_json(original)
     if is_json:
-        patched = build_patched_json_config(original, pk)
+        patched = build_patched_json_config(original, pk, sandbox_paths)
     else:
-        patched = build_patched_config(original, pk)
+        patched = build_patched_config(original, pk, sandbox_paths)
 
     if patched is None:
         # Safety valve: nowhere to put the source. Write nothing; hand the user
@@ -396,7 +441,10 @@ def run_crew_install(
                 f"`export default {{` object in {config_path}"
             )
         print(f"plan-keeper: {reason} — nothing was written.\n", file=out)
-        print(_managed_blocks_text(pk, is_json=is_json), file=out)
+        print(
+            _managed_blocks_text(pk, is_json=is_json, sandbox_paths=sandbox_paths),
+            file=out,
+        )
         raise PlanKeeperCliError(
             "config anchor not found; printed the managed block for manual "
             "paste (nothing written)",

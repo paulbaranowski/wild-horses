@@ -172,6 +172,28 @@ class TestCrossRootReads(RootTestCase):
         by_root = {row["root"] for row in json.loads(r.stdout)}
         self.assertEqual(by_root, {"default", "personal"})
 
+    def test_queue_add_root_flag_targets_straddling_repos_copy(self) -> None:
+        # Same-named plan in BOTH roots' copy of one repo. Without --root the
+        # promote resolves via route_root (straddle -> default); with --root
+        # personal it must mutate the personal file and leave default alone.
+        self._save("--topic", "Same", "--override", "both-repo")
+        self._save("--topic", "Same", "--override", "both-repo", "--root", "personal")
+        r = run_cli(
+            "crew", "queue", "add", f"{DATE}-same.md",
+            "--repo", "both-repo", "--root", "personal",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("/personal/plans/both-repo/", r.stdout.strip())
+        personal_text = (
+            self.personal / "both-repo" / f"{DATE}-same.md"
+        ).read_text(encoding="utf-8")
+        default_text = (
+            self.plans_root / "both-repo" / f"{DATE}-same.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Status: todo", personal_text)
+        self.assertNotIn("Status: todo", default_text)
+
     def test_crew_fetch_unions_agent_tagged_plans(self) -> None:
         # Tag one plan in each root; fetch must surface both.
         run_cli("crew", "queue", "add", f"{DATE}-work-item.md",
