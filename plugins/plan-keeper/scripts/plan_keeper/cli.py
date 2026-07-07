@@ -1652,6 +1652,18 @@ def cmd_move(args) -> int:
         shutil.move(str(src), str(dest))
         if src.resolve() == source.resolve():
             primary_dest = dest
+    # Opportunistic tidy-up: the move can leave the source dir (and, for a
+    # done/deferred plan, its repo dir above) empty in the old root. rmdir
+    # only removes EMPTY dirs, so anything still holding plans or a
+    # .plankeeper.json survives untouched. Belt-and-braces on top of
+    # roots._repo_dir_in_use (routing already ignores contentless dirs);
+    # this just keeps the old tree from accumulating husks.
+    for leftover in ((source.parent, source.parent.parent) if sub
+                     else (source.parent,)):
+        try:
+            leftover.rmdir()
+        except OSError:
+            break  # non-empty (or gone): its parent can't be empty either
     print(primary_dest if primary_dest is not None else dest_dir / source.name)
     return 0
 

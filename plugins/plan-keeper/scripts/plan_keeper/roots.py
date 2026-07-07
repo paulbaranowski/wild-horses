@@ -202,10 +202,39 @@ def route_root(repo: str, override: Optional[str] = None) -> Root:
     return default_root()
 
 
+def _repo_dir_in_use(repo_root: Path) -> bool:
+    """Whether a ``<root>/<repo>/`` dir actually holds plan content.
+
+    "In use" means at least one non-dotfile file at the top level, or inside the
+    ``done/`` / ``deferred/`` lifecycle subdirs (an archived-only repo still
+    lives in its root). A bare directory does NOT count: ``pk move`` (and manual
+    tidying) can leave an empty repo folder behind in the source root, and
+    counting it would fabricate a straddle that flips routing to the default
+    root forever after. A dotfile-only dir (just ``.plankeeper.json``) doesn't
+    count either - credentials are found by ``load_config``'s cross-root
+    fallback regardless of routing, so config placement must not steer it.
+    """
+    if not repo_root.is_dir():
+        return False
+    for entry in repo_root.iterdir():
+        if entry.name.startswith("."):
+            continue
+        if entry.is_file():
+            return True
+        if entry.is_dir() and entry.name in ("done", "deferred"):
+            if any(
+                p.is_file() and not p.name.startswith(".")
+                for p in entry.iterdir()
+            ):
+                return True
+    return False
+
+
 def roots_for_repo(repo: str) -> list[Root]:
-    """Every root that already has a ``<root>/<repo>/`` directory, in registry
-    order. Drives the save-routing rule and answers "where does this repo live"."""
-    return [root for root in load_roots() if (root.path / repo).is_dir()]
+    """Every root whose ``<root>/<repo>/`` dir is in use (see
+    ``_repo_dir_in_use``), in registry order. Drives the save-routing rule and
+    answers "where does this repo live"."""
+    return [root for root in load_roots() if _repo_dir_in_use(root.path / repo)]
 
 
 def iter_repo_dirs() -> Iterator[tuple[Root, Path]]:

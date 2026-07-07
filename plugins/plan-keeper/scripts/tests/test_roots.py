@@ -8,8 +8,8 @@ $HOME/.config/plan-keeper/config.json is naturally isolated too.
 Run all: python3 -m unittest discover -s plugins/plan-keeper/scripts/tests
 """
 import json
-import pathlib
 import unittest
+from pathlib import Path
 
 from support import IsolatedHomeTestCase, run_cli
 
@@ -35,6 +35,13 @@ class RootTestCase(IsolatedHomeTestCase):
                     stdin=body, home=self.home, cwd=self.cwd)
         self.assertEqual(r.returncode, 0, r.stderr)
         return r.stdout.strip()
+
+    def _setup_personal_root(self) -> Path:
+        """Register the standard second root and return its path (the shared
+        fixture for every multi-root test class)."""
+        personal = self.home / "personal" / "plans"
+        self._add_root("personal", str(personal))
+        return personal
 
 
 class TestRegistry(RootTestCase):
@@ -106,8 +113,7 @@ class TestRegistry(RootTestCase):
 class TestSaveRouting(RootTestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.personal = self.home / "personal" / "plans"
-        self._add_root("personal", str(self.personal))
+        self.personal = self._setup_personal_root()
 
     def test_zero_roots_routes_to_default(self) -> None:
         path = self._save("--topic", "New", "--override", "widget")
@@ -140,8 +146,7 @@ class TestSaveRouting(RootTestCase):
 class TestCrossRootReads(RootTestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.personal = self.home / "personal" / "plans"
-        self._add_root("personal", str(self.personal))
+        self.personal = self._setup_personal_root()
         self._save("--topic", "Work item", "--override", "work-repo")
         self._save("--topic", "Home item", "--override", "home-repo", "--root", "personal")
 
@@ -248,8 +253,7 @@ class TestCrewIdCrossRootCollision(RootTestCase):
 class TestMove(RootTestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.personal = self.home / "personal" / "plans"
-        self._add_root("personal", str(self.personal))
+        self.personal = self._setup_personal_root()
 
     def _ticket(self, path: str) -> str:
         r = run_cli("file-meta", "get", "--file", path, home=self.home, cwd=self.cwd)
@@ -287,14 +291,28 @@ class TestMove(RootTestCase):
         json_sib = md[:-3] + ".json"
         # Write a same-base .json next to the .md.
         (self.personal / "proj").mkdir(parents=True, exist_ok=True)
-        pathlib.Path(json_sib).write_text('{"tasks": []}\n', encoding="utf-8")
+        Path(json_sib).write_text('{"tasks": []}\n', encoding="utf-8")
         r = run_cli("move", "--file", md, "--root", "default",
                     home=self.home, cwd=self.cwd)
         self.assertEqual(r.returncode, 0, r.stderr)
-        base = pathlib.Path(r.stdout.strip()).stem
+        base = Path(r.stdout.strip()).stem
         moved_json = self.plans_root / "proj" / (base + ".json")
         self.assertTrue(moved_json.exists())
-        self.assertFalse(pathlib.Path(json_sib).exists())
+        self.assertFalse(Path(json_sib).exists())
+
+    def test_move_last_plan_does_not_leave_phantom_straddle(self) -> None:
+        # Repo lives in default only; move its only plan to personal. The
+        # emptied default dir must not count as "the repo lives here" - the
+        # next plain save has to follow the plan to personal, not fall back
+        # to default via a phantom straddle.
+        src = self._save("--topic", "Solo", "--override", "wander")
+        r = run_cli("move", "--file", src, "--root", "personal",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        path = self._save("--topic", "Next", "--override", "wander")
+        self.assertIn("/personal/plans/wander/", path)
+        # And move's tidy-up removed the emptied source dir outright.
+        self.assertFalse((self.plans_root / "wander").exists())
 
     def test_move_collision_fails_then_suffix(self) -> None:
         # Same-named plan already in the destination root.
