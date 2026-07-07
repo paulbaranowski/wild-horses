@@ -189,10 +189,13 @@ class IndexEntry(TypedDict):
 class QueueRow(TypedDict):
     """One row of ``crew queue list``'s JSON array, for the plan-crew UI.
 
+    ``root`` is the plan's registered root name (``"default"`` on a single-root
+    install), carried so the UI can disambiguate a repo that straddles two roots.
     ``status``/``agent`` are raw frontmatter values (``""`` when unset);
     ``blocked``/``blockedBy`` report dispatch-readiness.
     """
 
+    root: str
     repo: str
     file: str
     status: str

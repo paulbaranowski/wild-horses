@@ -70,3 +70,29 @@ Supported URL forms:
 Fallback when no remote or unparsable URL: `unknown/<cwd-basename>`. The fallback's `unknown/` prefix is intentional — it makes it visible in the ticket description that the derivation failed.
 
 The `--full` mode is read-only and idempotent. It does not affect or interact with the per-repo plans directory (which still uses the basename-only form from `repo` without `--full`).
+
+## Determine the root (multiple plan roots)
+
+A `<repo>` folder lives under a **root** tree. Most installs have exactly one root (`~/plans`, named `default`) and you can ignore this section entirely: reads see everything and saves land in the one root. Once a user has more than one root (e.g. a `work` and a `personal` tree, listed by `pk root list`), the `<root>` dimension sits _above_ `<repo>`.
+
+The division of labor is deliberate and asymmetric:
+
+- **Reads never need a root.** `plan-do`, `plan-list`, the queue, and ticket resolution **union across every root** automatically. When more than one root exists, each plan is labelled `root/...` so two same-named plans from different trees stay distinguishable. Never ask the user which root to read from; show them all. A user who wants to narrow can pass `--root <name>`.
+- **Only `plan-save` picks a root**, and it does so by routing, not by asking:
+  1. If the repo already has a folder in **exactly one** root, save there.
+  2. If the repo is new to **every** root, save to the **default** root.
+  3. If the repo **straddles two or more** roots, save to the **default** root (no prompt).
+
+### Root override in the invocation
+
+The user can name a root explicitly. Recognize a root when the named destination matches a configured root name (check `pk root list`):
+
+- "save this to personal" (and `personal` is a root) → pass `--root personal`; the repo is still auto-derived.
+- "save to personal/herds" (slash form) → pass `--root personal --override herds`.
+- "save to herds" where `herds` is **not** a root name → it's a repo, as before (`--override herds`), no `--root`.
+
+A bare token is a root **only** when it matches a registered root name; otherwise it is a repo, exactly as it was before multiple roots existed. When in doubt, resolve the token against `pk root list` first.
+
+### Fixing a mis-routed save
+
+If a save lands in the wrong root, relocate it with `pk move --file <path> --root <dest>` (or `--ticket <id>`). Move preserves the plan's id, its `done/`/`deferred/` subdir, and any paired `.json`/`.md` sibling. Do not hand-`mv` a plan across roots - that can orphan a paired file or resurrect an archived one.

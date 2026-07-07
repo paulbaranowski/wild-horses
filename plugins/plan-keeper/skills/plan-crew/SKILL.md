@@ -75,10 +75,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue list --rep
 
 **Run `crew queue list` fresh every time you reach this step — including on a re-invocation later in the same conversation, and again whenever step 5 sends you back here.** Never reprint an earlier queue from memory: plans get promoted, dequeued, or dispatched between turns, so a cached queue can be stale — and the user picks actions by the row numbers, so stale numbers target the wrong plan. The numbered queue you show must come from the output you just ran.
 
-Output is a JSON array of `{repo, file, status, agent, blocked, blockedBy}` objects (one per active plan).
-Repos are grouped in alphabetical order, and the plans within each repo arrive newest-first (by each
-plan's `Created:` stamp, falling back to its filename date). Preserve that order — don't re-sort. Group
-them for the user by `status` and present each ACTIONABLE plan with a global number:
+Output is a JSON array of `{root, repo, file, status, agent, blocked, blockedBy}` objects (one per active
+plan). The queue **unions every plan root**; each row's `root` names the tree it came from (`"default"`
+on a single-root install). Repos are grouped in registry-then-alphabetical order, and the plans within
+each repo arrive newest-first (by each plan's `Created:` stamp, falling back to its filename date).
+Preserve that order - don't re-sort. When more than one distinct `root` appears, show it in the row
+(e.g. `personal/journal · file`) so a repo that straddles two roots stays unambiguous; with a single
+root, omit it. Group them for the user by `status` and present each ACTIONABLE plan with a global number:
 
 Classify each plan by **both** its `status` and its `agent`, because `todo` alone does not mean
 dispatchable (see the dispatch-gates note in [Quick reference](#quick-reference)):
@@ -182,6 +185,12 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue drop --rep
 If the user selected plans across several repos (an `--all` listing), issue one `add`/`drop` per repo —
 each call is atomic over its own repo's batch. Always pass `--repo <repo>` from the JSON row rather than
 relying on the cwd, so the call targets the listed repo regardless of where you're running from.
+
+**Multiple roots:** when more than one distinct `root` appears in the listing, also pass `--root <root>`
+from the JSON row on every `add`/`drop` call (and group calls per `(root, repo)` pair, not just per
+repo). Without it, a repo that lives in two roots resolves against the default root, so the call can
+mutate the same-named plan in the wrong tree or fail with "plan not found" despite a matching queue row.
+On a single-root install, omit `--root` as before.
 
 ### 5. Re-show the queue
 

@@ -3,9 +3,10 @@ wiring, and ``main()``.
 
 This is the only module that imports from every domain module; the domain
 modules import only from leaf modules, never from ``cli``, so there is no
-import cycle. Direct ``PLAN_ROOT`` reads go through the ``storage`` module
-object (``storage.PLAN_ROOT``) so the constant has a single source of truth
-and a single patch point.
+import cycle. The plans tree is resolved through ``plan_keeper.roots`` (the
+registry over ``storage.PLAN_ROOT``): reads union across every root, and writes
+route to one via ``roots.route_root``. ``storage.PLAN_ROOT`` remains the single
+default-root source of truth and patch point.
 """
 import argparse
 import json
@@ -18,7 +19,7 @@ from datetime import date
 from pathlib import Path
 from typing import Callable, Mapping, Optional, cast
 
-from plan_keeper import __version__, storage
+from plan_keeper import __version__, roots
 from plan_keeper.config import (
     load_config,
     save_config,
@@ -49,6 +50,7 @@ from plan_keeper.groundcrew import (
 from plan_keeper.ids import (
     ensure_id,
     id_for_path,
+    repo_for_plan,
 )
 from plan_keeper.types import Kind, QueueRow, RepoAlias
 
@@ -94,13 +96,14 @@ from plan_keeper.storage import (
     emit_collision,
     find_unused_suffix,
     list_plans,
+    MAX_SUFFIX,
     plan_recency_key,
     plan_status,
     repo_dir,
-    resolve_ticket_to_path,
     state_subdir,
     write_atomic,
 )
+from plan_keeper.roots import resolve_ticket_to_path
 
 # Program name shown in --help/usage and error prefixes. Derived from the
 # invoked binary so the tool brands correctly in both of its homes: it reads
@@ -133,6 +136,7 @@ class RepoNameArgs:
 @dataclass
 class ListArgs:
     override: Optional[str]
+    root: Optional[str]
     all_repos: bool
     state: str
     status: Optional[str]
@@ -142,6 +146,7 @@ class ListArgs:
     def from_args(cls, args: argparse.Namespace) -> "ListArgs":
         return cls(
             override=args.override,
+            root=getattr(args, "root", None),
             all_repos=args.all_repos,
             state=args.state,
             status=getattr(args, "status", None),
@@ -152,6 +157,7 @@ class ListArgs:
 @dataclass
 class SaveArgs:
     override: Optional[str]
+    root: Optional[str]
     topic: Optional[str]
     date: Optional[str]
     extension: Optional[str]
@@ -163,6 +169,7 @@ class SaveArgs:
     def from_args(cls, args: argparse.Namespace) -> "SaveArgs":
         return cls(
             override=args.override,
+            root=getattr(args, "root", None),
             topic=args.topic,
             date=args.date,
             extension=args.extension,
@@ -310,31 +317,76 @@ class CrewInstallArgs:
 class QueueAddArgs:
     files: list[str]
     repo: Optional[str]
+    root: Optional[str]
     agent: str
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "QueueAddArgs":
-        return cls(files=args.files, repo=args.repo, agent=args.agent)
+        return cls(
+            files=args.files, repo=args.repo,
+            root=getattr(args, "root", None), agent=args.agent,
+        )
 
 
 @dataclass
 class QueueDropArgs:
     files: list[str]
     repo: Optional[str]
+    root: Optional[str]
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "QueueDropArgs":
-        return cls(files=args.files, repo=args.repo)
+        return cls(
+            files=args.files, repo=args.repo,
+            root=getattr(args, "root", None),
+        )
 
 
 @dataclass
 class QueueListArgs:
     all: bool
     repo: Optional[str]
+    root: Optional[str]
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "QueueListArgs":
-        return cls(all=args.all, repo=args.repo)
+        return cls(all=args.all, repo=args.repo, root=getattr(args, "root", None))
+
+
+@dataclass
+class MoveArgs:
+    file: Optional[str]
+    ticket: Optional[str]
+    root: str
+    on_collision: str
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "MoveArgs":
+        return cls(
+            file=args.file,
+            ticket=args.ticket,
+            root=args.root,
+            on_collision=args.on_collision,
+        )
+
+
+@dataclass
+class RootAddArgs:
+    name: str
+    path: str
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "RootAddArgs":
+        return cls(name=args.name, path=args.path)
+
+
+@dataclass
+class RootNameArg:
+    name: str
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "RootNameArg":
+        return cls(name=args.name)
 
 
 @dataclass
@@ -479,22 +531,61 @@ def _render_listing(items: list[tuple[str, Path]], raw_filter: Optional[str]) ->
     return 0
 
 
-def _all_repos_items(state: str) -> list[tuple[str, Path]]:
-    """Build the (display_name, path) list across every repo under ~/plans/.
+def _roots_to_show(root_arg: Optional[str]) -> list[roots.Root]:
+    """The roots a read command displays: the one named by ``--root`` (validated,
+    ``code 2`` on a typo), else every registered root. Whether the listing labels
+    each plan with its root follows from ``len(...) > 1`` (see the ``label`` flag
+    threaded through the item builders)."""
+    if root_arg:
+        return [roots.resolve_root_arg(root_arg)]
+    return roots.load_roots()
 
-    Repos are iterated alphabetically (same enumeration as cmd_repo_list —
-    sorted, dotfiles/non-dirs skipped); plans within a repo stay newest-first
-    (list_plans order). Display name is `repo/filename` so every line is
-    self-labeling. Repos with no plans in `state` contribute nothing.
+
+def _labelled(root: "roots.Root", tail: str, label: bool) -> str:
+    """Prefix ``tail`` with ``<root>/`` when a listing spans multiple roots.
+
+    Gating on ``label`` (true only when >1 root is being shown) is what keeps a
+    single-root install's output byte-identical to the pre-multi-root tool.
+    """
+    return f"{root.name}/{tail}" if label else tail
+
+
+def _all_repos_items(
+    state: str, roots_to_show: list["roots.Root"], label: bool
+) -> list[tuple[str, Path]]:
+    """The (display_name, path) list across every repo in every shown root.
+
+    Roots are visited in registry order, repos alphabetically within each, plans
+    newest-first within each repo (list_plans order). Display name is
+    ``[root/]repo/filename`` so every line is self-labeling; the ``root/`` prefix
+    appears only when the listing spans multiple roots. Repos with no plans in
+    ``state`` contribute nothing.
     """
     items: list[tuple[str, Path]] = []
-    if not storage.PLAN_ROOT.exists():
-        return items
-    for entry in sorted(storage.PLAN_ROOT.iterdir()):
-        if not entry.is_dir() or entry.name.startswith("."):
+    for root in roots_to_show:
+        if not root.path.exists():
             continue
-        for p in list_plans(entry.name, state):
-            items.append((f"{entry.name}/{p.name}", p))
+        for entry in sorted(root.path.iterdir()):
+            if not entry.is_dir() or entry.name.startswith("."):
+                continue
+            for p in list_plans(entry.name, state, root.path):
+                items.append((_labelled(root, f"{entry.name}/{p.name}", label), p))
+    return items
+
+
+def _single_repo_items(
+    repo: str, state: str, roots_to_show: list["roots.Root"], label: bool
+) -> list[tuple[str, Path]]:
+    """The (display_name, path) list for one repo, unioned across shown roots.
+
+    A repo can live in several roots (a deliberate straddle); this surfaces all
+    of them, newest-first within each root, labelled ``[root/]filename`` so two
+    same-named plans from different roots are distinguishable in the picker.
+    """
+    items: list[tuple[str, Path]] = []
+    for root in roots_to_show:
+        for p in list_plans(repo, state, root.path):
+            items.append((_labelled(root, p.name, label), p))
     return items
 
 
@@ -504,9 +595,13 @@ def cmd_list(args) -> int:
     # to cross-repo rather than the dir-name guess that used to point at a
     # nonexistent ~/plans/<cwd-basename>/ and print nothing. --all-repos and
     # --override are mutually exclusive — argparse rejects the combination
-    # (exit 2) before we get here.
+    # (exit 2) before we get here. Reads always union across roots; --root
+    # narrows the union to one, and the root label is shown only when the
+    # displayed union spans more than one root.
     a = ListArgs.from_args(args)
     raw_filter = a.status
+    roots_to_show = _roots_to_show(a.root)
+    label = len(roots_to_show) > 1
 
     if a.override:
         explicit: Optional[str] = validate_repo_name(normalize_override(a.override))
@@ -514,9 +609,9 @@ def cmd_list(args) -> int:
         explicit = _repo_from_git()
 
     if a.all_repos or explicit is None:
-        items = _all_repos_items(a.state)
+        items = _all_repos_items(a.state, roots_to_show, label)
     else:
-        items = [(p.name, p) for p in list_plans(explicit, a.state)]
+        items = _single_repo_items(explicit, a.state, roots_to_show, label)
     if a.group:
         return _render_grouped(items)
     return _render_listing(items, raw_filter)
@@ -524,8 +619,7 @@ def cmd_list(args) -> int:
 
 def cmd_repo_list(args) -> int:
     del args
-    if not storage.PLAN_ROOT.exists():
-        return 0
+
     def _count(d: Path) -> int:
         if not d.exists():
             return 0
@@ -533,9 +627,11 @@ def cmd_repo_list(args) -> int:
             1 for p in d.iterdir() if p.is_file() and not p.name.startswith(".")
         )
 
-    for entry in sorted(storage.PLAN_ROOT.iterdir()):
-        if not entry.is_dir() or entry.name.startswith("."):
-            continue
+    # Union every root (roots.iter_repo_dirs, registry order then alphabetical),
+    # labelling each repo `root/repo` only when more than one root exists so a
+    # single-root install's output is unchanged.
+    label = roots.multiple_roots()
+    for root, entry in roots.iter_repo_dirs():
         active = _count(entry)
         done = _count(entry / "done")
         deferred = _count(entry / "deferred")
@@ -548,7 +644,8 @@ def cmd_repo_list(args) -> int:
             parts.append(f"done={done}")
         if deferred:
             parts.append(f"deferred={deferred}")
-        print(f"{entry.name}: {' '.join(parts)}")
+        name = f"{root.name}/{entry.name}" if label else entry.name
+        print(f"{name}: {' '.join(parts)}")
     return 0
 
 
@@ -694,6 +791,11 @@ def cmd_repo_alias_remove(args) -> int:
 def cmd_save(args) -> int:
     a = SaveArgs.from_args(args)
     repo = derive_repo(a.override)
+    # Which root tree the plan lands in. Routing rule (roots.route_root): an
+    # explicit --root wins; else the one root this repo already lives in; else
+    # the default root (covers a brand-new repo and a straddling one). The id
+    # seed omits the root, so a later move keeps the plan's id stable.
+    root_path = roots.route_root(repo, a.root).path
 
     # Two distinct shapes, picked by whether --from-path is given:
     #
@@ -730,7 +832,7 @@ def cmd_save(args) -> int:
             raise PlanKeeperCliError(f"source not found: {source}", code=3)
         if not source.is_file():
             raise PlanKeeperCliError(f"source is not a file: {source}", code=3)
-        target = repo_dir(repo) / source.name
+        target = repo_dir(repo, root_path) / source.name
         ext = None  # --from-path never reaches the frontmatter-injection branch
     else:
         source = None
@@ -755,7 +857,7 @@ def cmd_save(args) -> int:
         date_str = (
             parse_date_arg(a.date) if a.date else date.today().isoformat()
         )
-        target = repo_dir(repo) / plan_filename(date_str, slug, ext, kind)
+        target = repo_dir(repo, root_path) / plan_filename(date_str, slug, ext, kind)
 
     if target.exists():
         if a.on_collision == "fail":
@@ -1280,15 +1382,19 @@ def cmd_upgrade(args) -> int:
 
 
 def _resolve_repo_plan_names(
-    files: list[str], repo_override: Optional[str]
+    files: list[str], repo_override: Optional[str],
+    root_override: Optional[str] = None,
 ) -> list[Path]:
-    """Resolve bare plan filenames against one repo's ~/plans/<repo>/ dir.
+    """Resolve bare plan filenames against one repo's `<root>/<repo>/` dir.
 
     Shared front half of `queue add` and `queue drop`: turns the user's bare
     filenames into validated absolute paths, all-or-nothing. `repo_override`
     (the `--repo` flag) names the repo; when None the repo is derived from the
-    cwd exactly like `queue list`'s default scope. `.md` is appended when
-    omitted.
+    cwd exactly like `queue list`'s default scope. `root_override` (the `--root`
+    flag) pins the root tree; when None it routes like save (the one root the
+    repo lives in, else the default). Pass it whenever the queue row being
+    acted on came from a non-default root, or a straddling repo's promote
+    would resolve against the wrong tree. `.md` is appended when omitted.
 
     Every name must land *directly* inside the repo dir (so a `../other-repo/
     x.md` name can't cross repos), point at an existing file, and carry
@@ -1296,7 +1402,7 @@ def _resolve_repo_plan_names(
     validated before any caller writes, so a typo can't half-mutate the queue.
     """
     repo = derive_repo(repo_override)
-    repo_root = repo_dir(repo).resolve()
+    repo_root = repo_dir(repo, roots.route_root(repo, root_override).path).resolve()
     resolved_paths: list[Path] = []
     for raw_name in files:
         name = raw_name if raw_name.endswith(".md") else raw_name + ".md"
@@ -1365,7 +1471,7 @@ def cmd_queue_add(args) -> int:
     is a harmless re-write.
     """
     a = QueueAddArgs.from_args(args)
-    resolved = _resolve_repo_plan_names(a.files, a.repo)
+    resolved = _resolve_repo_plan_names(a.files, a.repo, a.root)
     return _apply_queue_status(resolved, "todo", a.agent)
 
 
@@ -1379,7 +1485,7 @@ def cmd_queue_drop(args) -> int:
     re-write.
     """
     a = QueueDropArgs.from_args(args)
-    resolved = _resolve_repo_plan_names(a.files, a.repo)
+    resolved = _resolve_repo_plan_names(a.files, a.repo, a.root)
     return _apply_queue_status(resolved, "backlog", None)
 
 
@@ -1398,9 +1504,11 @@ def cmd_queue_list(args) -> int:
     queue reads most-recent-to-least-recent inside each repo block.
 
     Scope: by default only the current repo's plans (``derive_repo`` from the
-    cwd). ``--all`` lists every repo under ~/plans/; ``--repo NAME`` lists one
-    named repo (normalized like any repo override). The two flags are mutually
-    exclusive at the parser, so at most one of ``args.all``/``args.repo`` is set.
+    cwd). ``--all`` lists every repo across every root; ``--repo NAME`` lists one
+    named repo (normalized like any repo override), unioned across roots.
+    ``--root NAME`` narrows to one root. ``--all``/``--repo`` are mutually
+    exclusive at the parser. Each row carries the plan's ``root`` name so the
+    plan-crew UI can disambiguate a repo that straddles two roots.
     """
     a = QueueListArgs.from_args(args)
     if a.all:
@@ -1409,21 +1517,20 @@ def cmd_queue_list(args) -> int:
         scope = validate_repo_name(normalize_override(a.repo))
     else:
         scope = derive_repo(None)
+    root_filter = roots.resolve_root_arg(a.root).name if a.root else None
     rows: list[QueueRow] = []
-    if not storage.PLAN_ROOT.exists():
-        print("[]")
-        return 0
-    for repo_entry in sorted(storage.PLAN_ROOT.iterdir()):
-        if not repo_entry.is_dir() or repo_entry.name.startswith("."):
-            continue
+    for root, repo_entry in roots.iter_repo_dirs():
         if scope is not None and repo_entry.name != scope:
             continue
+        if root_filter is not None and root.name != root_filter:
+            continue
         # (recency_key, row) within this repo so plans sort newest-first per
-        # repo. Repos stay grouped in their outer alphabetical order; only the
-        # plans inside each one are ordered most-recent-to-least-recent.
-        # The repo index resolves each plan's Blocked-by refs so the row can
-        # report dispatch-readiness for the plan-crew UI.
-        index = _build_repo_index(repo_entry.name)
+        # (root, repo). Repos stay grouped in their outer registry-then-
+        # alphabetical order; only the plans inside each one are ordered
+        # most-recent-to-least-recent. The repo index resolves each plan's
+        # Blocked-by refs so the row can report dispatch-readiness for the
+        # plan-crew UI.
+        index = _build_repo_index(repo_entry)
         keyed: list[tuple[tuple[str, str], QueueRow]] = []
         for plan in sorted(repo_entry.iterdir()):
             if not plan.is_file() or not plan.name.endswith(".md"):
@@ -1440,6 +1547,7 @@ def cmd_queue_list(args) -> int:
                 continue
             _, unsatisfied = _blockers_for_plan(meta, index)
             row: QueueRow = {
+                "root": root.name,
                 "repo": repo_entry.name,
                 "file": plan.name,
                 "status": meta.get("Status", "").strip(),
@@ -1451,6 +1559,164 @@ def cmd_queue_list(args) -> int:
         keyed.sort(key=lambda kr: kr[0], reverse=True)
         rows.extend(row for _, row in keyed)
     print(json.dumps(rows))
+    return 0
+
+
+# --- move between roots -----------------------------------------------------
+
+
+def _paired_move_set(source: Path) -> list[Path]:
+    """Every file that must travel with ``source``: itself plus same-base-name
+    siblings (a task-list-builder ``.json`` + ``.md`` pair shares a base name).
+
+    "Same base name" is the filename with its final extension stripped, so
+    ``2026-…-foo.slug.json`` and ``2026-…-foo.slug.md`` move together while an
+    unrelated ``2026-…-bar.md`` stays. Sorted for deterministic output.
+    """
+    base = os.path.splitext(source.name)[0]
+    return sorted(
+        p for p in source.parent.iterdir()
+        if p.is_file() and os.path.splitext(p.name)[0] == base
+    )
+
+
+def _plan_move_targets(
+    dest_dir: Path, move_set: list[Path], on_collision: str
+) -> "tuple[Optional[list[tuple[Path, Path]]], Optional[Path]]":
+    """Compute (src, dest) pairs for a move, applying the collision policy.
+
+    Returns ``(pairs, None)`` to proceed, or ``(None, colliding_dest)`` when the
+    policy is ``fail`` and a target exists (the caller emits the structured
+    collision and exits 2). ``suffix`` finds one shared ``-N`` applied to every
+    file so a ``.json`` + ``.md`` pair stays matched; ``overwrite`` keeps the
+    base names and replaces. Raises ``code 4`` if no shared suffix is free.
+    """
+    names = [p.name for p in move_set]
+    if not any((dest_dir / n).exists() for n in names):
+        return [(p, dest_dir / p.name) for p in move_set], None
+    if on_collision == "fail":
+        first = next(dest_dir / n for n in names if (dest_dir / n).exists())
+        return None, first
+    if on_collision == "overwrite":
+        return [(p, dest_dir / p.name) for p in move_set], None
+    # suffix: one shared N across the whole (same-base-name) set.
+    for n in range(2, MAX_SUFFIX + 1):
+        cand = [
+            dest_dir / f"{os.path.splitext(p.name)[0]}-{n}{os.path.splitext(p.name)[1]}"
+            for p in move_set
+        ]
+        if all(not c.exists() for c in cand):
+            return list(zip(move_set, cand)), None
+    raise PlanKeeperCliError(
+        f"all -N variants up to -{MAX_SUFFIX} are taken in {dest_dir}", code=4
+    )
+
+
+def cmd_move(args) -> int:
+    """Relocate a plan (and its paired files) to a different root.
+
+    Locate by ``--file`` or ``--ticket``; ``--root`` names the destination root.
+    The plan's lifecycle subdir (``done/``/``deferred/``) is preserved, its
+    repo folder is created under the destination root if absent, and any paired
+    ``.json``/``.md`` siblings travel together with a shared collision suffix.
+    The id is unaffected (the id seed omits the root), so groundcrew keys and
+    ticket links stay stable. Prints the moved plan's new path.
+    """
+    a = MoveArgs.from_args(args)
+    source = resolve_ticket_to_path(a.ticket) if a.ticket else Path(a.file or "")
+    if not source.exists():
+        raise PlanKeeperCliError(f"plan file not found: {source}", code=3)
+    if not source.is_file():
+        raise PlanKeeperCliError(f"not a file: {source}", code=3)
+    dest_root = roots.resolve_root_arg(a.root)
+    repo = repo_for_plan(source)
+    # Preserve the lifecycle subdir: a plan in done/ or deferred/ lands in the
+    # same-named subdir under the destination repo folder, never at its root.
+    sub = source.parent.name if source.parent.name in TERMINAL_DIRS else None
+    dest_repo_root = repo_dir(repo, dest_root.path)
+    dest_dir = dest_repo_root / sub if sub else dest_repo_root
+    if source.parent.resolve() == dest_dir.resolve():
+        raise PlanKeeperCliError(
+            f"plan is already in root {dest_root.name!r} ({source.parent})",
+            code=2,
+        )
+    move_set = _paired_move_set(source)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    pairs, collision = _plan_move_targets(dest_dir, move_set, a.on_collision)
+    if pairs is None:
+        # Critical: emit before any file is touched, so a retry is safe.
+        emit_collision(collision)  # type: ignore[arg-type]  # non-None on fail
+        return 2
+    primary_dest: Optional[Path] = None
+    for src, dest in pairs:
+        shutil.move(str(src), str(dest))
+        if src.resolve() == source.resolve():
+            primary_dest = dest
+    # Opportunistic tidy-up: the move can leave the source dir (and, for a
+    # done/deferred plan, its repo dir above) empty in the old root. rmdir
+    # only removes EMPTY dirs, so anything still holding plans or a
+    # .plankeeper.json survives untouched. Belt-and-braces on top of
+    # roots._repo_dir_in_use (routing already ignores contentless dirs);
+    # this just keeps the old tree from accumulating husks.
+    for leftover in ((source.parent, source.parent.parent) if sub
+                     else (source.parent,)):
+        try:
+            leftover.rmdir()
+        except OSError:
+            break  # non-empty (or gone): its parent can't be empty either
+    print(primary_dest if primary_dest is not None else dest_dir / source.name)
+    return 0
+
+
+# --- root registry (`root` subcommands) -------------------------------------
+
+
+def cmd_root_list(args) -> int:
+    """Emit the root registry as a JSON array of {name, path, default}.
+
+    JSON (not a human table) because the plan-save/plan-do skills read it to map
+    a natural-language destination to a ``--root`` value. A single-root install
+    prints the one implicit default root.
+    """
+    del args
+    out = [
+        {"name": r.name, "path": str(r.path), "default": r.default}
+        for r in roots.load_roots()
+    ]
+    print(json.dumps(out))
+    return 0
+
+
+def cmd_root_add(args) -> int:
+    """Register a new root. Rejects a duplicate name or a path that overlaps an
+    existing root (nesting either way); creates the target dir. Prints the path."""
+    a = RootAddArgs.from_args(args)
+    created = roots.add_root(a.name, a.path)
+    print(created.path)
+    # The groundcrew sandbox grant (sandboxWritePaths) is baked into the crew
+    # config at install time, so a root added afterward isn't writable by
+    # dispatched agents until the config is re-generated.
+    print(
+        "note: if groundcrew is wired, re-run `pk crew install` so the new "
+        "root is granted to the dispatch sandbox",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def cmd_root_remove(args) -> int:
+    """Unregister a root (never the default or the last one). Prints its name."""
+    a = RootNameArg.from_args(args)
+    removed = roots.remove_root(a.name)
+    print(removed.name)
+    return 0
+
+
+def cmd_root_set_default(args) -> int:
+    """Make the named root the default (where new-repo saves route). Prints it."""
+    a = RootNameArg.from_args(args)
+    new_default = roots.set_default_root(a.name)
+    print(new_default.name)
     return 0
 
 
@@ -1649,6 +1915,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="active",
         help="which subset to list (default: active)",
     )
+    p_list.add_argument(
+        "--root",
+        help="narrow the listing to one registered root (default: union every "
+             "root). Plans are labelled 'root/...' whenever the listing spans "
+             "more than one root.",
+    )
     list_view = p_list.add_mutually_exclusive_group()
     list_view.add_argument(
         "--status",
@@ -1679,6 +1951,12 @@ def build_parser() -> argparse.ArgumentParser:
         "(or <date>-<slug>--<kind>.<ext> with --kind)",
     )
     p_save.add_argument("--override", help="explicit override for <repo>")
+    p_save.add_argument(
+        "--root",
+        help="explicit root to save into (a registered root name; see `root "
+             "list`). Default routing: the one root this repo already lives in, "
+             "else the default root.",
+    )
     p_save.add_argument(
         "--topic",
         help="topic string (will be slugified). Required for the heredoc shape; "
@@ -1891,6 +2169,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="list plans for this repo instead of the current one "
              "(normalized like any repo override)",
     )
+    p_queue_list.add_argument(
+        "--root",
+        help="narrow the queue to one registered root (default: union every root)",
+    )
 
     p_queue_add = crew_queue_sub.add_parser(
         "add",
@@ -1904,6 +2186,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_queue_add.add_argument(
         "--repo",
         help="repo to resolve filenames against (default: the current repo)",
+    )
+    p_queue_add.add_argument(
+        "--root",
+        help="root tree to resolve filenames in (default: the one root the "
+             "repo lives in, else the default root). Pass the queue row's "
+             "root when acting on a non-default-root plan.",
     )
     p_queue_add.add_argument(
         "--agent", default="claude",
@@ -1924,6 +2212,64 @@ def build_parser() -> argparse.ArgumentParser:
         "--repo",
         help="repo to resolve filenames against (default: the current repo)",
     )
+    p_queue_drop.add_argument(
+        "--root",
+        help="root tree to resolve filenames in (default: the one root the "
+             "repo lives in, else the default root). Pass the queue row's "
+             "root when acting on a non-default-root plan.",
+    )
+
+    # `move` relocates a plan (and its paired .json/.md) to another root,
+    # preserving the done/deferred lifecycle subdir. Locate by --file or
+    # --ticket; --root is the destination.
+    p_move = sub.add_parser(
+        "move",
+        help="move a plan (and paired files) to a different root, keeping its id",
+    )
+    move_target = p_move.add_mutually_exclusive_group(required=True)
+    move_target.add_argument("--file", help="path to the plan .md file to move")
+    move_target.add_argument(
+        "--ticket",
+        help="locate the plan by any of its id fields across all roots "
+             "(alternative to --file)",
+    )
+    p_move.add_argument(
+        "--root", required=True,
+        help="destination root (a registered root name; see `root list`)",
+    )
+    p_move.add_argument(
+        "--on-collision",
+        choices=["fail", "suffix", "overwrite"],
+        default="fail",
+        help="what to do if a target filename exists in the destination root "
+             "(default: fail with exit 2; suffix applies a shared -N to the "
+             "whole paired set)",
+    )
+
+    # `root` manages the plan-root registry (~/.config/plan-keeper/config.json):
+    # the named trees reads union over and saves route into.
+    p_root = sub.add_parser(
+        "root",
+        help="manage plan roots (add / list / remove / set-default)",
+    )
+    root_sub = p_root.add_subparsers(
+        dest="root_cmd", required=True, metavar="<subcommand>",
+        parser_class=HelpfulArgumentParser,
+    )
+    root_sub.add_parser("list", help="print the root registry as JSON")
+    p_root_add = root_sub.add_parser(
+        "add", help="register a new root (name -> path); rejects overlapping paths"
+    )
+    p_root_add.add_argument("name", help="root name (normalized like a repo override)")
+    p_root_add.add_argument("path", help="filesystem path for the root's tree")
+    p_root_remove = root_sub.add_parser(
+        "remove", help="unregister a root (not the default or the last one)"
+    )
+    p_root_remove.add_argument("name", help="root name to remove")
+    p_root_set_default = root_sub.add_parser(
+        "set-default", help="make a root the default (where new-repo saves route)"
+    )
+    p_root_set_default.add_argument("name", help="root name to make default")
 
     sub.add_parser(
         "upgrade",
@@ -2009,6 +2355,13 @@ _REPO_DISPATCH = {
     )(a),
 }
 
+_ROOT_DISPATCH = {
+    "list": cmd_root_list,
+    "add": cmd_root_add,
+    "remove": cmd_root_remove,
+    "set-default": cmd_root_set_default,
+}
+
 
 def main() -> int:
     parser = build_parser()
@@ -2020,8 +2373,10 @@ def main() -> int:
     # handlers, not here.
     dispatch = {
         "repo": lambda a: _dispatch(_REPO_DISPATCH, a.repo_cmd, "repo command")(a),
+        "root": lambda a: _dispatch(_ROOT_DISPATCH, a.root_cmd, "root command")(a),
         "list": cmd_list,
         "save": cmd_save,
+        "move": cmd_move,
         "file-meta": lambda a: _dispatch(
             _FILE_META_DISPATCH, a.file_meta_cmd, "file-meta command"
         )(a),

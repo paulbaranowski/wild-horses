@@ -9,7 +9,7 @@ import re
 import sys
 import tempfile
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 from plan_keeper.errors import PlanKeeperCliError
 from plan_keeper.frontmatter import parse_frontmatter
@@ -62,8 +62,15 @@ def write_atomic(path: Path, content: str) -> None:
         raise
 
 
-def repo_dir(repo: str) -> Path:
-    return PLAN_ROOT / repo
+def repo_dir(repo: str, root: "Optional[Path]" = None) -> Path:
+    """The ``<root>/<repo>/`` directory for a repo.
+
+    ``root`` is the tree the repo lives under; it defaults to ``PLAN_ROOT`` (the
+    single-tree behavior). Multi-root callers pass the routed root path (see
+    ``roots.route_root``) so a write lands in the right tree. Kept in ``storage``
+    (the leaf) as a pure path join - the routing *policy* lives in ``roots``.
+    """
+    return (root if root is not None else PLAN_ROOT) / repo
 
 
 def find_unused_suffix(target: Path) -> Path:
@@ -108,15 +115,19 @@ def state_subdir(repo_root: Path, state: str) -> Path:
     return repo_root / subdir
 
 
-def list_plans(repo: str, state: str) -> list[Path]:
+def list_plans(repo: str, state: str, root: Optional[Path] = None) -> list[Path]:
     """Return sorted plans for a repo in a given state, newest-first.
 
     Includes any non-dotfile in the directory regardless of extension —
     plan-save accepts arbitrary extensions (e.g. paired .json + .md from
     task-list-builder), so list must surface them. Dotfiles are excluded
     to keep the per-repo `.plankeeper.json` config out of the listing.
+
+    ``root`` selects the tree the repo lives under (defaults to ``PLAN_ROOT``);
+    multi-root read callers pass a specific root so the union can list the same
+    repo name across several trees.
     """
-    base = repo_dir(repo)
+    base = repo_dir(repo, root)
     if state == "active":
         d = base
     elif state in TERMINAL_DIRS:
@@ -130,62 +141,9 @@ def list_plans(repo: str, state: str) -> list[Path]:
     return files
 
 
-def find_plans_by_ticket(ticket_id: str) -> list[Path]:
-    """Return active (top-level) plans across all repos that carry `ticket_id`
-    in any of their id fields.
-
-    Global and system-agnostic: a literal match against the stored
-    `Plan-keeper Ticket` (`plan-<n>`), `Linear Ticket` (`ENG-123`), and
-    `Jira Ticket` values, so an id from any tracker resolves through one path.
-    `done/` and `deferred/` are excluded because every operation that resolves
-    by ticket (archive, status flip, push) acts on an active plan.
-    """
-    matches: list[Path] = []
-    if not PLAN_ROOT.exists():
-        return matches
-    for repo_entry in sorted(PLAN_ROOT.iterdir()):
-        if not repo_entry.is_dir() or repo_entry.name.startswith("."):
-            continue
-        for path in sorted(repo_entry.iterdir()):
-            if (not path.is_file() or path.name.startswith(".")
-                    or path.suffix != ".md"):
-                continue
-            try:
-                meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
-            except (PlanKeeperCliError, OSError, UnicodeDecodeError):
-                continue
-            stored = {
-                val for val in (
-                    (meta.get("Plan-keeper Ticket") or "").strip(),
-                    (meta.get("Linear Ticket") or "").strip(),
-                    (meta.get("Jira Ticket") or "").strip(),
-                ) if val
-            }
-            if ticket_id in stored:
-                matches.append(path)
-    return matches
-
-
-def resolve_ticket_to_path(ticket_id: str) -> Path:
-    """Resolve a ticket id to the single active plan that carries it.
-
-    0 matches -> code 3 (parallels archive's "plan not found"). >1 -> code 2
-    listing every candidate, so the caller can disambiguate with --file.
-    """
-    matches = find_plans_by_ticket(ticket_id)
-    if not matches:
-        raise PlanKeeperCliError(
-            f"no active plan with Ticket {ticket_id!r} found under {PLAN_ROOT}",
-            code=3,
-        )
-    if len(matches) > 1:
-        listing = "\n".join(f"  {p}" for p in matches)
-        raise PlanKeeperCliError(
-            f"ticket {ticket_id!r} matches {len(matches)} plans; "
-            f"disambiguate with --file:\n{listing}",
-            code=2,
-        )
-    return matches[0]
+# Ticket resolution (find_plans_by_ticket / resolve_ticket_to_path) now scans
+# every registered root, so it lives in ``plan_keeper.roots`` - keeping
+# ``storage`` a leaf that ``roots`` builds on, never the reverse.
 
 
 # Leading YYYY-MM-DD on a plan filename (e.g. "2026-06-02-foo.md").

@@ -65,6 +65,8 @@ Add `--override <name>` if you found one. The CLI handles repo derivation. With 
 
 **If stdout has lines**, display them as a numbered list — show each plan's status tag so the user sees what's queued vs. untriaged — and ask which one. If stderr carried a hidden-plans note, mention it below the list. Do not read or classify any files yet — classification only happens on the picked plan.
 
+**Multiple roots:** the list already unions every plan root. When more than one root is configured, each filename is prefixed `root/...` (e.g. `personal/2026-…-foo.md`); keep that prefix in the numbered list and carry it through to step 3's path resolution, so a plan in `personal` isn't confused with a same-named one in `default`.
+
 Example output to the user:
 
 ```text
@@ -85,7 +87,12 @@ The user replies with a number or a filename fragment. Resolve to a single filen
 
 ### 3. Read the picked plan
 
-Use the `Read` tool on `~/plans/<repo>/<filename>` (the full path is the repo dir from step 1 plus the picked filename). The content stays in conversation context for the rest of this skill and for whatever skill is invoked next.
+Resolve the picked token to a full path, then use the `Read` tool on it. Two cases:
+
+- **No `root/` prefix** (single-root install, or a `--root`-narrowed list): the path is `~/plans/<repo>/<filename>` - the repo dir from step 1 plus the picked filename.
+- **`root/` prefix present** (multi-root install): the prefix names the plan's root, and the path is `<root-path>/<repo>/<filename>`. Map the root name to its path with `root list` (`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" root list`, a JSON array of `{name, path, default}`). Never rebuild the path as `~/plans/<repo>/<filename>` - that silently reads the same-named plan from the wrong tree.
+
+The content stays in conversation context for the rest of this skill and for whatever skill is invoked next.
 
 ### 4. Classify the plan (tier 1: readiness)
 

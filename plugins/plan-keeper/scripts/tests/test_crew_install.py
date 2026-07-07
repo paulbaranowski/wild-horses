@@ -28,6 +28,7 @@ from plan_keeper.crew_install import (
     looks_like_json,
     resolve_config_path,
     run_crew_install,
+    sandbox_write_paths,
 )
 from plan_keeper.errors import PlanKeeperCliError
 
@@ -580,6 +581,75 @@ class TestCrewInstallBinaryPreference(unittest.TestCase):
 
     def test_literal_pk_when_neither_on_path(self):
         self.assertEqual(self._resolved_pk({}), "pk")
+
+
+class TestSandboxWritePaths(IsolatedHomeTestCase):
+    """The registry-derived sandbox grant (multi-root support in crew install).
+
+    Anchors the registry to the isolated $HOME by patching storage.PLAN_ROOT
+    (the registry file lives at PLAN_ROOT.parent/.config/plan-keeper/), same
+    seam every other in-process multi-root test uses.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._root_patch = patch.object(storage, "PLAN_ROOT", self.plans_root)
+        self._root_patch.start()
+
+    def tearDown(self) -> None:
+        self._root_patch.stop()
+        super().tearDown()
+
+    def _write_registry(self, roots: list) -> None:
+        cfg = self.home / ".config" / "plan-keeper" / "config.json"
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text(json.dumps({"roots": roots}), encoding="utf-8")
+
+    def test_implicit_default_yields_home_plans_literal(self):
+        # No registry file: exactly the historic single-root literal.
+        self.assertEqual(sandbox_write_paths(self.home), ["~/plans"])
+
+    def test_registered_roots_relativize_under_home(self):
+        self._write_registry([
+            {"name": "default", "path": str(self.home / "plans"), "default": True},
+            {"name": "personal", "path": str(self.home / "personal" / "plans")},
+        ])
+        self.assertEqual(
+            sandbox_write_paths(self.home),
+            ["~/plans", "~/personal/plans"],
+        )
+
+    def test_root_outside_home_stays_absolute(self):
+        self._write_registry([
+            {"name": "default", "path": str(self.home / "plans"), "default": True},
+            {"name": "vault", "path": "/srv/vault/plans"},
+        ])
+        self.assertEqual(
+            sandbox_write_paths(self.home),
+            ["~/plans", "/srv/vault/plans"],
+        )
+
+    def test_patchers_emit_the_supplied_paths(self):
+        # The pure patchers render whatever list the composition root hands
+        # them, in both config formats.
+        ts = build_patched_config(
+            BASE_CONFIG, PK, ["~/plans", "~/personal/plans"]
+        )
+        assert ts is not None
+        self.assertIn(
+            'sandboxWritePaths: ["~/plans", "~/personal/plans"]', ts
+        )
+        js = build_patched_json_config(
+            JSON_CONFIG, PK, ["~/plans", "~/personal/plans"]
+        )
+        assert js is not None
+        entry = next(
+            s for s in json.loads(js)["sources"]
+            if s.get("name") == "plankeeper"
+        )
+        self.assertEqual(
+            entry["sandboxWritePaths"], ["~/plans", "~/personal/plans"]
+        )
 
 
 if __name__ == "__main__":
