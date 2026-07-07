@@ -1,8 +1,0 @@
-{
-  "name": "groundcrew-setup",
-  "description": "Interactive setup wizard for groundcrew. Installs @clipboard-health/groundcrew via npm and eugene1g/agent-safehouse via Homebrew if missing, writes the clearance allowlist + env sidecar, writes the safehouse env sidecar, scaffolds ~/.config/groundcrew/config.ts conversationally, and runs crew doctor — with auto-discovery of GitHub repos (via gh) and local clones, best-effort seeding from any existing config, and smart-merge against existing rc-file exports. Replaces the install-then-edit-then-paste-exports first-run friction. Ships one command (/groundcrew-setup:setup); pass the clearance or safehouse argument to (re)run just that slice.",
-  "version": "2.0.0",
-  "author": {
-    "name": "Paul Baranowski"
-  }
-}
