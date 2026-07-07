@@ -24,7 +24,6 @@ Run the first three in order on a PR or feature branch — types (`/pyright:run-
 
 - **[codepath-visualizer](#codepath-visualizer)** — map a codebase's call chains into an interactive architecture diagram.
 - **[marketplace](#marketplace)** — scaffold a new Claude Code plugin marketplace with proper structure and schema.
-- **[groundcrew-setup](#groundcrew-setup)** — interactive first-run wizard that installs and configures groundcrew.
 
 **Smooth the agent workflow** — quality-of-life hooks and utilities.
 
@@ -153,20 +152,6 @@ Pull every configured git repo from `origin/<branch>` in one shot. Maintains a r
 ```
 
 See **[plugins/update-git-repos/README.md](plugins/update-git-repos/README.md)** for the config schema, bootstrap discovery, and dirty-tree action resolution.
-
-### [groundcrew-setup](plugins/groundcrew-setup/README.md)
-
-Interactive first-run wizard for groundcrew. Installs `@clipboard-health/groundcrew` (npm) and `eugene1g/agent-safehouse` (Homebrew) if missing, scaffolds `~/.config/groundcrew/config.ts` conversationally with GitHub repo auto-discovery, writes the `clearance` egress allowlist + env sidecar and the safehouse env sidecar, and runs `crew doctor`. Pass `clearance` or `safehouse` to re-run just that slice.
-
-```text
-/plugin install groundcrew-setup@wild-horses
-
-/groundcrew-setup:setup                 # full end-to-end wizard
-/groundcrew-setup:setup clearance       # re-run just the clearance slice
-/groundcrew-setup:setup safehouse       # re-run just the safehouse slice
-```
-
-See **[plugins/groundcrew-setup/README.md](plugins/groundcrew-setup/README.md)** for the discovery/install/render flow and the bundled scripts.
 
 ### [yes-no-questions-hook](plugins/yes-no-questions-hook)
 
