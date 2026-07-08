@@ -1,6 +1,6 @@
 ---
 name: autonomous
-description: Autonomously take an issue/ticket or a plan file from a link (or path) to an opened pull request, with no human in the loop. Hand it a Linear/GitHub/other issue URL, a path to a plan/spec file (e.g. ~/plans/<repo>/foo.md), or a plan already read into the conversation, and it decides everything itself: implements, tests, runs an independent sub-agent review to convergence, and opens a PR following the target repo's own conventions. Use when the user says "work this issue autonomously", "take this ticket end-to-end", "do this AFK", pastes an issue link, or points it at a plan file and asks you to just build it. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.
+description: Autonomously take an issue/ticket or a plan file from a link (or path) to an opened pull request, with no human in the loop. Hand it a Linear/GitHub/other issue URL, a path to a plan/spec file (e.g. ~/plans/<repo>/foo.md), or a plan already read into the conversation, and it decides everything itself: implements, tests, simplifies and reviews the diff (via `core:cb-review`, falling back to an independent sub-agent) to convergence, and opens a PR following the target repo's own conventions. Use when the user says "work this issue autonomously", "take this ticket end-to-end", "do this AFK", pastes an issue link, or points it at a plan file and asks you to just build it. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.
 user-invocable: true
 disable-model-invocation: false
 argument-hint: "<issue/ticket URL or path to a plan file>"
@@ -92,29 +92,52 @@ discipline that gets you there.
    diagnose the root cause and either fix or document in the Decisions section.
    Never skip a test, never disable it (e.g. `it.skip`), and never rely on CI to
    catch what should pass locally.
-3. Spawn a sub-agent to review your changes before opening the PR. Hand it the
-   diff plus the issue description, but not your reasoning or this conversation —
-   the value is in independent judgment. Ask it to flag bugs, regressions,
-   missing test coverage, security issues, and convention violations. Fix every
-   issue found, then re-run steps 2 and 3 on the updated diff; iterate until
-   tests pass and the review surfaces no remaining substantive findings. "Same
-   findings as last iteration" is **not** convergence — it means your fixes were
-   incomplete; fix harder. Document any disagreement with a specific finding in
-   the PR's Decisions section.
-4. Open a pull request. Follow the target repo's own PR conventions — read its
+3. Simplify the diff. Run the three-lens review bundled at `references/simplify.md`
+   (code reuse, code quality, efficiency). If the host supports sub-agents, launch
+   the three concurrently, handing each the full diff; otherwise perform them
+   inline. Aggregate their findings and fix each one directly - this is not a gate
+   and has no stop point. If a fix changes behavior, re-run step 2's tests before
+   continuing.
+4. Commit your work, then get an independent code review of the committed diff
+   before opening the PR, using `core:cb-review` when it is available this session
+   and an ad-hoc sub-agent otherwise. Commit first because `core:cb-review`
+   reviews the committed diff against the base branch, never the working tree - an
+   uncommitted change reads to it as an empty diff and the review silently no-ops.
+   Put the Task (the issue/plan) in the commit message so the review has spec
+   context to check against.
+   - **Primary - `core:cb-review`:** invoke `core:cb-review --effort high --report`
+     on the committed diff. It derives its own spec context from the branch (the
+     commit messages, and the PR body once one exists); do **not** feed it your
+     reasoning or this conversation - the value is in independent judgment.
+     `--report` mode is non-interactive and returns its findings with no gates.
+   - **Fallback - ad-hoc sub-agent** (only if `core:cb-review` is unavailable this
+     session): spawn a sub-agent to review your changes. Hand it the diff plus the
+     issue description, but not your reasoning or this conversation - the value is
+     in independent judgment. Ask it to flag bugs, regressions, missing test
+     coverage, security issues, and convention violations.
+
+   Either way, triage every finding yourself: fix the real, in-scope ones; dismiss
+   out-of-scope or false-positive ones, recording each dismissal with a one-line
+   reason in the PR's Decisions section. Then re-run steps 2 → 3 → 4 on the updated
+   diff; iterate until tests pass and the review surfaces no remaining substantive
+   findings. "Same findings as last iteration" is **not** convergence - it means
+   your fixes were incomplete; fix harder. Document any disagreement with a
+   specific finding in the PR's Decisions section.
+
+5. Open a pull request. Follow the target repo's own PR conventions — read its
    CLAUDE.md / AGENTS.md / CONTRIBUTING and recent `git log` for the title and
    description format. Link back to the source issue URL in the PR description,
    and include a "Decisions" section recording any ambiguous calls and the
    alternatives considered. **Don't** append a "Generated with Claude Code"
    footer and **don't** add any "Co-Authored-By: Claude" trailer.
-5. Tend the PR with `core:cb-babysit`: invoke it on the PR you just opened to
+6. Tend the PR with `core:cb-babysit`: invoke it on the PR you just opened to
    snapshot CI, auto-fix high-confidence failures, and reply to review threads.
-   Loop this 3 times — after each run, push any fixes back through steps 2–3,
+   Loop this 5 times - after each run, push any fixes back through steps 2–4,
    wait for review and CI to settle, then re-invoke `core:cb-babysit` (stop early
    once CI is green and the review threads are addressed). If `core:cb-babysit`
    is not available in this session, tend the PR manually instead: address CI
-   failures and review comments over the same 3 rounds, then stop.
-6. Stop. The human review loop happens out-of-session — **don't** keep polling
+   failures and review comments over the same 5 rounds, then stop.
+7. Stop. The human review loop happens out-of-session — **don't** keep polling
    the PR and **don't** refresh CI by hand.
 
 ## Task
