@@ -3,10 +3,12 @@ Vendored from core-utils `plugins/core/skills/cb-ship/references/simplify.md`
 as of 2026-07-08 (core plugin v3.16.1). This is a hand-maintained copy, not a
 live import: if the source changes, re-sync it here by hand so drift is a
 conscious re-vendor, not silent rot. Em-dashes in the source were normalized to
-spaced hyphens to match this repo's house style; content is otherwise faithful.
-The source's trailing "Validate fixes" section is intentionally omitted - the
-autonomous skill owns validation (its step 2 tests, re-run by the simplify step
-whenever a fix changes behavior).
+spaced hyphens to match this repo's house style. Two deliberate local changes on
+top of the source, to fold back in on any re-sync: the trailing "Validate fixes"
+section is omitted (the autonomous skill owns validation - its step 2 tests,
+re-run by the simplify step whenever a fix changes behavior), and the
+language-specific examples were extended with Python equivalents (the source's
+are JS/TS-only) since autonomous also reviews Python code.
 -->
 
 # Simplify
@@ -32,13 +34,13 @@ Review each change for hacky patterns:
 3. **Copy-paste with slight variation**: near-duplicate code blocks that should be unified with a shared abstraction. Exempt intentional, structurally-parallel repetition that aids readability - test arrange/act/assert blocks are the common case.
 4. **Leaky abstractions**: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries.
 5. **Premature abstraction (YAGNI)**: an interface, wrapper, or config object introduced for a single caller - inline it until a second caller justifies it.
-6. **Stringly-typed code**: using raw strings where constants, enums (string unions), or branded types already exist in the codebase.
+6. **Stringly-typed code**: using raw strings where constants, enums, or branded types already exist in the codebase (TS: a string-union or branded type; Python: an `Enum` or `Literal[...]`).
 7. **Unnecessary JSX nesting**: wrapper Boxes/elements that add no layout value. Check if inner component props (flexShrink, alignItems, etc.) already provide the needed behavior.
-8. **Nested conditionals**: ternary chains (`a ? x : b ? y : ...`), nested if/else, or nested switch 3+ levels deep. Flatten with early returns, guard clauses, a lookup table, or an if/else-if cascade.
+8. **Nested conditionals**: ternary chains (`a ? x : b ? y : ...`; Python: `x if a else y if b else z`), nested if/else, or nested switch/`match` 3+ levels deep. Flatten with early returns, guard clauses, a lookup table (a `dict` dispatch in Python), or an if/else-if cascade.
 9. **Unnecessary comments**: Delete comments explaining WHAT the code does (well-named identifiers already do that), narrating the change, or referencing the task/caller. Keep only non-obvious WHY (hidden constraints, subtle invariants, workarounds).
-10. **Defensive code on trusted inputs**: null/empty/type guards on inputs already guaranteed upstream (a validated DTO, the type system, a controller that already checked), optional chaining where the types guarantee presence, fallbacks that mask bugs (`?? ''`, `|| []`, `?? 0` on values that should never be absent), and try/catch that only logs and rethrows or guards an impossible state. Leave guards at genuine trust boundaries (raw request bodies, webhook payloads, third-party responses) and any error handling around real I/O, network, parsing, or payments - removing those changes behavior.
-11. **Type escapes**: `as any`, `: any`, `as unknown as X`, gratuitous non-null `!`, `@ts-ignore`/`@ts-expect-error` added to dodge a type error - replace with the real type when it is determinable from the call site, the imported type, or the shape in use; if it is not, leave it and flag it rather than deleting it (breaks the build) or swapping in a TODO (more clutter).
-12. **Dead & leftover code**: unreachable branches and stray debug statements (`console.log`/print-style output) - delete outright rather than commenting out; keep intentional logging that goes through the repo's logger. Unused exports/symbols with no remaining references are already covered by `.rules/common/typeScript.md`'s Dead Code Cleanup rule.
+10. **Defensive code on trusted inputs**: null/empty/type guards on inputs already guaranteed upstream (a validated DTO or Pydantic/dataclass model, the type system, a controller that already checked), optional chaining where the types guarantee presence, fallbacks that mask bugs (TS: `?? ''`, `|| []`, `?? 0`; Python: `x or ''`, `x or []`, `d.get(k, 0)` or `x if x is not None else 0` on values that should never be absent), and try/catch (Python: `try/except`, especially a bare `except Exception`) that only logs and rethrows or guards an impossible state. Leave guards at genuine trust boundaries (raw request bodies, webhook payloads, third-party responses) and any error handling around real I/O, network, parsing, or payments - removing those changes behavior.
+11. **Type escapes**: TS `as any`, `: any`, `as unknown as X`, gratuitous non-null `!`, `@ts-ignore`/`@ts-expect-error`, or Python `# type: ignore`, `typing.cast(...)`, a bare `Any` annotation, or `getattr`/`hasattr` - anything added to dodge a type error. Replace with the real type when it is determinable from the call site, the imported type, or the shape in use; if it is not, leave it and flag it rather than deleting it (breaks the build) or swapping in a TODO (more clutter).
+12. **Dead & leftover code**: unreachable branches and stray debug statements (`console.log`, Python `print(...)`/`breakpoint()`/`pdb.set_trace()`) - delete outright rather than commenting out; keep intentional logging that goes through the repo's logger (Python's `logging`). Unused exports/symbols with no remaining references are already covered by the repo's dead-code cleanup rules (e.g. `.rules/common/typeScript.md` for TS).
 
 ### 3: Efficiency review
 
