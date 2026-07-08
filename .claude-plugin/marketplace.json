@@ -20,7 +20,7 @@
     {
       "name": "autonomous",
       "source": "./plugins/autonomous",
-      "description": "An autonomous skill that drives a single issue/ticket link or plan file all the way to an opened pull request with no human in the loop: implements, tests, runs an independent sub-agent review to convergence, opens a PR following the target repo's conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.",
+      "description": "An autonomous skill that drives a single issue/ticket link or plan file all the way to an opened pull request with no human in the loop: implements, tests, simplifies and reviews the diff (via core:cb-review, falling back to an independent sub-agent) to convergence, opens a PR following the target repo's conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.",
       "author": {
         "name": "Paul Baranowski"
       },
