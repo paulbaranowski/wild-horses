@@ -1,6 +1,7 @@
 ---
 name: autonomous
-description: Autonomously take an issue/ticket or a plan file from a link (or path) to an opened pull request, with no human in the loop. Hand it a Linear/GitHub/other issue URL, a path to a plan/spec file (e.g. ~/plans/<repo>/foo.md), or a plan already read into the conversation, and it decides everything itself: implements, tests, simplifies and reviews the diff (via `core:cb-review`, falling back to an independent sub-agent) to convergence, and opens a PR following the target repo's own conventions. Use when the user says "work this issue autonomously", "take this ticket end-to-end", "do this AFK", pastes an issue link, or points it at a plan file and asks you to just build it. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.
+description: >-
+  Autonomously take an issue/ticket or a plan file from a link (or path) to an opened pull request, with no human in the loop. Hand it a Linear/GitHub/other issue URL, a path to a plan/spec file (e.g. ~/plans/repo/foo.md), or a plan already read into the conversation, and it decides everything itself: implements, tests, simplifies the diff, runs a bounded reasoning-gaps review (critical findings only, via harness agent prompts), reviews via core:cb-review (falling back to an independent sub-agent) to convergence, and opens a PR following the target repo's own conventions. Use when the user says work this issue autonomously, take this ticket end-to-end, do this AFK, pastes an issue link, or points it at a plan file and asks you to just build it. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.
 user-invocable: true
 disable-model-invocation: false
 argument-hint: "<issue/ticket URL or path to a plan file>"
@@ -98,7 +99,14 @@ discipline that gets you there.
    inline. Aggregate their findings and fix each one directly - this is not a gate
    and has no stop point. If a fix changes behavior, re-run step 2's tests before
    continuing.
-4. Commit your work, then get an independent code review of the committed diff
+4. Reasoning-gaps review. Run the bounded pass at `references/reasoning-gaps-review.md`
+   on changed source files only. It reuses the harness plugin's three specialist
+   agent prompts (types, implicit flow, structure) but triages to **critical
+   findings only**, plus important findings that are cross-dimension or on a
+   public API when the fix is a small local type/doc change. Fix every must-fix
+   item; defer the rest to the PR Decisions section. Skip entirely if the harness
+   plugin is unavailable. Re-run step 2's tests when a fix changes behavior.
+5. Commit your work, then get an independent code review of the committed diff
    before opening the PR, using `core:cb-review` when it is available this session
    and an ad-hoc sub-agent otherwise. Commit first because `core:cb-review`
    reviews the committed diff against the base branch, never the working tree - an
@@ -118,26 +126,26 @@ discipline that gets you there.
 
    Either way, triage every finding yourself: fix the real, in-scope ones; dismiss
    out-of-scope or false-positive ones, recording each dismissal with a one-line
-   reason in the PR's Decisions section. Then re-run steps 2 → 3 → 4 on the updated
+   reason in the PR's Decisions section. Then re-run steps 2 → 3 → 4 → 5 on the updated
    diff; iterate until tests pass and the review surfaces no remaining substantive
    findings. "Same findings as last iteration" is **not** convergence - it means
    your fixes were incomplete; fix harder. Document any disagreement with a
    specific finding in the PR's Decisions section.
 
-5. Open a pull request. Follow the target repo's own PR conventions — read its
+6. Open a pull request. Follow the target repo's own PR conventions — read its
    CLAUDE.md / AGENTS.md / CONTRIBUTING and recent `git log` for the title and
    description format. Link back to the source issue URL in the PR description,
    and include a "Decisions" section recording any ambiguous calls and the
    alternatives considered. **Don't** append a "Generated with Claude Code"
    footer and **don't** add any "Co-Authored-By: Claude" trailer.
-6. Tend the PR with `core:cb-babysit`: invoke it on the PR you just opened to
+7. Tend the PR with `core:cb-babysit`: invoke it on the PR you just opened to
    snapshot CI, auto-fix high-confidence failures, and reply to review threads.
-   Loop this 5 times - after each run, push any fixes back through steps 2–4,
+   Loop this 5 times - after each run, push any fixes back through steps 2–5,
    wait for review and CI to settle, then re-invoke `core:cb-babysit` (stop early
    once CI is green and the review threads are addressed). If `core:cb-babysit`
    is not available in this session, tend the PR manually instead: address CI
    failures and review comments over the same 5 rounds, then stop.
-7. Stop. The human review loop happens out-of-session — **don't** keep polling
+8. Stop. The human review loop happens out-of-session — **don't** keep polling
    the PR and **don't** refresh CI by hand.
 
 ## Task
