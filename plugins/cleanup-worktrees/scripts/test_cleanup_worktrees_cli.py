@@ -588,6 +588,10 @@ class AllowScriptTestCase(unittest.TestCase):
         cmd = 'python3 "/Users/x/.claude/plugins/cache/wild-horses/cleanup-worktrees/0.1.0/scripts/cleanup_worktrees_cli.py" scan'
         self.assertIn("allow", self.run_allow(cmd))
 
+    def test_approves_cursor_local_path(self) -> None:
+        cmd = 'python3 "/Users/x/.cursor/plugins/local/cleanup-worktrees/scripts/cleanup_worktrees_cli.py" scan'
+        self.assertIn("allow", self.run_allow(cmd))
+
     def test_approves_exact_plugin_root(self) -> None:
         # Production path: the real CLI under its real plugin root, matched by inode.
         plugin_root = CLI.parent.parent
