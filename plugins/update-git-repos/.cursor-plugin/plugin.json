@@ -1,0 +1,9 @@
+{
+  "name": "update-git-repos",
+  "description": "Pull every configured git repo from origin/<branch> in one shot. Includes a preToolUse hook that auto-approves invocations of the bundled update_repos_cli.py.",
+  "version": "1.3.3",
+  "author": {
+    "name": "Paul Baranowski"
+  },
+  "hooks": "hooks/cursor-hooks.json"
+}

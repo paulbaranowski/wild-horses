@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "postToolUse": [
+      {
+        "command": "bash \"./scripts/markdown-combo-fix.sh\"",
+        "matcher": "Write"
+      },
+      {
+        "command": "bash \"./scripts/pyright-post-edit.sh\"",
+        "matcher": "Write"
+      }
+    ]
+  }
+}

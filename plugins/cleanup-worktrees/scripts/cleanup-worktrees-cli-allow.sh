@@ -14,7 +14,8 @@ set -euo pipefail
 
 command -v jq >/dev/null 2>&1 || exit 0
 
-cmd=$(jq -r '.tool_input.command // empty')
+input=$(cat)
+cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 
 # Match: `python3` immediately followed by the cleanup-worktrees CLI as its
 # first positional argument, possibly wrapped in single or double quotes. The
@@ -61,7 +62,12 @@ esac
 # newline that somehow slipped past the case prefilter, etc.) can't ride
 # along after a matching prefix.
 approve() {
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"cleanup-worktrees CLI is plugin-approved"}}'
+    hook_event=$(echo "$input" | jq -r '.hook_event_name // empty')
+    if [[ "$hook_event" == "preToolUse" ]]; then
+        printf '%s\n' '{"permission":"allow","agent_message":"cleanup-worktrees CLI is plugin-approved"}'
+    else
+        printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"cleanup-worktrees CLI is plugin-approved"}}'
+    fi
 }
 
 # Extract the script path from one of three forms, so a legitimate plugin path
@@ -93,10 +99,14 @@ if [[ -n "$script" ]]; then
         fi
     else
         # No plugin-root env (direct / test invocation, where the file may not
-        # even exist on disk): fall back to the two known layout shapes.
+        # even exist on disk): fall back to known layout shapes. Each pattern
+        # anchors on a plugin-specific prefix so planted copies under /tmp or
+        # arbitrary clones cannot ride the substring.
         #   - dev:       /...checkout.../plugins/cleanup-worktrees/scripts/cleanup_worktrees_cli.py
+        #   - cursor:    /.../.cursor/plugins/local/cleanup-worktrees/scripts/cleanup_worktrees_cli.py
         #   - installed: /...cache/wild-horses/cleanup-worktrees/<version>/scripts/cleanup_worktrees_cli.py
         if [[ "$script" == *"/plugins/cleanup-worktrees/scripts/cleanup_worktrees_cli.py" \
+           || "$script" == *"/.cursor/plugins/local/cleanup-worktrees/scripts/cleanup_worktrees_cli.py" \
            || "$script" == *"/cache/wild-horses/cleanup-worktrees/"*"/scripts/cleanup_worktrees_cli.py" ]]; then
             approve
         fi

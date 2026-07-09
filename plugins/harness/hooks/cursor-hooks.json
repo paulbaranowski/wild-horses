@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "bash \"./scripts/task-list-cli-allow.sh\"",
+        "matcher": "Shell",
+        "timeout": 5
+      }
+    ]
+  }
+}

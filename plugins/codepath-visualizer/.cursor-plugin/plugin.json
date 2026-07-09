@@ -1,0 +1,8 @@
+{
+  "name": "codepath-visualizer",
+  "description": "Map and visualize codepaths in any codebase as an interactive architecture diagram.",
+  "version": "0.2.0",
+  "author": {
+    "name": "Paul Baranowski"
+  }
+}

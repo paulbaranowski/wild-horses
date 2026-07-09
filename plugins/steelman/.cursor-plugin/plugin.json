@@ -1,0 +1,8 @@
+{
+  "name": "steelman",
+  "description": "Argue the strongest good-faith case against the proposed changes in the current conversation or a named design/plan file.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Paul Baranowski"
+  }
+}

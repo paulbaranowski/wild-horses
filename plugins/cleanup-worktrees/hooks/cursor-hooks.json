@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "bash \"./scripts/cleanup-worktrees-cli-allow.sh\"",
+        "matcher": "Shell",
+        "timeout": 5
+      }
+    ]
+  }
+}

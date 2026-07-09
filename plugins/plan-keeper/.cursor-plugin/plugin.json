@@ -1,0 +1,9 @@
+{
+  "name": "plan-keeper",
+  "description": "A local task-management system built around plans in a ~/plans/<repo>/ tree: capture from conversation, route to the next step, archive, dispatch via groundcrew, and optionally export to Linear/Jira.",
+  "version": "6.11.1",
+  "author": {
+    "name": "Paul Baranowski"
+  },
+  "hooks": "hooks/cursor-hooks.json"
+}

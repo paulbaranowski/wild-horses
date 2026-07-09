@@ -1,0 +1,141 @@
+{
+  "name": "wild-horses",
+  "owner": {
+    "name": "Paul Baranowski"
+  },
+  "metadata": {
+    "description": "Code quality and harness-engineering plugins for Cursor and Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "harness",
+      "source": "plugins/harness",
+      "description": "feedback-blockers, reasoning-gaps, and setup commands for harness engineering. Analyze code for feedback-loop blockers, AI reasoning gaps, and set up the harness directory structure.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "autonomous",
+      "source": "plugins/autonomous",
+      "description": "An autonomous skill that drives a single issue/ticket link or plan file all the way to an opened pull request with no human in the loop.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "linting-hooks",
+      "source": "plugins/linting-hooks",
+      "description": "Post-edit hooks that auto-format .md files with Prettier + markdownlint and type-check .py files with pyright.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "marketplace",
+      "source": "plugins/marketplace",
+      "description": "Scaffold a plugin marketplace with proper structure, schema validation, and conventions.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "pyright",
+      "source": "plugins/pyright",
+      "description": "Run pyright on a Python codebase and fix its findings using a documented playbook of fix patterns.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "codepath-visualizer",
+      "source": "plugins/codepath-visualizer",
+      "description": "Map and visualize codepaths in any codebase as an interactive architecture diagram.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "documentation",
+      "license": "MIT"
+    },
+    {
+      "name": "plan-keeper",
+      "source": "plugins/plan-keeper",
+      "description": "Organize markdown plans in ~/plans/<repo>/. Save, route, archive, and optionally export to Linear/Jira.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "update-git-repos",
+      "source": "plugins/update-git-repos",
+      "description": "Pull every configured git repo from origin/<branch> in one shot.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "yes-no-questions-hook",
+      "source": "plugins/yes-no-questions-hook",
+      "description": "Reminds the agent to pose decision questions as numbered yes/no questions.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "steelman",
+      "source": "plugins/steelman",
+      "description": "Argue the strongest good-faith case against the proposed changes in the current conversation or a named design/plan file.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "pr-status-hook",
+      "source": "plugins/pr-status-hook",
+      "description": "Stop hook that reports PR / push / dirty-tree state at the end of every turn from real git/gh state.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "pr-summary-writer",
+      "source": "plugins/pr-summary-writer",
+      "description": "Write architecture-first pull-request descriptions.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "cleanup-worktrees",
+      "source": "plugins/cleanup-worktrees",
+      "description": "Reclaim disk space from stale git worktrees.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    }
+  ]
+}

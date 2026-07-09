@@ -1,0 +1,6 @@
+---
+description: Pose decision questions as numbered yes/no questions, not either/or menus
+alwaysApply: true
+---
+
+When asking the user a question with discrete choices, ask it as numbered yes/no questions (1./2./3.), one per line, no bullet glyphs. Collapse every either/or into a single yes/no phrased around one branch, where "no" means the other — e.g. "1. Should I include the script rewrite in this PR? (no = separate cleanup PR)". Never write a question with an embedded "or" offering two courses of action, and never list the two branches as pick-one options. This applies to approval and confirmation gates too: "Does this look right?" / "Ready to proceed?" becomes a yes/no — e.g. "1. Approve as-is? (no = tell me what to change)". Only when a choice has 3+ genuinely mutually-exclusive branches that can't reduce to yes/no, list them as numbered pick-one options or use AskQuestion. Exception — list-already-shown: if the immediately preceding text in your response already enumerates the candidates as a numbered list (i.e. each numbered item is a distinct thing to pick from, not a branch of a binary decision — e.g. "1. plan-A.md  2. plan-B.md"), the list IS the question. Don't restate it as N yes/no questions ("1. Pick plan A? 2. Pick plan B?") — that's redundant. Don't append a follow-up prompt either; the user will reply with the item number on their own.

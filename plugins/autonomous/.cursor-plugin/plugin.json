@@ -1,0 +1,8 @@
+{
+  "name": "autonomous",
+  "description": "An autonomous skill that drives a single issue/ticket link or plan file all the way to an opened pull request with no human in the loop.",
+  "version": "1.2.0",
+  "author": {
+    "name": "Paul Baranowski"
+  }
+}

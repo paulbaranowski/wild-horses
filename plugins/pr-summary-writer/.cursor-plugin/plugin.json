@@ -1,0 +1,8 @@
+{
+  "name": "pr-summary-writer",
+  "description": "Write architecture-first pull-request descriptions.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Paul Baranowski"
+  }
+}

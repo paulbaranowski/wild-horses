@@ -13,7 +13,8 @@ set -euo pipefail
 
 command -v jq >/dev/null 2>&1 || exit 0
 
-cmd=$(jq -r '.tool_input.command // empty')
+input=$(cat)
+cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 
 # Match: `python3` immediately followed by the update-git-repos CLI as its
 # first positional argument, possibly wrapped in single or double quotes. The
@@ -53,5 +54,10 @@ esac
 # along after a matching prefix.
 if [[ "$cmd" =~ ^python3[[:space:]]+[\"\']?([^\"\'[:space:]]+/scripts/update_repos_cli\.py)[\"\']?([[:space:]].*)?$ ]] \
    && [[ "${BASH_REMATCH[1]}" == *"/update-git-repos/"* ]]; then
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"update-git-repos CLI is plugin-approved"}}'
+    hook_event=$(echo "$input" | jq -r '.hook_event_name // empty')
+    if [[ "$hook_event" == "preToolUse" ]]; then
+        printf '%s\n' '{"permission":"allow","agent_message":"update-git-repos CLI is plugin-approved"}'
+    else
+        printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"update-git-repos CLI is plugin-approved"}}'
+    fi
 fi

@@ -20,7 +20,8 @@ set -euo pipefail
 
 command -v jq >/dev/null 2>&1 || exit 0
 
-cmd=$(jq -r '.tool_input.command // empty')
+input=$(cat)
+cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 
 # Match: `python3` immediately followed by a plan-keeper CLI as its first
 # positional argument, possibly wrapped in single or double quotes. The path
@@ -51,5 +52,10 @@ cmd=$(jq -r '.tool_input.command // empty')
 # can't blur into each other.
 if [[ "$cmd" =~ ^python3[[:space:]]+[\"\']?([^\"\'[:space:]]+/scripts/(plan_keeper_cli|refresh_worktree_cli)\.py)[\"\']?([[:space:]]|$) ]] \
    && [[ "${BASH_REMATCH[1]}" == *"/plan-keeper/"* ]]; then
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"plan-keeper CLI is plugin-approved"}}'
+    hook_event=$(echo "$input" | jq -r '.hook_event_name // empty')
+    if [[ "$hook_event" == "preToolUse" ]]; then
+        printf '%s\n' '{"permission":"allow","agent_message":"plan-keeper CLI is plugin-approved"}'
+    else
+        printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"plan-keeper CLI is plugin-approved"}}'
+    fi
 fi

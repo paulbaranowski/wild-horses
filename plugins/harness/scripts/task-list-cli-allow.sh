@@ -18,7 +18,8 @@ set -euo pipefail
 
 command -v jq >/dev/null 2>&1 || exit 0
 
-cmd=$(jq -r '.tool_input.command // empty')
+input=$(cat)
+cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 
 # Match: command starts with `python3 ` (with whitespace), AND contains
 # `/skills/task-list-runner/task_list_cli.py` as a literal substring.
@@ -33,5 +34,10 @@ cmd=$(jq -r '.tool_input.command // empty')
 # of one regex with end-anchor) handles Claude Code's defensive
 # path-quoting.
 if [[ "$cmd" =~ ^python3[[:space:]] ]] && [[ "$cmd" == *"/skills/task-list-runner/task_list_cli.py"* ]]; then
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"task-list-runner CLI is plugin-approved"}}'
+    hook_event=$(echo "$input" | jq -r '.hook_event_name // empty')
+    if [[ "$hook_event" == "preToolUse" ]]; then
+        printf '%s\n' '{"permission":"allow","agent_message":"task-list-runner CLI is plugin-approved"}'
+    else
+        printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"task-list-runner CLI is plugin-approved"}}'
+    fi
 fi

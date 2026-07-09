@@ -1,0 +1,9 @@
+{
+  "name": "linting-hooks",
+  "description": "Post-edit hooks that run Prettier + markdownlint on .md edits and pyright on .py edits. Use /linting-hooks:install to set up dependencies per machine.",
+  "version": "1.0.2",
+  "author": {
+    "name": "Paul Baranowski"
+  },
+  "hooks": "hooks/cursor-hooks.json"
+}

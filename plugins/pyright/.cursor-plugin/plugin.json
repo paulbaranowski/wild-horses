@@ -1,0 +1,8 @@
+{
+  "name": "pyright",
+  "description": "Run pyright on a Python codebase and fix the errors it finds via the harness task-list pipeline.",
+  "version": "1.12.1",
+  "author": {
+    "name": "Paul Baranowski"
+  }
+}
