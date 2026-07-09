@@ -12,12 +12,13 @@ The plugins group into four themes, following the lifecycle of working on code w
 - **[harness](#harness)** — diagnose where an agent would misread your code (`/harness:reasoning-gaps`) or couldn't tell whether it succeeded (`/harness:feedback-blockers`), then build, run, and inspect a remediation task list.
 - **[linting-hooks](#linting-hooks)** — auto-lint Markdown and Python the moment Claude edits them.
 
-Run the first three in order on a PR or feature branch — types (`/pyright:run-and-fix`), then comprehension (`/harness:reasoning-gaps`), then verification (`/harness:feedback-blockers`). Each asks a harder question than the last.
+Run comprehension, then types, then observability on a PR or feature branch — `/harness:reasoning-gaps`, then `/pyright:run-and-fix` (Python), then `/harness:feedback-blockers`. Each asks a harder question than the last. Install **[linting-hooks](#linting-hooks)** once so Markdown and Python edits auto-lint as you go.
 
 **Plan and ship work** — turn an idea into a merged PR.
 
-- **[plan-keeper](#plan-keeper)** — save, route, and archive markdown plans in `~/plans/<repo>/` (also a standalone Homebrew CLI).
+- **[plan-keeper](#plan-keeper)** — capture, route, queue, and archive markdown plans in `~/plans/<repo>/` (also a standalone Homebrew CLI).
 - **[autonomous](#autonomous)** — drive a single issue or plan file all the way to an opened PR, with no human in the loop.
+- **[pr-summary-writer](#pr-summary-writer)** — write architecture-first PR descriptions that state the one structural idea up front.
 - **[steelman](#steelman)** — argue the strongest good-faith case _against_ a plan before you commit to it.
 
 **Understand and scaffold** — see what's there, or stand up something new.
@@ -28,6 +29,7 @@ Run the first three in order on a PR or feature branch — types (`/pyright:run-
 **Smooth the agent workflow** — quality-of-life hooks and utilities.
 
 - **[update-git-repos](#update-git-repos)** — pull every configured git repo from `origin` in one shot.
+- **[cleanup-worktrees](#cleanup-worktrees)** — find and remove stale git worktrees that are safe to delete.
 - **[yes-no-questions-hook](#yes-no-questions-hook)** — nudge the agent to pose decisions as numbered yes/no questions.
 - **[pr-status-hook](#pr-status-hook)** — report PR / push / dirty-tree state at the end of every turn.
 
@@ -35,7 +37,7 @@ Run the first three in order on a PR or feature branch — types (`/pyright:run-
 
 ### [pyright](plugins/pyright/README.md)
 
-Run pyright on a Python codebase and fix what it finds, using a documented playbook of fix patterns instead of ad-hoc guesses. Three fix intents (`silence`, `improve`, `bugs-only`) shape how aggressively to refactor. Parallelizes across agents for codebases with ≥20 errors. Hands off cleanly to `/harness:reasoning-gaps`.
+Run pyright on a Python codebase and fix what it finds, using a documented playbook of fix patterns instead of ad-hoc guesses. Three fix intents (`silence`, `improve`, `bugs-only`) shape how aggressively to refactor. Parallelizes across agents for codebases with ≥20 errors. In the recommended workflow, run after `/harness:reasoning-gaps` and before `/harness:feedback-blockers`.
 
 ```text
 /plugin install pyright@wild-horses
@@ -86,7 +88,7 @@ Scaffold a new Claude Code plugin marketplace with proper structure, schema vali
 
 See **[plugins/marketplace/README.md](plugins/marketplace/README.md)** for the scaffolding flow.
 
-### [codepath-visualizer](plugins/codepath-visualizer/README.md)
+### [codepath-visualizer](plugins/codepath-visualizer/CLAUDE.md)
 
 Map and visualize codepaths in any codebase as an interactive architecture diagram. `/codepath-mapper` walks entry points and extracts call chains into a structured JSON file; `/codepath-visualizer` renders the resulting graph as an interactive HTML diagram you can explore in the browser. Scope the mapper to a user-facing flow (e.g. "invite new user") to produce a focused diagram of just that path.
 
@@ -99,25 +101,25 @@ Map and visualize codepaths in any codebase as an interactive architecture diagr
 /codepath-visualizer --select
 ```
 
-See **[plugins/codepath-visualizer/README.md](plugins/codepath-visualizer/README.md)** for the JSON schema, scoping behavior, and rendering options.
+See **[plugins/codepath-visualizer/CLAUDE.md](plugins/codepath-visualizer/CLAUDE.md)** for the mapper/visualizer split and **[codepaths-schema.md](plugins/codepath-visualizer/codepaths-schema.md)** for the JSON schema, scoping behavior, and rendering options.
 
 ### [plan-keeper](plugins/plan-keeper/README.md)
 
-Three skills for organizing markdown plans in `~/plans/<repo>/`. `plan-save` captures the latest plan from the current conversation into a dated file; `plan-do` lists saved plans and routes the picked one to the right next skill (brainstorming / writing-plans / executing-plans / task-list-builder) based on whether it reads as an idea, spec, sequential impl plan, or task-list-shaped plan; `plan-done` archives a completed plan into `~/plans/<repo>/done/` with a completion stamp. All three are model-invoked by description — no slash command required.
+Nine skills for the plan lifecycle in `~/plans/<repo>/` — list, save, route, split, archive, edit frontmatter, manage the groundcrew queue, and file to Linear/Jira. `plan-save` captures the latest plan from the current conversation; `plan-do` lists saved plans and routes the picked one to the right next skill based on whether it reads as an idea, spec, or execution-ready plan; `plan-done` archives a completed plan into `~/plans/<repo>/done/` with a completion stamp. All nine are model-invoked by description — no slash command required.
 
 ```text
 /plugin install plan-keeper@wild-horses
 
 "save this plan"
-"do a plan from herds"
+"do a plan from my saved plans"
 "I'm done with the plan"
 ```
 
-See **[plugins/plan-keeper/README.md](plugins/plan-keeper/README.md)** for the three-skill pipeline, the shared `~/plans/<repo>/` tree, and the bundled CLI.
+See **[plugins/plan-keeper/README.md](plugins/plan-keeper/README.md)** for the nine-skill lifecycle, the shared `~/plans/<repo>/` tree, and the bundled CLI.
 
 ### [autonomous](plugins/autonomous/README.md)
 
-Drive a single task — an issue/ticket link or a plan/spec file — all the way to an opened pull request, with no human in the loop. Hand it a Linear/GitHub issue URL, a path to a plan file, or a plan already in the conversation, and it implements, tests, runs an independent sub-agent review to convergence, opens a PR following the target repo's own conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.
+Drive a single task — an issue/ticket link or a plan/spec file — all the way to an opened pull request, with no human in the loop. Hand it a Linear/GitHub issue URL, a path to a plan file, or a plan already in the conversation, and it implements, tests, simplifies the diff, runs a bounded reasoning-gaps review (critical only), runs an independent sub-agent review to convergence, opens a PR following the target repo's own conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.
 
 ```text
 /plugin install autonomous@wild-horses
@@ -128,6 +130,20 @@ Drive a single task — an issue/ticket link or a plan/spec file — all the way
 ```
 
 See **[plugins/autonomous/README.md](plugins/autonomous/README.md)** for the autonomy contract, the code-style bar, and the review-to-convergence loop.
+
+### [pr-summary-writer](plugins/pr-summary-writer/skills/pr-summary-writer/SKILL.md)
+
+Write pull-request descriptions that lead with the one structural idea — what changed and why — instead of a file-by-file changelog. Auto-invokes when a PR description is about to be written or revised; also available as `/pr-summary-writer`. Replaces acceptance-criteria checklists and per-file bullets with the mental model the diff assumes.
+
+```text
+/plugin install pr-summary-writer@wild-horses
+
+/pr-summary-writer                       # rewrite the PR for the current branch
+/pr-summary-writer 42                    # rewrite PR #42
+"write the PR description"               # model-invoked
+```
+
+See **[plugins/pr-summary-writer/skills/pr-summary-writer/SKILL.md](plugins/pr-summary-writer/skills/pr-summary-writer/SKILL.md)** for the section template and anti-patterns.
 
 ### [steelman](plugins/steelman)
 
@@ -153,6 +169,18 @@ Pull every configured git repo from `origin/<branch>` in one shot. Maintains a r
 
 See **[plugins/update-git-repos/README.md](plugins/update-git-repos/README.md)** for the config schema, bootstrap discovery, and dirty-tree action resolution.
 
+### [cleanup-worktrees](plugins/cleanup-worktrees/README.md)
+
+Reclaim disk space from git worktrees that are safe to delete. Scans configured roots (direct repos and parent directories), classifies each worktree as cleanable (merged PR, upstream gone, merged into the default branch, or stale) or skipped (dirty, locked, unpushed), shows the cleanable set grouped by reason with sizes, and removes the ones you pick — re-validating before each removal, never `--force`.
+
+```text
+/plugin install cleanup-worktrees@wild-horses
+
+/cleanup-worktrees                       # scan, pick, and remove
+```
+
+See **[plugins/cleanup-worktrees/README.md](plugins/cleanup-worktrees/README.md)** for classification rules, config schema, and safety guarantees.
+
 ### [yes-no-questions-hook](plugins/yes-no-questions-hook)
 
 A `UserPromptSubmit` hook that injects a per-turn reminder to pose decision questions as numbered yes/no questions — collapsing every either/or into a single yes/no rather than an inline "X, or Y?" or a pick-one menu. A portable, shareable restatement of a personal `CLAUDE.md` rule. No command — it fires automatically once installed.
@@ -176,12 +204,12 @@ The I/O backend behind the plan-keeper skills — `plan_keeper_cli.py`, a zero-d
 ```text
 brew install paulbaranowski/tap/plan-keeper
 
-plan-keeper list                     # active plans for the current repo
-plan-keeper repo list                # every repo under ~/plans/ with counts
-plan-keeper save --topic "spike notes" <<'EOF'
+pk list                              # active plans for the current repo
+pk repo list                         # every repo under ~/plans/ with counts
+pk save --topic "spike notes" <<'EOF'
 ...plan body...
 EOF
-plan-keeper --help                   # all subcommands
+pk --help                            # all subcommands (plan-keeper is an alias)
 ```
 
 It is the same source file the plan-keeper plugin invokes in-place — packaged from `plugins/plan-keeper/scripts/` with no second copy to drift. Both the plugin's skills and this CLI read and write the same `~/plans/<repo>/` tree, so they interoperate directly.
@@ -190,10 +218,22 @@ It is the same source file the plan-keeper plugin invokes in-place — packaged 
 
 ### Claude Code
 
+**From GitHub** (most users):
+
 1. Run `/plugin` in Claude Code
-2. Select **Marketplaces**
-3. Select **Add marketplace**
-4. Enter `paulbaranowski/wild-horses`
+2. Select **Marketplaces** → **Add marketplace**
+3. Enter `paulbaranowski/wild-horses`
+4. Install individual plugins from the catalog (e.g. `/plugin install harness@wild-horses`)
+
+**From a local checkout** (contributors):
+
+```text
+git clone https://github.com/paulbaranowski/wild-horses.git
+cd wild-horses
+/plugin marketplace add .
+```
+
+Point at the repo root (the directory that contains `.claude-plugin/marketplace.json`), not the JSON file itself. Install plugins the same way: `/plugin install harness@wild-horses`.
 
 ### Cursor
 
@@ -220,6 +260,43 @@ Hook plugins and their Cursor equivalents:
 | `pr-status-hook`                                                  | `stop`                  | Banner prints to Hooks stderr         |
 | `harness`, `plan-keeper`, `update-git-repos`, `cleanup-worktrees` | `preToolUse` (`Shell`)  | Auto-approve bounded plugin CLIs      |
 | `yes-no-questions-hook`                                           | _(rule, not hook)_      | Ships as `rules/yes-no-questions.mdc` |
+
+## Development
+
+This repo is a Claude Code plugin marketplace — each directory under `plugins/` is an independently versioned plugin. **[CLAUDE.md](CLAUDE.md)** is the contributor guide: marketplace layout, commands vs skills namespacing, versioning rules, and repo hygiene.
+
+### Validate
+
+After editing plugin content, validate the marketplace schema:
+
+```text
+claude plugin validate .
+```
+
+Inside Claude Code: `/plugin validate .`
+
+A PostToolUse hook (`.claude/hooks/validate-plugin.sh`) runs the same check automatically when files under `plugins/` are edited during a session.
+
+### Test
+
+Bundled CLIs ship stdlib-only unittest suites — no extra dependencies:
+
+```text
+python3 -m unittest discover -s plugins/plan-keeper/scripts/tests
+python3 -m unittest discover -s plugins/update-git-repos/scripts -p 'test_update_repos_cli.py'
+python3 -m unittest discover -s plugins/codepath-visualizer/skills/codepath-mapper -p 'test_codepaths_cli.py'
+python3 -m unittest discover -s plugins/cleanup-worktrees/scripts -p 'test_cleanup_worktrees_cli.py'
+```
+
+The harness task-list CLI uses pytest via [uv](https://docs.astral.sh/uv/):
+
+```text
+uv run pytest plugins/harness/skills/task-list-runner/test_task_list_cli.py
+```
+
+### Versioning
+
+Every change to a plugin's skills, commands, agents, or hooks requires a version bump in that plugin's `plugins/<name>/.claude-plugin/plugin.json` (patch for fixes, minor for features, major for breaking changes). The plan-keeper CLI also keeps `plugins/plan-keeper/scripts/plan_keeper/__init__.py` (`__version__`) in lockstep — see `plugins/plan-keeper/README.md`.
 
 ## License
 
