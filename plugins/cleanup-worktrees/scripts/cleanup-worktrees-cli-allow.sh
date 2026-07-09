@@ -99,11 +99,11 @@ if [[ -n "$script" ]]; then
         fi
     else
         # No plugin-root env (direct / test invocation, where the file may not
-        # even exist on disk): fall back to the two known layout shapes.
+        # even exist on disk): fall back to known layout shapes.
         #   - dev:       /...checkout.../plugins/cleanup-worktrees/scripts/cleanup_worktrees_cli.py
+        #   - cursor:    /.../.cursor/plugins/local/cleanup-worktrees/scripts/cleanup_worktrees_cli.py
         #   - installed: /...cache/wild-horses/cleanup-worktrees/<version>/scripts/cleanup_worktrees_cli.py
-        if [[ "$script" == *"/plugins/cleanup-worktrees/scripts/cleanup_worktrees_cli.py" \
-           || "$script" == *"/cache/wild-horses/cleanup-worktrees/"*"/scripts/cleanup_worktrees_cli.py" ]]; then
+        if [[ "$script" == *"/cleanup-worktrees/scripts/cleanup_worktrees_cli.py" ]]; then
             approve
         fi
     fi
