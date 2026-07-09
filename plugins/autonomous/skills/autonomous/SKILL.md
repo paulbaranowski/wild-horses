@@ -102,8 +102,8 @@ discipline that gets you there.
 4. Reasoning-gaps review. Run the bounded pass at `references/reasoning-gaps-review.md`
    on changed source files only. It reuses the harness plugin's three specialist
    agent prompts (types, implicit flow, structure) but triages to **critical
-   findings only**, plus important findings that are cross-dimension or on a
-   public API when the fix is a small local type/doc change. Fix every must-fix
+   findings only**, plus important findings when (cross-dimension or on a
+   public API) **and** the fix is a small local type/doc change. Fix every must-fix
    item; defer the rest to the PR Decisions section. Skip entirely if the harness
    plugin is unavailable. Re-run step 2's tests when a fix changes behavior.
 5. Commit your work, then get an independent code review of the committed diff

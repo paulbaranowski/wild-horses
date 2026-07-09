@@ -70,11 +70,11 @@ After all three agents return:
 The full reasoning-gaps command fixes every critical, important, and minor
 finding. Autonomous does **not**. Apply this gate so the pass stays bounded:
 
-| Severity      | Action                                                                                                                                                                                                                                                                      |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Critical**  | **Must fix** before opening the PR. Every verified critical finding gets a code change.                                                                                                                                                                                     |
-| **Important** | Fix only when **both**: (a) the finding is cross-dimension (2+ agents flagged the same location), **or** it sits on a public/exported API boundary, **and** (b) the concrete fix is annotation, docstring, or a small local type — no multi-file refactor. Otherwise defer. |
-| **Minor**     | **Skip.** Do not fix, do not list individually.                                                                                                                                                                                                                             |
+| Severity      | Action                                                                                                                                                                                                                                                                                     |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Critical**  | **Must fix** before opening the PR. Every verified critical finding gets a code change.                                                                                                                                                                                                    |
+| **Important** | Fix only when **both** (a) and (b): **(a)** the finding is cross-dimension (2+ agents flagged the same location) **or** it sits on a public/exported API boundary; **and (b)** the concrete fix is annotation, docstring, or a small local type — no multi-file refactor. Otherwise defer. |
+| **Minor**     | **Skip.** Do not fix, do not list individually.                                                                                                                                                                                                                                            |
 
 When deferring important findings (out of scope for this pass), summarize them
 in the PR **Decisions** section under "Deferred reasoning gaps" — one line each
