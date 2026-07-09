@@ -5,6 +5,5 @@
   "author": {
     "name": "Paul Baranowski"
   },
-  "license": "MIT",
   "hooks": "hooks/cursor-hooks.json"
 }

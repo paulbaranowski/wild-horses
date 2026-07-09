@@ -1,10 +1,9 @@
 {
   "name": "yes-no-questions-hook",
-  "description": "Reminds the agent to pose decision questions as numbered yes/no questions — collapsing either/or choices into single yes/no items. Ships as an always-on Cursor rule (Claude Code uses a UserPromptSubmit hook).",
+  "description": "Reminds the agent to pose decision questions as numbered yes/no questions \u2014 collapsing either/or choices into single yes/no items. Ships as an always-on Cursor rule (Claude Code uses a UserPromptSubmit hook).",
   "version": "0.2.1",
   "author": {
     "name": "Paul Baranowski"
   },
-  "license": "MIT",
   "rules": "rules/"
 }

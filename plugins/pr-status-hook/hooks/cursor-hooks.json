@@ -2,7 +2,7 @@
   "hooks": {
     "stop": [
       {
-        "command": "./scripts/pr-status.sh",
+        "command": "bash \"./scripts/pr-status.sh\"",
         "timeout": 10
       }
     ]
