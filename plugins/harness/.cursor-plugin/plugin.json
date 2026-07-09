@@ -1,0 +1,10 @@
+{
+  "name": "harness",
+  "description": "feedback-blockers and reasoning-gaps commands for harness engineering, plus task-list-builder, task-list-runner, and task-list-viewer skills for producing, executing, and inspecting structured task lists. Includes a preToolUse hook that auto-approves invocations of the bundled task_list_cli.py.",
+  "version": "8.0.1",
+  "author": {
+    "name": "Paul Baranowski"
+  },
+  "license": "MIT",
+  "hooks": "hooks/cursor-hooks.json"
+}

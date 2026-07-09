@@ -1,0 +1,10 @@
+{
+  "name": "pr-status-hook",
+  "description": "Stop hook that reports, at every turn-end, whether an open PR exists for the current branch, whether commits were pushed, and whether the working tree is dirty — from real git/gh state.",
+  "version": "0.1.1",
+  "author": {
+    "name": "Paul Baranowski"
+  },
+  "license": "MIT",
+  "hooks": "hooks/cursor-hooks.json"
+}

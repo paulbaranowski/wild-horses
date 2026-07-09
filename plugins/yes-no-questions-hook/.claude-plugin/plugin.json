@@ -1,7 +1,7 @@
 {
   "name": "yes-no-questions-hook",
   "description": "Injects a per-turn reminder (via a UserPromptSubmit hook) to ask the user decision questions as numbered yes/no questions — collapsing every either/or into a single yes/no rather than an inline 'X, or Y?' or a pick-one menu. Portable, shareable restatement of a personal CLAUDE.md rule.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": {
     "name": "Paul Baranowski"
   }

@@ -3,6 +3,12 @@
 # Stays silent unless there is something worth reporting.
 set -uo pipefail
 
+input=""
+if [[ ! -t 0 ]]; then
+  input=$(cat)
+fi
+hook_event=$(echo "$input" | jq -r '.hook_event_name // empty' 2>/dev/null || true)
+
 # Only meaningful inside a git repo.
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 
@@ -40,6 +46,12 @@ fi
 
 if [ "$dirty" != "0" ]; then
   msg="$msg · ✎ $dirty file(s) uncommitted"
+fi
+
+# Cursor stop hooks surface banners on stderr; Claude uses systemMessage JSON.
+if [[ "$hook_event" == "stop" ]]; then
+  echo "$msg" >&2
+  exit 0
 fi
 
 # Emit as a user-facing banner; keep stdout out of the transcript otherwise.

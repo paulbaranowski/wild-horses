@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "./scripts/plan-keeper-cli-allow.sh",
+        "matcher": "Shell",
+        "timeout": 5
+      }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "cleanup-worktrees",
+  "description": "Reclaim disk space from stale git worktrees. Includes a preToolUse hook that auto-approves invocations of the bundled cleanup_worktrees_cli.py.",
+  "version": "0.1.1",
+  "author": {
+    "name": "Paul Baranowski"
+  },
+  "license": "MIT",
+  "hooks": "hooks/cursor-hooks.json"
+}

@@ -27,6 +27,7 @@ plugins/marketplace/               -- plugin root (skills-based)
 ### Marketplace Structure
 
 - marketplace.json goes in `.claude-plugin/` at the repo root. Do NOT add `"$schema"` — the validator rejects unrecognized keys.
+- **Cursor parity:** also ship `.cursor-plugin/marketplace.json` at the repo root and `.cursor-plugin/plugin.json` per plugin. Claude hooks stay in `hooks/hooks.json` (PascalCase, nested); Cursor hooks go in `hooks/cursor-hooks.json` (camelCase, flat) and are referenced from the Cursor manifest via `"hooks": "hooks/cursor-hooks.json"`. Hook scripts that emit permission decisions must support both Claude (`hookSpecificOutput`) and Cursor (`permission`) formats — branch on `hook_event_name` from stdin.
 - Each plugin lives in its own directory under `plugins/`. The plugin's `.claude-plugin/plugin.json` goes inside that directory, NOT at the repo root.
 - Skills, agents, commands, and hooks go at the **plugin root** level, NOT inside `.claude-plugin/`.
 - Validate with: `claude plugin validate .` or `/plugin validate .`

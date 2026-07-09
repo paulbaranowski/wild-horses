@@ -188,10 +188,38 @@ It is the same source file the plan-keeper plugin invokes in-place — packaged 
 
 ## Install
 
+### Claude Code
+
 1. Run `/plugin` in Claude Code
 2. Select **Marketplaces**
 3. Select **Add marketplace**
 4. Enter `paulbaranowski/wild-horses`
+
+### Cursor
+
+wild-horses ships dual manifests: `.claude-plugin/` for Claude Code and `.cursor-plugin/` for Cursor. Hooks use `hooks/hooks.json` (Claude) and `hooks/cursor-hooks.json` (Cursor) side by side.
+
+**Local testing** (fastest iteration):
+
+```bash
+# Symlink one plugin into Cursor's local plugin directory
+ln -s "$(pwd)/plugins/pr-status-hook" ~/.cursor/plugins/local/pr-status-hook
+
+# Or symlink the whole marketplace checkout and install plugins from Customize
+```
+
+Then restart Cursor (**Developer: Reload Window**) and open **Customize** to enable the plugin. Check **Settings → Hooks** to confirm hook registration.
+
+**Team / published marketplace:** add this repository as a team marketplace in **Dashboard → Plugins**, or submit at [cursor.com/marketplace/publish](https://cursor.com/marketplace/publish) once ready.
+
+Hook plugins and their Cursor equivalents:
+
+| Plugin                                                            | Cursor hook event       | Notes                                 |
+| ----------------------------------------------------------------- | ----------------------- | ------------------------------------- |
+| `linting-hooks`                                                   | `postToolUse` (`Write`) | Run `/linting-hooks:install` for deps |
+| `pr-status-hook`                                                  | `stop`                  | Banner prints to Hooks stderr         |
+| `harness`, `plan-keeper`, `update-git-repos`, `cleanup-worktrees` | `preToolUse` (`Shell`)  | Auto-approve bounded plugin CLIs      |
+| `yes-no-questions-hook`                                           | _(rule, not hook)_      | Ships as `rules/yes-no-questions.mdc` |
 
 ## License
 

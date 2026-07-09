@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "./scripts/update-repos-cli-allow.sh",
+        "matcher": "Shell",
+        "timeout": 5
+      }
+    ]
+  }
+}

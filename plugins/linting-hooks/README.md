@@ -2,6 +2,8 @@
 
 PostToolUse hooks that lint Markdown and Python files immediately after Claude edits them. Hook registration happens automatically on plugin enable; one command (`/linting-hooks:install`) handles the per-machine software each hook depends on.
 
+**Cursor:** hooks register via `hooks/cursor-hooks.json` (`postToolUse` on `Write`). Same scripts; matchers differ from Claude's `Edit|Write|MultiEdit`.
+
 Install:
 
 ```text

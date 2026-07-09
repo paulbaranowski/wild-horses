@@ -1,7 +1,7 @@
 {
   "name": "pr-status-hook",
   "description": "Stop hook that reports, at every turn-end, whether an open PR exists for the current branch (with its link), whether the last commits were actually pushed, and whether the working tree is dirty — all computed from real git/gh state, never from Claude's memory. Stays silent unless there is something worth reporting, and exits early on non-repos, detached HEAD, and the default branches.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "Paul Baranowski"
   }

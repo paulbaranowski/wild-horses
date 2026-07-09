@@ -14,7 +14,8 @@ set -euo pipefail
 
 command -v jq >/dev/null 2>&1 || exit 0
 
-cmd=$(jq -r '.tool_input.command // empty')
+input=$(cat)
+cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 
 # Match: `python3` immediately followed by the cleanup-worktrees CLI as its
 # first positional argument, possibly wrapped in single or double quotes. The
@@ -61,7 +62,12 @@ esac
 # newline that somehow slipped past the case prefilter, etc.) can't ride
 # along after a matching prefix.
 approve() {
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"cleanup-worktrees CLI is plugin-approved"}}'
+    hook_event=$(echo "$input" | jq -r '.hook_event_name // empty')
+    if [[ "$hook_event" == "preToolUse" ]]; then
+        printf '%s\n' '{"permission":"allow","agent_message":"cleanup-worktrees CLI is plugin-approved"}'
+    else
+        printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"cleanup-worktrees CLI is plugin-approved"}}'
+    fi
 }
 
 # Extract the script path from one of three forms, so a legitimate plugin path
