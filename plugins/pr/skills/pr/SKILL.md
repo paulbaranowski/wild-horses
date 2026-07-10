@@ -42,17 +42,21 @@ Run in parallel:
 ```bash
 git status --short
 git branch --show-current
+git status --short --branch
+gh repo view --json defaultBranchRef --jq .defaultBranchRef.name
 git rev-parse --abbrev-ref HEAD@{upstream} 2>/dev/null
 gh pr view --json number,url,state 2>/dev/null
 ```
 
+Resolve the repo's actual default branch from `gh repo view` (fallback: `git symbolic-ref refs/remotes/origin/HEAD`). Do not hard-code `main` / `master`.
+
 Stop and report if:
 
-- Not on a git repo, or on the default branch (`main` / `master`) with no feature branch.
+- Not on a git repo, or on the repository's default branch with no feature branch.
 - Working tree is dirty in a way that would leave uncommitted work out of the PR — ask the user to commit or stash first. Do not auto-commit.
 - An open PR already exists for this branch — print its URL and ask whether to (a) skip create and only run the babysit loop on it, or (b) abort. Do not open a duplicate.
 
-If the branch has no upstream, or is behind/ahead in a way that needs a push before create:
+Push when the branch has no upstream, **or** when local `HEAD` is ahead of its upstream (use `git status --short --branch` or `git rev-list --left-right --count @{upstream}...HEAD`). An upstream existing is not enough — unpushed local commits must land before create:
 
 ```bash
 git push -u origin HEAD
@@ -70,17 +74,25 @@ git push -u origin HEAD
 
 ## Phase 3 — Create the PR
 
+Build the create invocation shell-safely — do not interpolate the title into an unquoted string, and do not expand `$ARGUMENTS` unquoted:
+
 ```bash
-gh pr create --title "<title>" --body "$(cat <<'EOF'
+TITLE='<title from pr-summary-writer>'
+CREATE_ARGS=()
+# If $ARGUMENTS is a bare branch name (no leading -), treat as base:
+#   CREATE_ARGS+=(--base "$ARGUMENTS")
+# Else if $ARGUMENTS is non-empty, parse into CREATE_ARGS as discrete
+# validated gh pr create flags (e.g. --draft) — never raw free-form prose.
+
+gh pr create --title "$TITLE" "${CREATE_ARGS[@]}" --body-file - <<'EOF'
 <body>
 EOF
-)" $ARGUMENTS
 ```
 
 Notes:
 
-- Use a single-quoted `EOF` heredoc so `$`, backticks, and quotes in the body stay literal.
-- If `$ARGUMENTS` looks like a bare branch name (no leading `-`), pass it as `--base <name>` instead of raw args.
+- `--body-file -` with a single-quoted heredoc keeps `$`, backticks, and quotes in the body literal.
+- Quote `"$TITLE"` so titles with spaces, quotes, or shell metacharacters do not misparse.
 - Capture the PR URL from `gh pr create` output (or `gh pr view --json url -q .url` right after).
 
 Print the PR URL, then continue — do not wait for the user.
