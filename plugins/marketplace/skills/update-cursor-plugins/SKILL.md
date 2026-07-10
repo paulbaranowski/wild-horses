@@ -1,14 +1,14 @@
 ---
-name: install-cursor-plugins
+name: update-cursor-plugins
 description: Copy every plugin from a Cursor marketplace catalog into ~/.cursor/plugins/local as real files (no symlinks). Use when installing or refreshing wild-horses (or any dual-manifest marketplace) for Cursor, when team marketplace refresh is unavailable, or when local plugin installs must not point at a checkout via symlink.
 user-invocable: true
 disable-model-invocation: true
 argument-hint: "[marketplace-root]"
 ---
 
-# Install Cursor Plugins (local copy)
+# Update Cursor Plugins (local copy)
 
-Install all plugins listed in a marketplace's `.cursor-plugin/marketplace.json` into Cursor's local plugin directory as **real file trees**. Never symlink.
+Install or refresh all plugins listed in a marketplace's `.cursor-plugin/marketplace.json` into Cursor's local plugin directory as **real file trees**. Never symlink.
 
 **Arguments:** `$ARGUMENTS` — optional path to the marketplace root (directory that contains `.cursor-plugin/marketplace.json`). Defaults to the current workspace root when that file exists there.
 
@@ -23,16 +23,16 @@ Cursor team-marketplace refresh lives on the web dashboard, not in the IDE, and 
    - Else if `./.cursor-plugin/marketplace.json` exists, use `.`.
    - Else ask the user for the marketplace root path.
 2. Confirm the manifest exists: `<root>/.cursor-plugin/marketplace.json`.
-3. Run the bundled installer (one Bash call — do not hand-roll `cp`/`ln`):
+3. Run the bundled updater (one Bash call — do not hand-roll `cp`/`ln`):
 
 ```bash
-bash "<skill-or-plugin-root>/skills/install-cursor-plugins/scripts/install-cursor-plugins.sh" "<marketplace-root>"
+bash "<skill-or-plugin-root>/skills/update-cursor-plugins/scripts/update-cursor-plugins.sh" "<marketplace-root>"
 ```
 
 When this skill is running from an installed `marketplace` plugin, prefer:
 
 ```bash
-bash "${CURSOR_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/install-cursor-plugins/scripts/install-cursor-plugins.sh" "<marketplace-root>"
+bash "${CURSOR_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/update-cursor-plugins/scripts/update-cursor-plugins.sh" "<marketplace-root>"
 ```
 
 If neither plugin-root env is set (dev checkout), resolve the script relative to this skill's directory.

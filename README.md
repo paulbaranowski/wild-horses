@@ -243,8 +243,8 @@ wild-horses ships dual manifests: `.claude-plugin/` for Claude Code and `.cursor
 
 ```bash
 # From a wild-horses checkout (or any marketplace root with .cursor-plugin/marketplace.json)
-bash plugins/marketplace/skills/install-cursor-plugins/scripts/install-cursor-plugins.sh .
-# Or invoke the skill: /install-cursor-plugins
+bash plugins/marketplace/skills/update-cursor-plugins/scripts/update-cursor-plugins.sh .
+# Or invoke the skill: /update-cursor-plugins
 ```
 
 Then restart Cursor (**Developer: Reload Window**) and open **Customize** to enable plugins. Check **Settings → Hooks** to confirm hook registration.

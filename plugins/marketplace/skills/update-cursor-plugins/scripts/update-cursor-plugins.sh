@@ -5,7 +5,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: install-cursor-plugins.sh <marketplace-root> [dest-root]
+Usage: update-cursor-plugins.sh <marketplace-root> [dest-root]
 
   marketplace-root  Directory that contains .cursor-plugin/marketplace.json
   dest-root         Defaults to ~/.cursor/plugins/local

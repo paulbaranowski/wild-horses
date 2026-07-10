@@ -27,19 +27,19 @@ The skill will:
 4. Generate `.claude-plugin/marketplace.json`, the first plugin's `.claude-plugin/plugin.json`, and a `CLAUDE.md` that captures the conventions you'll need to remember.
 5. Validate the result with `claude plugin validate .` so you find schema mistakes before commit, not after.
 
-### `/install-cursor-plugins`
+### `/update-cursor-plugins`
 
 Copies every plugin listed in `.cursor-plugin/marketplace.json` into `~/.cursor/plugins/local/<name>/` as a real file tree. Use this when Cursor's team-marketplace refresh is unavailable or you need a durable local install that does not symlink into a checkout.
 
 ```text
-/install-cursor-plugins
-/install-cursor-plugins /path/to/marketplace-root
+/update-cursor-plugins
+/update-cursor-plugins /path/to/marketplace-root
 ```
 
 Or run the script directly:
 
 ```bash
-bash plugins/marketplace/skills/install-cursor-plugins/scripts/install-cursor-plugins.sh .
+bash plugins/marketplace/skills/update-cursor-plugins/scripts/update-cursor-plugins.sh .
 ```
 
 Then **Developer: Reload Window**, enable plugins in **Customize**, and confirm hooks under **Settings → Hooks**.
