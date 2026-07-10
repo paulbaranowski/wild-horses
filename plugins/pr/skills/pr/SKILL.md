@@ -54,7 +54,7 @@ Stop and report if:
 
 - Not on a git repo, or on the repository's default branch with no feature branch.
 - An open PR already exists for this branch — print its URL and ask whether to (a) skip create and only run the babysit loop on it, or (b) abort. Do not open a duplicate.
-  - **If (a):** capture that PR's URL/number, run the push step below if needed, **skip Phases 2–3 entirely**, and jump to Phase 4 with that URL as the babysit target.
+  - **If (a):** capture that PR's URL/number, run **Commit uncommitted work (if dirty)** below, then the push step if needed, **skip Phases 2–3 entirely**, and jump to Phase 4 with that URL as the babysit target.
   - **If (b):** stop. Do not continue.
 
 ### Commit uncommitted work (if dirty)
@@ -85,7 +85,8 @@ EOF
 )"
 ```
 
-1. If the commit fails (e.g. pre-commit hook modified files), fix the issue and create a **new** commit — do not amend unless you created the prior commit in this same `/pr` run and it has not been pushed.
+1. If the commit fails (e.g. pre-commit hook rejected the commit), fix the issue and create a **new** commit — do not amend unless you created the prior commit in this same `/pr` run and it has not been pushed.
+2. After every successful commit, re-check `git status --short`. If hooks left modified or uncommitted files, stage and commit them in a separate follow-up commit (repeat the status check until clean or only unrelated dirty files remain).
 
 Then continue to the push step below.
 
