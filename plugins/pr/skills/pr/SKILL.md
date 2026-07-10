@@ -53,10 +53,41 @@ Resolve the repo's actual default branch from `gh repo view` (fallback: `git sym
 Stop and report if:
 
 - Not on a git repo, or on the repository's default branch with no feature branch.
-- Working tree is dirty in a way that would leave uncommitted work out of the PR — ask the user to commit or stash first. Do not auto-commit.
 - An open PR already exists for this branch — print its URL and ask whether to (a) skip create and only run the babysit loop on it, or (b) abort. Do not open a duplicate.
   - **If (a):** capture that PR's URL/number, run the push step below if needed, **skip Phases 2–3 entirely**, and jump to Phase 4 with that URL as the babysit target.
   - **If (b):** stop. Do not continue.
+
+### Commit uncommitted work (if dirty)
+
+If `git status --short` shows changes, commit them before push/create so nothing is left out of the PR.
+
+Run in parallel:
+
+```bash
+git status
+git diff
+git diff --cached
+git log --oneline -5
+```
+
+Stop and ask the user only if staged or unstaged changes look like secrets (`.env`, credentials, tokens, private keys). Do not commit those files.
+
+Otherwise:
+
+1. Stage the relevant changes (`git add` for modified/untracked files that belong in the PR — not secrets or local-only scratch).
+2. Draft a concise commit message from the diff and recent `git log` style (1–2 sentences, focus on why).
+3. Commit with a heredoc so quotes and metacharacters stay literal:
+
+```bash
+git commit -m "$(cat <<'EOF'
+<commit message>
+EOF
+)"
+```
+
+1. If the commit fails (e.g. pre-commit hook modified files), fix the issue and create a **new** commit — do not amend unless you created the prior commit in this same `/pr` run and it has not been pushed.
+
+Then continue to the push step below.
 
 Push when the branch has no upstream, **or** when local `HEAD` is ahead of its upstream (use `git status --short --branch` or `git rev-list --left-right --count @{upstream}...HEAD`). An upstream existing is not enough — unpushed local commits must land before create **and** before a babysit-only jump to Phase 4 (option (a)):
 
@@ -134,6 +165,7 @@ After the loop (3 passes or early clean/hard-stuck stop), summarize:
 
 **Do:**
 
+- Commit uncommitted work during preflight when the tree is dirty (except suspected secrets) — `/pr` should not stop with local changes still on disk.
 - Use pr-summary-writer for every title/body — never a changelog-style stub.
 - Use cb-babysit for tending — never a hand-rolled "check CI and reply" shortcut.
 - Push when the branch has no upstream, **or** when local `HEAD` is ahead of its upstream — before create **and** before a babysit-only jump to Phase 4 (same rule as Phase 1).
@@ -143,7 +175,7 @@ After the loop (3 passes or early clean/hard-stuck stop), summarize:
 **Don't:**
 
 - **Don't open a second PR** when one already exists for the branch.
-- **Don't auto-commit** dirty work during preflight.
+- **Don't commit** files that look like secrets — stop and ask the user instead.
 - **Don't run more than three** cb-babysit passes in this skill, even if the PR is still progressing.
 - **Don't stop after a `progressing` exit** to wait for the user or suggest `/loop` — continue to the next pass until 3 or early exit.
 - **Don't paraphrase** pr-summary-writer or cb-babysit from memory — Read each skill's SKILL.md before executing it.
