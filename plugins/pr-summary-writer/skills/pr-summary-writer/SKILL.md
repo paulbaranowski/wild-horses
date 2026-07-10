@@ -167,7 +167,7 @@ architecture themselves. The rewrite led with the one idea.
    `gh pr view <arg> --json number,title,url,body`.
 2. Generate the title alongside the body: concise, intent-and-impact,
    conventional style when the repo uses it (`refactor(events): ...`).
-3. If a PR exists, offer to update it directly; on confirmation:
+3. If a PR exists, update it immediately — do not ask for confirmation:
 
    ```bash
    gh pr edit <number> --title "<title>" --body "$(cat <<'EOF'
@@ -179,6 +179,10 @@ architecture themselves. The rewrite led with the one idea.
    The single-quoted `EOF` means zero shell expansion: backticks, `$`, and
    quotes must appear raw. Escaping anything inside the heredoc corrupts the
    markdown on GitHub.
+
+   After a successful update, confirm with the PR URL. If the update fails,
+   show the error and fall back to printing the title and body for
+   copy/paste.
 
 4. If no PR exists, hand the title and body to whatever opens the PR (or
    print them for copy/paste).
