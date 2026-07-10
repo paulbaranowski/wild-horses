@@ -14,6 +14,7 @@ from update_cursor_plugins import (
     plugin_dest_error,
     plugin_source_path,
     resolve_source_dir,
+    rsync_same_path_error,
     source_path_error,
 )
 
@@ -107,6 +108,20 @@ class TestManifestHelpers(unittest.TestCase):
             outside.mkdir()
             with self.assertRaises(ValueError):
                 resolve_source_dir(root, f"../{outside.name}", None)
+
+    def test_rsync_same_path_error_detects_identical_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin_dir = Path(tmp) / "plugins" / "harness"
+            plugin_dir.mkdir(parents=True)
+            self.assertIsNotNone(rsync_same_path_error(plugin_dir, plugin_dir))
+
+    def test_rsync_same_path_error_detects_symlink_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin_dir = Path(tmp) / "plugins" / "harness"
+            plugin_dir.mkdir(parents=True)
+            alias = Path(tmp) / "alias"
+            alias.symlink_to(plugin_dir)
+            self.assertIsNotNone(rsync_same_path_error(plugin_dir, alias))
 
 
 if __name__ == "__main__":

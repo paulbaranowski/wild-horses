@@ -1,7 +1,7 @@
 {
   "name": "marketplace",
   "description": "Scaffold a plugin marketplace with proper structure, schema validation, and conventions. Includes update-cursor-plugins to copy a marketplace catalog into ~/.cursor/plugins/local as real files.",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "author": {
     "name": "Paul Baranowski"
   }

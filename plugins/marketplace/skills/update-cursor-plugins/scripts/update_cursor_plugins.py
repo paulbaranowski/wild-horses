@@ -120,7 +120,16 @@ def load_catalog(manifest_path: Path) -> tuple[str | None, list[tuple[str, str]]
     return plugin_root, entries
 
 
+def rsync_same_path_error(src_dir: Path, dest_dir: Path) -> str | None:
+    if src_dir.resolve() == dest_dir.resolve():
+        return "source and destination are the same path"
+    return None
+
+
 def rsync_copy(src_dir: Path, dest_dir: Path) -> None:
+    if err := rsync_same_path_error(src_dir, dest_dir):
+        raise ValueError(err)
+
     rsync = shutil.which("rsync")
     if not rsync:
         raise RuntimeError("rsync is required")
@@ -177,6 +186,11 @@ def update_plugins(marketplace_root: Path, dest_root: Path) -> tuple[int, int]:
             dest_dir = plugin_dest_dir(dest_root, name)
         except ValueError as exc:
             print(f"skip {name}: {exc}", file=sys.stderr)
+            skipped += 1
+            continue
+
+        if err := rsync_same_path_error(src_dir, dest_dir):
+            print(f"skip {name}: {err}", file=sys.stderr)
             skipped += 1
             continue
 
