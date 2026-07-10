@@ -1,6 +1,6 @@
 ---
 name: pr
-description: Open a PR for the current branch using pr-summary-writer for the title/body, then run cb-babysit up to three times (stop early on clean). Use when the user says /pr, "create a PR and babysit", "open a PR and babysit", or wants create-then-tend in one shot.
+description: Open a PR for the current branch using pr-summary-writer for the title/body, then run pr-babysit up to three times (stop early on clean). Use when the user says /pr, "create a PR and babysit", "open a PR and babysit", or wants create-then-tend in one shot.
 user-invocable: true
 disable-model-invocation: true
 argument-hint: "[optional base branch or extra gh pr create flags]"
@@ -8,12 +8,12 @@ argument-hint: "[optional base branch or extra gh pr create flags]"
 
 # /pr — create PR, then babysit ×3
 
-Open a PR for the current branch, write its description with **pr-summary-writer**, then tend it with **cb-babysit** up to three times (stop early if a pass exits clean).
+Open a PR for the current branch, write its description with **pr-summary-writer**, then tend it with **pr-babysit** up to three times (stop early if a pass exits clean).
 
 **Dependencies (must be available this session):**
 
 - `pr-summary-writer` (wild-horses) — description + title
-- `cb-babysit` / `core:cb-babysit` (clipboard core) — CI + review tending
+- `pr-babysit` (wild-horses `pr` plugin) — CI + review tending
 
 If either skill is missing, stop and tell the user what to install. Do not invent a substitute description format or a hand-rolled babysit loop.
 
@@ -23,15 +23,15 @@ If either skill is missing, stop and tell the user what to install. Do not inven
 
 ## Composing other skills
 
-For each dependency skill:
+For each dependency skill or command:
 
-1. **Locate** its installed `SKILL.md` (plugin cache, marketplace checkout, or session skill list).
+1. **Locate** its installed `SKILL.md` or `commands/*.md` (plugin cache, marketplace checkout, or session skill list).
 2. **Read** that file with the Read tool — do not rely on memory or a paraphrase.
 3. **Execute** it fully, then return here to the next phase.
 
-**Don't paraphrase** either skill's rules from memory. **Don't skip** the Read step even if you have used the skill before in this conversation.
+**Don't paraphrase** either dependency from memory. **Don't skip** the Read step even if you have used it before in this conversation.
 
-When invoking cb-babysit, treat the captured PR URL (or number) as the skill's argument text — as if the user had run `/cb-babysit <url>`. That feeds its Setup parser so it targets the right PR.
+When invoking pr-babysit, treat the captured PR URL (or number) as the command's argument text — as if the user had run `/pr:pr-babysit <url>`. That feeds its Setup parser so it targets the right PR.
 
 ---
 
@@ -143,19 +143,19 @@ Print the PR URL, then continue — do not wait for the user.
 
 ## Phase 4 — Babysit up to 3 times
 
-`/pr` owns the outer babysit loop. Run **cb-babysit** on the PR from Phase 3 (or the existing PR URL from preflight option (a)), **up to three sequential passes**.
+`/pr` owns the outer babysit loop. Run **pr-babysit** on the PR from Phase 3 (or the existing PR URL from preflight option (a)), **up to three sequential passes**.
 
-cb-babysit's own Loop control may say "tell the user to re-run" or "wrap with `/loop`" on a `progressing` exit. **Ignore that advice while inside `/pr`** — continue to the next pass yourself until you hit 3 passes or an early-exit condition below.
+pr-babysit's own Loop control may say "tell the user to re-run" or "wrap with `/loop`" on a `progressing` exit. **Ignore that advice while inside `/pr`** — continue to the next pass yourself until you hit 3 passes or an early-exit condition below.
 
 For each pass `N` in `1..3`:
 
-1. Compose **cb-babysit** / **core:cb-babysit** per **Composing other skills**, with the captured PR URL as its argument.
+1. Compose **pr-babysit** per **Composing other skills**, with the captured PR URL as its argument.
 2. After the pass finishes, note its stop condition (`clean` / `progressing` / `stuck`).
 3. **Early exit (clean):** if the pass exits **clean**, stop the loop. Do not run remaining passes.
 4. **Stuck — soft vs hard:**
    - **Soft stuck** (CI still pending after watch timeout, or similar "re-run could help"): count the pass, then continue to the next pass immediately.
    - **Hard stuck** (auth/infra/external check/diagnosis-only with nothing actionable): stop the loop and report. Do not burn remaining passes.
-5. **Progressing:** count the pass and start the next one immediately. CI wait lives inside cb-babysit's own `gh pr checks --watch`, not between passes.
+5. **Progressing:** count the pass and start the next one immediately. CI wait lives inside pr-babysit's own `gh pr checks --watch`, not between passes.
 
 After the loop (3 passes or early clean/hard-stuck stop), summarize:
 
@@ -172,7 +172,7 @@ After the loop (3 passes or early clean/hard-stuck stop), summarize:
 
 - Commit uncommitted work during preflight when the tree is dirty (except suspected secrets) — `/pr` should not stop with local changes still on disk.
 - Use pr-summary-writer for every title/body — never a changelog-style stub.
-- Use cb-babysit for tending — never a hand-rolled "check CI and reply" shortcut.
+- Use pr-babysit for tending — never a hand-rolled "check CI and reply" shortcut.
 - Push when the branch has no upstream, **or** when local `HEAD` is ahead of its upstream — before create **and** before a babysit-only jump to Phase 4 (same rule as Phase 1).
 - Return the PR URL in the final summary.
 - Own the outer babysit loop: on `progressing` or soft `stuck`, run the next pass yourself.
@@ -181,7 +181,7 @@ After the loop (3 passes or early clean/hard-stuck stop), summarize:
 
 - **Don't open a second PR** when one already exists for the branch.
 - **Don't commit** files that look like secrets — stop and ask the user instead.
-- **Don't run more than three** cb-babysit passes in this skill, even if the PR is still progressing.
+- **Don't run more than three** pr-babysit passes in this skill, even if the PR is still progressing.
 - **Don't stop after a `progressing` exit** to wait for the user or suggest `/loop` — continue to the next pass until 3 or early exit.
-- **Don't paraphrase** pr-summary-writer or cb-babysit from memory — Read each skill's SKILL.md before executing it.
+- **Don't paraphrase** pr-summary-writer or pr-babysit from memory — Read each skill's SKILL.md (or pr-babysit's command file) before executing it.
 - **Don't** append "Generated with Claude" footers or Co-Authored-By trailers.
