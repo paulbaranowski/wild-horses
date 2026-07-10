@@ -1,7 +1,7 @@
 {
   "name": "pr-summary-writer",
   "description": "Write architecture-first pull-request descriptions: state the one structural idea directly, give the requirements the change had to satisfy, explain the why via before/after, cover only the load-bearing decisions, and name what deliberately did not change. Replaces changelog-style descriptions (file inventories, checkbox lists) with the mental model the diff assumes. Auto-invokes whenever a PR description is about to be written or revised.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "Paul Baranowski"
   }
