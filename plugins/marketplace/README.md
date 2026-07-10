@@ -1,6 +1,6 @@
 # marketplace
 
-Scaffold a Claude Code plugin marketplace with proper structure, schema validation, and `CLAUDE.md` conventions. Use this when you're starting a new marketplace repo, or want to add marketplace structure to an existing one.
+Scaffold a Claude Code plugin marketplace with proper structure, schema validation, and `CLAUDE.md` conventions. Also installs a Cursor marketplace catalog into `~/.cursor/plugins/local` as real file copies (no symlinks).
 
 Install:
 
@@ -8,7 +8,7 @@ Install:
 /plugin install marketplace@wild-horses
 ```
 
-## Skill
+## Skills
 
 ### `/create`
 
@@ -26,6 +26,23 @@ The skill will:
 3. Ask whether you have an existing `SKILL.md` or plugin directory to import. If yes, it copies it into the proper `plugins/<name>/` structure; if no, it creates an empty marketplace you can add plugins to later.
 4. Generate `.claude-plugin/marketplace.json`, the first plugin's `.claude-plugin/plugin.json`, and a `CLAUDE.md` that captures the conventions you'll need to remember.
 5. Validate the result with `claude plugin validate .` so you find schema mistakes before commit, not after.
+
+### `/update-cursor-plugins`
+
+Copies every plugin listed in `.cursor-plugin/marketplace.json` into `~/.cursor/plugins/local/<name>/` as a real file tree. Use this when Cursor's team-marketplace refresh is unavailable or you need a durable local install that does not symlink into a checkout.
+
+```text
+/update-cursor-plugins
+/update-cursor-plugins /path/to/marketplace-root
+```
+
+Or run the script directly:
+
+```bash
+python3 plugins/marketplace/skills/update-cursor-plugins/scripts/update_cursor_plugins.py .
+```
+
+Then **Developer: Reload Window**, enable plugins in **Customize**, and confirm hooks under **Settings → Hooks**.
 
 ## Why this matters
 
