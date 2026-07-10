@@ -1,0 +1,8 @@
+{
+  "name": "pr",
+  "description": "Open a pull request with an architecture-first description (via pr-summary-writer), then babysit CI and review feedback three times (via cb-babysit).",
+  "version": "0.1.0",
+  "author": {
+    "name": "Paul Baranowski"
+  }
+}
