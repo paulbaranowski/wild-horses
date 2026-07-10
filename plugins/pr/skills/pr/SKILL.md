@@ -55,10 +55,10 @@ Stop and report if:
 - Not on a git repo, or on the repository's default branch with no feature branch.
 - Working tree is dirty in a way that would leave uncommitted work out of the PR — ask the user to commit or stash first. Do not auto-commit.
 - An open PR already exists for this branch — print its URL and ask whether to (a) skip create and only run the babysit loop on it, or (b) abort. Do not open a duplicate.
-  - **If (a):** capture that PR's URL/number, **skip Phases 2–3 entirely**, and jump to Phase 4 with that URL as the babysit target.
+  - **If (a):** capture that PR's URL/number, run the push step below if needed, **skip Phases 2–3 entirely**, and jump to Phase 4 with that URL as the babysit target.
   - **If (b):** stop. Do not continue.
 
-Push when the branch has no upstream, **or** when local `HEAD` is ahead of its upstream (use `git status --short --branch` or `git rev-list --left-right --count @{upstream}...HEAD`). An upstream existing is not enough — unpushed local commits must land before create:
+Push when the branch has no upstream, **or** when local `HEAD` is ahead of its upstream (use `git status --short --branch` or `git rev-list --left-right --count @{upstream}...HEAD`). An upstream existing is not enough — unpushed local commits must land before create **and** before a babysit-only jump to Phase 4 (option (a)):
 
 ```bash
 git push -u origin HEAD
@@ -136,7 +136,7 @@ After the loop (3 passes or early clean/hard-stuck stop), summarize:
 
 - Use pr-summary-writer for every title/body — never a changelog-style stub.
 - Use cb-babysit for tending — never a hand-rolled "check CI and reply" shortcut.
-- Push before create when the branch has no upstream, **or** when local `HEAD` is ahead of its upstream (same rule as Phase 1).
+- Push when the branch has no upstream, **or** when local `HEAD` is ahead of its upstream — before create **and** before a babysit-only jump to Phase 4 (same rule as Phase 1).
 - Return the PR URL in the final summary.
 - Own the outer babysit loop: on `progressing` or soft `stuck`, run the next pass yourself.
 
