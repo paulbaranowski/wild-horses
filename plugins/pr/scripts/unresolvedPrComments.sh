@@ -206,14 +206,15 @@ add_fingerprints() {
   local fps=()
   local line
   while IFS= read -r line; do
-    [ -z "$line" ] && continue
-    local body
-    body="$(printf '%s' "$line" | base64 -d)"
+    local body=""
+    if [ -n "$line" ]; then
+      body="$(printf '%s' "$line" | base64 -d)"
+    fi
     fps+=("$(fingerprint_body "$body")")
-  done < <(printf '%s' "$input_json" | jq -r '.[] | .body // "" | @base64')
+  done < <(printf '%s' "$input_json" | jq -r '.[] | (.body // "") | @base64')
 
   local fps_json
-  fps_json="$(printf '%s\n' "${fps[@]}" | jq -Rs 'split("\n") | map(select(. != ""))')"
+  fps_json="$(printf '%s\n' "${fps[@]}" | jq -Rs 'split("\n") | if length > 0 and .[-1] == "" then .[0:-1] else . end')"
   printf '%s' "$input_json" | jq --argjson fps "$fps_json" '
     [., $fps] | transpose | map(.[0] + { fingerprint: (.[1] // "") })
   '

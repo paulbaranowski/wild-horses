@@ -66,7 +66,7 @@ FAILING_RAW="$(printf '%s' "$ROLLUP" \
         | (.state // "" | ascii_downcase) as $s
         | if $b == "fail" or $c == "failure" or $s == "failure" or $s == "error"
           then "fail" else "" end;
-      .[]
+      ( . // [] )[]
       | select(normalized_bucket == "fail")
       | [.name // "unknown", .detailsUrl // ""]
       | @tsv

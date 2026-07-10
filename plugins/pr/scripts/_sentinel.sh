@@ -10,7 +10,7 @@
 SENTINEL_PREFIX='pr-babysit:addressed v1 '
 LEGACY_CB_SENTINEL_PREFIX='cb-babysit:addressed v1 '
 LEGACY_BABYSIT_PR_SENTINEL_PREFIX='babysit-pr:addressed v1 '
-SENTINEL='<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.0</code></sub>'
+SENTINEL='<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>'
 
 # Bot author allowlist (JSON array literal). Used by unresolvedPrComments.sh
 # as a fallback when GraphQL's `author.__typename == "Bot"` misses a GitHub

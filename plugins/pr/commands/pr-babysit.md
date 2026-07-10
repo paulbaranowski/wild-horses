@@ -14,15 +14,15 @@ The user invokes this skill with an optional PR number or URL. Parse in this ord
 3. **Bare numeric argument**: only when the complete text is a positive integer without surrounding prose.
 4. **None of the above**: operate on the PR for the current branch.
 
-Scripts live at `${CLAUDE_PLUGIN_ROOT}/scripts/` (or `${CURSOR_PLUGIN_ROOT}/scripts/` in Cursor).
+Scripts live at `${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/` (or `${CURSOR_PLUGIN_ROOT}/scripts/` in Cursor).
 
 ## Sentinels
 
 The skill uses two sentinels with visible footer lines.
 
-**Addressed sentinel**: `<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.0</code></sub>`. Appended on its own line at the end of every reply the skill posts so re-runs know which threads and review-body comments are already handled. Dedupe also recognizes legacy `cb-babysit:addressed v1` and `babysit-pr:addressed v1` prefixes from prior babysit implementations.
+**Addressed sentinel**: `<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>`. Appended on its own line at the end of every reply the skill posts so re-runs know which threads and review-body comments are already handled. Dedupe also recognizes legacy `cb-babysit:addressed v1` and `babysit-pr:addressed v1` prefixes from prior babysit implementations.
 
-**Follow-up sentinel**: `<sub>🤖 <code>pr-babysit:followup v1 wild-horses@0.2.0</code></sub>`. Attached to replies that defer an out-of-scope comment as a tracked follow-up. The sentinel is additive: the post-reply scripts still append the `addressed` sentinel at the end.
+**Follow-up sentinel**: `<sub>🤖 <code>pr-babysit:followup v1 wild-horses@0.2.1</code></sub>`. Attached to replies that defer an out-of-scope comment as a tracked follow-up. The sentinel is additive: the post-reply scripts still append the `addressed` sentinel at the end.
 
 **Sentinel recency rules.** The script emits a per-thread `activityState` with three values. Step 6a owns the handling rules for each state.
 
@@ -94,7 +94,7 @@ Exit codes 0 (pass), 1 (fail), 8 (pending), and 124 (timeout) are expected and h
 ### 4. Fetch review data
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/unresolvedPrComments.sh"
+bash "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/unresolvedPrComments.sh"
 ```
 
 The output JSON has:
@@ -139,7 +139,7 @@ Default posture: focus on in-scope feedback. For out-of-scope feedback, apply th
 
 ### 5. Handle CI failures
 
-Run `bash "${CLAUDE_PLUGIN_ROOT}/scripts/fetchFailedLogs.sh"` to stream failed output for every failing check on the PR. The first line is either:
+Run `bash "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/fetchFailedLogs.sh"` to stream failed output for every failing check on the PR. The first line is either:
 
 - `# pr-babysit: no failing checks` → skip to step 6a.
 - `# pr-babysit: failing checks` → followed by one delimited block per failing job or external check:
@@ -221,7 +221,7 @@ If steps 5, 6, or 7 modified any files, decide:
 Then run:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/commitAndPush.sh" "<message>" <file1> [<file2> ...]
+bash "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/commitAndPush.sh" "<message>" <file1> [<file2> ...]
 ```
 
 The script enforces explicit staging (never `git add -A`), never skips hooks, and prints:
@@ -238,7 +238,7 @@ Capture the `url=` line for the reply templates in step 9.
 For every thread assessed in step 6a that was NOT marked **Skip-reply** (i.e., one of Agree / Disagree / Already fixed / Defer):
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/postSentinelReply.sh" "$THREAD_ID" "$BODY"
+bash "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/postSentinelReply.sh" "$THREAD_ID" "$BODY"
 ```
 
 Skip-reply threads are left alone as the existing sentinel already covers them.
@@ -248,7 +248,7 @@ Body templates (the script appends the `addressed` sentinel if missing):
 - **Agree**: `Addressed in <commit-url>. <one-line what-changed>.`
 - **Disagree**: `Leaving current behavior. <reasoning>.`
 - **Already fixed**: `Already handled by <commit-url-or-file:line>. <brief pointer>.`
-- **Defer**: `Out of scope for this PR; this looks like follow-up work rather than something introduced or required by this change. <one-line rationale or pointer if useful>.\n\n<sub>🤖 <code>pr-babysit:followup v1 wild-horses@0.2.0</code></sub>`
+- **Defer**: `Out of scope for this PR; this looks like follow-up work rather than something introduced or required by this change. <one-line rationale or pointer if useful>.\n\n<sub>🤖 <code>pr-babysit:followup v1 wild-horses@0.2.1</code></sub>`
 
 For Defer replies, include the follow-up sentinel on its own line as shown. The script will append the `addressed` sentinel after it on its own line, so the final body ends with the follow-up sentinel followed by a blank line followed by the `addressed` sentinel. `grep pr-babysit:followup` finds the deferral and `grep pr-babysit:addressed` still marks the thread handled for dedupe.
 
@@ -257,14 +257,14 @@ The script uses the `addPullRequestReviewThreadReply` GraphQL mutation. It does 
 If any automated review bodies were assessed in step 7 OR any active issue comments were assessed in step 6b, post ONE top-level PR comment summarizing all of them:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/postSentinelPrComment.sh" "$PR_NUMBER" "$BODY"
+bash "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/postSentinelPrComment.sh" "$PR_NUMBER" "$BODY"
 ```
 
 The PR-level summary should:
 
 - Group by source. Use `## Review-body findings` for step-7 work and `## Conversation-tab comments` for step-6b work. Omit a section if its list is empty.
 - Inside each section, group verdicts under **Agree / Disagree / Already fixed / Deferred (out of scope)** subheadings. Omit a subheading if its list is empty.
-- Under **Deferred (out of scope)**, list each deferred item as a bullet, followed on its own line by `<sub>🤖 <code>pr-babysit:followup v1 wild-horses@0.2.0</code></sub>` so grep catches them individually.
+- Under **Deferred (out of scope)**, list each deferred item as a bullet, followed on its own line by `<sub>🤖 <code>pr-babysit:followup v1 wild-horses@0.2.1</code></sub>` so grep catches them individually.
 - Include the commit URL for fixes.
 - End with a fenced fingerprint block listing every current fingerprint (addressed and deferred) one per line. Include both `reviewBodyComments[].fingerprint` (whole-body, one per automated review) and `activeIssueComments[].fingerprint` (per Conversation-tab comment). Future runs dedupe by matching these against `priorBabysitSentinels`.
 
