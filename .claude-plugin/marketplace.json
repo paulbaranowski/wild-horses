@@ -40,7 +40,7 @@
     {
       "name": "marketplace",
       "source": "./plugins/marketplace",
-      "description": "Scaffold a Claude Code plugin marketplace with proper structure, schema validation, and CLAUDE.md conventions.",
+      "description": "Scaffold a Claude Code plugin marketplace with proper structure, schema validation, and CLAUDE.md conventions. Includes install-cursor-plugins to copy a catalog into ~/.cursor/plugins/local as real files.",
       "author": {
         "name": "Paul Baranowski"
       },

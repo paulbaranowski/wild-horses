@@ -40,7 +40,7 @@
     {
       "name": "marketplace",
       "source": "plugins/marketplace",
-      "description": "Scaffold a plugin marketplace with proper structure, schema validation, and conventions.",
+      "description": "Scaffold a plugin marketplace with proper structure, schema validation, and conventions. Includes install-cursor-plugins to copy a catalog into ~/.cursor/plugins/local as real files.",
       "author": {
         "name": "Paul Baranowski"
       },

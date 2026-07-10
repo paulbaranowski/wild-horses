@@ -239,16 +239,15 @@ Point at the repo root (the directory that contains `.claude-plugin/marketplace.
 
 wild-horses ships dual manifests: `.claude-plugin/` for Claude Code and `.cursor-plugin/` for Cursor. Hooks use `hooks/hooks.json` (Claude) and `hooks/cursor-hooks.json` (Cursor) side by side.
 
-**Local testing** (fastest iteration):
+**Local install** (copy catalog plugins as real files — no symlinks):
 
 ```bash
-# Symlink one plugin into Cursor's local plugin directory
-ln -s "$(pwd)/plugins/pr-status-hook" ~/.cursor/plugins/local/pr-status-hook
-
-# Or symlink the whole marketplace checkout and install plugins from Customize
+# From a wild-horses checkout (or any marketplace root with .cursor-plugin/marketplace.json)
+bash plugins/marketplace/skills/install-cursor-plugins/scripts/install-cursor-plugins.sh .
+# Or invoke the skill: /install-cursor-plugins
 ```
 
-Then restart Cursor (**Developer: Reload Window**) and open **Customize** to enable the plugin. Check **Settings → Hooks** to confirm hook registration.
+Then restart Cursor (**Developer: Reload Window**) and open **Customize** to enable plugins. Check **Settings → Hooks** to confirm hook registration.
 
 **Team / published marketplace:** add this repository as a team marketplace in **Dashboard → Plugins**, or submit at [cursor.com/marketplace/publish](https://cursor.com/marketplace/publish) once ready.
 
