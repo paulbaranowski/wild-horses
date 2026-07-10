@@ -136,7 +136,7 @@ After the loop (3 passes or early clean/hard-stuck stop), summarize:
 
 - Use pr-summary-writer for every title/body — never a changelog-style stub.
 - Use cb-babysit for tending — never a hand-rolled "check CI and reply" shortcut.
-- Push before create when the branch is not on the remote.
+- Push before create when the branch has no upstream, **or** when local `HEAD` is ahead of its upstream (same rule as Phase 1).
 - Return the PR URL in the final summary.
 - Own the outer babysit loop: on `progressing` or soft `stuck`, run the next pass yourself.
 
