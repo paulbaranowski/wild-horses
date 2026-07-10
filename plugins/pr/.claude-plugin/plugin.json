@@ -1,7 +1,7 @@
 {
   "name": "pr",
   "description": "Open a pull request with an architecture-first description (via pr-summary-writer), then babysit CI and review feedback. Ships /pr:pr-babysit for single-pass tending and /pr for create-then-babysit.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": {
     "name": "Paul Baranowski"
   }
