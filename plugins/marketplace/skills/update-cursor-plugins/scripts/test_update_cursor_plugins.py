@@ -10,6 +10,8 @@ from pathlib import Path
 from update_cursor_plugins import (
     load_catalog,
     normalize_plugin_root,
+    plugin_dest_dir,
+    plugin_dest_error,
     plugin_source_path,
     resolve_source_dir,
 )
@@ -57,6 +59,18 @@ class TestManifestHelpers(unittest.TestCase):
                 entries,
                 [("harness", "harness"), ("linting-hooks", "linting-hooks")],
             )
+
+    def test_plugin_dest_error_rejects_unsafe_names(self) -> None:
+        for bad in ("", ".", "..", "foo/bar", r"foo\bar"):
+            self.assertIsNotNone(plugin_dest_error(bad))
+        self.assertIsNone(plugin_dest_error("pr-status-hook"))
+
+    def test_plugin_dest_dir_stays_under_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "local"
+            root.mkdir()
+            dest = plugin_dest_dir(root, "harness")
+            self.assertEqual(dest, (root / "harness").resolve())
 
 
 if __name__ == "__main__":

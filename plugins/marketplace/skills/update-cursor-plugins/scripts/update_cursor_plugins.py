@@ -19,6 +19,26 @@ CURSOR_PLUGIN_MANIFEST = Path(".cursor-plugin") / "plugin.json"
 RSYNC_EXCLUDES = (".git/", ".DS_Store")
 
 
+def plugin_dest_error(name: str) -> str | None:
+    if name in ("", ".", ".."):
+        return "unsafe plugin name"
+    if "/" in name or "\\" in name:
+        return "plugin name must be a single path segment"
+    if Path(name).name != name:
+        return "unsafe plugin name"
+    return None
+
+
+def plugin_dest_dir(dest_root: Path, name: str) -> Path:
+    if err := plugin_dest_error(name):
+        raise ValueError(err)
+    dest_dir = (dest_root / name).resolve()
+    dest_root_resolved = dest_root.resolve()
+    if dest_dir == dest_root_resolved or dest_root_resolved not in dest_dir.parents:
+        raise ValueError(f"plugin destination escapes dest root: {name!r}")
+    return dest_dir
+
+
 def plugin_source_path(source: object) -> str | None:
     if isinstance(source, str):
         return source
@@ -124,7 +144,14 @@ def update_plugins(marketplace_root: Path, dest_root: Path) -> tuple[int, int]:
             skipped += 1
             continue
 
-        copy_plugin(name, src_dir, dest_root / name)
+        try:
+            dest_dir = plugin_dest_dir(dest_root, name)
+        except ValueError as exc:
+            print(f"skip {name}: {exc}", file=sys.stderr)
+            skipped += 1
+            continue
+
+        copy_plugin(name, src_dir, dest_dir)
         copied += 1
 
     print(f"done: copied={copied} skipped={skipped} dest={dest_root}")
