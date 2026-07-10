@@ -55,6 +55,8 @@ Stop and report if:
 - Not on a git repo, or on the repository's default branch with no feature branch.
 - Working tree is dirty in a way that would leave uncommitted work out of the PR — ask the user to commit or stash first. Do not auto-commit.
 - An open PR already exists for this branch — print its URL and ask whether to (a) skip create and only run the babysit loop on it, or (b) abort. Do not open a duplicate.
+  - **If (a):** capture that PR's URL/number, **skip Phases 2–3 entirely**, and jump to Phase 4 with that URL as the babysit target.
+  - **If (b):** stop. Do not continue.
 
 Push when the branch has no upstream, **or** when local `HEAD` is ahead of its upstream (use `git status --short --branch` or `git rev-list --left-right --count @{upstream}...HEAD`). An upstream existing is not enough — unpushed local commits must land before create:
 
@@ -74,10 +76,14 @@ git push -u origin HEAD
 
 ## Phase 3 — Create the PR
 
-Build the create invocation shell-safely — do not interpolate the title into an unquoted string, and do not expand `$ARGUMENTS` unquoted:
+Build the create invocation shell-safely — do not interpolate the title into an unquoted string, and do not expand `$ARGUMENTS` unquoted. **Don't assign the title with `TITLE='…'`** — a single quote inside the title (common in conventional commits) terminates the string early.
 
 ```bash
-TITLE='<title from pr-summary-writer>'
+# Heredoc → variable keeps apostrophes and other metacharacters literal.
+TITLE=$(cat <<'TITLE_EOF'
+<title from pr-summary-writer>
+TITLE_EOF
+)
 CREATE_ARGS=()
 # If $ARGUMENTS is a bare branch name (no leading -), treat as base:
 #   CREATE_ARGS+=(--base "$ARGUMENTS")
@@ -92,7 +98,7 @@ EOF
 Notes:
 
 - `--body-file -` with a single-quoted heredoc keeps `$`, backticks, and quotes in the body literal.
-- Quote `"$TITLE"` so titles with spaces, quotes, or shell metacharacters do not misparse.
+- Quote `"$TITLE"` at the `gh` call so spaces and metacharacters do not word-split.
 - Capture the PR URL from `gh pr create` output (or `gh pr view --json url -q .url` right after).
 
 Print the PR URL, then continue — do not wait for the user.
@@ -101,7 +107,7 @@ Print the PR URL, then continue — do not wait for the user.
 
 ## Phase 4 — Babysit up to 3 times
 
-`/pr` owns the outer babysit loop. Run **cb-babysit** on the PR you just opened, **up to three sequential passes**.
+`/pr` owns the outer babysit loop. Run **cb-babysit** on the PR from Phase 3 (or the existing PR URL from preflight option (a)), **up to three sequential passes**.
 
 cb-babysit's own Loop control may say "tell the user to re-run" or "wrap with `/loop`" on a `progressing` exit. **Ignore that advice while inside `/pr`** — continue to the next pass yourself until you hit 3 passes or an early-exit condition below.
 
