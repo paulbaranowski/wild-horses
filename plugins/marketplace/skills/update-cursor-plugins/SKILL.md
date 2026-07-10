@@ -26,13 +26,13 @@ Cursor team-marketplace refresh lives on the web dashboard, not in the IDE, and 
 3. Run the bundled updater (one Bash call — do not hand-roll `cp`/`ln`):
 
 ```bash
-bash "<skill-or-plugin-root>/skills/update-cursor-plugins/scripts/update-cursor-plugins.sh" "<marketplace-root>"
+python3 "<skill-or-plugin-root>/skills/update-cursor-plugins/scripts/update_cursor_plugins.py" "<marketplace-root>"
 ```
 
 When this skill is running from an installed `marketplace` plugin, prefer:
 
 ```bash
-bash "${CURSOR_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/update-cursor-plugins/scripts/update-cursor-plugins.sh" "<marketplace-root>"
+python3 "${CURSOR_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/update-cursor-plugins/scripts/update_cursor_plugins.py" "<marketplace-root>"
 ```
 
 If neither plugin-root env is set (dev checkout), resolve the script relative to this skill's directory.

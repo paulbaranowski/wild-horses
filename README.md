@@ -243,7 +243,7 @@ wild-horses ships dual manifests: `.claude-plugin/` for Claude Code and `.cursor
 
 ```bash
 # From a wild-horses checkout (or any marketplace root with .cursor-plugin/marketplace.json)
-bash plugins/marketplace/skills/update-cursor-plugins/scripts/update-cursor-plugins.sh .
+python3 plugins/marketplace/skills/update-cursor-plugins/scripts/update_cursor_plugins.py .
 # Or invoke the skill: /update-cursor-plugins
 ```
 

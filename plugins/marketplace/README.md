@@ -39,7 +39,7 @@ Copies every plugin listed in `.cursor-plugin/marketplace.json` into `~/.cursor/
 Or run the script directly:
 
 ```bash
-bash plugins/marketplace/skills/update-cursor-plugins/scripts/update-cursor-plugins.sh .
+python3 plugins/marketplace/skills/update-cursor-plugins/scripts/update_cursor_plugins.py .
 ```
 
 Then **Developer: Reload Window**, enable plugins in **Customize**, and confirm hooks under **Settings → Hooks**.
