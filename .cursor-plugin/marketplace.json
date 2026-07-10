@@ -128,6 +128,16 @@
       "license": "MIT"
     },
     {
+      "name": "pr",
+      "source": "plugins/pr",
+      "description": "Open a pull request with an architecture-first description (via pr-summary-writer), then babysit CI and review feedback three times (via cb-babysit).",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
       "name": "cleanup-worktrees",
       "source": "plugins/cleanup-worktrees",
       "description": "Reclaim disk space from stale git worktrees.",
