@@ -86,7 +86,11 @@ EOF
 ```
 
 1. If the commit fails (e.g. pre-commit hook rejected the commit), fix the issue and create a **new** commit — do not amend unless you created the prior commit in this same `/pr` run and it has not been pushed.
-2. After every successful commit, re-check `git status --short`. If hooks left modified or uncommitted files, stage and commit them in a separate follow-up commit (repeat the status check until clean or only unrelated dirty files remain).
+2. After every successful commit, re-check `git status --short`. For remaining dirty files:
+   - Re-run the secret check from above; stop and ask the user if any path looks like secrets.
+   - Stage only hook-touched files among paths already part of this `/pr` run (files in the commit just made or the intended PR surface) — not secrets or local-only scratch.
+   - If any dirty files remain that are unrelated to this run (disjoint paths, pre-existing work the user had before `/pr` started), stop and report instead of continuing to push.
+   - Otherwise commit the follow-up changes and repeat this status check until the tree is clean.
 
 Then continue to the push step below.
 
