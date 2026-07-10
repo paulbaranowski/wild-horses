@@ -105,7 +105,7 @@ The result `status` is one of:
 
 ### 3.5 Handle misconfigured-bare repos (only those with `status: bare-misconfig`)
 
-A `bare-misconfig` repo is a real working tree with a stray `core.bare=true` — git refuses every work-tree operation until it's unset, so the repo wasn't pulled. Some worktree tooling (emdash/graft) re-sets the flag, so this can recur across runs. For each such repo, ask the user via AskUserQuestion: **"Unset core.bare and pull"** or **"Skip"**.
+A `bare-misconfig` repo is a real working tree with a stray `core.bare=true` — git refuses every work-tree operation until it's unset, so the repo wasn't pulled. For each such repo, ask the user via AskUserQuestion: **"Unset core.bare and pull"** or **"Skip"**.
 
 For "Unset core.bare and pull":
 

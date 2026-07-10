@@ -342,8 +342,7 @@ def is_git_repo(path: Path) -> bool:
 def is_misconfigured_bare(path: Path) -> bool:
     """True for a real working tree wrongly flagged core.bare=true.
 
-    Some worktree tooling (emdash/graft) intermittently sets core.bare=true on a
-    normal checkout, after which git refuses every work-tree operation
+    With core.bare=true on a normal checkout, git refuses every work-tree operation
     ('fatal: this operation must be run in a work tree'). We detect the
     contradiction between two queries: `--is-bare-repository` reads the core.bare
     flag (true), while `--git-dir` reports the on-disk layout — a real checkout
