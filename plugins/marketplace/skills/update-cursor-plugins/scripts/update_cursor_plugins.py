@@ -32,11 +32,29 @@ def plugin_dest_error(name: str) -> str | None:
 def plugin_dest_dir(dest_root: Path, name: str) -> Path:
     if err := plugin_dest_error(name):
         raise ValueError(err)
-    dest_dir = (dest_root / name).resolve()
+    dest_dir = dest_root / name
+    if dest_dir.is_symlink():
+        print(f"replacing symlink {dest_dir} with a real copy")
+        dest_dir.unlink()
+    elif dest_dir.exists() and not dest_dir.is_dir():
+        print(f"replacing file {dest_dir} with a plugin directory")
+        dest_dir.unlink()
+    dest_resolved = dest_dir.resolve()
     dest_root_resolved = dest_root.resolve()
-    if dest_dir == dest_root_resolved or dest_root_resolved not in dest_dir.parents:
+    if (
+        dest_resolved == dest_root_resolved
+        or dest_root_resolved not in dest_resolved.parents
+    ):
         raise ValueError(f"plugin destination escapes dest root: {name!r}")
     return dest_dir
+
+
+def source_path_error(source: str) -> str | None:
+    if Path(source).is_absolute():
+        return "source must be relative to marketplace root"
+    if ".." in Path(source).parts:
+        return "source must not contain parent segments"
+    return None
 
 
 def plugin_source_path(source: object) -> str | None:
@@ -59,11 +77,20 @@ def normalize_plugin_root(plugin_root: str | None) -> str | None:
 def resolve_source_dir(
     marketplace_root: Path, source: str, plugin_root: str | None
 ) -> Path:
+    if err := source_path_error(source):
+        raise ValueError(err)
     rel = source.removeprefix("./")
     root = normalize_plugin_root(plugin_root)
     if root and not rel.startswith(f"{root}/"):
         rel = f"{root}/{rel}"
-    return marketplace_root / rel
+    src_dir = (marketplace_root / rel).resolve()
+    marketplace_root_resolved = marketplace_root.resolve()
+    if (
+        marketplace_root_resolved not in src_dir.parents
+        and src_dir != marketplace_root_resolved
+    ):
+        raise ValueError("source escapes marketplace root")
+    return src_dir
 
 
 def load_catalog(manifest_path: Path) -> tuple[str | None, list[tuple[str, str]]]:
@@ -110,9 +137,6 @@ def rsync_copy(src_dir: Path, dest_dir: Path) -> None:
 
 
 def copy_plugin(name: str, src_dir: Path, dest_dir: Path) -> None:
-    if dest_dir.is_symlink():
-        print(f"replacing symlink {dest_dir} with a real copy")
-        dest_dir.unlink()
     dest_dir.mkdir(parents=True, exist_ok=True)
     rsync_copy(src_dir, dest_dir)
     if dest_dir.is_symlink():
@@ -131,7 +155,12 @@ def update_plugins(marketplace_root: Path, dest_root: Path) -> tuple[int, int]:
     copied = 0
     skipped = 0
     for name, source in entries:
-        src_dir = resolve_source_dir(marketplace_root, source, plugin_root)
+        try:
+            src_dir = resolve_source_dir(marketplace_root, source, plugin_root)
+        except ValueError as exc:
+            print(f"skip {name}: {exc}", file=sys.stderr)
+            skipped += 1
+            continue
         if not src_dir.is_dir():
             print(f"skip {name}: source not found: {src_dir}", file=sys.stderr)
             skipped += 1
@@ -187,7 +216,13 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         copied, _skipped = update_plugins(marketplace_root, dest_root)
-    except (FileNotFoundError, ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
+    except (
+        FileNotFoundError,
+        ValueError,
+        RuntimeError,
+        subprocess.CalledProcessError,
+        OSError,
+    ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

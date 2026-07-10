@@ -1,7 +1,7 @@
 {
   "name": "marketplace",
   "description": "Scaffold a Claude Code plugin marketplace with proper structure, schema validation, and CLAUDE.md conventions. Includes update-cursor-plugins to copy a marketplace catalog into ~/.cursor/plugins/local as real files.",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "author": {
     "name": "Paul Baranowski"
   }

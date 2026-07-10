@@ -14,6 +14,7 @@ from update_cursor_plugins import (
     plugin_dest_error,
     plugin_source_path,
     resolve_source_dir,
+    source_path_error,
 )
 
 
@@ -70,7 +71,42 @@ class TestManifestHelpers(unittest.TestCase):
             root = Path(tmp) / "local"
             root.mkdir()
             dest = plugin_dest_dir(root, "harness")
-            self.assertEqual(dest, (root / "harness").resolve())
+            self.assertEqual(dest, root / "harness")
+
+    def test_plugin_dest_dir_replaces_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "local"
+            root.mkdir()
+            outside = Path(tmp) / "checkout"
+            outside.mkdir()
+            link = root / "harness"
+            link.symlink_to(outside)
+            dest = plugin_dest_dir(root, "harness")
+            self.assertEqual(dest, root / "harness")
+            self.assertFalse(dest.exists())
+
+    def test_plugin_dest_dir_replaces_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "local"
+            root.mkdir()
+            blocker = root / "harness"
+            blocker.write_text("not a directory", encoding="utf-8")
+            dest = plugin_dest_dir(root, "harness")
+            self.assertEqual(dest, blocker)
+            self.assertFalse(dest.exists())
+
+    def test_source_path_error_rejects_escape(self) -> None:
+        self.assertIsNotNone(source_path_error("/abs/path"))
+        self.assertIsNotNone(source_path_error("../outside"))
+
+    def test_resolve_source_dir_rejects_outside_marketplace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "marketplace"
+            root.mkdir()
+            outside = Path(tmp) / "outside"
+            outside.mkdir()
+            with self.assertRaises(ValueError):
+                resolve_source_dir(root, f"../{outside.name}", None)
 
 
 if __name__ == "__main__":
