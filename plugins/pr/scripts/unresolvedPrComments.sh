@@ -455,7 +455,7 @@ main() {
     [.[]
       | select(.isBabysitSentinel | not)
       | select(.isKnownBot | not)
-      | select($blob | contains(.fingerprint) | not)
+      | select(.fingerprint as $fp | ($blob | contains($fp)) | not)
     ]
   ')"
 
