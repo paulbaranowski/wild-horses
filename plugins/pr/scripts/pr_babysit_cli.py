@@ -59,31 +59,42 @@ SECURITY_LOGINS = ("github-advanced-security", "github-advanced-security[bot]")
 
 # --- gh plumbing -------------------------------------------------------------
 
+# Wall-clock cap for a single `gh` call so a stuck network or auth prompt can't
+# wedge an unattended pr-babysit loop forever. Only `gh` calls are timed; local
+# git operations (commit hooks, large pushes) legitimately run long and are left
+# to complete on their own.
+GH_TIMEOUT_SECONDS = 120
+
+
 class GhError(Exception):
     """A `gh` invocation failed; message is the combined stderr/stdout."""
 
 
-def _run(args, *, capture=True, stdin=None):
+def _run(args, *, capture=True, stdin=None, timeout=None):
     return subprocess.run(
         args,
         input=stdin,
         stdout=subprocess.PIPE if capture else None,
         stderr=subprocess.PIPE if capture else None,
         text=True,
+        timeout=timeout,
     )
 
 
-def gh_text(args):
-    """Run `gh <args>`, return stdout. Raise GhError on non-zero exit."""
-    proc = _run(["gh", *args])
+def gh_text(args, *, stdin=None):
+    """Run `gh <args>`, return stdout. Raise GhError on non-zero exit or timeout."""
+    try:
+        proc = _run(["gh", *args], stdin=stdin, timeout=GH_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        raise GhError(f"gh timed out after {GH_TIMEOUT_SECONDS}s: gh {' '.join(args[:2])}")
     if proc.returncode != 0:
         raise GhError((proc.stderr or proc.stdout or "").strip())
     return proc.stdout
 
 
-def gh_json(args):
+def gh_json(args, *, stdin=None):
     """Run `gh <args>` and parse stdout as JSON."""
-    out = gh_text(args)
+    out = gh_text(args, stdin=stdin)
     return json.loads(out) if out.strip() else None
 
 
@@ -444,9 +455,9 @@ class ReviewError(Exception):
 def _repo_info():
     try:
         info = gh_json(["repo", "view", "--json", "owner,name"])
-    except GhError:
+    except GhError as e:
         raise ReviewError(
-            "Could not determine repository. Are you in a git repo with a GitHub remote?")
+            "Could not determine repository. Are you in a git repo with a GitHub remote?") from e
     owner = ((info or {}).get("owner") or {}).get("login") or ""
     name = (info or {}).get("name") or ""
     if not owner or not name:
@@ -461,8 +472,8 @@ def _resolve_pr_number(arg):
         return int(arg)
     try:
         pr = gh_json(["pr", "view", "--json", "number"])
-    except GhError:
-        raise ReviewError("No PR found for current branch. Provide PR number as argument.")
+    except GhError as e:
+        raise ReviewError("No PR found for current branch. Provide PR number as argument.") from e
     num = (pr or {}).get("number")
     if not num:
         raise ReviewError("No PR found for current branch. Provide PR number as argument.")
@@ -475,8 +486,8 @@ def cmd_review(args):
             raise ReviewError("gh CLI not found. Install from https://cli.github.com")
         try:
             gh_text(["api", "user", "--jq", ".login"])
-        except GhError:
-            raise ReviewError("Not authenticated with GitHub. Run: gh auth login")
+        except GhError as e:
+            raise ReviewError("Not authenticated with GitHub. Run: gh auth login") from e
 
         pr_number = _resolve_pr_number(args.pr)
         owner, repo = _repo_info()
@@ -490,7 +501,7 @@ def cmd_review(args):
                 "-F", f"pr={pr_number}",
             ])
         except GhError as e:
-            raise ReviewError(f"GraphQL query failed: {e}")
+            raise ReviewError(f"GraphQL query failed: {e}") from e
 
         if _pull_request(response) is None:
             repository = ((response or {}).get("data") or {}).get("repository")
@@ -554,6 +565,13 @@ def partition_failing_checks(rollup):
 
 
 def cmd_failed_logs(args):
+    # Validate the argument BEFORE any environment probe, so malformed input is
+    # a deterministic exit 2 regardless of whether gh is installed/authenticated
+    # (otherwise a bad PR number returns 1 on an unauthenticated runner).
+    if args.pr is not None and not re.fullmatch(r"[0-9]+", args.pr):
+        print(json.dumps({"error": f"invalid PR number: {args.pr}"}), file=sys.stderr)
+        return 2
+
     if not have("gh"):
         print(json.dumps({"error": "gh CLI not found"}), file=sys.stderr)
         return 1
@@ -565,9 +583,6 @@ def cmd_failed_logs(args):
         return 1
 
     if args.pr is not None:
-        if not re.fullmatch(r"[0-9]+", args.pr):
-            print(json.dumps({"error": f"invalid PR number: {args.pr}"}), file=sys.stderr)
-            return 2
         view = ["pr", "view", args.pr, "--json", "statusCheckRollup", "--jq", ".statusCheckRollup"]
         fail_msg = f"could not fetch PR {args.pr}"
     else:
@@ -665,7 +680,11 @@ def cmd_commit_push(args):
         print(json.dumps({"error": "git push failed"}), file=sys.stderr)
         return 1
 
-    sha = gh_text_or_git(["git", "rev-parse", "HEAD"]).strip()
+    rev = _run(["git", "rev-parse", "HEAD"])
+    if rev.returncode != 0:
+        print(json.dumps({"error": "git rev-parse HEAD failed after push"}), file=sys.stderr)
+        return 1
+    sha = (rev.stdout or "").strip()
 
     try:
         info = gh_json(["repo", "view", "--json", "owner,name"])
@@ -681,11 +700,6 @@ def cmd_commit_push(args):
     print(f"sha={sha}")
     print(f"url=https://github.com/{owner}/{repo}/commit/{sha}")
     return 0
-
-
-def gh_text_or_git(args):
-    proc = _run(args)
-    return proc.stdout or ""
 
 
 # --- reply subcommand --------------------------------------------------------
@@ -721,6 +735,9 @@ def cmd_reply(args):
 
     body = ensure_sentinel(body)
     try:
+        # `-f`/`--raw-field` passes the value literally: it does NOT do gh's
+        # `@filename` / `@-` interpretation (that is only `-F`/`--field`), so a
+        # leading `@` in an @mention reply is posted verbatim, as intended.
         result = gh_json([
             "api", "graphql",
             "-f", f"query={REPLY_MUTATION}",
@@ -768,6 +785,8 @@ def cmd_comment(args):
         return 1
 
     try:
+        # `-f`/`--raw-field` is literal (no `@filename` interpretation), so a
+        # leading `@` in the body is posted verbatim.
         result = gh_json([
             "api", f"repos/{owner}/{repo}/issues/{pr_number}/comments",
             "--method", "POST",
