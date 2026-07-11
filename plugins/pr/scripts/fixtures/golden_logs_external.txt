@@ -1,0 +1,7 @@
+# pr-babysit: failing checks
+
+# --- external check: nx-cloud (https://cloud.nx.app/runs/abc123) ---
+# --- external check: CircleCI (https://circleci.com/gh/x/y/456) ---
+
+# (no inline logs available for external checks — investigate via the URLs above;
+#  treat these like "External checks with no inspectable logs" in step 5's guidance)

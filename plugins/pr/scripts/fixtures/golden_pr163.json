@@ -1,0 +1,147 @@
+{
+  "activeIssueComments": [],
+  "activeThreads": [],
+  "issueComments": [
+    {
+      "id": "IC_kwDOR024ms8AAAABJfI8tQ",
+      "databaseId": 4931599541,
+      "author": "coderabbitai",
+      "authorType": "Bot",
+      "body": "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n<!-- review_stack_entry_start -->\n\n[![Review Change Stack](https://storage.googleapis.com/coderabbit_public_assets/review-stack-in-coderabbit-ui.svg)](https://app.coderabbit.ai/change-stack/paulbaranowski/wild-horses/pull/163?utm_source=github_walkthrough&utm_medium=github&utm_campaign=change_stack)\n\n<!-- review_stack_entry_end -->\n<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n\n> [!WARNING]\n> ## Review limit reached\n> \n> You’ve reached a temporary PR review limit under our [Fair Usage Limits Policy](https://docs.coderabbit.ai/management/plans#fair-usage-limits-policy).<br>\n> Your recent review volume is higher than typical usage, so adaptive limits are currently applied.\n> \n> **Next review available in:** **21 minutes**\n> \n> Enable **[usage-based reviews](https://app.coderabbit.ai/settings/billing?tab=usage&orgId=884645f9-892f-4c20-9a7a-21ddb620dd83)** in Billing to review now. Otherwise, wait until the next included review is available.\n> You're only billed for reviews past your plan's rate limits ($0.25/file).\n> \n> <details>\n> <summary>How can I continue?</summary>\n> \n> After more reviews become available, a review can be triggered using the `@coderabbitai review` command as a PR comment. Alternatively, push new commits to this PR.\n> \n> To avoid repeated limits, reduce automatic review volume by pausing incremental auto-reviews earlier, using label-based review opt-in, excluding WIP or generated PR titles, or requesting reviews manually when the PR is ready. If your team needs uninterrupted high-volume reviews, an organization admin can enable usage-based reviews.\n> \n> </details>\n> \n> \n> <details>\n> <summary>How do review limits work?</summary>\n> \n> CodeRabbit enforces per-developer PR review limits for each organization. Most developers receive the normal plan review availability.\n> \n> For paid Pro and Pro+ PR reviews, CodeRabbit uses adaptive limits for sustained high-volume activity. When a developer's recent PR review activity reaches the 95th percentile or higher among CodeRabbit users, additional reviews become available more gradually as earlier reviews age out of the rolling window.\n> \n> Please refer [docs](https://docs.coderabbit.ai/management/plans#rate-limits) for additional details.\n> \n> </details>\n> \n> <details>\n> <summary>Review details</summary>\n> \n> <details>\n> <summary>⚙️ Run configuration</summary>\n> \n> **Configuration used**: Organization UI\n> \n> **Review profile**: CHILL\n> \n> **Plan**: Pro\n> \n> **Run ID**: `bdaa643d-db80-4849-b0e1-b164e793dd43`\n> \n> </details>\n> \n> <details>\n> <summary>📥 Commits</summary>\n> \n> Reviewing files that changed from the base of the PR and between 7545616a5e8adeb7e73edd0a8e7f8ecac0d4d65f and 50e1908b2dd6f7e7b171c544450a3faa8ad035a5.\n> \n> </details>\n> \n> <details>\n> <summary>📒 Files selected for processing (3)</summary>\n> \n> * `plugins/pr/.claude-plugin/plugin.json`\n> * `plugins/pr/.cursor-plugin/plugin.json`\n> * `plugins/pr/skills/pr/SKILL.md`\n> \n> </details>\n> \n> </details>\n\n<!-- end of auto-generated comment: rate limited by coderabbit.ai -->\n\n<!-- walkthrough_start -->\n\n<details>\n<summary>📝 Walkthrough</summary>\n\n## Walkthrough\n\nThe PR adds a Claude and Cursor `pr` plugin, registers its manifests, and defines a `/pr` skill that validates the current branch, creates a pull request with generated content, then runs up to three CI and review babysitting passes.\n\n### Changes\n\n**Pull request workflow**\n\n|Layer / File(s)|Summary|\n|---|---|\n|**Plugin registration and manifests** <br> `.claude-plugin/marketplace.json`, `.cursor-plugin/marketplace.json`, `plugins/pr/.claude-plugin/plugin.json`, `plugins/pr/.cursor-plugin/plugin.json`|Registers the `pr` plugin and adds matching version `0.1.0` manifests with author and workflow metadata.|\n|**Skill contract and preflight** <br> `plugins/pr/skills/pr/SKILL.md`|Defines `/pr` arguments and dependencies, reads composed skills, validates repository and branch state, prevents duplicate PRs, and pushes the branch when needed.|\n|**PR creation and babysitting** <br> `plugins/pr/skills/pr/SKILL.md`|Generates the PR title and body, creates the PR with `gh pr create`, captures its URL, and runs up to three `cb-babysit` passes with defined stop conditions.|\n\n**Estimated code review effort:** 3 (Moderate) | ~20 minutes\n\n### Sequence Diagram(s)\n\n```mermaid\nsequenceDiagram\n  participant GitRepository\n  participant pr-summary-writer\n  participant gh\n  participant cb-babysit\n  GitRepository->>GitRepository: Validate branch, upstream, working tree, and existing PR\n  pr-summary-writer->>gh: Supply generated title and body\n  gh->>GitRepository: Create pull request\n  GitRepository-->>gh: Return pull request URL\n  cb-babysit->>gh: Run CI and review feedback pass\n  gh-->>cb-babysit: Return pass outcome\n```\n\n</details>\n\n<!-- walkthrough_end -->\n<!-- pre_merge_checks_walkthrough_start -->\n\n<details>\n<summary>🚥 Pre-merge checks | ✅ 5</summary>\n\n<details>\n<summary>✅ Passed checks (5 passed)</summary>\n\n|         Check name         | Status   | Explanation                                                                                                       |\n| :------------------------: | :------- | :---------------------------------------------------------------------------------------------------------------- |\n|      Description Check     | ✅ Passed | Check skipped - CodeRabbit’s high-level summary is enabled.                                                       |\n|         Title check        | ✅ Passed | The title clearly summarizes the main change: adding the /pr skill that creates a PR and babysits it three times. |\n|     Docstring Coverage     | ✅ Passed | No functions found in the changed files to evaluate docstring coverage. Skipping docstring coverage check.        |\n|     Linked Issues check    | ✅ Passed | Check skipped because no linked issues were found for this pull request.                                          |\n| Out of Scope Changes check | ✅ Passed | Check skipped because no linked issues were found for this pull request.                                          |\n\n</details>\n\n</details>\n\n<!-- pre_merge_checks_walkthrough_end -->\n<!-- finishing_touch_checkbox_start -->\n\n<details>\n<summary>✨ Finishing Touches</summary>\n\n<details>\n<summary>🧪 Generate unit tests (beta)</summary>\n\n- [ ] <!-- {\"checkboxId\": \"f47ac10b-58cc-4372-a567-0e02b2c3d479\", \"radioGroupId\": \"utg-output-choice-group-unknown_comment_id\"} -->   Create PR with unit tests\n- [ ] <!-- {\"checkboxId\": \"6ba7b810-9dad-11d1-80b4-00c04fd430c8\", \"radioGroupId\": \"utg-output-choice-group-unknown_comment_id\"} -->   Commit unit tests in branch `emdash/create-a-pr-skill-imh6y`\n\n</details>\n\n</details>\n\n<!-- finishing_touch_checkbox_end -->\n<!-- tips_start -->\n\n---\n\n\n\n\n<sub>Comment `@coderabbitai help` to get the list of available commands.</sub>\n\n<!-- tips_end -->",
+      "createdAt": "2026-07-10T03:05:46Z",
+      "url": "https://github.com/paulbaranowski/wild-horses/pull/163#issuecomment-4931599541",
+      "isBabysitSentinel": false,
+      "isKnownBot": true,
+      "fingerprint": "15c91dc568e5be48"
+    },
+    {
+      "id": "IC_kwDOR024ms8AAAABJfL48A",
+      "databaseId": 4931647728,
+      "author": "paulbaranowski",
+      "authorType": "User",
+      "body": "## Review-body findings\n\n### Agree\n\n- Detect the repository’s actual default branch (not only `main`/`master`) — fixed in https://github.com/paulbaranowski/wild-horses/commit/3d5f3de773385cf1f58f30cc94edd9928e8230f0.\n- Compare ahead/behind before push — fixed in the same commit.\n- Shell-safe title / args / `--body-file -` for `gh pr create` — fixed in the same commit.\n\n```\n3b31284278db01d5\n```\n\n<sub>🤖 <code>cb-babysit:addressed v1 core@3.16.1</code></sub>",
+      "createdAt": "2026-07-10T03:16:07Z",
+      "url": "https://github.com/paulbaranowski/wild-horses/pull/163#issuecomment-4931647728",
+      "isBabysitSentinel": true,
+      "isKnownBot": false,
+      "fingerprint": "5bbcdf03fc9822aa"
+    },
+    {
+      "id": "IC_kwDOR024ms8AAAABJl2LoA",
+      "databaseId": 4938632096,
+      "author": "paulbaranowski",
+      "authorType": "User",
+      "body": "## Review-body findings\n\n### Agree\n\n- Skip-create path undefined when an existing PR is chosen — fixed in https://github.com/paulbaranowski/wild-horses/commit/be5654ed10aaa7ff4411d2b464a83e27312d07f6.\n- Apostrophe breaks `TITLE='…'` assignment — fixed in the same commit (heredoc → variable).\n\n```\n3bbb42f2446c20c0\n```\n\n<sub>🤖 <code>cb-babysit:addressed v1 core@3.16.1</code></sub>",
+      "createdAt": "2026-07-10T19:04:53Z",
+      "url": "https://github.com/paulbaranowski/wild-horses/pull/163#issuecomment-4938632096",
+      "isBabysitSentinel": true,
+      "isKnownBot": false,
+      "fingerprint": "70b3d5aefc74414c"
+    },
+    {
+      "id": "IC_kwDOR024ms8AAAABJl-mXA",
+      "databaseId": 4938770012,
+      "author": "paulbaranowski",
+      "authorType": "User",
+      "body": "## Review-body findings\n\n### Agree\n\n- Rules omit ahead-of-upstream push — fixed in https://github.com/paulbaranowski/wild-horses/commit/2a9f25f28408686e4e021204d20415d8a9befc22 so the Do list matches Phase 1.\n\n```\na13e8101265f139f\n```\n\n<sub>🤖 <code>cb-babysit:addressed v1 core@3.16.1</code></sub>",
+      "createdAt": "2026-07-10T19:24:08Z",
+      "url": "https://github.com/paulbaranowski/wild-horses/pull/163#issuecomment-4938770012",
+      "isBabysitSentinel": true,
+      "isKnownBot": false,
+      "fingerprint": "a13be6a74dbed13d"
+    },
+    {
+      "id": "IC_kwDOR024ms8AAAABJl_wYQ",
+      "databaseId": 4938788961,
+      "author": "paulbaranowski",
+      "authorType": "User",
+      "body": "## Review-body findings\n\n### Agree\n\n- Babysit-only path skips push — fixed in https://github.com/paulbaranowski/wild-horses/commit/50e1908b2dd6f7e7b171c544450a3faa8ad035a5 so option (a) pushes when ahead/no upstream before Phase 4.\n\n```\n540e02ddf6edabe3\n```\n\n<sub>🤖 <code>cb-babysit:addressed v1 core@3.16.1</code></sub>",
+      "createdAt": "2026-07-10T19:26:55Z",
+      "url": "https://github.com/paulbaranowski/wild-horses/pull/163#issuecomment-4938788961",
+      "isBabysitSentinel": true,
+      "isKnownBot": false,
+      "fingerprint": "505971ab4733cc52"
+    }
+  ],
+  "owner": "paulbaranowski",
+  "prNumber": 163,
+  "priorBabysitSentinels": [
+    {
+      "id": "IC_kwDOR024ms8AAAABJfL48A",
+      "databaseId": 4931647728,
+      "author": "paulbaranowski",
+      "authorType": "User",
+      "body": "## Review-body findings\n\n### Agree\n\n- Detect the repository’s actual default branch (not only `main`/`master`) — fixed in https://github.com/paulbaranowski/wild-horses/commit/3d5f3de773385cf1f58f30cc94edd9928e8230f0.\n- Compare ahead/behind before push — fixed in the same commit.\n- Shell-safe title / args / `--body-file -` for `gh pr create` — fixed in the same commit.\n\n```\n3b31284278db01d5\n```\n\n<sub>🤖 <code>cb-babysit:addressed v1 core@3.16.1</code></sub>",
+      "createdAt": "2026-07-10T03:16:07Z",
+      "url": "https://github.com/paulbaranowski/wild-horses/pull/163#issuecomment-4931647728",
+      "isBabysitSentinel": true,
+      "isKnownBot": false,
+      "fingerprint": "5bbcdf03fc9822aa"
+    },
+    {
+      "id": "IC_kwDOR024ms8AAAABJl2LoA",
+      "databaseId": 4938632096,
+      "author": "paulbaranowski",
+      "authorType": "User",
+      "body": "## Review-body findings\n\n### Agree\n\n- Skip-create path undefined when an existing PR is chosen — fixed in https://github.com/paulbaranowski/wild-horses/commit/be5654ed10aaa7ff4411d2b464a83e27312d07f6.\n- Apostrophe breaks `TITLE='…'` assignment — fixed in the same commit (heredoc → variable).\n\n```\n3bbb42f2446c20c0\n```\n\n<sub>🤖 <code>cb-babysit:addressed v1 core@3.16.1</code></sub>",
+      "createdAt": "2026-07-10T19:04:53Z",
+      "url": "https://github.com/paulbaranowski/wild-horses/pull/163#issuecomment-4938632096",
+      "isBabysitSentinel": true,
+      "isKnownBot": false,
+      "fingerprint": "70b3d5aefc74414c"
+    },
+    {
+      "id": "IC_kwDOR024ms8AAAABJl-mXA",
+      "databaseId": 4938770012,
+      "author": "paulbaranowski",
+      "authorType": "User",
+      "body": "## Review-body findings\n\n### Agree\n\n- Rules omit ahead-of-upstream push — fixed in https://github.com/paulbaranowski/wild-horses/commit/2a9f25f28408686e4e021204d20415d8a9befc22 so the Do list matches Phase 1.\n\n```\na13e8101265f139f\n```\n\n<sub>🤖 <code>cb-babysit:addressed v1 core@3.16.1</code></sub>",
+      "createdAt": "2026-07-10T19:24:08Z",
+      "url": "https://github.com/paulbaranowski/wild-horses/pull/163#issuecomment-4938770012",
+      "isBabysitSentinel": true,
+      "isKnownBot": false,
+      "fingerprint": "a13be6a74dbed13d"
+    },
+    {
+      "id": "IC_kwDOR024ms8AAAABJl_wYQ",
+      "databaseId": 4938788961,
+      "author": "paulbaranowski",
+      "authorType": "User",
+      "body": "## Review-body findings\n\n### Agree\n\n- Babysit-only path skips push — fixed in https://github.com/paulbaranowski/wild-horses/commit/50e1908b2dd6f7e7b171c544450a3faa8ad035a5 so option (a) pushes when ahead/no upstream before Phase 4.\n\n```\n540e02ddf6edabe3\n```\n\n<sub>🤖 <code>cb-babysit:addressed v1 core@3.16.1</code></sub>",
+      "createdAt": "2026-07-10T19:26:55Z",
+      "url": "https://github.com/paulbaranowski/wild-horses/pull/163#issuecomment-4938788961",
+      "isBabysitSentinel": true,
+      "isKnownBot": false,
+      "fingerprint": "505971ab4733cc52"
+    }
+  ],
+  "repo": "wild-horses",
+  "reviewBodyComments": [
+    {
+      "author": "coderabbitai",
+      "authorType": "Bot",
+      "createdAt": "2026-07-10T03:08:39Z",
+      "body": "**Actionable comments posted: 3**\n\n<details>\n<summary>🤖 Prompt for all review comments with AI agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nInline comments:\nIn `@plugins/pr/skills/pr/SKILL.md`:\n- Around line 49-52: Update the stop conditions in the PR workflow documentation\nto detect the repository’s actual default branch via `gh repo view` or the\nremote HEAD, rather than checking only `main` and `master`; prevent PR creation\nwhen currently on that branch without a feature branch, while preserving the\nexisting dirty-working-tree checks.\n- Around line 55-59: Update the branching guidance around the upstream check to\ncompare local HEAD with its upstream ref, not merely confirm that an upstream\nexists. Use an ahead/behind comparison such as git status --short --branch or\ngit rev-list to detect local commits, and run git push -u origin HEAD whenever\nthe branch is ahead or lacks an upstream before creating the PR.\n- Around line 73-84: Update the PR creation command to pass the generated title\nthrough a validated, shell-safe variable and invoke it as a quoted argument;\nparse validated arguments into an array to prevent word splitting and glob\nexpansion, converting bare branch names to a base-branch flag. Replace\ncommand-substituted body handling with a single-quoted heredoc piped via\n`--body-file -`, while preserving PR URL capture after `gh pr create` in the\ndocumented workflow.\n```\n\n</details>\n\n<details>\n<summary>🪄 Autofix (Beta)</summary>\n\nFix all unresolved CodeRabbit comments on this PR:\n\n- [ ] <!-- {\"checkboxId\": \"4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9\"} --> Push a commit to this branch (recommended)\n- [ ] <!-- {\"checkboxId\": \"ff5b1114-7d8c-49e6-8ac1-43f82af23a33\"} --> Create a new PR with the fixes\n\n</details>\n\n---\n\n<details>\n<summary>ℹ️ Review info</summary>\n\n<details>\n<summary>⚙️ Run configuration</summary>\n\n**Configuration used**: Organization UI\n\n**Review profile**: CHILL\n\n**Plan**: Pro\n\n**Run ID**: `b49c0151-f39c-4b57-9172-36372992bcf3`\n\n</details>\n\n<details>\n<summary>📥 Commits</summary>\n\nReviewing files that changed from the base of the PR and between f119b0bfb6a61e0b33a53e317689ac7ac084dac0 and 7545616a5e8adeb7e73edd0a8e7f8ecac0d4d65f.\n\n</details>\n\n<details>\n<summary>📒 Files selected for processing (5)</summary>\n\n* `.claude-plugin/marketplace.json`\n* `.cursor-plugin/marketplace.json`\n* `plugins/pr/.claude-plugin/plugin.json`\n* `plugins/pr/.cursor-plugin/plugin.json`\n* `plugins/pr/skills/pr/SKILL.md`\n\n</details>\n\n</details>\n\n<!-- This is an auto-generated comment by CodeRabbit for review status -->",
+      "fingerprint": "3b31284278db01d5"
+    },
+    {
+      "author": "cursor",
+      "authorType": "Bot",
+      "createdAt": "2026-07-10T19:25:36Z",
+      "body": "<!-- BUGBOT_REVIEW -->\nCursor Bugbot has reviewed your changes using default effort and found 1 potential issue.\n\n\n\n<!-- BUGBOT_FIX_ALL -->\n<a href=\"https://cursor.com/open?link=eyJ2ZXJzaW9uIjoxLCJ0eXBlIjoiQlVHQk9UX0ZJWF9BTExfSU5fQ1VSU09SIiwiZGF0YSI6eyJyZWRpc0tleSI6ImJ1Z2JvdC1tdWx0aTplZWVkZGFlZS01NWQ1LTQ3MjYtOTRlZi1mZGI2NGUyZjUyNTMiLCJlbmNyeXB0aW9uS2V5IjoiQjFTVUpsaFFseS14cEFXNHJ4aUlmMnJUREZZR2dEdVdRLWp0bkl5djB0byIsImJyYW5jaCI6ImVtZGFzaC9jcmVhdGUtYS1wci1za2lsbC1pbWg2eSIsInJlcG9Pd25lciI6InBhdWxiYXJhbm93c2tpIiwicmVwb05hbWUiOiJ3aWxkLWhvcnNlcyJ9fQ\" target=\"_blank\" rel=\"noopener noreferrer\"><picture><source media=\"(prefers-color-scheme: dark)\" srcset=\"https://cursor.com/assets/images/fix-in-cursor-dark.png\"><source media=\"(prefers-color-scheme: light)\" srcset=\"https://cursor.com/assets/images/fix-in-cursor-light.png\"><img alt=\"Fix All in Cursor\" width=\"115\" height=\"28\" src=\"https://cursor.com/assets/images/fix-in-cursor-dark.png\"></picture></a>\n<!-- /BUGBOT_FIX_ALL -->\n\n<!-- BUGBOT_AUTOFIX_REVIEW_FOOTNOTE_BEGIN -->\n<sup>❌ Bugbot Autofix is OFF. To automatically fix reported issues with cloud agents, enable autofix in the [Cursor dashboard](https://www.cursor.com/dashboard/bugbot).</sup>\n<!-- BUGBOT_AUTOFIX_REVIEW_FOOTNOTE_END -->\n\n<sup>Reviewed by [Cursor Bugbot](https://cursor.com/bugbot) for commit 2a9f25f28408686e4e021204d20415d8a9befc22. Configure [here](https://www.cursor.com/dashboard/bugbot).</sup>",
+      "fingerprint": "540e02ddf6edabe3"
+    }
+  ],
+  "sentinel": "<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>",
+  "threads": [],
+  "title": "feat(pr): add /pr skill to create a PR then babysit ×3",
+  "totalActiveIssueComments": 0,
+  "totalActiveThreads": 0,
+  "totalReviewBodyComments": 2,
+  "totalUncertainThreads": 0,
+  "totalUnresolvedComments": 0,
+  "truncated": [],
+  "uncertainThreads": [],
+  "unresolvedComments": [],
+  "url": "https://github.com/paulbaranowski/wild-horses/pull/163"
+}

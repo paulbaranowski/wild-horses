@@ -1,0 +1,321 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "title": "Synthetic PR",
+        "url": "https://github.com/paulbaranowski/wild-horses/pull/1",
+        "reviewThreads": {
+          "pageInfo": {
+            "hasNextPage": true
+          },
+          "nodes": [
+            {
+              "id": "TA",
+              "isResolved": false,
+              "comments": {
+                "pageInfo": {
+                  "hasNextPage": false
+                },
+                "nodes": [
+                  {
+                    "id": "a1",
+                    "databaseId": 1001,
+                    "body": "Please rename this variable.",
+                    "path": "src/a.py",
+                    "line": 10,
+                    "originalLine": 10,
+                    "createdAt": "2026-01-01T10:00:00Z",
+                    "author": {
+                      "login": "alice",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "TB",
+              "isResolved": false,
+              "comments": {
+                "pageInfo": {
+                  "hasNextPage": false
+                },
+                "nodes": [
+                  {
+                    "id": "b1",
+                    "databaseId": 1002,
+                    "body": "This looks off.",
+                    "path": "src/a.py",
+                    "line": 10,
+                    "originalLine": 10,
+                    "createdAt": "2026-01-01T10:00:00Z",
+                    "author": {
+                      "login": "bob",
+                      "__typename": "User"
+                    }
+                  },
+                  {
+                    "id": "b2",
+                    "databaseId": 1003,
+                    "body": "Leaving current behavior. Looks fine.\n\n<sub>\ud83e\udd16 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>",
+                    "path": "src/a.py",
+                    "line": 10,
+                    "originalLine": 10,
+                    "createdAt": "2026-01-02T10:00:00Z",
+                    "author": {
+                      "login": "paulbaranowski",
+                      "__typename": "User"
+                    }
+                  },
+                  {
+                    "id": "b3",
+                    "databaseId": 1004,
+                    "body": "Still not fixed.",
+                    "path": "src/a.py",
+                    "line": 10,
+                    "originalLine": 10,
+                    "createdAt": "2026-01-03T10:00:00Z",
+                    "author": {
+                      "login": "bob",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "TC",
+              "isResolved": false,
+              "comments": {
+                "pageInfo": {
+                  "hasNextPage": false
+                },
+                "nodes": [
+                  {
+                    "id": "c1",
+                    "databaseId": 1005,
+                    "body": "Consider a guard clause.",
+                    "path": "src/a.py",
+                    "line": 10,
+                    "originalLine": 10,
+                    "createdAt": "2026-01-01T10:00:00Z",
+                    "author": {
+                      "login": "carol",
+                      "__typename": "User"
+                    }
+                  },
+                  {
+                    "id": "c2",
+                    "databaseId": 1006,
+                    "body": "Leaving current behavior. Looks fine.\n\n<sub>\ud83e\udd16 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>",
+                    "path": "src/a.py",
+                    "line": 10,
+                    "originalLine": 10,
+                    "createdAt": "2026-01-02T10:00:00Z",
+                    "author": {
+                      "login": "paulbaranowski",
+                      "__typename": "User"
+                    }
+                  },
+                  {
+                    "id": "c3",
+                    "databaseId": 1007,
+                    "body": "New finding: possible NPE here.",
+                    "path": "src/a.py",
+                    "line": 10,
+                    "originalLine": 10,
+                    "createdAt": "2026-01-03T10:00:00Z",
+                    "author": {
+                      "login": "coderabbitai",
+                      "__typename": "Bot"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "TD",
+              "isResolved": false,
+              "comments": {
+                "pageInfo": {
+                  "hasNextPage": false
+                },
+                "nodes": [
+                  {
+                    "id": "d1",
+                    "databaseId": 1008,
+                    "body": "nit: spacing.",
+                    "path": "src/a.py",
+                    "line": 10,
+                    "originalLine": 10,
+                    "createdAt": "2026-01-01T10:00:00Z",
+                    "author": {
+                      "login": "dave",
+                      "__typename": "User"
+                    }
+                  },
+                  {
+                    "id": "d2",
+                    "databaseId": 1009,
+                    "body": "Leaving current behavior. Looks fine.\n\n<sub>\ud83e\udd16 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>",
+                    "path": "src/a.py",
+                    "line": 10,
+                    "originalLine": 10,
+                    "createdAt": "2026-01-02T10:00:00Z",
+                    "author": {
+                      "login": "paulbaranowski",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "TE",
+              "isResolved": true,
+              "comments": {
+                "pageInfo": {
+                  "hasNextPage": false
+                },
+                "nodes": [
+                  {
+                    "id": "e1",
+                    "databaseId": 1010,
+                    "body": "done",
+                    "path": "src/a.py",
+                    "line": 10,
+                    "originalLine": 10,
+                    "createdAt": "2026-01-01T10:00:00Z",
+                    "author": {
+                      "login": "erin",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "TF",
+              "isResolved": false,
+              "comments": {
+                "pageInfo": {
+                  "hasNextPage": false
+                },
+                "nodes": [
+                  {
+                    "id": "f1",
+                    "databaseId": 1011,
+                    "body": "Alert: SQL injection risk. See https://github.com/paulbaranowski/wild-horses/security/code-scanning/42",
+                    "path": "src/db.py",
+                    "line": 5,
+                    "originalLine": 5,
+                    "createdAt": "2026-01-01T10:00:00Z",
+                    "author": {
+                      "login": "github-advanced-security",
+                      "__typename": "User"
+                    }
+                  },
+                  {
+                    "id": "f2",
+                    "databaseId": 1012,
+                    "body": "Alert: XSS risk. See /code-scanning/99",
+                    "path": "src/web.py",
+                    "line": 7,
+                    "originalLine": 7,
+                    "createdAt": "2026-01-01T10:01:00Z",
+                    "author": {
+                      "login": "github-advanced-security",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "reviews": {
+          "pageInfo": {
+            "hasNextPage": false
+          },
+          "nodes": [
+            {
+              "body": "**Actionable comments posted: 1**\nFinding in src/a.py:10.",
+              "createdAt": "2026-01-01T09:00:00Z",
+              "author": {
+                "login": "coderabbitai",
+                "__typename": "Bot"
+              }
+            },
+            {
+              "body": "LGTM overall, human review.",
+              "createdAt": "2026-01-01T09:05:00Z",
+              "author": {
+                "login": "alice",
+                "__typename": "User"
+              }
+            },
+            {
+              "body": "",
+              "createdAt": "2026-01-01T09:06:00Z",
+              "author": {
+                "login": "coderabbitai",
+                "__typename": "Bot"
+              }
+            }
+          ]
+        },
+        "comments": {
+          "pageInfo": {
+            "hasNextPage": false
+          },
+          "nodes": [
+            {
+              "id": "IC1",
+              "databaseId": 2001,
+              "body": "Can you also update the changelog?",
+              "createdAt": "2026-01-04T10:00:00Z",
+              "url": "https://github.com/x/y/pull/1#issuecomment-2001",
+              "author": {
+                "login": "frank",
+                "__typename": "User"
+              }
+            },
+            {
+              "id": "IC2",
+              "databaseId": 2002,
+              "body": "Nit: typo in the README heading.",
+              "createdAt": "2026-01-04T10:01:00Z",
+              "url": "u2",
+              "author": {
+                "login": "grace",
+                "__typename": "User"
+              }
+            },
+            {
+              "id": "IC3",
+              "databaseId": 2003,
+              "body": "Automated: coverage report.",
+              "createdAt": "2026-01-04T10:02:00Z",
+              "url": "u3",
+              "author": {
+                "login": "codecov",
+                "__typename": "Bot"
+              }
+            },
+            {
+              "id": "IC4",
+              "databaseId": 2004,
+              "body": "## Conversation-tab comments\n\nAgree: fixed.\n\n```\n7d36352232e4cde6\n```\n\n<sub>\ud83e\udd16 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>",
+              "createdAt": "2026-01-04T10:03:00Z",
+              "url": "u4",
+              "author": {
+                "login": "paulbaranowski",
+                "__typename": "User"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
