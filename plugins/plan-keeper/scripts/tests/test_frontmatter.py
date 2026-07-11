@@ -346,6 +346,15 @@ class TestFileMetaSet(IsolatedHomeTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Kind: exec-plan", path.read_text(encoding="utf-8"))
 
+    def test_accepts_reqs_kind(self) -> None:
+        path = self._managed()
+        result = run_cli(
+            "file-meta", "set", "--file", str(path), "--kind", "reqs",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Kind: reqs", path.read_text(encoding="utf-8"))
+
     def test_rejects_invalid_kind_before_write(self) -> None:
         path = self._managed()
         result = run_cli(

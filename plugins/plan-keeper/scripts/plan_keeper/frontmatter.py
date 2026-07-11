@@ -32,7 +32,7 @@ _LEGACY_SYSTEM_TO_FIELD = {
 # lifecycle). The values are ordered by pipeline position, idea → ready-to-build.
 # plan-save infers and writes it; plan-do reads it as its primary routing signal.
 # Canonical definitions + the plan-do routing map live in plan-kinds.md.
-VALID_KINDS = ("idea", "prd", "design", "spec", "exec-plan")
+VALID_KINDS = ("idea", "prd", "reqs", "design", "spec", "exec-plan")
 
 
 def validate_kind(value: str) -> Kind:
