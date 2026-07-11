@@ -14,11 +14,15 @@ scripts' real jq/shasum logic against recorded gh responses (see the design doc)
 `transform_review` and `partition_failing_checks` must reproduce them exactly -
 that is the regression guarantee that the jq -> Python translation is faithful.
 """
+import contextlib
+import io
 import json
 import subprocess
 import sys
 import unittest
+from argparse import Namespace
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).parent
 FIXTURES = HERE / "fixtures"
@@ -212,6 +216,58 @@ class TestFailingChecks(unittest.TestCase):
         ]
         run_ids, _, _ = cli.partition_failing_checks(rollup)
         self.assertEqual(run_ids, ["7"])
+
+
+class TestFailedLogsErrorsAreVisible(unittest.TestCase):
+    """A log-retrieval failure must be surfaced, never silently skipped -
+    the workflow diagnoses CI from this output, so a swallowed error would
+    read as "nothing to inspect" (Cursor Bugbot finding on PR #170)."""
+
+    ROLLUP = [{"name": "ci", "bucket": "fail",
+               "detailsUrl": "https://github.com/o/r/actions/runs/555"}]
+
+    def _run_failed_logs(self, gh_json_side, gh_text_side):
+        out = io.StringIO()
+        with mock.patch.object(cli, "have", return_value=True), \
+                mock.patch.object(cli, "gh_json", side_effect=gh_json_side), \
+                mock.patch.object(cli, "gh_text", side_effect=gh_text_side), \
+                contextlib.redirect_stdout(out):
+            rc = cli.cmd_failed_logs(Namespace(pr="555"))
+        return rc, out.getvalue()
+
+    def test_jobs_fetch_error_is_printed(self):
+        def gh_json_side(args):
+            if args[:2] == ["pr", "view"]:
+                return self.ROLLUP
+            if args[:2] == ["run", "view"]:
+                raise cli.GhError("boom fetching jobs")
+            return None
+
+        def gh_text_side(args):
+            return "login\n"  # the `gh api user` auth probe
+
+        rc, out = self._run_failed_logs(gh_json_side, gh_text_side)
+        self.assertEqual(rc, 0)
+        self.assertIn("# pr-babysit: failing checks", out)
+        self.assertIn("ERROR fetching jobs (boom fetching jobs)", out)
+
+    def test_log_fetch_error_is_printed(self):
+        def gh_json_side(args):
+            if args[:2] == ["pr", "view"]:
+                return self.ROLLUP
+            if args[:2] == ["run", "view"]:
+                return {"jobs": [{"conclusion": "failure", "databaseId": 99}]}
+            return None
+
+        def gh_text_side(args):
+            if args[:2] == ["run", "view"]:
+                raise cli.GhError("boom fetching logs")
+            return "login\n"
+
+        rc, out = self._run_failed_logs(gh_json_side, gh_text_side)
+        self.assertEqual(rc, 0)
+        self.assertIn("# --- run=555 job=99 ---", out)
+        self.assertIn("could not fetch logs for job 99: boom fetching logs", out)
 
 
 class TestCliSurface(unittest.TestCase):

@@ -590,7 +590,12 @@ def cmd_failed_logs(args):
     for run_id in run_ids:
         try:
             jobs = gh_json(["run", "view", run_id, "--json", "jobs"])
-        except GhError:
+        except GhError as e:
+            # Never swallow a retrieval failure: the workflow diagnoses CI from
+            # this output, so a silent skip would read as "no logs to inspect"
+            # when the truth is "logs could not be fetched". Surface it.
+            print("")
+            print(f"# --- run={run_id}: ERROR fetching jobs ({e}) ---")
             continue
         for job in (jobs or {}).get("jobs", []):
             if job.get("conclusion") != "failure":
@@ -601,8 +606,8 @@ def cmd_failed_logs(args):
             # Stream the failed-step logs straight through.
             try:
                 sys.stdout.write(gh_text(["run", "view", "--job", str(job_id), "--log-failed"]))
-            except GhError:
-                pass
+            except GhError as e:
+                print(f"# (ERROR: could not fetch logs for job {job_id}: {e})")
 
     if external_lines:
         print("")
