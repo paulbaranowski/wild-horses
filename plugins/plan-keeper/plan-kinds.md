@@ -8,13 +8,14 @@ The `Kind:` frontmatter field classifies **what type of document a plan file is*
 
 The values are a closed enum, ordered by pipeline position (earliest first):
 
-| `Kind`      | What it is                                                                                                     | Answers          |
-| ----------- | -------------------------------------------------------------------------------------------------------------- | ---------------- |
-| `idea`      | Exploratory thought. No committed requirements or design — a "what if", a sketch, a note to self.              | —                |
-| `prd`       | Product requirements: the problem, the why, user-facing requirements, success criteria, scope / non-goals.     | WHAT & WHY       |
-| `design`    | Architecture / technical design: components, data model, interfaces, trade-offs. The structural HOW.           | HOW (structural) |
-| `spec`      | Implementation spec: the concrete, detailed HOW — close enough to start building, not yet decomposed to tasks. | HOW (detailed)   |
-| `exec-plan` | Executable plan: phased steps or independent tasks with acceptance criteria, ready to dispatch / execute.      | —                |
+| `Kind`      | What it is                                                                                                                                                               | Answers            |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ |
+| `idea`      | Exploratory thought. No committed requirements or design — a "what if", a sketch, a note to self.                                                                        | —                  |
+| `prd`       | Product requirements: the problem, the why, user-facing requirements, success criteria, scope / non-goals.                                                               | WHAT & WHY         |
+| `reqs`      | Engineering acceptance-contract: functional requirements, constraints, invariants to preserve, non-goals. What a design is verified against, with no structural HOW yet. | WHAT (constraints) |
+| `design`    | Architecture / technical design: components, data model, interfaces, trade-offs. The structural HOW.                                                                     | HOW (structural)   |
+| `spec`      | Implementation spec: the concrete, detailed HOW — close enough to start building, not yet decomposed to tasks.                                                           | HOW (detailed)     |
+| `exec-plan` | Executable plan: phased steps or independent tasks with acceptance criteria, ready to dispatch / execute.                                                                | —                  |
 
 A missing/blank `Kind` is a valid state — it means "not classified", and `plan-do` falls back to inferring the type from the file's content.
 
@@ -28,15 +29,21 @@ Classify by **how far the work has actually progressed**, not by how the documen
 
 The `spec` / `exec-plan` boundary follows from rule 3: a `spec` is the detailed HOW that still has open design decisions or has not been pinned to concrete touch points; an `exec-plan` is buildable as-is. (`design` and `spec` route the same way in `plan-do`, so a design-vs-spec slip is cheap; a design-vs-exec-plan slip is the costly one, because only `exec-plan` routes straight to execution.)
 
+The `prd` / `reqs` / `design` boundary sits earlier on the same axis. All three can mention "requirements"; the discriminator is what the content commits to:
+
+- `prd` is product-level — the problem, the why, user value, success criteria. Requirements framed as outcomes.
+- `reqs` is the engineering acceptance-contract a design gets verified against — functional requirements, constraints, invariants to preserve, non-goals — with **no structural HOW** (no components, data model, or interfaces). It is `reqs` only when that contract is the doc's furthest content.
+- `design` is where structural HOW appears. By rule 1 (most-advanced-stage-present wins) and rule 2 (rationale never demotes), a doc that carries a requirements section _alongside_ a component/interface design stays `design` — the embedded requirements do not pull it back to `reqs`.
+
 ## plan-do routing
 
 `plan-do` maps `Kind` onto its tier-1 readiness routes:
 
-| `Kind`                    | Readiness       | plan-do route                                                               |
-| ------------------------- | --------------- | --------------------------------------------------------------------------- |
-| `idea`                    | idea            | `superpowers:brainstorming` (turn it into a reviewed spec)                  |
-| `prd` / `design` / `spec` | spec            | `superpowers:writing-plans` (turn it into a phased implementation plan)     |
-| `exec-plan`               | execution-ready | the execution menu (`autonomous` / `task-list-builder` / `executing-plans`) |
+| `Kind`                             | Readiness       | plan-do route                                                               |
+| ---------------------------------- | --------------- | --------------------------------------------------------------------------- |
+| `idea`                             | idea            | `superpowers:brainstorming` (turn it into a reviewed spec)                  |
+| `prd` / `reqs` / `design` / `spec` | spec            | `superpowers:writing-plans` (turn it into a phased implementation plan)     |
+| `exec-plan`                        | execution-ready | the execution menu (`autonomous` / `task-list-builder` / `executing-plans`) |
 
 When `Kind` is present it is the authoritative signal (still confirmable by the user). When it is absent, `plan-do` infers readiness from the content as before.
 

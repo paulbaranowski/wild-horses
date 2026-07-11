@@ -20,7 +20,7 @@ JsonObject = dict[str, Any]
 # The closed plan-Kind vocabulary. Members mirror ``frontmatter.VALID_KINDS``
 # exactly; that tuple stays the runtime source of truth (validation iterates it)
 # and this Literal is the static mirror so signatures can name the closed set.
-Kind = Literal["idea", "prd", "design", "spec", "exec-plan"]
+Kind = Literal["idea", "prd", "reqs", "design", "spec", "exec-plan"]
 
 
 class LinearDefaults(TypedDict, total=False):

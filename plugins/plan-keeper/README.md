@@ -13,7 +13,7 @@ The unit of work is a **task**, and every task is a plan file. Tasks come in two
 
 Two orthogonal frontmatter fields track where a task sits:
 
-- **`Kind`** (`idea → prd → design → spec → exec-plan`) — the document type: how far the _thinking_ has progressed. A planning task advances a plan along this axis, each step's output being a higher `Kind`. See [`plan-kinds.md`](plan-kinds.md).
+- **`Kind`** (`idea → prd → reqs → design → spec → exec-plan`) — the document type: how far the _thinking_ has progressed. A planning task advances a plan along this axis, each step's output being a higher `Kind`. See [`plan-kinds.md`](plan-kinds.md).
 - **`Status`** (`backlog → todo → in-progress → in-review → done`) — the lifecycle: how far the _work_ has progressed.
 
 plan-keeper is the system of record for these tasks — they live in `~/plans/<repo>/` on your machine and are never committed to any repo. Filing a plan to **Linear or Jira** (`plan-linear` / `plan-jira`) is an optional export for the occasions a task needs a shared tracker; by default the task is tracked here.

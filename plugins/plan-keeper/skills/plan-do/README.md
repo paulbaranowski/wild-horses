@@ -39,7 +39,7 @@ execution-ready ──► menu (recommended first):
 
 ## Classification cheatsheet
 
-**Tier 1 — readiness (which path).** `plan-do` reads the plan's `Kind:` frontmatter first — `plan-save` sets it, so it's authoritative (`idea` → idea, `prd`/`design`/`spec` → spec, `exec-plan` → execution-ready; see [`../../plan-kinds.md`](../../plan-kinds.md)). When `Kind` is absent (old or hand-made files), it infers from content using these signals:
+**Tier 1 — readiness (which path).** `plan-do` reads the plan's `Kind:` frontmatter first — `plan-save` sets it, so it's authoritative (`idea` → idea, `prd`/`reqs`/`design`/`spec` → spec, `exec-plan` → execution-ready; see [`../../plan-kinds.md`](../../plan-kinds.md)). When `Kind` is absent (old or hand-made files), it infers from content using these signals:
 
 | Readiness           | Signals                                                                                            |
 | ------------------- | -------------------------------------------------------------------------------------------------- |

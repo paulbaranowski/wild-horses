@@ -16,7 +16,7 @@ Save one or more files from the current conversation to `~/plans/<repo>/<YYYY-MM
 - **Date:** today, in the user's local timezone (CLI handles).
 - **Collision:** ask the user; never overwrite silently.
 - **Content:** file body verbatim — no preamble, footer, or commentary. (For `.md` saves — heredoc **and** `--from-path` moves — the CLI injects a `Status: backlog\nCreated: <iso>\n` frontmatter block if one isn't present, and fills missing Status/Created fields if a partial block is; `Kind` is filled only when `--kind` is passed. Save never injects an `Agent` tag — that field is the groundcrew dispatch signal, written automatically only by `plan-crew` on promote (`plan-update` can still set it on explicit user request); a body that hand-declares `Agent` is preserved as-is. Non-`.md` saves stay byte-exact. On a `--from-path` `.md` move, `Created` comes from the source file's birthtime, not the move time, since the plan pre-existed.)
-- **`--kind`:** the document type — one of `idea` / `prd` / `design` / `spec` / `exec-plan` (see [../../plan-kinds.md](../../plan-kinds.md)). Infer it from the content and pass it on `.md` heredoc saves; `plan-do` later reads it to route the plan. Fill-if-absent, `.md`-only. See [Classifying the Kind](#classifying-the-kind).
+- **`--kind`:** the document type — one of `idea` / `prd` / `reqs` / `design` / `spec` / `exec-plan` (see [../../plan-kinds.md](../../plan-kinds.md)). Infer it from the content and pass it on `.md` heredoc saves; `plan-do` later reads it to route the plan. Fill-if-absent, `.md`-only. See [Classifying the Kind](#classifying-the-kind).
 - **Kind in filename:** a markdown save with `--kind` lands at `<date>-<slug>--<kind>.md` (double-hyphen separator). Without `--kind` (or for non-`.md` saves) the name stays `<date>-<slug>.<ext>`. The `--` is the sole, unambiguous Kind boundary — `slugify` can never emit `--` inside the slug, so the stages of one project (which share a slug) group cleanly in `plan-list`/`plan-do`.
 - **Multiple files:** when the user has produced a paired/grouped artifact (most commonly task-list-builder's `.json` + `.md`), save each file with one `save` invocation, sharing `--topic` (and `--date` if you set it) so the resulting filenames pair on the base name.
 
@@ -69,7 +69,7 @@ Two delivery shapes — pick the one that fits the source:
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" save \
   --topic "<heading text>" \
-  --kind <idea|prd|design|spec|exec-plan> \
+  --kind <idea|prd|reqs|design|spec|exec-plan> \
   <<'EOF'
 <file body verbatim — no preamble, no footer>
 EOF
@@ -124,7 +124,7 @@ For paired saves where one file collides and the other doesn't, apply the chosen
 
 Tell the user the absolute path(s) the CLI returned, and — for `.md` saves — the `Kind` you assigned, so they can correct it in one reply:
 
-> Saved to `/Users/<you>/plans/<repo>/<YYYY-MM-DD>-<topic>.md` as **Kind: prd**. (Say so if it's really an idea / design / spec / exec-plan and I'll fix it.)
+> Saved to `/Users/<you>/plans/<repo>/<YYYY-MM-DD>-<topic>.md` as **Kind: prd**. (Say so if it's really an idea / reqs / design / spec / exec-plan and I'll fix it.)
 
 If the user corrects the Kind, apply it without re-saving the body:
 
@@ -156,13 +156,14 @@ The CLI's `--extension` flag accepts `^[a-z0-9]+$` (with optional leading `.`). 
 
 For `.md` saves, infer the **document type** from the content and conversation and pass it as `--kind`. The closed value set and its full definitions live in [../../plan-kinds.md](../../plan-kinds.md); the short form:
 
-| `--kind`    | Use when the file is…                                                           |
-| ----------- | ------------------------------------------------------------------------------- |
-| `idea`      | an exploratory thought / sketch — no committed requirements or design           |
-| `prd`       | product requirements: the problem, the why, user-facing reqs, scope / non-goals |
-| `design`    | an architecture / technical design: components, data model, trade-offs          |
-| `spec`      | an implementation spec: the concrete, detailed how, ready to plan against       |
-| `exec-plan` | an executable plan / task list: phased steps or independent tasks, ready to run |
+| `--kind`    | Use when the file is…                                                                                           |
+| ----------- | --------------------------------------------------------------------------------------------------------------- |
+| `idea`      | an exploratory thought / sketch — no committed requirements or design                                           |
+| `prd`       | product requirements: the problem, the why, user-facing reqs, scope / non-goals                                 |
+| `reqs`      | an engineering acceptance-contract: functional reqs, constraints, invariants, non-goals — no structural HOW yet |
+| `design`    | an architecture / technical design: components, data model, trade-offs                                          |
+| `spec`      | an implementation spec: the concrete, detailed how, ready to plan against                                       |
+| `exec-plan` | an executable plan / task list: phased steps or independent tasks, ready to run                                 |
 
 This is the same axis `plan-do` uses to route a plan, recorded once at save time so `plan-do` doesn't have to re-infer it. Classify, pass `--kind`, and **surface the value in your step-5 confirmation** so the user can correct it in one reply (infer-and-confirm).
 
@@ -270,7 +271,7 @@ The CLI writes stdin verbatim (it only appends a trailing newline if missing).
 ## Notes
 
 - The `~/plans/` tree is local to the user's machine. This skill never commits anything to any repo.
-- The `Kind` this skill assigns is what `plan-do` reads to route the plan (idea → brainstorming, prd/design/spec → writing-plans, exec-plan → execution menu). Classifying it here, with full conversation context, saves `plan-do` from re-inferring it later — see [../../plan-kinds.md](../../plan-kinds.md).
+- The `Kind` this skill assigns is what `plan-do` reads to route the plan (idea → brainstorming, prd/reqs/design/spec → writing-plans, exec-plan → execution menu). Classifying it here, with full conversation context, saves `plan-do` from re-inferring it later — see [../../plan-kinds.md](../../plan-kinds.md).
 - `--from-path` moves never carry a `Kind` (the CLI rejects `--kind` on `--from-path`): a non-`.md` source stays byte-exact, and a moved-in `.md` gets the managed `Status`/`Created` block (no `Agent`, no `Kind`). If you want one on the relocated `.md`, add it afterward with `file-meta set --kind exec-plan`.
 - A `.md` dropped into `~/plans/<repo>/` by a manual `mv`/`cp` (the CLI never ran) carries no `Created`, so it falls back to day-granularity filename ordering. To get an exact stamp (and intra-day ordering), bring the file in with `save --from-path` instead — it stamps `Created` from the source's birthtime. `list`/`plan-do` deliberately do **not** stamp on read — those stay read-only queries; stamping lives only in the write path (`save`).
 - Sibling skills in the `plan-` family (`plan-do`, `plan-done`) share the same CLI and the same `~/plans/<repo>/` tree.

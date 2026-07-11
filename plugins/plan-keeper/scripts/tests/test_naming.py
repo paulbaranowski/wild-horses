@@ -180,6 +180,12 @@ class TestPlanFilename(unittest.TestCase):
             "2026-06-04-auth-design--design.md",
         )
 
+    def test_reqs_kind_gets_double_hyphen_suffix(self) -> None:
+        self.assertEqual(
+            plan_filename("2026-07-10", "api-rate-limits", "md", "reqs"),
+            "2026-07-10-api-rate-limits--reqs.md",
+        )
+
 
 class TestPlanGroupKey(unittest.TestCase):
     def test_recovers_slug_stripping_date_and_kind(self) -> None:
@@ -196,6 +202,12 @@ class TestPlanGroupKey(unittest.TestCase):
 
     def test_round_trips_topic_ending_in_kind_word(self) -> None:
         self.assertEqual(plan_group_key("2026-06-04-auth-design--design.md"), "auth-design")
+
+    def test_recovers_slug_stripping_reqs_kind(self) -> None:
+        # `reqs` is a valid Kind, so its `--reqs` segment strips like any other.
+        self.assertEqual(
+            plan_group_key("2026-07-10-api-rate-limits--reqs.md"), "api-rate-limits"
+        )
 
     def test_collision_suffixed_file_groups_with_original(self) -> None:
         # A same-kind/same-day/same-topic re-save lands at `…--<kind>-N.md`
@@ -257,6 +269,13 @@ class TestRenameForKind(unittest.TestCase):
         self.assertEqual(
             rename_for_kind("2026-06-15-topic--spec.md", "spec"),
             "2026-06-15-topic--spec.md",
+        )
+
+    def test_reclassify_prd_to_reqs(self) -> None:
+        # Promoting a product doc to the engineering acceptance-contract stage.
+        self.assertEqual(
+            rename_for_kind("2026-07-10-checkout-flow--prd.md", "reqs"),
+            "2026-07-10-checkout-flow--reqs.md",
         )
 
     def test_topic_ending_in_kind_word_is_preserved(self) -> None:
