@@ -1,0 +1,627 @@
+{
+  "activeIssueComments": [
+    {
+      "id": "IC1",
+      "databaseId": 2001,
+      "author": "frank",
+      "authorType": "User",
+      "body": "Can you also update the changelog?",
+      "createdAt": "2026-01-04T10:00:00Z",
+      "url": "https://github.com/x/y/pull/1#issuecomment-2001",
+      "isBabysitSentinel": false,
+      "isKnownBot": false,
+      "fingerprint": "69c6a84360a110c6"
+    }
+  ],
+  "activeThreads": [
+    {
+      "threadId": "TA",
+      "isResolved": false,
+      "replyToCommentDatabaseId": 1001,
+      "file": "src/a.py",
+      "line": 10,
+      "commentsTruncated": false,
+      "comments": [
+        {
+          "id": "a1",
+          "databaseId": 1001,
+          "author": "alice",
+          "authorType": "User",
+          "body": "Please rename this variable.",
+          "createdAt": "2026-01-01T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": false,
+          "isKnownBot": false
+        }
+      ],
+      "lastBabysitSentinelAt": null,
+      "lastHumanCommentAt": "2026-01-01T10:00:00Z",
+      "lastBotCommentAt": null,
+      "postSentinelBotComments": [],
+      "postSentinelHumanComments": [],
+      "activityState": "active"
+    },
+    {
+      "threadId": "TB",
+      "isResolved": false,
+      "replyToCommentDatabaseId": 1002,
+      "file": "src/a.py",
+      "line": 10,
+      "commentsTruncated": false,
+      "comments": [
+        {
+          "id": "b1",
+          "databaseId": 1002,
+          "author": "bob",
+          "authorType": "User",
+          "body": "This looks off.",
+          "createdAt": "2026-01-01T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": false,
+          "isKnownBot": false
+        },
+        {
+          "id": "b2",
+          "databaseId": 1003,
+          "author": "paulbaranowski",
+          "authorType": "User",
+          "body": "Leaving current behavior. Looks fine.\n\n<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>",
+          "createdAt": "2026-01-02T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": true,
+          "isKnownBot": false
+        },
+        {
+          "id": "b3",
+          "databaseId": 1004,
+          "author": "bob",
+          "authorType": "User",
+          "body": "Still not fixed.",
+          "createdAt": "2026-01-03T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": false,
+          "isKnownBot": false
+        }
+      ],
+      "lastBabysitSentinelAt": "2026-01-02T10:00:00Z",
+      "lastHumanCommentAt": "2026-01-03T10:00:00Z",
+      "lastBotCommentAt": null,
+      "postSentinelBotComments": [],
+      "postSentinelHumanComments": [
+        {
+          "id": "b3",
+          "createdAt": "2026-01-03T10:00:00Z",
+          "author": "bob",
+          "body": "Still not fixed."
+        }
+      ],
+      "activityState": "active"
+    },
+    {
+      "threadId": "TC",
+      "isResolved": false,
+      "replyToCommentDatabaseId": 1005,
+      "file": "src/a.py",
+      "line": 10,
+      "commentsTruncated": false,
+      "comments": [
+        {
+          "id": "c1",
+          "databaseId": 1005,
+          "author": "carol",
+          "authorType": "User",
+          "body": "Consider a guard clause.",
+          "createdAt": "2026-01-01T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": false,
+          "isKnownBot": false
+        },
+        {
+          "id": "c2",
+          "databaseId": 1006,
+          "author": "paulbaranowski",
+          "authorType": "User",
+          "body": "Leaving current behavior. Looks fine.\n\n<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>",
+          "createdAt": "2026-01-02T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": true,
+          "isKnownBot": false
+        },
+        {
+          "id": "c3",
+          "databaseId": 1007,
+          "author": "coderabbitai",
+          "authorType": "Bot",
+          "body": "New finding: possible NPE here.",
+          "createdAt": "2026-01-03T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": false,
+          "isKnownBot": true
+        }
+      ],
+      "lastBabysitSentinelAt": "2026-01-02T10:00:00Z",
+      "lastHumanCommentAt": "2026-01-01T10:00:00Z",
+      "lastBotCommentAt": "2026-01-03T10:00:00Z",
+      "postSentinelBotComments": [
+        {
+          "id": "c3",
+          "createdAt": "2026-01-03T10:00:00Z",
+          "author": "coderabbitai",
+          "authorType": "Bot",
+          "body": "New finding: possible NPE here."
+        }
+      ],
+      "postSentinelHumanComments": [],
+      "activityState": "uncertain"
+    },
+    {
+      "threadId": "TF",
+      "isResolved": false,
+      "replyToCommentDatabaseId": 1011,
+      "file": "src/db.py",
+      "line": 5,
+      "commentsTruncated": false,
+      "comments": [
+        {
+          "id": "f1",
+          "databaseId": 1011,
+          "author": "github-advanced-security",
+          "authorType": "User",
+          "body": "Alert: SQL injection risk. See https://github.com/paulbaranowski/wild-horses/security/code-scanning/42",
+          "createdAt": "2026-01-01T10:00:00Z",
+          "file": "src/db.py",
+          "line": 5,
+          "isBabysitSentinel": false,
+          "isKnownBot": true
+        },
+        {
+          "id": "f2",
+          "databaseId": 1012,
+          "author": "github-advanced-security",
+          "authorType": "User",
+          "body": "Alert: XSS risk. See /code-scanning/99",
+          "createdAt": "2026-01-01T10:01:00Z",
+          "file": "src/web.py",
+          "line": 7,
+          "isBabysitSentinel": false,
+          "isKnownBot": true
+        }
+      ],
+      "lastBabysitSentinelAt": null,
+      "lastHumanCommentAt": null,
+      "lastBotCommentAt": "2026-01-01T10:01:00Z",
+      "postSentinelBotComments": [],
+      "postSentinelHumanComments": [],
+      "activityState": "active"
+    }
+  ],
+  "issueComments": [
+    {
+      "id": "IC1",
+      "databaseId": 2001,
+      "author": "frank",
+      "authorType": "User",
+      "body": "Can you also update the changelog?",
+      "createdAt": "2026-01-04T10:00:00Z",
+      "url": "https://github.com/x/y/pull/1#issuecomment-2001",
+      "isBabysitSentinel": false,
+      "isKnownBot": false,
+      "fingerprint": "69c6a84360a110c6"
+    },
+    {
+      "id": "IC2",
+      "databaseId": 2002,
+      "author": "grace",
+      "authorType": "User",
+      "body": "Nit: typo in the README heading.",
+      "createdAt": "2026-01-04T10:01:00Z",
+      "url": "u2",
+      "isBabysitSentinel": false,
+      "isKnownBot": false,
+      "fingerprint": "7d36352232e4cde6"
+    },
+    {
+      "id": "IC3",
+      "databaseId": 2003,
+      "author": "codecov",
+      "authorType": "Bot",
+      "body": "Automated: coverage report.",
+      "createdAt": "2026-01-04T10:02:00Z",
+      "url": "u3",
+      "isBabysitSentinel": false,
+      "isKnownBot": true,
+      "fingerprint": "247de6db61012fcb"
+    },
+    {
+      "id": "IC4",
+      "databaseId": 2004,
+      "author": "paulbaranowski",
+      "authorType": "User",
+      "body": "## Conversation-tab comments\n\nAgree: fixed.\n\n```\n7d36352232e4cde6\n```\n\n<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>",
+      "createdAt": "2026-01-04T10:03:00Z",
+      "url": "u4",
+      "isBabysitSentinel": true,
+      "isKnownBot": false,
+      "fingerprint": "03590955dbcc0bdd"
+    }
+  ],
+  "owner": "paulbaranowski",
+  "prNumber": 1,
+  "priorBabysitSentinels": [
+    {
+      "id": "IC4",
+      "databaseId": 2004,
+      "author": "paulbaranowski",
+      "authorType": "User",
+      "body": "## Conversation-tab comments\n\nAgree: fixed.\n\n```\n7d36352232e4cde6\n```\n\n<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>",
+      "createdAt": "2026-01-04T10:03:00Z",
+      "url": "u4",
+      "isBabysitSentinel": true,
+      "isKnownBot": false,
+      "fingerprint": "03590955dbcc0bdd"
+    }
+  ],
+  "repo": "wild-horses",
+  "reviewBodyComments": [
+    {
+      "author": "coderabbitai",
+      "authorType": "Bot",
+      "createdAt": "2026-01-01T09:00:00Z",
+      "body": "**Actionable comments posted: 1**\nFinding in src/a.py:10.",
+      "fingerprint": "abace1076767ef3f"
+    }
+  ],
+  "sentinel": "<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>",
+  "threads": [
+    {
+      "threadId": "TA",
+      "isResolved": false,
+      "replyToCommentDatabaseId": 1001,
+      "file": "src/a.py",
+      "line": 10,
+      "commentsTruncated": false,
+      "comments": [
+        {
+          "id": "a1",
+          "databaseId": 1001,
+          "author": "alice",
+          "authorType": "User",
+          "body": "Please rename this variable.",
+          "createdAt": "2026-01-01T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": false,
+          "isKnownBot": false
+        }
+      ],
+      "lastBabysitSentinelAt": null,
+      "lastHumanCommentAt": "2026-01-01T10:00:00Z",
+      "lastBotCommentAt": null,
+      "postSentinelBotComments": [],
+      "postSentinelHumanComments": [],
+      "activityState": "active"
+    },
+    {
+      "threadId": "TB",
+      "isResolved": false,
+      "replyToCommentDatabaseId": 1002,
+      "file": "src/a.py",
+      "line": 10,
+      "commentsTruncated": false,
+      "comments": [
+        {
+          "id": "b1",
+          "databaseId": 1002,
+          "author": "bob",
+          "authorType": "User",
+          "body": "This looks off.",
+          "createdAt": "2026-01-01T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": false,
+          "isKnownBot": false
+        },
+        {
+          "id": "b2",
+          "databaseId": 1003,
+          "author": "paulbaranowski",
+          "authorType": "User",
+          "body": "Leaving current behavior. Looks fine.\n\n<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>",
+          "createdAt": "2026-01-02T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": true,
+          "isKnownBot": false
+        },
+        {
+          "id": "b3",
+          "databaseId": 1004,
+          "author": "bob",
+          "authorType": "User",
+          "body": "Still not fixed.",
+          "createdAt": "2026-01-03T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": false,
+          "isKnownBot": false
+        }
+      ],
+      "lastBabysitSentinelAt": "2026-01-02T10:00:00Z",
+      "lastHumanCommentAt": "2026-01-03T10:00:00Z",
+      "lastBotCommentAt": null,
+      "postSentinelBotComments": [],
+      "postSentinelHumanComments": [
+        {
+          "id": "b3",
+          "createdAt": "2026-01-03T10:00:00Z",
+          "author": "bob",
+          "body": "Still not fixed."
+        }
+      ],
+      "activityState": "active"
+    },
+    {
+      "threadId": "TC",
+      "isResolved": false,
+      "replyToCommentDatabaseId": 1005,
+      "file": "src/a.py",
+      "line": 10,
+      "commentsTruncated": false,
+      "comments": [
+        {
+          "id": "c1",
+          "databaseId": 1005,
+          "author": "carol",
+          "authorType": "User",
+          "body": "Consider a guard clause.",
+          "createdAt": "2026-01-01T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": false,
+          "isKnownBot": false
+        },
+        {
+          "id": "c2",
+          "databaseId": 1006,
+          "author": "paulbaranowski",
+          "authorType": "User",
+          "body": "Leaving current behavior. Looks fine.\n\n<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>",
+          "createdAt": "2026-01-02T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": true,
+          "isKnownBot": false
+        },
+        {
+          "id": "c3",
+          "databaseId": 1007,
+          "author": "coderabbitai",
+          "authorType": "Bot",
+          "body": "New finding: possible NPE here.",
+          "createdAt": "2026-01-03T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": false,
+          "isKnownBot": true
+        }
+      ],
+      "lastBabysitSentinelAt": "2026-01-02T10:00:00Z",
+      "lastHumanCommentAt": "2026-01-01T10:00:00Z",
+      "lastBotCommentAt": "2026-01-03T10:00:00Z",
+      "postSentinelBotComments": [
+        {
+          "id": "c3",
+          "createdAt": "2026-01-03T10:00:00Z",
+          "author": "coderabbitai",
+          "authorType": "Bot",
+          "body": "New finding: possible NPE here."
+        }
+      ],
+      "postSentinelHumanComments": [],
+      "activityState": "uncertain"
+    },
+    {
+      "threadId": "TD",
+      "isResolved": false,
+      "replyToCommentDatabaseId": 1008,
+      "file": "src/a.py",
+      "line": 10,
+      "commentsTruncated": false,
+      "comments": [
+        {
+          "id": "d1",
+          "databaseId": 1008,
+          "author": "dave",
+          "authorType": "User",
+          "body": "nit: spacing.",
+          "createdAt": "2026-01-01T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": false,
+          "isKnownBot": false
+        },
+        {
+          "id": "d2",
+          "databaseId": 1009,
+          "author": "paulbaranowski",
+          "authorType": "User",
+          "body": "Leaving current behavior. Looks fine.\n\n<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>",
+          "createdAt": "2026-01-02T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": true,
+          "isKnownBot": false
+        }
+      ],
+      "lastBabysitSentinelAt": "2026-01-02T10:00:00Z",
+      "lastHumanCommentAt": "2026-01-01T10:00:00Z",
+      "lastBotCommentAt": null,
+      "postSentinelBotComments": [],
+      "postSentinelHumanComments": [],
+      "activityState": "addressed"
+    },
+    {
+      "threadId": "TF",
+      "isResolved": false,
+      "replyToCommentDatabaseId": 1011,
+      "file": "src/db.py",
+      "line": 5,
+      "commentsTruncated": false,
+      "comments": [
+        {
+          "id": "f1",
+          "databaseId": 1011,
+          "author": "github-advanced-security",
+          "authorType": "User",
+          "body": "Alert: SQL injection risk. See https://github.com/paulbaranowski/wild-horses/security/code-scanning/42",
+          "createdAt": "2026-01-01T10:00:00Z",
+          "file": "src/db.py",
+          "line": 5,
+          "isBabysitSentinel": false,
+          "isKnownBot": true
+        },
+        {
+          "id": "f2",
+          "databaseId": 1012,
+          "author": "github-advanced-security",
+          "authorType": "User",
+          "body": "Alert: XSS risk. See /code-scanning/99",
+          "createdAt": "2026-01-01T10:01:00Z",
+          "file": "src/web.py",
+          "line": 7,
+          "isBabysitSentinel": false,
+          "isKnownBot": true
+        }
+      ],
+      "lastBabysitSentinelAt": null,
+      "lastHumanCommentAt": null,
+      "lastBotCommentAt": "2026-01-01T10:01:00Z",
+      "postSentinelBotComments": [],
+      "postSentinelHumanComments": [],
+      "activityState": "active"
+    }
+  ],
+  "title": "Synthetic PR",
+  "totalActiveIssueComments": 1,
+  "totalActiveThreads": 4,
+  "totalReviewBodyComments": 1,
+  "totalUncertainThreads": 1,
+  "totalUnresolvedComments": 6,
+  "truncated": [
+    "reviewThreads"
+  ],
+  "uncertainThreads": [
+    {
+      "threadId": "TC",
+      "isResolved": false,
+      "replyToCommentDatabaseId": 1005,
+      "file": "src/a.py",
+      "line": 10,
+      "commentsTruncated": false,
+      "comments": [
+        {
+          "id": "c1",
+          "databaseId": 1005,
+          "author": "carol",
+          "authorType": "User",
+          "body": "Consider a guard clause.",
+          "createdAt": "2026-01-01T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": false,
+          "isKnownBot": false
+        },
+        {
+          "id": "c2",
+          "databaseId": 1006,
+          "author": "paulbaranowski",
+          "authorType": "User",
+          "body": "Leaving current behavior. Looks fine.\n\n<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>",
+          "createdAt": "2026-01-02T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": true,
+          "isKnownBot": false
+        },
+        {
+          "id": "c3",
+          "databaseId": 1007,
+          "author": "coderabbitai",
+          "authorType": "Bot",
+          "body": "New finding: possible NPE here.",
+          "createdAt": "2026-01-03T10:00:00Z",
+          "file": "src/a.py",
+          "line": 10,
+          "isBabysitSentinel": false,
+          "isKnownBot": true
+        }
+      ],
+      "lastBabysitSentinelAt": "2026-01-02T10:00:00Z",
+      "lastHumanCommentAt": "2026-01-01T10:00:00Z",
+      "lastBotCommentAt": "2026-01-03T10:00:00Z",
+      "postSentinelBotComments": [
+        {
+          "id": "c3",
+          "createdAt": "2026-01-03T10:00:00Z",
+          "author": "coderabbitai",
+          "authorType": "Bot",
+          "body": "New finding: possible NPE here."
+        }
+      ],
+      "postSentinelHumanComments": [],
+      "activityState": "uncertain"
+    }
+  ],
+  "unresolvedComments": [
+    {
+      "author": "alice",
+      "body": "Please rename this variable.",
+      "createdAt": "2026-01-01T10:00:00Z",
+      "file": "src/a.py",
+      "line": 10
+    },
+    {
+      "author": "bob",
+      "body": "This looks off.",
+      "createdAt": "2026-01-01T10:00:00Z",
+      "file": "src/a.py",
+      "line": 10
+    },
+    {
+      "author": "bob",
+      "body": "Still not fixed.",
+      "createdAt": "2026-01-03T10:00:00Z",
+      "file": "src/a.py",
+      "line": 10
+    },
+    {
+      "author": "carol",
+      "body": "Consider a guard clause.",
+      "createdAt": "2026-01-01T10:00:00Z",
+      "file": "src/a.py",
+      "line": 10
+    },
+    {
+      "author": "coderabbitai",
+      "body": "New finding: possible NPE here.",
+      "createdAt": "2026-01-03T10:00:00Z",
+      "file": "src/a.py",
+      "line": 10
+    },
+    {
+      "author": "github-advanced-security",
+      "body": "Alert: XSS risk. See /code-scanning/99",
+      "createdAt": "2026-01-01T10:01:00Z",
+      "file": "src/web.py",
+      "line": 7
+    }
+  ],
+  "url": "https://github.com/paulbaranowski/wild-horses/pull/1"
+}

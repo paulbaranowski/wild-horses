@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "bash \"./scripts/pr-babysit-cli-allow.sh\"",
+        "matcher": "Shell",
+        "timeout": 5
+      }
+    ]
+  }
+}

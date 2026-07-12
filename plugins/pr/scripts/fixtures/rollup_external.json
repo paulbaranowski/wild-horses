@@ -1,0 +1,20 @@
+[
+  {
+    "name": "nx-cloud",
+    "state": "FAILURE",
+    "bucket": null,
+    "detailsUrl": "https://cloud.nx.app/runs/abc123"
+  },
+  {
+    "name": "CircleCI",
+    "conclusion": "FAILURE",
+    "bucket": "fail",
+    "detailsUrl": "https://circleci.com/gh/x/y/456"
+  },
+  {
+    "name": "passing-check",
+    "conclusion": "SUCCESS",
+    "bucket": "pass",
+    "detailsUrl": ""
+  }
+]

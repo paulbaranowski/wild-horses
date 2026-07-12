@@ -14,7 +14,7 @@ The user invokes this skill with an optional PR number or URL. Parse in this ord
 3. **Bare numeric argument**: only when the complete text is a positive integer without surrounding prose.
 4. **None of the above**: operate on the PR for the current branch.
 
-Scripts live at `${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/` (or `${CURSOR_PLUGIN_ROOT}/scripts/` in Cursor).
+All helper logic lives in one CLI, `${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/pr_babysit_cli.py` (or under `${CURSOR_PLUGIN_ROOT}/scripts/` in Cursor), invoked as `python3 "<path>" <subcommand>`. Subcommands: `review`, `failed-logs`, `commit-push`, `reply`, `comment`.
 
 ## Sentinels
 
@@ -22,7 +22,7 @@ The skill uses two sentinels with visible footer lines.
 
 **Addressed sentinel**: `<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>`. Appended on its own line at the end of every reply the skill posts so re-runs know which threads and review-body comments are already handled. Dedupe also recognizes legacy `cb-babysit:addressed v1` and `babysit-pr:addressed v1` prefixes from prior babysit implementations.
 
-**Follow-up sentinel**: `<sub>🤖 <code>pr-babysit:followup v1 wild-horses@0.2.1</code></sub>`. Attached to replies that defer an out-of-scope comment as a tracked follow-up. The sentinel is additive: the post-reply scripts still append the `addressed` sentinel at the end.
+**Follow-up sentinel**: `<sub>🤖 <code>pr-babysit:followup v1 wild-horses@0.2.1</code></sub>`. Attached to replies that defer an out-of-scope comment as a tracked follow-up. The sentinel is additive: the `reply` and `comment` subcommands still append the `addressed` sentinel at the end.
 
 **Sentinel recency rules.** The script emits a per-thread `activityState` with three values. Step 6a owns the handling rules for each state.
 
@@ -94,7 +94,7 @@ Exit codes 0 (pass), 1 (fail), 8 (pending), and 124 (timeout) are expected and h
 ### 4. Fetch review data
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/unresolvedPrComments.sh"
+python3 "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/pr_babysit_cli.py" review
 ```
 
 The output JSON has:
@@ -115,7 +115,7 @@ This PR's review-feedback scope is strict by default. Steps 6a (threads), 6b (to
 
 Build the changed-line set from `gh pr diff` once per pass. Count changed diff lines on both sides: added lines in the new version, removed lines in the old version, and modified code represented by adjacent remove/add pairs. Do not count diff context lines. A reviewer comment or automated review-body comment is **in scope** when its anchor falls on a changed diff line on either side of the hunk. Deleted-line comments like "why remove this?" or "please add this back" are in scope by definition. For a range like `12-14`, any overlap with a changed diff line is in scope.
 
-When matching review comments to hunks, use the anchor line provided by `unresolvedPrComments.sh`; it may be the current `line` or the script's fallback to `originalLine`. Compare that anchor against both new-side added ranges and old-side removed ranges.
+When matching review comments to hunks, use the anchor line provided by `pr_babysit_cli.py review`; it may be the current `line` or the CLI's fallback to `originalLine`. Compare that anchor against both new-side added ranges and old-side removed ranges.
 
 Comments on unchanged/context lines, touched files outside changed lines, or untouched files are **out of scope by default**.
 
@@ -139,7 +139,7 @@ Default posture: focus on in-scope feedback. For out-of-scope feedback, apply th
 
 ### 5. Handle CI failures
 
-Run `bash "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/fetchFailedLogs.sh"` to stream failed output for every failing check on the PR. The first line is either:
+Run `python3 "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/pr_babysit_cli.py" failed-logs` to stream failed output for every failing check on the PR. The first line is either:
 
 - `# pr-babysit: no failing checks` → skip to step 6a.
 - `# pr-babysit: failing checks` → followed by one delimited block per failing job or external check:
@@ -221,10 +221,10 @@ If steps 5, 6, or 7 modified any files, decide:
 Then run:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/commitAndPush.sh" "<message>" <file1> [<file2> ...]
+python3 "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/pr_babysit_cli.py" commit-push "<message>" <file1> [<file2> ...]
 ```
 
-The script enforces explicit staging (never `git add -A`), never skips hooks, and prints:
+The `commit-push` subcommand enforces explicit staging (never `git add -A`), never skips hooks, and prints:
 
 ```text
 sha=<commit-sha>
@@ -238,12 +238,14 @@ Capture the `url=` line for the reply templates in step 9.
 For every thread assessed in step 6a that was NOT marked **Skip-reply** (i.e., one of Agree / Disagree / Already fixed / Defer):
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/postSentinelReply.sh" "$THREAD_ID" "$BODY"
+python3 "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/pr_babysit_cli.py" reply "$THREAD_ID" <<'EOF'
+<reply body markdown>
+EOF
 ```
 
-Skip-reply threads are left alone as the existing sentinel already covers them.
+The `reply` subcommand reads the body from stdin (use a quoted heredoc as shown, so markdown backticks and newlines pass through byte-verbatim). Skip-reply threads are left alone as the existing sentinel already covers them.
 
-Body templates (the script appends the `addressed` sentinel if missing):
+Body templates (the CLI appends the `addressed` sentinel if missing):
 
 - **Agree**: `Addressed in <commit-url>. <one-line what-changed>.`
 - **Disagree**: `Leaving current behavior. <reasoning>.`
@@ -257,7 +259,9 @@ The script uses the `addPullRequestReviewThreadReply` GraphQL mutation. It does 
 If any automated review bodies were assessed in step 7 OR any active issue comments were assessed in step 6b, post ONE top-level PR comment summarizing all of them:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/postSentinelPrComment.sh" "$PR_NUMBER" "$BODY"
+python3 "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/pr_babysit_cli.py" comment "$PR_NUMBER" <<'EOF'
+<summary body markdown>
+EOF
 ```
 
 The PR-level summary should:
