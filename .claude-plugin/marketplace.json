@@ -130,7 +130,7 @@
     {
       "name": "pr",
       "source": "./plugins/pr",
-      "description": "Open a pull request with an architecture-first description (via pr-summary-writer), then babysit CI and review feedback. Ships /pr:pr-babysit for single-pass tending and /pr for create-then-babysit.",
+      "description": "Open a pull request with an architecture-first description (via pr-summary-writer), review it, and babysit CI and review feedback. Ships /pr:review for rubric-based code review, /pr:pr-babysit for single-pass tending, and /pr for create-then-babysit.",
       "author": {
         "name": "Paul Baranowski"
       },
