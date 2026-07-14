@@ -85,7 +85,7 @@ files — run `/harness:reasoning-gaps` post-merge").
 
 Fix every must-fix item directly in code — same as simplify, not a separate
 implementation loop. If a fix changes behavior, re-run the project's tests before
-continuing to the commit + review step (`pr:review`, falling back to `core:cb-review`).
+continuing to the commit + review step (`pr:review`, falling back to a sub-agent).
 
 Do not spawn task-list-runner, do not invoke `/harness:reasoning-gaps` Phase 4,
 and do not attempt to clear the entire findings backlog in this pass.

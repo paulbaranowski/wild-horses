@@ -35,7 +35,7 @@ Once a task is resolved, the skill makes every design and implementation decisio
 2. Run the project's tests; fix every failure (pre-existing, "unrelated", and flaky all count).
 3. Simplify the diff (reuse, quality, efficiency lenses).
 4. Reasoning-gaps review on changed files — fix critical findings; defer the rest.
-5. Commit, then independent review (`pr:review`, falling back to `core:cb-review` or a sub-agent); iterate to convergence.
+5. Commit, then independent review (`pr:review`, falling back to a sub-agent); iterate to convergence.
 6. Open a PR following the target repo's own conventions, with a "Decisions" section.
 7. Tend the PR (CI + review threads) over a bounded number of rounds.
 8. Stop — the human review loop happens out-of-session.
