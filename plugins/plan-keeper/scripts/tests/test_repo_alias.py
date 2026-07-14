@@ -10,6 +10,7 @@ Run all: python3 -m unittest discover -s plugins/plan-keeper/scripts/tests
 import json
 import subprocess
 import unittest
+from pathlib import Path
 
 from support import (  # noqa: F401 — also inserts scripts/ onto sys.path
     IsolatedHomeTestCase,
@@ -34,7 +35,7 @@ class _MonorepoAliasTestCase(IsolatedHomeTestCase):
             check=True,
         )
 
-    def _subdir(self, *parts: str):
+    def _subdir(self, *parts: str) -> Path:
         """Create (mkdir -p) and return a subpath of self.cwd."""
         path = self.cwd.joinpath(*parts)
         path.mkdir(parents=True, exist_ok=True)
@@ -249,7 +250,7 @@ class TestListAliasResolution(_MonorepoAliasTestCase):
             f"---\nStatus: {status}\n---\n\n# {name}\n", encoding="utf-8"
         )
 
-    def _configure_alias(self):
+    def _configure_alias(self) -> Path:
         """Set up carrot monorepo + catalog/flawless-inventory -> maple alias.
 
         Returns the aliased deep cwd. Seeds the aliased bucket (~/plans/maple/)
@@ -291,7 +292,9 @@ class TestListAliasResolution(_MonorepoAliasTestCase):
         self.assertEqual(auto.returncode, 0, auto.stderr)
         self.assertEqual(override.returncode, 0, override.stderr)
         self.assertEqual(auto.stdout, override.stdout)
-        self.assertNotEqual(auto.stdout.strip(), "")
+        # Assert on expected content rather than mere non-emptiness: the
+        # todo,backlog filter admits first.md (backlog), so it must appear.
+        self.assertIn("first.md", auto.stdout)
 
     def test_no_alias_match_still_lists_bare_remote_bucket(self) -> None:
         # When no alias matches, `list` must keep reading the bare-remote bucket
