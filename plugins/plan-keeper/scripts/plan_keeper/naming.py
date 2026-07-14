@@ -305,22 +305,41 @@ def _resolve_alias(
     return None
 
 
+def repo_from_git_aliased(cwd: Optional[str] = None) -> Optional[str]:
+    """Alias-aware form of `_repo_from_git`: git-derived name, alias applied, or None.
+
+    Returns the monorepo-subpath alias name when the global config maps
+    `(remote, subpath)`, else the bare git-origin basename, else None when
+    `cwd` is not in a git repo. This is the resolution `list` needs: it must
+    distinguish "no repo context" (None → list every repo) from "a repo,
+    possibly aliased". `derive_repo` can't serve that need because it never
+    returns None — it falls back to the cwd basename. Both entry points share
+    `_maybe_alias`, so `repo name`, `save`, and `list` resolve aliases
+    identically (the divergence this helper closes: `list` used to call the
+    bare `_repo_from_git`, silently reading ~/plans/<remote>/ from an aliased
+    cwd).
+    """
+    from_git = _repo_from_git(cwd)
+    if from_git is None:
+        return None
+    aliased = _maybe_alias(from_git, cwd)
+    return aliased if aliased is not None else from_git
+
+
 def derive_repo(override: Optional[str], cwd: Optional[str] = None) -> str:
     """Resolve <repo> per repo-derivation.md.
 
     Contract: override (normalized) → alias mapping → git origin → cwd basename.
     The alias step (added with the monorepo-subpath mapping) sits between the
     git lookup and its bare result so every consumer that already calls
-    `repo name` picks up alias resolution transparently.
+    `repo name` picks up alias resolution transparently. Shares the alias step
+    with `list` via `repo_from_git_aliased`.
     """
     if override:
         return validate_repo_name(normalize_override(override))
-    from_git = _repo_from_git(cwd)
-    if from_git is not None:
-        aliased = _maybe_alias(from_git, cwd)
-        if aliased is not None:
-            return aliased
-        return from_git
+    aliased = repo_from_git_aliased(cwd)
+    if aliased is not None:
+        return aliased
     cwd = cwd or os.getcwd()
     return validate_repo_name(os.path.basename(os.path.abspath(cwd)))
 

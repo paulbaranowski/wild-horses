@@ -76,13 +76,13 @@ from plan_keeper.linear import (
     refresh_linear_cache,
 )
 from plan_keeper.naming import (
-    _repo_from_git,
     derive_repo,
     derive_repo_full,
     normalize_override,
     plan_filename,
     plan_group_key,
     rename_for_kind,
+    repo_from_git_aliased,
     slugify_topic,
     validate_extension,
     validate_repo_name,
@@ -598,6 +598,11 @@ def cmd_list(args) -> int:
     # (exit 2) before we get here. Reads always union across roots; --root
     # narrows the union to one, and the root label is shown only when the
     # displayed union spans more than one root.
+    #
+    # `repo_from_git_aliased` (not the bare `_repo_from_git`) is the git-origin
+    # step: from a monorepo-subpath-aliased cwd it resolves to the alias bucket,
+    # matching `repo name` / `save`. It still returns None outside a git repo, so
+    # the "no repo context → list every repo" fallback below is preserved.
     a = ListArgs.from_args(args)
     raw_filter = a.status
     roots_to_show = _roots_to_show(a.root)
@@ -606,7 +611,7 @@ def cmd_list(args) -> int:
     if a.override:
         explicit: Optional[str] = validate_repo_name(normalize_override(a.override))
     else:
-        explicit = _repo_from_git()
+        explicit = repo_from_git_aliased()
 
     if a.all_repos or explicit is None:
         items = _all_repos_items(a.state, roots_to_show, label)
