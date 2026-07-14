@@ -1,7 +1,7 @@
 ---
 name: autonomous
 description: >-
-  Autonomously take an issue/ticket or a plan file from a link (or path) to an opened pull request, with no human in the loop. Hand it a Linear/GitHub/other issue URL, a path to a plan/spec file (e.g. ~/plans/repo/foo.md), or a plan already read into the conversation, and it decides everything itself: implements, tests, simplifies the diff, runs a bounded reasoning-gaps review (critical findings only, via harness agent prompts), reviews via core:cb-review (falling back to an independent sub-agent) to convergence, and opens a PR following the target repo's own conventions. Use when the user says work this issue autonomously, take this ticket end-to-end, do this AFK, pastes an issue link, or points it at a plan file and asks you to just build it. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.
+  Autonomously take an issue/ticket or a plan file from a link (or path) to an opened pull request, with no human in the loop. Hand it a Linear/GitHub/other issue URL, a path to a plan/spec file (e.g. ~/plans/repo/foo.md), or a plan already read into the conversation, and it decides everything itself: implements, tests, simplifies the diff, runs a bounded reasoning-gaps review (critical findings only, via harness agent prompts), reviews via pr:review (falling back to core:cb-review, then an independent sub-agent) to convergence, and opens a PR following the target repo's own conventions. Use when the user says work this issue autonomously, take this ticket end-to-end, do this AFK, pastes an issue link, or points it at a plan file and asks you to just build it. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.
 user-invocable: true
 disable-model-invocation: false
 argument-hint: "<issue/ticket URL or path to a plan file>"
@@ -107,19 +107,24 @@ discipline that gets you there.
    item; defer the rest to the PR Decisions section. Skip entirely if the harness
    plugin is unavailable. Re-run step 2's tests when a fix changes behavior.
 5. Commit your work, then get an independent code review of the committed diff
-   before opening the PR, using `core:cb-review` when it is available this session
-   and an ad-hoc sub-agent otherwise. Commit first because `core:cb-review`
-   reviews the committed diff against the base branch, never the working tree - an
-   uncommitted change reads to it as an empty diff and the review silently no-ops.
-   Put the Task (the issue/plan) in the commit message so the review has spec
+   before opening the PR. Prefer the in-marketplace `pr:review` skill (wild-horses
+   `pr` plugin), fall back to `core:cb-review`, and use an ad-hoc sub-agent only if
+   neither review skill is available this session. Commit first because these review
+   skills review the committed diff against the base branch, never the working tree -
+   an uncommitted change reads to them as an empty diff and the review silently
+   no-ops. Put the Task (the issue/plan) in the commit message so the review has spec
    context to check against.
-   - **Primary - `core:cb-review`:** invoke `core:cb-review --effort high --report`
-     on the committed diff. It derives its own spec context from the branch (the
-     commit messages, and the PR body once one exists); do **not** feed it your
-     reasoning or this conversation - the value is in independent judgment.
-     `--report` mode is non-interactive and returns its findings with no gates.
-   - **Fallback - ad-hoc sub-agent** (only if `core:cb-review` is unavailable this
-     session): spawn a sub-agent to review your changes. Hand it the diff plus the
+   - **Primary - `pr:review` (wild-horses):** read and execute the `pr` plugin's
+     `skills/review/SKILL.md` in `--report --effort high` mode on the committed diff
+     (locate it in the plugin cache or marketplace checkout, the same way `/pr`
+     composes its dependency skills). It derives its own spec context from the branch
+     (the commit messages, and the PR body once one exists); do **not** feed it your
+     reasoning or this conversation - the value is in independent judgment. `--report`
+     mode is non-interactive and returns its findings with no gates.
+   - **Fallback - `core:cb-review`:** if `pr:review` is unavailable this session,
+     invoke `core:cb-review --effort high --report` on the committed diff the same way.
+   - **Last resort - ad-hoc sub-agent** (only if neither review skill is available
+     this session): spawn a sub-agent to review your changes. Hand it the diff plus the
      issue description, but not your reasoning or this conversation - the value is
      in independent judgment. Ask it to flag bugs, regressions, missing test
      coverage, security issues, and convention violations.
