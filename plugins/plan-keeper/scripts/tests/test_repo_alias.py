@@ -17,7 +17,14 @@ from support import (  # noqa: F401 — also inserts scripts/ onto sys.path
 )
 
 
-class TestRepoNameAliasResolution(IsolatedHomeTestCase):
+class _MonorepoAliasTestCase(IsolatedHomeTestCase):
+    """Shared monorepo/alias fixtures for the repo-alias test classes.
+
+    Factors out the git-init + subdir + global-config helpers so both the
+    `repo name` resolution tests and the `list` regression tests build the
+    same (real git remote, subpath alias) fixture the resolver keys on.
+    """
+
     def _init_monorepo(self, remote_url: str = "git@github.com:acme/carrot.git") -> None:
         """Init a git repo at self.cwd with `origin` pointing at `remote_url`."""
         subprocess.run(["git", "init", "-q"], cwd=self.cwd, check=True)
@@ -40,6 +47,8 @@ class TestRepoNameAliasResolution(IsolatedHomeTestCase):
             json.dumps(data), encoding="utf-8"
         )
 
+
+class TestRepoNameAliasResolution(_MonorepoAliasTestCase):
     def test_matching_alias_returns_alias_name(self) -> None:
         # cwd is carrot/catalog/flawless-inventory under the monorepo "carrot";
         # the global config maps that exact subpath to "maple", so the resolved
@@ -219,6 +228,97 @@ class TestRepoNameAliasResolution(IsolatedHomeTestCase):
         # But the user is told about the corruption.
         self.assertIn("warning", r.stderr.lower())
         self.assertIn("global config", r.stderr.lower())
+
+
+class TestListAliasResolution(_MonorepoAliasTestCase):
+    """`list` must honor monorepo-subpath aliases the same way `repo name` does.
+
+    Regression coverage for the bug where `list` derived its repo via the bare
+    git remote (reading ~/plans/<remote>/) instead of routing through the
+    alias-aware helper, so from an aliased cwd it silently returned an empty
+    listing while `--override <alias>` worked. The contract: from an aliased
+    cwd, bare auto-derived `list` and explicit `list --override <alias>` must
+    produce byte-identical stdout.
+    """
+
+    def _seed_plan(self, repo: str, name: str, status: str = "backlog") -> None:
+        """Write a minimal valid plan file into ~/plans/<repo>/<name>."""
+        repo_dir = self.plans_root / repo
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        (repo_dir / name).write_text(
+            f"---\nStatus: {status}\n---\n\n# {name}\n", encoding="utf-8"
+        )
+
+    def _configure_alias(self):
+        """Set up carrot monorepo + catalog/flawless-inventory -> maple alias.
+
+        Returns the aliased deep cwd. Seeds the aliased bucket (~/plans/maple/)
+        with plans; leaves the bare-remote bucket (~/plans/carrot/) empty, which
+        is exactly the post-migration state that surfaced the bug.
+        """
+        self._init_monorepo()
+        deep = self._subdir("catalog", "flawless-inventory")
+        self._write_global_config({"aliases": [
+            {"remote": "carrot", "subpath": "catalog/flawless-inventory",
+             "name": "maple"},
+        ]})
+        self._seed_plan("maple", "2026-01-02-second.md", status="todo")
+        self._seed_plan("maple", "2026-01-01-first.md", status="backlog")
+        return deep
+
+    def test_auto_derive_matches_override_byte_for_byte(self) -> None:
+        # The core regression: from the aliased cwd, bare `list` must return the
+        # exact same bytes as `list --override maple` — not an empty listing.
+        deep = self._configure_alias()
+        auto = run_cli("list", home=self.home, cwd=deep)
+        override = run_cli("list", "--override", "maple", home=self.home, cwd=deep)
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(override.returncode, 0, override.stderr)
+        self.assertEqual(auto.stdout, override.stdout)
+        # Guard against "both empty pass": the aliased bucket has plans, so the
+        # shared output must actually list them. (assertIn already implies
+        # non-empty — no separate empty-string assertion needed here.)
+        self.assertIn("first.md", auto.stdout)
+
+    def test_auto_derive_matches_override_with_status_filter(self) -> None:
+        # Same equivalence must hold when a --status filter is applied.
+        deep = self._configure_alias()
+        auto = run_cli("list", "--status", "todo,backlog", home=self.home, cwd=deep)
+        override = run_cli(
+            "list", "--override", "maple", "--status", "todo,backlog",
+            home=self.home, cwd=deep,
+        )
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(override.returncode, 0, override.stderr)
+        self.assertEqual(auto.stdout, override.stdout)
+        self.assertNotEqual(auto.stdout.strip(), "")
+
+    def test_no_alias_match_still_lists_bare_remote_bucket(self) -> None:
+        # When no alias matches, `list` must keep reading the bare-remote bucket
+        # (~/plans/carrot/) — the alias routing must not regress the plain path.
+        self._init_monorepo()
+        elsewhere = self._subdir("services", "billing")
+        self._write_global_config({"aliases": [
+            {"remote": "carrot", "subpath": "catalog/flawless-inventory",
+             "name": "maple"},
+        ]})
+        self._seed_plan("carrot", "2026-01-01-bare.md")
+        auto = run_cli("list", home=self.home, cwd=elsewhere)
+        override = run_cli("list", "--override", "carrot", home=self.home, cwd=elsewhere)
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(auto.stdout, override.stdout)
+        self.assertIn("bare.md", auto.stdout)
+
+    def test_no_git_context_still_lists_all_repos(self) -> None:
+        # Outside any git repo, `list` must keep its "no repo context -> list
+        # every repo" fallback rather than pinning a single derived repo.
+        self._seed_plan("alpha", "2026-01-01-a.md")
+        self._seed_plan("beta", "2026-01-01-b.md")
+        # self.cwd is a non-git dir (IsolatedHomeTestCase default).
+        r = run_cli("list", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("a.md", r.stdout)
+        self.assertIn("b.md", r.stdout)
 
 
 if __name__ == "__main__":
