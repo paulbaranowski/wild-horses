@@ -49,7 +49,7 @@ Drop candidates that match. The tagged items double as the slop taxonomy for the
 ```
 
 - Pure deletion: `after` is `""`.
-- Pure addition at a new line: `before` is `""`, prefix `after` with `// add after line <N>`.
+- Pure addition at a new line: `before` is `""`; `after` holds only the code to add, with no `// add after line <N>` marker inside it (a marker inside the code is inserted verbatim on the PR and breaks non-`//` languages). Convey the insertion location in the finding's `point`, not in the code.
 - Structural change with no clean drop-in: omit `suggested_fix`, describe in `point`/`failure_mode`.
 - Both must be code (not prose), preserving the file's indentation. Don't elide with `// ...`.
 
