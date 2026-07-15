@@ -75,8 +75,9 @@ appears.
    consumer touches without reading the source: CLI commands/flags, HTTP/RPC
    endpoints, config file formats, UI screens. Internal library APIs
    (renamed functions, changed signatures) do not count - the diff shows
-   those better than any example. One before/after example per changed
-   surface:
+   those better than any example. One example per changed surface: a
+   before/after pair for a modified surface, "after"-only for a brand-new
+   one:
 
    Before:
 
