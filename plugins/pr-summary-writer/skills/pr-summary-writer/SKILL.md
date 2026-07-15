@@ -31,8 +31,8 @@ sentence that says you're about to.
 
 - **Trivial PR** (dependency bump, one-line fix, copy tweak): one-line
   description. If it changes an externally-consumed interface, add the
-  Interface changes section (template section 4) after the one-liner;
-  otherwise stop. Nothing else in this skill applies to a trivial PR.
+  Interface changes section after the one-liner; otherwise stop. Nothing
+  else in this skill applies to a trivial PR.
 - **Design PR** (new seam, refactor, new data flow, a decoupling, anything that
   introduces or shifts structure): full method below.
 
@@ -78,12 +78,16 @@ appears.
    those better than any example. One before/after example per changed
    surface:
 
+   Before:
+
    ```text
-   # before
    $ plan-keeper list
    error: repo could not be derived
+   ```
 
-   # after
+   After:
+
+   ```text
    $ plan-keeper list --repo herds
    3 plans in ~/plans/herds/
    ```
@@ -98,7 +102,7 @@ appears.
      the baseline; a recording (GIF) only when the change is an interaction
      or flow a still image can't convey. Capture is best-effort with
      whatever tooling the session has; when none is available, skip the
-     media and say so in the handoff message instead of blocking.
+     media and say so in your final message instead of blocking.
    - Media handoff: a PR body can only render media that GitHub hosts, and
      the drag-and-drop upload has no API. Save assets outside the worktree
      at `~/tmp/pr-assets/<repo>/<pr-number>/` (use the branch name until a
@@ -220,11 +224,15 @@ architecture themselves. The rewrite led with the one idea.
    `gh pr view <arg> --json number,title,url,body`.
 2. Generate the title alongside the body: concise, intent-and-impact,
    conventional style when the repo uses it (`refactor(events): ...`).
-3. If the body contains media placeholders, make sure the assets are already
-   saved under `~/tmp/pr-assets/<repo>/<pr-number>/` before updating the PR,
-   and after delivering, list each placeholder's absolute file path in your
-   final message so the user can drag the files into the description.
-4. If a PR exists, update it immediately — do not ask for confirmation:
+3. If the existing body already contains GitHub-hosted media
+   (`user-attachments` URLs), carry those links into the new body unchanged;
+   placeholders are only for surfaces not yet illustrated. For any remaining
+   placeholders, make sure the assets are already saved under
+   `~/tmp/pr-assets/<repo>/<pr-number>/` (branch name until a PR number
+   exists) before updating the PR, and after delivering, list each
+   placeholder's absolute file path in your final message so the user can
+   drag the files into the description.
+4. If a PR exists, update it immediately - do not ask for confirmation:
 
    ```bash
    gh pr edit <number> --title "<title>" --body "$(cat <<'EOF'
