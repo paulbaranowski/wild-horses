@@ -30,7 +30,9 @@ sentence that says you're about to.
 ## Triage first
 
 - **Trivial PR** (dependency bump, one-line fix, copy tweak): one-line
-  description. Stop. The rest of this skill does not apply.
+  description. If it changes an externally-consumed interface, add the
+  Interface changes section (template section 4) after the one-liner;
+  otherwise stop. Nothing else in this skill applies to a trivial PR.
 - **Design PR** (new seam, refactor, new data flow, a decoupling, anything that
   introduces or shifts structure): full method below.
 
@@ -69,17 +71,53 @@ appears.
      untouched-but-at-risk surface is often the most reassuring thing a
      reviewer can read.
 
-4. **Data / contract model** - only when a schema or contract changed: the one
+4. **Interface changes** - only when the PR changes a surface an external
+   consumer touches without reading the source: CLI commands/flags, HTTP/RPC
+   endpoints, config file formats, UI screens. Internal library APIs
+   (renamed functions, changed signatures) do not count - the diff shows
+   those better than any example. One before/after example per changed
+   surface:
+
+   ```text
+   # before
+   $ plan-keeper list
+   error: repo could not be derived
+
+   # after
+   $ plan-keeper list --repo herds
+   3 plans in ~/plans/herds/
+   ```
+
+   - Capture the "after" by actually running the command when that is cheap
+     and side-effect-free; write the "before" from the old code's known
+     behavior (never check out the base branch just to capture it). A
+     brand-new surface gets an "after"-only usage example - no fabricated
+     "before".
+   - Trim output to only the lines that demonstrate the change.
+   - Visual interfaces (web/mobile UI): one screenshot per changed screen is
+     the baseline; a recording (GIF) only when the change is an interaction
+     or flow a still image can't convey. Capture is best-effort with
+     whatever tooling the session has; when none is available, skip the
+     media and say so in the handoff message instead of blocking.
+   - Media handoff: a PR body can only render media that GitHub hosts, and
+     the drag-and-drop upload has no API. Save assets outside the worktree
+     at `~/tmp/pr-assets/<repo>/<pr-number>/` (use the branch name until a
+     PR number exists), put a visible italic placeholder naming the file in
+     the body (`_[screenshot: settings-page.png - drag file here]_`), and
+     list the absolute file paths in your final message so the user can
+     drag them in.
+
+5. **Data / contract model** - only when a schema or contract changed: the one
    or two field-level semantics a reviewer must hold in their head. Not the
    full schema.
 
-5. **Testing** - one paragraph: the approach (what's driven end-to-end vs.
+6. **Testing** - one paragraph: the approach (what's driven end-to-end vs.
    stubbed, and why) and the top-line result.
 
-6. **Sequence / follow-ups** - when part of a series: one line on where this
+7. **Sequence / follow-ups** - when part of a series: one line on where this
    sits and what's deferred.
 
-7. Footer per the target repo's convention (often none). Never add
+8. Footer per the target repo's convention (often none). Never add
    "Generated with Claude Code" footers or Co-Authored-By trailers.
 
 ## Method
@@ -94,11 +132,14 @@ appears.
 4. **Keep only the 2-4 decisions that shape the design.** Drop anything with
    an obvious default or that's a local implementation detail.
 5. **Identify the at-risk untouched surface** and how it's protected.
-6. **Draft in prose, architecture section first.** The one-idea sentence,
+6. **Detect changed external surfaces.** CLI, API, config, UI - one
+   before/after example each, per the Interface changes section's rules;
+   capture media only when the surface is visual.
+7. **Draft in prose, architecture section first.** The one-idea sentence,
    then before/after, then decisions, then what-didn't-change.
-7. **Ruthlessly demote detail.** If removing a line loses no _understanding_,
+8. **Ruthlessly demote detail.** If removing a line loses no _understanding_,
    remove it; the commits and code already carry it.
-8. **One-pass read.** If a reviewer can't get the mental model in a single
+9. **One-pass read.** If a reviewer can't get the mental model in a single
    read, it's still too granular.
 
 ## Smell tests (revise if any are true)
@@ -116,6 +157,10 @@ appears.
   they're process artifacts, not architecture.
 - Every decision made is listed: keep only the load-bearing ones.
 - No mention of what stayed the same: name the at-risk untouched surface.
+- An Interface changes section exists but no externally-consumed surface
+  changed: cut the section.
+- The interface example is an exhaustive option matrix rather than the one
+  representative invocation: keep the single pair that shows the change.
 
 ## Don't
 
@@ -133,6 +178,14 @@ appears.
 - **Don't announce the idea before stating it** ("The core move is...",
   "The key change here is...", "At a high level..."). Open with the claim
   about the system itself.
+- **Don't dump untrimmed command output** into an interface example. Keep
+  only the lines that demonstrate the change.
+- **Don't include more than one example per changed surface**: one
+  representative before/after pair each, one screenshot or one recording
+  per changed screen/flow.
+- **Don't commit media assets to the repo.** Screenshots and recordings
+  live outside the worktree (`~/tmp/pr-assets/<repo>/<pr-number>/`) and
+  reach the PR body via the user's drag-and-drop.
 
 ## Worked reference
 
@@ -167,7 +220,11 @@ architecture themselves. The rewrite led with the one idea.
    `gh pr view <arg> --json number,title,url,body`.
 2. Generate the title alongside the body: concise, intent-and-impact,
    conventional style when the repo uses it (`refactor(events): ...`).
-3. If a PR exists, update it immediately — do not ask for confirmation:
+3. If the body contains media placeholders, make sure the assets are already
+   saved under `~/tmp/pr-assets/<repo>/<pr-number>/` before updating the PR,
+   and after delivering, list each placeholder's absolute file path in your
+   final message so the user can drag the files into the description.
+4. If a PR exists, update it immediately — do not ask for confirmation:
 
    ```bash
    gh pr edit <number> --title "<title>" --body "$(cat <<'EOF'
@@ -184,5 +241,5 @@ architecture themselves. The rewrite led with the one idea.
    show the error and fall back to printing the title and body for
    copy/paste.
 
-4. If no PR exists, hand the title and body to whatever opens the PR (or
+5. If no PR exists, hand the title and body to whatever opens the PR (or
    print them for copy/paste).
