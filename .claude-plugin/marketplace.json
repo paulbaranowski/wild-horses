@@ -20,7 +20,7 @@
     {
       "name": "autonomous",
       "source": "./plugins/autonomous",
-      "description": "An autonomous skill that drives a single issue/ticket link or plan file all the way to an opened pull request with no human in the loop: implements, tests, simplifies the diff, runs a bounded reasoning-gaps review (critical only), reviews via core:cb-review (falling back to an independent sub-agent) to convergence, opens a PR following the target repo's conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.",
+      "description": "An autonomous skill that drives a single issue/ticket link or plan file all the way to an opened pull request with no human in the loop: implements, tests, simplifies the diff, runs a bounded reasoning-gaps review (critical only), reviews via wild-pr:review (falling back to an independent sub-agent) to convergence, opens a PR following the target repo's conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.",
       "author": {
         "name": "Paul Baranowski"
       },
@@ -128,9 +128,9 @@
       "license": "MIT"
     },
     {
-      "name": "pr",
-      "source": "./plugins/pr",
-      "description": "Open a pull request with an architecture-first description (via pr-summary-writer), review it, and babysit CI and review feedback. Ships /pr:review for rubric-based code review, /pr:pr-babysit for single-pass tending, and /pr for create-then-babysit.",
+      "name": "wild-pr",
+      "source": "./plugins/wild-pr",
+      "description": "Open a pull request with an architecture-first description (via pr-summary-writer), review it, and babysit CI and review feedback. Ships /wild-pr:review for rubric-based code review, /wild-pr:babysit for single-pass tending, and /wild-pr for create-then-babysit.",
       "author": {
         "name": "Paul Baranowski"
       },

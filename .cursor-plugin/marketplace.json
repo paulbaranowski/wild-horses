@@ -128,9 +128,9 @@
       "license": "MIT"
     },
     {
-      "name": "pr",
-      "source": "plugins/pr",
-      "description": "Open a pull request with an architecture-first description (via pr-summary-writer), review it, and babysit CI and review feedback. Ships /pr:review for rubric-based code review, /pr:pr-babysit for single-pass tending, and /pr for create-then-babysit.",
+      "name": "wild-pr",
+      "source": "plugins/wild-pr",
+      "description": "Open a pull request with an architecture-first description (via pr-summary-writer), review it, and babysit CI and review feedback. Ships /wild-pr:review for rubric-based code review, /wild-pr:babysit for single-pass tending, and /wild-pr for create-then-babysit.",
       "author": {
         "name": "Paul Baranowski"
       },

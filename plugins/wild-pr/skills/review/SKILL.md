@@ -1,6 +1,6 @@
 ---
 name: review
-description: Code review of a diff, branch, or PR, with findings posted as anchored PR comments. Use when the user asks to review a diff, branch, or PR, asks to check a change against its ticket/spec/PRD, or runs /pr:review [pr-number-or-url] [--effort low|high] [--report].
+description: Code review of a diff, branch, or PR, with findings posted as anchored PR comments. Use when the user asks to review a diff, branch, or PR, asks to check a change against its ticket/spec/PRD, or runs /wild-pr:review [pr-number-or-url] [--effort low|high] [--report].
 user-invocable: true
 disable-model-invocation: true
 argument-hint: "[pr-number-or-url] [--effort low|high] [--report]"
@@ -15,8 +15,8 @@ Review a diff against one rubric, filter to the few findings worth raising, gate
 
 ## Invocation
 
-- `/pr:review` - review the current branch (resolves the open PR for the branch if any, otherwise diffs against the default branch).
-- `/pr:review <pr-number-or-url>` - review that PR without checking it out; forces reviewer mode. Accepts a bare number (current repo) or full GitHub URL (identifies owner/repo).
+- `/wild-pr:review` - review the current branch (resolves the open PR for the branch if any, otherwise diffs against the default branch).
+- `/wild-pr:review <pr-number-or-url>` - review that PR without checking it out; forces reviewer mode. Accepts a bare number (current repo) or full GitHub URL (identifies owner/repo).
 - `--effort low|high` - pick the engine explicitly. Phrases also select: "quick"/"fast" → low; "deep"/"thorough"/"multi-perspective" → high.
 - `--report` - non-interactive: stop after Synthesize and return the findings to the caller. No user gates, no posting, no implementing. For agent callers.
 
