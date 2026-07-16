@@ -1,19 +1,19 @@
 ---
-name: pr
-description: Open a PR for the current branch using pr-summary-writer for the title/body, then run pr-babysit up to three times (stop early on clean). Use when the user says /pr, "create a PR and babysit", "open a PR and babysit", or wants create-then-tend in one shot.
+name: wild-pr
+description: Open a PR for the current branch using summary-writer for the title/body, then run babysit up to three times (stop early on clean). Use when the user says /wild-pr, "create a PR and babysit", "open a PR and babysit", or wants create-then-tend in one shot.
 user-invocable: true
 disable-model-invocation: true
 argument-hint: "[optional base branch or extra gh pr create flags]"
 ---
 
-# /pr — create PR, then babysit ×3
+# /wild-pr — create PR, then babysit ×3
 
-Open a PR for the current branch, write its description with **pr-summary-writer**, then tend it with **pr-babysit** up to three times (stop early if a pass exits clean).
+Open a PR for the current branch, write its description with **summary-writer**, then tend it with **babysit** up to three times (stop early if a pass exits clean).
 
 **Dependencies (must be available this session):**
 
-- `pr-summary-writer` (wild-horses) — description + title
-- `pr-babysit` (wild-horses `pr` plugin) — CI + review tending
+- `summary-writer` (this plugin) — description + title
+- `babysit` (this plugin) — CI + review tending
 
 If either skill is missing, stop and tell the user what to install. Do not invent a substitute description format or a hand-rolled babysit loop.
 
@@ -31,7 +31,7 @@ For each dependency skill or command:
 
 **Don't paraphrase** either dependency from memory. **Don't skip** the Read step even if you have used it before in this conversation.
 
-When invoking pr-babysit, treat the captured PR URL (or number) as the command's argument text — as if the user had run `/pr:pr-babysit <url>`. That feeds its Setup parser so it targets the right PR.
+When invoking babysit, treat the captured PR URL (or number) as the command's argument text — as if the user had run `/wild-pr:babysit <url>`. That feeds its Setup parser so it targets the right PR.
 
 ---
 
@@ -85,11 +85,11 @@ EOF
 )"
 ```
 
-1. If the commit fails (e.g. pre-commit hook rejected the commit), fix the issue and create a **new** commit — do not amend unless you created the prior commit in this same `/pr` run and it has not been pushed.
+1. If the commit fails (e.g. pre-commit hook rejected the commit), fix the issue and create a **new** commit — do not amend unless you created the prior commit in this same `/wild-pr` run and it has not been pushed.
 2. After every successful commit, re-check `git status --short`. For remaining dirty files:
    - Re-run the secret check from above; stop and ask the user if any path looks like secrets.
    - Stage any remaining dirty files that belong in the PR (same criteria as step 1 — not secrets or local-only scratch), whether hook-touched or not.
-   - If any dirty files remain that are unrelated to this run (disjoint paths, pre-existing work the user had before `/pr` started), stop and report instead of continuing to push.
+   - If any dirty files remain that are unrelated to this run (disjoint paths, pre-existing work the user had before `/wild-pr` started), stop and report instead of continuing to push.
    - Otherwise commit the follow-up changes and repeat this status check until the tree is clean.
 
 Then continue to the push step below.
@@ -102,11 +102,11 @@ git push -u origin HEAD
 
 ---
 
-## Phase 2 — Description via pr-summary-writer
+## Phase 2 — Description via summary-writer
 
-1. Compose **pr-summary-writer** per **Composing other skills** above.
-2. That skill produces a **title** and **body**. Because no PR exists yet, take the title and body it hands off — do not offer an edit confirmation loop here; `/pr` means create now.
-3. Respect repo conventions the summary-writer already covers (conventional titles when the repo uses them, no "Generated with Claude" footers, no Co-Authored-By trailers).
+1. Compose **summary-writer** per **Composing other skills** above.
+2. That skill produces a **title** and **body**. Because no PR exists yet, take the title and body it hands off — do not offer an edit confirmation loop here; `/wild-pr` means create now.
+3. Respect repo conventions summary-writer already covers (conventional titles when the repo uses them, no "Generated with Claude" footers, no Co-Authored-By trailers).
 
 ---
 
@@ -117,7 +117,7 @@ Build the create invocation shell-safely — do not interpolate the title into a
 ```bash
 # Heredoc → variable keeps apostrophes and other metacharacters literal.
 TITLE=$(cat <<'TITLE_EOF'
-<title from pr-summary-writer>
+<title from summary-writer>
 TITLE_EOF
 )
 CREATE_ARGS=()
@@ -143,19 +143,19 @@ Print the PR URL, then continue — do not wait for the user.
 
 ## Phase 4 — Babysit up to 3 times
 
-`/pr` owns the outer babysit loop. Run **pr-babysit** on the PR from Phase 3 (or the existing PR URL from preflight option (a)), **up to three sequential passes**.
+`/wild-pr` owns the outer babysit loop. Run **babysit** on the PR from Phase 3 (or the existing PR URL from preflight option (a)), **up to three sequential passes**.
 
-pr-babysit's own Loop control may say "tell the user to re-run" or "wrap with `/loop`" on a `progressing` exit. **Ignore that advice while inside `/pr`** — continue to the next pass yourself until you hit 3 passes or an early-exit condition below.
+babysit's own Loop control may say "tell the user to re-run" or "wrap with `/loop`" on a `progressing` exit. **Ignore that advice while inside `/wild-pr`** — continue to the next pass yourself until you hit 3 passes or an early-exit condition below.
 
 For each pass `N` in `1..3`:
 
-1. Compose **pr-babysit** per **Composing other skills**, with the captured PR URL as its argument.
+1. Compose **babysit** per **Composing other skills**, with the captured PR URL as its argument.
 2. After the pass finishes, note its stop condition (`clean` / `progressing` / `stuck`).
 3. **Early exit (clean):** if the pass exits **clean**, stop the loop. Do not run remaining passes.
 4. **Stuck — soft vs hard:**
    - **Soft stuck** (CI still pending after watch timeout, or similar "re-run could help"): count the pass, then continue to the next pass immediately.
    - **Hard stuck** (auth/infra/external check/diagnosis-only with nothing actionable): stop the loop and report. Do not burn remaining passes.
-5. **Progressing:** count the pass and start the next one immediately. CI wait lives inside pr-babysit's own `gh pr checks --watch`, not between passes.
+5. **Progressing:** count the pass and start the next one immediately. CI wait lives inside babysit's own `gh pr checks --watch`, not between passes.
 
 After the loop (3 passes or early clean/hard-stuck stop), summarize:
 
@@ -170,9 +170,9 @@ After the loop (3 passes or early clean/hard-stuck stop), summarize:
 
 **Do:**
 
-- Commit uncommitted work during preflight when the tree is dirty (except suspected secrets) — `/pr` should not stop with local changes still on disk.
-- Use pr-summary-writer for every title/body — never a changelog-style stub.
-- Use pr-babysit for tending — never a hand-rolled "check CI and reply" shortcut.
+- Commit uncommitted work during preflight when the tree is dirty (except suspected secrets) — `/wild-pr` should not stop with local changes still on disk.
+- Use summary-writer for every title/body — never a changelog-style stub.
+- Use babysit for tending — never a hand-rolled "check CI and reply" shortcut.
 - Push when the branch has no upstream, **or** when local `HEAD` is ahead of its upstream — before create **and** before a babysit-only jump to Phase 4 (same rule as Phase 1).
 - Return the PR URL in the final summary.
 - Own the outer babysit loop: on `progressing` or soft `stuck`, run the next pass yourself.
@@ -181,7 +181,7 @@ After the loop (3 passes or early clean/hard-stuck stop), summarize:
 
 - **Don't open a second PR** when one already exists for the branch.
 - **Don't commit** files that look like secrets — stop and ask the user instead.
-- **Don't run more than three** pr-babysit passes in this skill, even if the PR is still progressing.
+- **Don't run more than three** babysit passes in this skill, even if the PR is still progressing.
 - **Don't stop after a `progressing` exit** to wait for the user or suggest `/loop` — continue to the next pass until 3 or early exit.
-- **Don't paraphrase** pr-summary-writer or pr-babysit from memory — Read each skill's SKILL.md (or pr-babysit's command file) before executing it.
+- **Don't paraphrase** summary-writer or babysit from memory — Read each skill's SKILL.md (or babysit's command file) before executing it.
 - **Don't** append "Generated with Claude" footers or Co-Authored-By trailers.

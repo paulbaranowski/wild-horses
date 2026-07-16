@@ -1,9 +1,9 @@
 ---
-description: Watch a PR through CI and review feedback. Auto-fix high-confidence failures and address review comments. Use when the user says /pr:pr-babysit, babysit a PR, or respond to PR comments.
+description: Watch a PR through CI and review feedback. Auto-fix high-confidence failures and address review comments. Use when the user says /wild-pr:babysit, babysit a PR, or respond to PR comments.
 argument-hint: "[pr-number-or-url]"
 ---
 
-# /pr:pr-babysit — watch CI and review feedback
+# /wild-pr:babysit — watch CI and review feedback
 
 ## Setup
 
@@ -43,7 +43,7 @@ git status --short
 If non-empty, classify the dirty files against the target PR's changed paths (`gh pr diff --name-only`):
 
 - Any dirty file overlaps the PR's surface, or you cannot confidently classify → stop and report. The skill never starts where it might sweep up related in-progress work.
-- All dirty files are clearly unrelated (disjoint paths, pre-existing edits) → stash exactly those files by name with a labeled stash (`git stash push -m "pr-babysit: pre-existing unrelated work (auto-restored)" -- <paths>`), proceed, and `git stash pop` as the final step of the pass, including on early exits. Report the stash/restore in the summary.
+- All dirty files are clearly unrelated (disjoint paths, pre-existing edits) → stash exactly those files by name with a labeled stash (`git stash push -m "babysit: pre-existing unrelated work (auto-restored)" -- <paths>`), proceed, and `git stash pop` as the final step of the pass, including on early exits. Report the stash/restore in the summary.
 
 If a PR number or URL was parsed from inputs, check out that PR now:
 
@@ -216,7 +216,7 @@ If `reviewBodyComments` is empty (or all entries dedupe), skip ONLY the review-b
 If steps 5, 6, or 7 modified any files, decide:
 
 - **Which files are yours this pass.** The worktree may contain unrelated in-progress work. Only stage files this pass touched. If in doubt, run `git diff --name-only` and pick from that list deliberately.
-- **A focused commit message.** Prefer something like `pr-babysit: <one-line what-changed>`; the project's commitlint expects conventional-commit form, so a `fix(core): ...` or `docs(core): ...` prefix is usually right.
+- **A focused commit message.** Prefer something like `babysit: <one-line what-changed>`; the project's commitlint expects conventional-commit form, so a `fix(core): ...` or `docs(core): ...` prefix is usually right.
 
 Then run:
 
@@ -299,7 +299,7 @@ Do not rely only on `gh pr view --json comments,reviews`. That view can miss inl
 After the single pass completes, pick exactly one outcome:
 
 - **Exit clean**: all CI checks passed AND every thread in `activeThreads` was either marked Skip-reply during step 6a's inspection or has already received a fresh sentinel reply in this pass (Agree / Disagree / Already-fixed / **Defer** all count. A Defer reply is a sentinel reply), AND every entry in `activeIssueComments` is covered by this pass's PR-level summary, AND every current review-body fingerprint is covered by an existing sentinel comment (deferred review-body and conversation-comment fingerprints count; they're in the summary's fenced block). Do not use raw `totalActiveThreads` / `totalActiveIssueComments` from the script output. They're pre-inspection and will stay non-zero for Skip-reply or post-summary cases. A PR with Deferred items is still clean from babysit's perspective: the skill has done what it can without widening scope. Report success and stop.
-- **Exit progressing**: pass made commits, posted new replies, or both, and the PR is not yet clean (CI is still pending, a new CI run was triggered by this pass's commits, or more work remains). There is real work still in flight that another run would pick up. Report what was done and what is pending, and tell the user to re-run `/pr-babysit` once CI settles, or to wrap the call with `/loop <cadence> /pr-babysit` (or a shell `while true; do ...; done`) for automatic re-runs.
+- **Exit progressing**: pass made commits, posted new replies, or both, and the PR is not yet clean (CI is still pending, a new CI run was triggered by this pass's commits, or more work remains). There is real work still in flight that another run would pick up. Report what was done and what is pending, and tell the user to re-run `/wild-pr:babysit` once CI settles, or to wrap the call with `/loop <cadence> /wild-pr:babysit` (or a shell `while true; do ...; done`) for automatic re-runs.
 - **Exit stuck**: pass made no commits and posted no new replies, and the PR is still not clean. Nothing actionable happened this pass. Use this whenever progress is blocked on something outside the skill's scope, including:
   - Merge conflict in step 2 that exceeded the high-confidence resolution bar.
   - CI still running (`gh pr checks --watch` timed out with pending checks).

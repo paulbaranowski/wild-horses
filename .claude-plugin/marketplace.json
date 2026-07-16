@@ -20,7 +20,7 @@
     {
       "name": "autonomous",
       "source": "./plugins/autonomous",
-      "description": "An autonomous skill that drives a single issue/ticket link or plan file all the way to an opened pull request with no human in the loop: implements, tests, simplifies the diff, runs a bounded reasoning-gaps review (critical only), reviews via core:cb-review (falling back to an independent sub-agent) to convergence, opens a PR following the target repo's conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.",
+      "description": "An autonomous skill that drives a single issue/ticket link or plan file all the way to an opened pull request with no human in the loop: implements, tests, simplifies the diff, runs a bounded reasoning-gaps review (critical only), reviews via wild-pr:review (falling back to an independent sub-agent) to convergence, opens a PR following the target repo's conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.",
       "author": {
         "name": "Paul Baranowski"
       },
@@ -118,19 +118,9 @@
       "license": "MIT"
     },
     {
-      "name": "pr-summary-writer",
-      "source": "./plugins/pr-summary-writer",
-      "description": "Write architecture-first pull-request descriptions: state the one structural idea directly, give the requirements the change had to satisfy, explain the why via before/after, cover only the load-bearing decisions, and name what deliberately did not change. Replaces changelog-style descriptions (file inventories, checkbox lists, review logs) with the mental model the diff assumes. Auto-invokes whenever a PR description is about to be written or revised.",
-      "author": {
-        "name": "Paul Baranowski"
-      },
-      "category": "development",
-      "license": "MIT"
-    },
-    {
-      "name": "pr",
-      "source": "./plugins/pr",
-      "description": "Open a pull request with an architecture-first description (via pr-summary-writer), review it, and babysit CI and review feedback. Ships /pr:review for rubric-based code review, /pr:pr-babysit for single-pass tending, and /pr for create-then-babysit.",
+      "name": "wild-pr",
+      "source": "./plugins/wild-pr",
+      "description": "Open a pull request with an architecture-first description (via its bundled summary-writer skill), review it, and babysit CI and review feedback. Ships /wild-pr:review for rubric-based code review, /wild-pr:babysit for single-pass tending, /wild-pr for create-then-babysit, and the summary-writer skill for architecture-first PR descriptions.",
       "author": {
         "name": "Paul Baranowski"
       },
