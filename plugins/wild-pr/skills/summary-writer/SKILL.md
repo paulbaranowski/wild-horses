@@ -125,6 +125,20 @@ appears.
 8. Footer per the target repo's convention (often none). Never add
    "Generated with Claude Code" footers or Co-Authored-By trailers.
 
+## The title
+
+The title is part of the deliverable on every run, not just at PR creation:
+revising a body always means re-deriving the title from the same one idea.
+An existing title is input, never a default - keep it only when the
+re-derived title would say the same thing.
+
+- The one idea compressed to one line: intent and impact, not mechanics
+  ("decouple event extraction from persistence", not "refactor
+  event_algorithm.py").
+- Conventional-commit style when the repo's history uses it (check
+  `git log --oneline`); plain sentence case otherwise.
+- Aim under ~70 characters so GitHub doesn't truncate it in lists.
+
 ## Method
 
 1. **Find the one idea.** Skim the diff and ask: what single structural change
@@ -142,10 +156,12 @@ appears.
    capture media only when the surface is visual.
 7. **Draft in prose, architecture section first.** The one-idea sentence,
    then before/after, then decisions, then what-didn't-change.
-8. **Ruthlessly demote detail.** If removing a line loses no _understanding_,
+8. **Compress the one idea into the title** per The title section - re-derive
+   it every run; never carry an existing title forward unexamined.
+9. **Ruthlessly demote detail.** If removing a line loses no _understanding_,
    remove it; the commits and code already carry it.
-9. **One-pass read.** If a reviewer can't get the mental model in a single
-   read, it's still too granular.
+10. **One-pass read.** If a reviewer can't get the mental model in a single
+    read, it's still too granular.
 
 ## Smell tests (revise if any are true)
 
@@ -166,6 +182,9 @@ appears.
   changed: cut the section.
 - The interface example is an exhaustive option matrix rather than the one
   representative invocation: keep the single pair that shows the change.
+- The body was rewritten but the pre-existing title survived verbatim:
+  re-derive the title from the one idea; keeping it is only right when the
+  re-derived title matches.
 
 ## Don't
 
@@ -223,8 +242,9 @@ architecture themselves. The rewrite led with the one idea.
    `gh pr view --json number,title,url,body` (non-zero exit means none). When
    a PR number or branch was passed as the argument, target it instead:
    `gh pr view <arg> --json number,title,url,body`.
-2. Generate the title alongside the body: concise, intent-and-impact,
-   conventional style when the repo uses it (`refactor(events): ...`).
+2. Generate the title alongside the body per The title section - re-derived
+   from the one idea on every run, including when the PR already has a
+   title.
 3. If the existing body already contains GitHub-hosted media
    (`user-attachments` URLs), carry those links into the new body unchanged;
    placeholders are only for surfaces not yet illustrated. For any remaining

@@ -1,7 +1,7 @@
 {
   "name": "wild-pr",
   "description": "Open a pull request with an architecture-first description (via its bundled summary-writer skill), review it, and babysit CI and review feedback. Ships /wild-pr:review for rubric-based code review, /wild-pr:babysit for single-pass tending, /wild-pr for create-then-babysit, and the summary-writer skill for architecture-first PR descriptions.",
-  "version": "0.6.0",
+  "version": "1.0.0",
   "author": {
     "name": "Paul Baranowski"
   },
