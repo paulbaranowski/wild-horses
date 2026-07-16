@@ -118,19 +118,9 @@
       "license": "MIT"
     },
     {
-      "name": "pr-summary-writer",
-      "source": "plugins/pr-summary-writer",
-      "description": "Write architecture-first pull-request descriptions.",
-      "author": {
-        "name": "Paul Baranowski"
-      },
-      "category": "development",
-      "license": "MIT"
-    },
-    {
       "name": "wild-pr",
       "source": "plugins/wild-pr",
-      "description": "Open a pull request with an architecture-first description (via pr-summary-writer), review it, and babysit CI and review feedback. Ships /wild-pr:review for rubric-based code review, /wild-pr:babysit for single-pass tending, and /wild-pr for create-then-babysit.",
+      "description": "Open a pull request with an architecture-first description (via its bundled summary-writer skill), review it, and babysit CI and review feedback. Ships /wild-pr:review for rubric-based code review, /wild-pr:babysit for single-pass tending, /wild-pr for create-then-babysit, and the summary-writer skill for architecture-first PR descriptions.",
       "author": {
         "name": "Paul Baranowski"
       },

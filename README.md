@@ -18,7 +18,7 @@ Run comprehension, then types, then observability on a PR or feature branch — 
 
 - **[plan-keeper](#plan-keeper)** — capture, route, queue, and archive markdown plans in `~/plans/<repo>/` (also a standalone Homebrew CLI).
 - **[autonomous](#autonomous)** — drive a single issue or plan file all the way to an opened PR, with no human in the loop.
-- **[pr-summary-writer](#pr-summary-writer)** — write architecture-first PR descriptions that state the one structural idea up front.
+- **[summary-writer](#summary-writer)** — write architecture-first PR descriptions that state the one structural idea up front (ships with the wild-pr plugin).
 - **[steelman](#steelman)** — argue the strongest good-faith case _against_ a plan before you commit to it.
 
 **Understand and scaffold** — see what's there, or stand up something new.
@@ -131,19 +131,19 @@ Drive a single task — an issue/ticket link or a plan/spec file — all the way
 
 See **[plugins/autonomous/README.md](plugins/autonomous/README.md)** for the autonomy contract, the code-style bar, and the review-to-convergence loop.
 
-### [pr-summary-writer](plugins/pr-summary-writer/skills/pr-summary-writer/SKILL.md)
+### [summary-writer](plugins/wild-pr/skills/summary-writer/SKILL.md)
 
-Write pull-request descriptions that lead with the one structural idea — what changed and why — instead of a file-by-file changelog. Auto-invokes when a PR description is about to be written or revised; also available as `/pr-summary-writer`. Replaces acceptance-criteria checklists and per-file bullets with the mental model the diff assumes.
+Write pull-request descriptions that lead with the one structural idea — what changed and why — instead of a file-by-file changelog. Auto-invokes when a PR description is about to be written or revised; also available as `/summary-writer`. Replaces acceptance-criteria checklists and per-file bullets with the mental model the diff assumes. Ships as part of the **wild-pr** plugin.
 
 ```text
-/plugin install pr-summary-writer@wild-horses
+/plugin install wild-pr@wild-horses
 
-/pr-summary-writer                       # rewrite the PR for the current branch
-/pr-summary-writer 42                    # rewrite PR #42
+/summary-writer                          # rewrite the PR for the current branch
+/summary-writer 42                       # rewrite PR #42
 "write the PR description"               # model-invoked
 ```
 
-See **[plugins/pr-summary-writer/skills/pr-summary-writer/SKILL.md](plugins/pr-summary-writer/skills/pr-summary-writer/SKILL.md)** for the section template and anti-patterns.
+See **[plugins/wild-pr/skills/summary-writer/SKILL.md](plugins/wild-pr/skills/summary-writer/SKILL.md)** for the section template and anti-patterns.
 
 ### [steelman](plugins/steelman)
 

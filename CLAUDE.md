@@ -105,7 +105,7 @@ Single-context (`CONTEXT.md` and `docs/adr/` at the repo root). See `docs/agents
 
 ### PR descriptions
 
-Architecture-first: lead with the one structural idea, not a file inventory. Before writing or revising any PR body, invoke the `pr-summary-writer` skill (`plugins/pr-summary-writer/skills/pr-summary-writer/SKILL.md`) - it is the single source of truth for the format; don't restate its rules elsewhere.
+Architecture-first: lead with the one structural idea, not a file inventory. Before writing or revising any PR body, invoke the wild-pr plugin's `summary-writer` skill (`plugins/wild-pr/skills/summary-writer/SKILL.md`) - it is the single source of truth for the format; don't restate its rules elsewhere.
 
 ## Reference Marketplaces
 

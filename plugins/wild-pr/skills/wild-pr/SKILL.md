@@ -1,6 +1,6 @@
 ---
 name: wild-pr
-description: Open a PR for the current branch using pr-summary-writer for the title/body, then run babysit up to three times (stop early on clean). Use when the user says /wild-pr, "create a PR and babysit", "open a PR and babysit", or wants create-then-tend in one shot.
+description: Open a PR for the current branch using summary-writer for the title/body, then run babysit up to three times (stop early on clean). Use when the user says /wild-pr, "create a PR and babysit", "open a PR and babysit", or wants create-then-tend in one shot.
 user-invocable: true
 disable-model-invocation: true
 argument-hint: "[optional base branch or extra gh pr create flags]"
@@ -8,12 +8,12 @@ argument-hint: "[optional base branch or extra gh pr create flags]"
 
 # /wild-pr — create PR, then babysit ×3
 
-Open a PR for the current branch, write its description with **pr-summary-writer**, then tend it with **babysit** up to three times (stop early if a pass exits clean).
+Open a PR for the current branch, write its description with **summary-writer**, then tend it with **babysit** up to three times (stop early if a pass exits clean).
 
 **Dependencies (must be available this session):**
 
-- `pr-summary-writer` (wild-horses) — description + title
-- `babysit` (wild-horses `wild-pr` plugin) — CI + review tending
+- `summary-writer` (this plugin) — description + title
+- `babysit` (this plugin) — CI + review tending
 
 If either skill is missing, stop and tell the user what to install. Do not invent a substitute description format or a hand-rolled babysit loop.
 
@@ -102,11 +102,11 @@ git push -u origin HEAD
 
 ---
 
-## Phase 2 — Description via pr-summary-writer
+## Phase 2 — Description via summary-writer
 
-1. Compose **pr-summary-writer** per **Composing other skills** above.
+1. Compose **summary-writer** per **Composing other skills** above.
 2. That skill produces a **title** and **body**. Because no PR exists yet, take the title and body it hands off — do not offer an edit confirmation loop here; `/wild-pr` means create now.
-3. Respect repo conventions the summary-writer already covers (conventional titles when the repo uses them, no "Generated with Claude" footers, no Co-Authored-By trailers).
+3. Respect repo conventions summary-writer already covers (conventional titles when the repo uses them, no "Generated with Claude" footers, no Co-Authored-By trailers).
 
 ---
 
@@ -117,7 +117,7 @@ Build the create invocation shell-safely — do not interpolate the title into a
 ```bash
 # Heredoc → variable keeps apostrophes and other metacharacters literal.
 TITLE=$(cat <<'TITLE_EOF'
-<title from pr-summary-writer>
+<title from summary-writer>
 TITLE_EOF
 )
 CREATE_ARGS=()
@@ -171,7 +171,7 @@ After the loop (3 passes or early clean/hard-stuck stop), summarize:
 **Do:**
 
 - Commit uncommitted work during preflight when the tree is dirty (except suspected secrets) — `/wild-pr` should not stop with local changes still on disk.
-- Use pr-summary-writer for every title/body — never a changelog-style stub.
+- Use summary-writer for every title/body — never a changelog-style stub.
 - Use babysit for tending — never a hand-rolled "check CI and reply" shortcut.
 - Push when the branch has no upstream, **or** when local `HEAD` is ahead of its upstream — before create **and** before a babysit-only jump to Phase 4 (same rule as Phase 1).
 - Return the PR URL in the final summary.
@@ -183,5 +183,5 @@ After the loop (3 passes or early clean/hard-stuck stop), summarize:
 - **Don't commit** files that look like secrets — stop and ask the user instead.
 - **Don't run more than three** babysit passes in this skill, even if the PR is still progressing.
 - **Don't stop after a `progressing` exit** to wait for the user or suggest `/loop` — continue to the next pass until 3 or early exit.
-- **Don't paraphrase** pr-summary-writer or babysit from memory — Read each skill's SKILL.md (or babysit's command file) before executing it.
+- **Don't paraphrase** summary-writer or babysit from memory — Read each skill's SKILL.md (or babysit's command file) before executing it.
 - **Don't** append "Generated with Claude" footers or Co-Authored-By trailers.

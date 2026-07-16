@@ -118,19 +118,9 @@
       "license": "MIT"
     },
     {
-      "name": "pr-summary-writer",
-      "source": "./plugins/pr-summary-writer",
-      "description": "Write architecture-first pull-request descriptions: state the one structural idea directly, give the requirements the change had to satisfy, explain the why via before/after, cover only the load-bearing decisions, and name what deliberately did not change. Replaces changelog-style descriptions (file inventories, checkbox lists, review logs) with the mental model the diff assumes. Auto-invokes whenever a PR description is about to be written or revised.",
-      "author": {
-        "name": "Paul Baranowski"
-      },
-      "category": "development",
-      "license": "MIT"
-    },
-    {
       "name": "wild-pr",
       "source": "./plugins/wild-pr",
-      "description": "Open a pull request with an architecture-first description (via pr-summary-writer), review it, and babysit CI and review feedback. Ships /wild-pr:review for rubric-based code review, /wild-pr:babysit for single-pass tending, and /wild-pr for create-then-babysit.",
+      "description": "Open a pull request with an architecture-first description (via its bundled summary-writer skill), review it, and babysit CI and review feedback. Ships /wild-pr:review for rubric-based code review, /wild-pr:babysit for single-pass tending, /wild-pr for create-then-babysit, and the summary-writer skill for architecture-first PR descriptions.",
       "author": {
         "name": "Paul Baranowski"
       },
