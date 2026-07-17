@@ -27,6 +27,15 @@ the description itself ("The core move is...", "The main change here is...",
 "At a high level, this PR..."). Start talking about the change; delete the
 sentence that says you're about to.
 
+**The description describes the net diff vs. the base, not the branch's
+history.** The reviewer sees `<base>...HEAD` on GitHub - one collapsed
+change against main - and that is the only surface the description exists
+to explain. Approaches that were tried and reverted inside the branch,
+commits that superseded earlier commits, mid-PR pivots, and "originally
+this did X, now it does Y" narration are all invisible in that diff and
+must be invisible in the description too. The state before this PR is
+main; the state after is HEAD; nothing in between belongs.
+
 ## Triage first
 
 - **Trivial PR** (dependency bump, one-line fix, copy tweak): one-line
@@ -141,8 +150,14 @@ re-derived title would say the same thing.
 
 ## Method
 
-1. **Find the one idea.** Skim the diff and ask: what single structural change
-   makes all these edits necessary? That sentence is the spine.
+1. **Find the one idea.** Read the net diff against the base -
+   `git diff "$(git merge-base HEAD origin/main)"..HEAD` (substitute the
+   repo's default branch if not `main`) - and ask: what single structural
+   change makes all these edits necessary? That sentence is the spine.
+   Read the diff, not `git log` on the branch: commit history exposes
+   intra-branch churn (reverted commits, superseded approaches, mid-PR
+   pivots) that the reviewer will never see and must not appear in the
+   description.
 2. **Recover the constraint.** What did the old code assume or hard-wire that
    the goal couldn't live with? That's your before/after.
 3. **Recover the requirements.** What did the change have to satisfy: needs,
@@ -185,6 +200,12 @@ re-derived title would say the same thing.
 - The body was rewritten but the pre-existing title survived verbatim:
   re-derive the title from the one idea; keeping it is only right when the
   re-derived title matches.
+- The description narrates the branch's own history - "this replaces this
+  PR's original approach", "an earlier commit is reverted in-branch",
+  "originally this did X, now it does Y", "the net diff below is only the
+  new feature": cut every such phrase. Describe the state after HEAD as
+  measured against main, with no reference to intermediate states the
+  reviewer will not see.
 
 ## Don't
 
@@ -210,6 +231,13 @@ re-derived title would say the same thing.
 - **Don't commit media assets to the repo.** Screenshots and recordings
   live outside the worktree (`~/tmp/pr-assets/<repo>/<pr-number>/`) and
   reach the PR body via the user's drag-and-drop.
+- **Don't narrate the branch's own history.** No references to reverted
+  commits, superseded approaches, mid-PR pivots, or "this replaces the
+  original approach" / "an earlier commit is reverted in-branch" /
+  "originally this did X, now it does Y" framing. The reviewer sees the
+  net diff against the base and nothing else; describe only that. If a
+  fact only makes sense as a contrast with an intermediate state that
+  never leaves the branch, the fact does not belong in the description.
 
 ## Worked reference
 
