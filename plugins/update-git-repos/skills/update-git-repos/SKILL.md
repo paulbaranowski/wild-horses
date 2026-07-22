@@ -5,7 +5,7 @@ description: Pull every repo listed in ~/.config/wild-horses/update-git-repos/re
 
 # update-git-repos
 
-Pull every repo in the config from `origin/<branch>` in one shot. When a working tree is dirty, `pull-all` applies the configured default action — `ask` (the default), `skip`, or `stash` — resolved per-repo then globally; with `ask` it prompts you per repo to pick stash-pull or skip.
+Pull every repo in the config from `origin/<branch>` in one shot. When a working tree is dirty, `pull-all` applies the configured default action — `ask` (the default), `skip`, or `stash` — resolved per-repo then globally; with `ask` it prompts you per repo to pick stash → fetch/merge → pop, or skip.
 
 ## Quick reference
 
