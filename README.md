@@ -4,7 +4,21 @@ A [Claude Code](https://claude.ai/code) plugin marketplace of tools for working 
 
 ## Overview
 
-The plugins group into four themes, following the lifecycle of working on code with an agent. Each one-liner below links to the full plugin entry further down.
+The plugins group into four themes. Each one-liner below links to the full plugin entry further down.
+
+**Plan and ship work** — turn an idea into a merged PR.
+
+- **[plan-keeper](#plan-keeper)** — capture, route, queue, and archive markdown plans in `~/plans/<repo>/`, kept outside every worktree so plans outlive them (also a standalone Homebrew CLI).
+- **[autonomous](#autonomous)** — drive a single issue or plan file all the way to an opened PR, with no human in the loop.
+- **[wild-pr](#wild-pr)**: open a PR with an architecture-first description, review it against a rubric, and babysit it through CI and review feedback.
+- **[steelman](#steelman)** — argue the strongest good-faith case _against_ a plan before you commit to it.
+
+**Smooth the agent workflow** — quality-of-life hooks and utilities.
+
+- **[update-git-repos](#update-git-repos)** — pull every configured git repo from `origin` in one shot.
+- **[cleanup-worktrees](#cleanup-worktrees)** — find and remove stale git worktrees that are safe to delete.
+- **[yes-no-questions-hook](#yes-no-questions-hook)** — nudge the agent to pose decisions as numbered yes/no questions.
+- **[pr-status-hook](#pr-status-hook)** — report PR / push / dirty-tree state at the end of every turn.
 
 **Make code agent-readable** — can an agent understand your code and safely edit it?
 
@@ -14,98 +28,16 @@ The plugins group into four themes, following the lifecycle of working on code w
 
 Run comprehension, then types, then observability on a PR or feature branch — `/harness:reasoning-gaps`, then `/pyright:run-and-fix` (Python), then `/harness:feedback-blockers`. Each asks a harder question than the last. Install **[linting-hooks](#linting-hooks)** once so Markdown and Python edits auto-lint as you go.
 
-**Plan and ship work** — turn an idea into a merged PR.
-
-- **[plan-keeper](#plan-keeper)** — capture, route, queue, and archive markdown plans in `~/plans/<repo>/` (also a standalone Homebrew CLI).
-- **[autonomous](#autonomous)** — drive a single issue or plan file all the way to an opened PR, with no human in the loop.
-- **[wild-pr](#wild-pr)**: open a PR with an architecture-first description, review it against a rubric, and babysit it through CI and review feedback.
-- **[steelman](#steelman)** — argue the strongest good-faith case _against_ a plan before you commit to it.
-
 **Understand and scaffold** — see what's there, or stand up something new.
 
 - **[codepath-visualizer](#codepath-visualizer)** — map a codebase's call chains into an interactive architecture diagram.
 - **[marketplace](#marketplace)** — scaffold a new Claude Code plugin marketplace with proper structure and schema.
 
-**Smooth the agent workflow** — quality-of-life hooks and utilities.
-
-- **[update-git-repos](#update-git-repos)** — pull every configured git repo from `origin` in one shot.
-- **[cleanup-worktrees](#cleanup-worktrees)** — find and remove stale git worktrees that are safe to delete.
-- **[yes-no-questions-hook](#yes-no-questions-hook)** — nudge the agent to pose decisions as numbered yes/no questions.
-- **[pr-status-hook](#pr-status-hook)** — report PR / push / dirty-tree state at the end of every turn.
-
 ## Plugins
-
-### [pyright](plugins/pyright/README.md)
-
-Run pyright on a Python codebase and fix what it finds, using a documented playbook of fix patterns instead of ad-hoc guesses. Three fix intents (`silence`, `improve`, `bugs-only`) shape how aggressively to refactor. Parallelizes across agents for codebases with ≥20 errors. In the recommended workflow, run after `/harness:reasoning-gaps` and before `/harness:feedback-blockers`.
-
-```text
-/plugin install pyright@wild-horses
-
-/pyright:run-and-fix
-/pyright:run-and-fix strict --persist
-/pyright:run-and-fix --scope src/workers/ --intent improve
-```
-
-See **[plugins/pyright/README.md](plugins/pyright/README.md)** for fix-intent semantics, the rule/library/bug pattern files, and ratchet/persist flags.
-
-### [harness](plugins/harness/README.md)
-
-Two commands plus a task-list pipeline for making code agent-friendly. The commands diagnose reasoning gaps and feedback-loop blockers; the task-list skills (`task-list-builder`, `task-list-runner`, `task-list-viewer`) produce, execute, and inspect the resulting remediation plans.
-
-```text
-/plugin install harness@wild-horses
-
-/harness:reasoning-gaps              # comprehension review
-/harness:feedback-blockers           # observability review
-/task-list-builder                   # build an implementation plan
-/task-list-runner --all              # drive an implementation plan to completion
-/task-list-viewer                    # inspect what's left
-```
-
-See **[plugins/harness/README.md](plugins/harness/README.md)** for what each command analyzes, the task-list pipeline, and a comparison with the [superpowers](https://github.com/obra/superpowers) plan skills.
-
-### [linting-hooks](plugins/linting-hooks/README.md)
-
-PostToolUse hooks that lint Markdown and Python files immediately after Claude edits them — `prettier` + `markdownlint-cli2` on `.md`, `pyright` on `.py`. Both are non-blocking. Hook registration is automatic; `/linting-hooks:install` handles the per-machine software.
-
-```text
-/plugin install linting-hooks@wild-horses
-/linting-hooks:install
-```
-
-See **[plugins/linting-hooks/README.md](plugins/linting-hooks/README.md)** for the bundled hooks and install behavior.
-
-### [marketplace](plugins/marketplace/README.md)
-
-Scaffold a new Claude Code plugin marketplace with proper structure, schema validation, and `CLAUDE.md` conventions. Generates `marketplace.json`, `plugin.json`, and a starter `CLAUDE.md` interactively.
-
-```text
-/plugin install marketplace@wild-horses
-/create
-/create my-marketplace
-```
-
-See **[plugins/marketplace/README.md](plugins/marketplace/README.md)** for the scaffolding flow.
-
-### [codepath-visualizer](plugins/codepath-visualizer/README.md)
-
-Map and visualize codepaths in any codebase as an interactive architecture diagram. `/codepath-mapper` walks entry points and extracts call chains into a structured JSON file; `/codepath-visualizer` renders the resulting graph as an interactive HTML diagram you can explore in the browser. Scope the mapper to a user-facing flow (e.g. "invite new user") to produce a focused diagram of just that path.
-
-```text
-/plugin install codepath-visualizer@wild-horses
-
-/codepath-mapper
-/codepath-mapper "invite new user"
-/codepath-visualizer
-/codepath-visualizer --select
-```
-
-See **[plugins/codepath-visualizer/README.md](plugins/codepath-visualizer/README.md)** for the mapper/visualizer split, **[codepaths-schema.md](plugins/codepath-visualizer/codepaths-schema.md)** for the JSON schema, scoping behavior, and rendering options, and **[plugins/codepath-visualizer/CLAUDE.md](plugins/codepath-visualizer/CLAUDE.md)** for contributor-facing template/artifact details.
 
 ### [plan-keeper](plugins/plan-keeper/README.md)
 
-Nine skills for the plan lifecycle in `~/plans/<repo>/` — list, save, route, split, archive, edit frontmatter, manage the groundcrew queue, and file to Linear/Jira. `plan-save` captures the latest plan from the current conversation; `plan-do` lists saved plans and routes the picked one to the right next skill based on whether it reads as an idea, spec, or execution-ready plan; `plan-done` archives a completed plan into `~/plans/<repo>/done/` with a completion stamp. All nine are model-invoked by description — no slash command required.
+A local task-management system for plans that live outside your code: capture an idea straight from conversation, route it through spec and execution stages as it matures, then dispatch it to whichever engine fits — a single autonomous run, a structured task list, or step-by-step execution with review gates — or queue it for the groundcrew to pick up unattended. Plans live in `~/plans/<repo>/`, decoupled from any single worktree, so they survive worktrees being spun up and torn down. Everything is tracked locally by default; filing out to Linear or Jira is an optional export, not the system of record. Every step triggers from natural phrasing — no slash command required.
 
 ```text
 /plugin install plan-keeper@wild-horses
@@ -198,6 +130,74 @@ A `Stop` hook that reports, at every turn-end, whether an open PR exists for the
 ```text
 /plugin install pr-status-hook@wild-horses
 ```
+
+### [pyright](plugins/pyright/README.md)
+
+Run pyright on a Python codebase and fix what it finds, using a documented playbook of fix patterns instead of ad-hoc guesses. Three fix intents (`silence`, `improve`, `bugs-only`) shape how aggressively to refactor. Parallelizes across agents for codebases with ≥20 errors. In the recommended workflow, run after `/harness:reasoning-gaps` and before `/harness:feedback-blockers`.
+
+```text
+/plugin install pyright@wild-horses
+
+/pyright:run-and-fix
+/pyright:run-and-fix strict --persist
+/pyright:run-and-fix --scope src/workers/ --intent improve
+```
+
+See **[plugins/pyright/README.md](plugins/pyright/README.md)** for fix-intent semantics, the rule/library/bug pattern files, and ratchet/persist flags.
+
+### [harness](plugins/harness/README.md)
+
+Two commands plus a task-list pipeline for making code agent-friendly. The commands diagnose reasoning gaps and feedback-loop blockers; the task-list skills (`task-list-builder`, `task-list-runner`, `task-list-viewer`) produce, execute, and inspect the resulting remediation plans.
+
+```text
+/plugin install harness@wild-horses
+
+/harness:reasoning-gaps              # comprehension review
+/harness:feedback-blockers           # observability review
+/task-list-builder                   # build an implementation plan
+/task-list-runner --all              # drive an implementation plan to completion
+/task-list-viewer                    # inspect what's left
+```
+
+See **[plugins/harness/README.md](plugins/harness/README.md)** for what each command analyzes, the task-list pipeline, and a comparison with the [superpowers](https://github.com/obra/superpowers) plan skills.
+
+### [linting-hooks](plugins/linting-hooks/README.md)
+
+PostToolUse hooks that lint Markdown and Python files immediately after Claude edits them — `prettier` + `markdownlint-cli2` on `.md`, `pyright` on `.py`. Both are non-blocking. Hook registration is automatic; `/linting-hooks:install` handles the per-machine software.
+
+```text
+/plugin install linting-hooks@wild-horses
+/linting-hooks:install
+```
+
+See **[plugins/linting-hooks/README.md](plugins/linting-hooks/README.md)** for the bundled hooks and install behavior.
+
+### [codepath-visualizer](plugins/codepath-visualizer/README.md)
+
+Map and visualize codepaths in any codebase as an interactive architecture diagram. `/codepath-mapper` walks entry points and extracts call chains into a structured JSON file; `/codepath-visualizer` renders the resulting graph as an interactive HTML diagram you can explore in the browser. Scope the mapper to a user-facing flow (e.g. "invite new user") to produce a focused diagram of just that path.
+
+```text
+/plugin install codepath-visualizer@wild-horses
+
+/codepath-mapper
+/codepath-mapper "invite new user"
+/codepath-visualizer
+/codepath-visualizer --select
+```
+
+See **[plugins/codepath-visualizer/README.md](plugins/codepath-visualizer/README.md)** for the mapper/visualizer split, **[codepaths-schema.md](plugins/codepath-visualizer/codepaths-schema.md)** for the JSON schema, scoping behavior, and rendering options, and **[plugins/codepath-visualizer/CLAUDE.md](plugins/codepath-visualizer/CLAUDE.md)** for contributor-facing template/artifact details.
+
+### [marketplace](plugins/marketplace/README.md)
+
+Scaffold a new Claude Code plugin marketplace with proper structure, schema validation, and `CLAUDE.md` conventions. Generates `marketplace.json`, `plugin.json`, and a starter `CLAUDE.md` interactively.
+
+```text
+/plugin install marketplace@wild-horses
+/create
+/create my-marketplace
+```
+
+See **[plugins/marketplace/README.md](plugins/marketplace/README.md)** for the scaffolding flow.
 
 ## Standalone CLI: `plan-keeper`
 
