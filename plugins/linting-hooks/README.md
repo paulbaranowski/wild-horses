@@ -19,6 +19,8 @@ Install:
 
 Each hook script self-guards: if its required tools aren't on `PATH`, it exits 0 silently. So a fresh install is inert until you opt in to specific software.
 
+`pyright-post-edit` is uv-aware: when the edited file lives under a uv project (a `uv.lock` above it), it runs via `uv run --no-sync pyright` from that project root so imports resolve against the project's `.venv`. Otherwise it falls back to a global `pyright` on `PATH`.
+
 ## Command
 
 ### `/linting-hooks:install`

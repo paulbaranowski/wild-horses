@@ -48,6 +48,7 @@ The three bundled pattern files carry the recipes. The lists below are a summary
 General typing patterns, keyed on the rule name pyright prints:
 
 - **`reportOptionalMemberAccess` / `reportOptionalSubscript`** — default to `if x is None: raise ...` for narrowing; reserve `assert x is not None` for the strict case where upstream code pyright can't follow has already guaranteed non-None (the assert is a hint, not a check).
+- **Repeated `self.<attr>` narrowing across `await`s**: pyright drops attribute narrowing across an `await` (it could mutate `self`); re-bind once per method, or lift validation to `__init__` (or one consolidated point) when the same dance repeats across 2+ methods of the class.
 - **`reportArgumentType`** — widen call-site types (often `Mapping[str, Any]` over `Dict[str, Any]`) instead of casting.
 - **TypedDict ↔ `dict[str, Any]` asymmetry** — widening direction that works with pyright's variance rules.
 - **`reportCallIssue` / no overloads match** — reorder / re-shape args; sometimes a stale `@overload` stack is the culprit.
@@ -57,6 +58,7 @@ General typing patterns, keyed on the rule name pyright prints:
 - **Undeclared keys on TypedDict** — decide between widening the TypedDict or switching to a regular dict at the boundary.
 - **Discriminated unions with `Literal` + `TypedDict`** — model each variant as its own TypedDict and use a `Literal` field to let pyright narrow the whole shape from one check.
 - **`reportAttributeAccessIssue` on class-level fields** — annotate the class attribute; don't rely on `__init__` assignment to infer it.
+- **`__init__` attribute typing**: `self.x = None` with no annotation locks the attribute's inferred type to `None`, so a later `self.x = "abc"` fails; forward-declare the attribute's type before an `if/else` whose branches assign different subtypes, or pyright infers a messy union.
 - **`def f(x: str = None)` antipattern** — fix to `x: str | None = None`.
 - **Dataclass mutable defaults** — `field(default_factory=list)` over `= []`.
 - **`Protocol` methods missing `self`** — add it; pyright will stop complaining and the Protocol will actually be callable.
@@ -70,6 +72,7 @@ General typing patterns, keyed on the rule name pyright prints:
 - **`reportGeneralTypeIssues` / "None is not iterable"**, **`reportOptionalOperand`**, **`reportMissingImports`**.
 - **Third-party library intake flow** — ordered fallbacks when a new library pyright can't type: typeshed stubs → `useLibraryCodeForTypes` → `pyright --createstub` → scoped `allowedUntypedLibraries`.
 - **`TYPE_CHECKING` for type-only imports** — guarded imports for circular references and heavy type-only dependencies; pair with `from __future__ import annotations` to avoid runtime `NameError`.
+- **Quoted type annotations default to off**: only quote for self-reference inside the class body, a forward reference to a later-defined name, a `TYPE_CHECKING`-only symbol, or PEP 604 `X | Y` syntax on Python < 3.10; otherwise write annotations bare.
 - **`bool | None` → `bool` coercion** — when it's safe, and when coercing destroys the "unknown" vs "false" distinction.
 - **Stale `@overload` stacks** — prune overloads that no longer match the implementation.
 - **Opaque `dict[str, Any]` with repeated key reads** — `--intent improve` only. Scans touched files for `dict[str, Any]` values read through 3+ distinct literal keys and proposes extraction. Prefers **Pydantic `BaseModel`** (with `model_validate` at the boundary) for dicts coming off an **external producer** (DB client, HTTP response, subprocess, file parse); **TypedDict** for internal contracts your own code constructs. Also checks whether a data-access class (manager/repository) is the right place for the model. Pyright doesn't flag any of this (code is type-clean) but the shapes block data-flow tracing; extraction gives the contract a name. Asks for approval before writing — the decision tree pauses on name, location, optional-key shape, and migration radius.
@@ -109,10 +112,9 @@ Patterns where pyright has uncovered a genuine runtime bug. These are **flagged 
 
 1. **Parse args and verify setup** — locate config, detect package manager if pyright isn't installed, apply level override (pyright has no CLI flag for `typeCheckingMode`, so the command edits the config file and records the original level for restore).
 2. **Baseline** — full pyright run saved to `/tmp/pyright_full.txt`, bucketed by rule and by file, triage summary shown, intent confirmed.
-3. **Fix** — inline for `<20` errors; parallel agent dispatch with disjoint file partitions for `≥20`. Every dispatched agent is given the verbatim intent definition so partitions don't drift.
-4. **Consolidation pass (3.5)** — greps the combined diff for high-repetition suppressions and casts. ≥10 of the same suppression or ≥5 of the same cast target trigger a "this is one upstream fix, not N downstream suppressions" prompt.
-5. **Verify** — re-run pyright, classify any residual into library-stub gaps, design decisions, or genuine bugs.
-6. **Persist, ratchet, summarize** — persist only on zero-error runs; restore original config level otherwise. Print a summary and (unless `--no-suggestions`) a prioritized list of structural improvements the run deferred.
+3. **Build the task list**: one task per file with errors; the chosen intent's authoritative bullet is copied verbatim into each task's `what` field so per-task agents don't drift. Renders a markdown report (scope, triage, findings, per-file interventions) inline in the conversation. No fixes are applied in this phase.
+4. **Build and run**: hands off to the `task-list-builder` skill, which materializes the report as a paired `.md`/`.json` under `docs/exec-plans/active/` and previews the plan for approval (edit task fields, split files with ≥30 errors, or cancel before anything is written). `task-list-runner` then executes: one foreground agent per file-task, strictly serial, each verified with a per-file `pyright <file>` run. After the loop, a consolidation pass greps the cumulative diff for high-repetition suppressions and casts (≥10 of the same suppression or ≥5 of the same cast target trigger a "this is one upstream fix, not N downstream suppressions" prompt), then a behavior-change audit scans the diff for tokens that alter observable behavior (added `raise`s, `assert`s, `or []`-style fallbacks). A final full pyright run classifies any residual into library-stub gaps, design decisions, or genuine bugs.
+5. **Persist, ratchet, summarize** — persist only on zero-error runs; restore original config level otherwise. Print a summary and (unless `--no-suggestions`) a prioritized list of structural improvements the run deferred.
 
 ## Suggested-improvements artifact
 

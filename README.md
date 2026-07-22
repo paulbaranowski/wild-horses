@@ -18,7 +18,7 @@ Run comprehension, then types, then observability on a PR or feature branch — 
 
 - **[plan-keeper](#plan-keeper)** — capture, route, queue, and archive markdown plans in `~/plans/<repo>/` (also a standalone Homebrew CLI).
 - **[autonomous](#autonomous)** — drive a single issue or plan file all the way to an opened PR, with no human in the loop.
-- **[summary-writer](#summary-writer)** — write architecture-first PR descriptions that state the one structural idea up front (ships with the wild-pr plugin).
+- **[wild-pr](#wild-pr)**: open a PR with an architecture-first description, review it against a rubric, and babysit it through CI and review feedback.
 - **[steelman](#steelman)** — argue the strongest good-faith case _against_ a plan before you commit to it.
 
 **Understand and scaffold** — see what's there, or stand up something new.
@@ -131,19 +131,21 @@ Drive a single task — an issue/ticket link or a plan/spec file — all the way
 
 See **[plugins/autonomous/README.md](plugins/autonomous/README.md)** for the autonomy contract, the code-style bar, and the review-to-convergence loop.
 
-### [summary-writer](plugins/wild-pr/skills/summary-writer/SKILL.md)
+### [wild-pr](plugins/wild-pr)
 
-Write pull-request descriptions that lead with the one structural idea — what changed and why — instead of a file-by-file changelog. Auto-invokes when a PR description is about to be written or revised; also available as `/summary-writer`. Replaces acceptance-criteria checklists and per-file bullets with the mental model the diff assumes. Ships as part of the **wild-pr** plugin.
+Open a pull request with an architecture-first description, review it against a rubric, and babysit it through CI and review feedback. Four entry points: `/wild-pr` creates the PR (via **summary-writer** for the title/body) then runs **babysit** up to three times, stopping early on a clean pass; `/wild-pr:review` posts anchored findings against a diff, branch, or PR; `/wild-pr:babysit` does a single tending pass over CI failures and review comments; `/wild-pr:summary-writer` rewrites just the description/title, bound to the net diff rather than branch history. Backed by `pr_babysit_cli.py` with a PreToolUse hook that auto-approves its invocations.
 
 ```text
 /plugin install wild-pr@wild-horses
 
-/summary-writer                          # rewrite the PR for the current branch
-/summary-writer 42                       # rewrite PR #42
-"write the PR description"               # model-invoked
+/wild-pr                                 # open a PR, then babysit it to convergence
+/wild-pr:review                          # review the current branch/PR
+/wild-pr:babysit 42                      # one tending pass on PR #42
+/wild-pr:summary-writer                  # rewrite the PR description for the current branch
+"write the PR description"               # model-invoked (summary-writer)
 ```
 
-See **[plugins/wild-pr/skills/summary-writer/SKILL.md](plugins/wild-pr/skills/summary-writer/SKILL.md)** for the section template and anti-patterns.
+See **[plugins/wild-pr/skills/wild-pr/SKILL.md](plugins/wild-pr/skills/wild-pr/SKILL.md)** for the create-then-babysit flow, **[plugins/wild-pr/skills/review/SKILL.md](plugins/wild-pr/skills/review/SKILL.md)** for the review rubric, **[plugins/wild-pr/skills/babysit/SKILL.md](plugins/wild-pr/skills/babysit/SKILL.md)** for tending behavior, and **[plugins/wild-pr/skills/summary-writer/SKILL.md](plugins/wild-pr/skills/summary-writer/SKILL.md)** for the description template and anti-patterns.
 
 ### [steelman](plugins/steelman)
 
@@ -253,12 +255,12 @@ Then restart Cursor (**Developer: Reload Window**) and open **Customize** to ena
 
 Hook plugins and their Cursor equivalents:
 
-| Plugin                                                            | Cursor hook event       | Notes                                 |
-| ----------------------------------------------------------------- | ----------------------- | ------------------------------------- |
-| `linting-hooks`                                                   | `postToolUse` (`Write`) | Run `/linting-hooks:install` for deps |
-| `pr-status-hook`                                                  | `stop`                  | Banner prints to Hooks stderr         |
-| `harness`, `plan-keeper`, `update-git-repos`, `cleanup-worktrees` | `preToolUse` (`Shell`)  | Auto-approve bounded plugin CLIs      |
-| `yes-no-questions-hook`                                           | _(rule, not hook)_      | Ships as `rules/yes-no-questions.mdc` |
+| Plugin                                                                       | Cursor hook event       | Notes                                 |
+| ---------------------------------------------------------------------------- | ----------------------- | ------------------------------------- |
+| `linting-hooks`                                                              | `postToolUse` (`Write`) | Run `/linting-hooks:install` for deps |
+| `pr-status-hook`                                                             | `stop`                  | Banner prints to Hooks stderr         |
+| `harness`, `plan-keeper`, `update-git-repos`, `cleanup-worktrees`, `wild-pr` | `preToolUse` (`Shell`)  | Auto-approve bounded plugin CLIs      |
+| `yes-no-questions-hook`                                                      | _(rule, not hook)_      | Ships as `rules/yes-no-questions.mdc` |
 
 ## Development
 

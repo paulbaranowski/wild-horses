@@ -46,4 +46,4 @@ Then **Developer: Reload Window**, enable plugins in **Customize**, and confirm 
 
 ## Why this matters
 
-Claude Code plugins are how you package reusable AI workflows — analysis tools, scaffolding commands, automated loops — and share them across projects and teams. A marketplace is a collection of plugins others can install with a single command. Getting the directory structure, manifest fields, and conventions right is fiddly; this skill handles it interactively so you can focus on the plugin content.
+Claude Code plugins are how you package reusable AI workflows (analysis tools, scaffolding commands, automated loops) and share them across projects and teams. A marketplace is a collection of plugins others can install with a single command. Getting the directory structure, manifest fields, and conventions right is fiddly; this skill handles it interactively so you can focus on the plugin content.

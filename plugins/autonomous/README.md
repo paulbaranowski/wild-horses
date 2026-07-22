@@ -10,9 +10,9 @@ Install:
 
 ## Skill
 
-| Skill                                  | Role  | What it does                                                                                                                                                                                                                                                                                                                  |
-| -------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **[`autonomous`](skills/autonomous/)** | Ships | Resolves a task from an issue URL, a plan-file path, or an in-context plan, then implements, tests, simplifies the diff, runs a bounded reasoning-gaps review (critical only), runs an independent sub-agent review to convergence, opens a PR, and tends it through CI — making every design and implementation call itself. |
+| Skill                                  | Role  | What it does                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **[`autonomous`](skills/autonomous/)** | Ships | Resolves a task from an issue URL, a plan-file path, or an in-context plan, then implements, tests, simplifies the diff, runs a bounded reasoning-gaps review (critical only), reviews via `wild-pr:review` (falling back to an independent sub-agent) to convergence, opens a PR, and tends it through CI — making every design and implementation call itself. |
 
 The skill is model-invoked by description and also available as `/autonomous` in the slash menu (skills aren't shown with their plugin namespace; the fully-qualified `autonomous:autonomous` is only for internal routing/tooling). Trigger phrases: "work this issue autonomously", "take this ticket end-to-end", "do this AFK", or pointing it at a plan file and asking it to just build it.
 
@@ -40,4 +40,4 @@ Once a task is resolved, the skill makes every design and implementation decisio
 7. Tend the PR (CI + review threads) over a bounded number of rounds.
 8. Stop — the human review loop happens out-of-session.
 
-It applies the [superpowers](https://github.com/obra/superpowers) suite (brainstorming, writing-plans, test-driven-development, systematic-debugging, requesting-code-review, verification-before-completion, finishing-a-development-branch) as the discipline throughout.
+It applies the [superpowers](https://github.com/obra/superpowers) suite (brainstorming, writing-plans, test-driven-development, systematic-debugging, subagent-driven-development, requesting-code-review, verification-before-completion, finishing-a-development-branch) as the discipline throughout.

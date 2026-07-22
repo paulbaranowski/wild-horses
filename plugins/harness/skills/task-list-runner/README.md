@@ -117,11 +117,13 @@ The JSON schema is defined once, in [`../../task-list-schema.md`](../../task-lis
 
 ## Files in this directory
 
-| File                    | Purpose                                                     |
-| ----------------------- | ----------------------------------------------------------- |
-| `SKILL.md`              | Instructions Claude executes when the skill is invoked      |
-| `task_list_cli.py`      | Bundled CLI — the only sanctioned mutator for the task JSON |
-| `test_task_list_cli.py` | Pytest suite for the CLI                                    |
+| File                            | Purpose                                                         |
+| ------------------------------- | --------------------------------------------------------------- |
+| `SKILL.md`                      | Instructions Claude executes when the skill is invoked          |
+| `task_list_cli.py`              | Bundled CLI — the only sanctioned mutator for the task JSON     |
+| `test_task_list_cli.py`         | Pytest suite for the CLI                                        |
+| `task-implementation-prompt.md` | Prompt body for the implementation `Agent` call (Phase 4)       |
+| `validation-agent-prompt.md`    | Prompt body for the read-only validation `Agent` call (Phase 4) |
 
 Run the tests from the repo root:
 

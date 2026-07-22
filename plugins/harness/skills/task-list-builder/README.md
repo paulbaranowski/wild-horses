@@ -7,7 +7,7 @@ The full instructions Claude follows when this skill runs are in [`SKILL.md`](./
 ## Invoke
 
 ```text
-/harness:task-list-builder [free-form description | path to .md report | path to .json task file (rewrite) | empty for conversation context]
+/harness:task-list-builder [free-form description | path to .md report | path to .json task file (rewrite) | empty for conversation context] [--slug <name>] [--md-body-from-context]
 ```
 
 Pairs with [`task-list-runner`](../task-list-runner/), which consumes the JSON the builder produces.
