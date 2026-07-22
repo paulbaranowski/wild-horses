@@ -281,22 +281,37 @@ architecture themselves. The rewrite led with the one idea.
    exists) before updating the PR, and after delivering, list each
    placeholder's absolute file path in your final message so the user can
    drag the files into the description.
-4. If a PR exists, update it immediately - do not ask for confirmation:
+4. If a PR exists, update it immediately via the REST API - do not ask for
+   confirmation. `gh pr edit` calls a GraphQL mutation that requires
+   `read:org` on the token; `repo`-scoped tokens (the common case for
+   fine-grained PATs and CI tokens) will fail. REST PATCH works on any
+   `repo`-scoped token.
+
+   Write the body to a tempfile first - inline heredocs corrupt on any
+   backtick / `$` / unpaired quote in the body when passed through
+   `gh api -f body=...`:
 
    ```bash
-   gh pr edit <number> --title "<title>" --body "$(cat <<'EOF'
+   cat > /tmp/pr-<number>-body.md <<'BODY_EOF'
    <body>
-   EOF
-   )"
+   BODY_EOF
+
+   gh api -X PATCH "repos/<owner>/<repo>/pulls/<number>" \
+     -f title="<title>" \
+     -f body="$(cat /tmp/pr-<number>-body.md)" \
+     --jq '{url, title}'
    ```
 
-   The single-quoted `EOF` means zero shell expansion: backticks, `$`, and
-   quotes must appear raw. Escaping anything inside the heredoc corrupts the
-   markdown on GitHub.
+   The single-quoted heredoc delimiter means zero shell expansion into the
+   tempfile: backticks, `$`, and quotes stay raw as they must.
 
-   After a successful update, confirm with the PR URL. If the update fails,
-   show the error and fall back to printing the title and body for
-   copy/paste.
+   **Do not use `-f body=@-` or `-f body=@file`** - the leading `@` makes
+   `gh api` file-reference the value in a way that silently corrupts PR-body
+   markdown; use `-f body="$(cat file)"` instead.
+
+   After a successful update, confirm with the PR URL. If the PATCH fails
+   (network, 404, permissions), show the error and fall back to printing the
+   title and body for copy/paste.
 
 5. If no PR exists, hand the title and body to whatever opens the PR (or
    print them for copy/paste).
