@@ -1,6 +1,6 @@
 # plan-keeper
 
-plan-keeper is a local **task-management system** built around plans. A task _is_ a plan file in `~/plans/<repo>/`, and it takes one of two shapes: a **planning task**, whose output is more plans (an idea you brainstorm into a spec; a PRD you turn into an executable plan), or an **implementation task** — an executable plan that gets built into code. The same tool captures both, routes each to its next step, and archives it when done. Everything is tracked locally in markdown on your machine, never committed to any repo; filing a plan out to Linear or Jira is an occasional export, not the system of record.
+plan-keeper is a local **task-management system** built around plans. A task _is_ a plan file, living in `~/plans/<repo>/` — outside every checkout of the repo, so it's tied to the repo's identity rather than to any one worktree. That decoupling is the whole point: spin up a fresh `git worktree add` to work a plan, delete it once the PR lands, and the plan itself (its status, its history) never moved. plan-keeper supports a variety of plan types, capturing, routing, and archiving each one as it moves from idea to shipped code. Everything is tracked locally in markdown on your machine, never committed to any repo; filing a plan out to Linear or Jira is an occasional export, not the system of record.
 
 Nine skills cover the lifecycle: list a repo's plans read-only (`plan-list`), capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), split one plan into dependency-wired slices (`plan-split`), archive with a completion stamp (`plan-done`), edit frontmatter (`plan-update`), manage the groundcrew dispatch queue (`plan-crew`), and file plans as Linear or Jira tickets (`plan-linear`, `plan-jira`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine — nothing is committed to any repo.
 
@@ -15,6 +15,10 @@ Two orthogonal frontmatter fields track where a task sits:
 
 - **`Kind`** (`idea → prd → reqs → design → spec → exec-plan`) — the document type: how far the _thinking_ has progressed. A planning task advances a plan along this axis, each step's output being a higher `Kind`. See [`plan-kinds.md`](plan-kinds.md).
 - **`Status`** (`backlog → todo → in-progress → in-review → done`) — the lifecycle: how far the _work_ has progressed.
+
+### Plans outlive worktrees
+
+A plan's home is `~/plans/<repo>/`, derived from the repo's git remote — not from any single directory on disk. That means it is never inside a worktree's own tree, so it's immune to everything that happens to a worktree: `git worktree add` doesn't need to seed it, `git worktree remove` can't take it with it, and two worktrees of the same repo see the exact same plans at the exact same statuses. In practice this is what makes disposable worktrees the default way to work a plan — `plan-do` fast-forwards whatever worktree it's handed onto the base branch before dispatch (see [`plan-do`](skills/plan-do/)), because there's no risk of losing the plan itself in the process: the worktree is scratch space for the code, `~/plans/<repo>/` is the durable record of the task.
 
 plan-keeper is the system of record for these tasks — they live in `~/plans/<repo>/` on your machine and are never committed to any repo. Filing a plan to **Linear or Jira** (`plan-linear` / `plan-jira`) is an optional export for the occasions a task needs a shared tracker; by default the task is tracked here.
 

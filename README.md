@@ -8,7 +8,7 @@ The plugins group into four themes. Each one-liner below links to the full plugi
 
 **Plan and ship work** — turn an idea into a merged PR.
 
-- **[plan-keeper](#plan-keeper)** — capture, route, queue, and archive markdown plans in `~/plans/<repo>/` (also a standalone Homebrew CLI).
+- **[plan-keeper](#plan-keeper)** — capture, route, queue, and archive markdown plans in `~/plans/<repo>/`, kept outside every worktree so plans outlive them (also a standalone Homebrew CLI).
 - **[autonomous](#autonomous)** — drive a single issue or plan file all the way to an opened PR, with no human in the loop.
 - **[wild-pr](#wild-pr)**: open a PR with an architecture-first description, review it against a rubric, and babysit it through CI and review feedback.
 - **[steelman](#steelman)** — argue the strongest good-faith case _against_ a plan before you commit to it.
@@ -37,7 +37,7 @@ Run comprehension, then types, then observability on a PR or feature branch — 
 
 ### [plan-keeper](plugins/plan-keeper/README.md)
 
-Nine skills for the plan lifecycle in `~/plans/<repo>/` — list, save, route, split, archive, edit frontmatter, manage the groundcrew queue, and file to Linear/Jira. `plan-save` captures the latest plan from the current conversation; `plan-do` lists saved plans and routes the picked one to the right next skill based on whether it reads as an idea, spec, or execution-ready plan; `plan-done` archives a completed plan into `~/plans/<repo>/done/` with a completion stamp. All nine are model-invoked by description — no slash command required.
+A local task-management system for plans that live outside your code: capture an idea straight from conversation, route it through spec and execution stages as it matures, then dispatch it to whichever engine fits — a single autonomous run, a structured task list, or step-by-step execution with review gates — or queue it for the groundcrew to pick up unattended. Plans live in `~/plans/<repo>/`, decoupled from any single worktree, so they survive worktrees being spun up and torn down. Everything is tracked locally by default; filing out to Linear or Jira is an optional export, not the system of record. Every step triggers from natural phrasing — no slash command required.
 
 ```text
 /plugin install plan-keeper@wild-horses
