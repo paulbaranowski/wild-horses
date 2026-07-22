@@ -287,27 +287,31 @@ architecture themselves. The rewrite led with the one idea.
    fine-grained PATs and CI tokens) will fail. REST PATCH works on any
    `repo`-scoped token.
 
-   Write the body to a tempfile first - inline heredocs corrupt on any
-   backtick / `$` / unpaired quote in the body when passed through
-   `gh api -f body=...`:
+   Capture the title and body into shell variables first, each via its own
+   single-quoted heredoc - the quoted delimiter means zero shell expansion,
+   so backticks, `$`, and quotes stay raw:
 
    ```bash
-   cat > /tmp/pr-<number>-body.md <<'BODY_EOF'
+   title=$(cat <<'TITLE_EOF'
+   <title>
+   TITLE_EOF
+   )
+   body=$(cat <<'BODY_EOF'
    <body>
    BODY_EOF
+   )
 
-   gh api -X PATCH "repos/<owner>/<repo>/pulls/<number>" \
-     -f title="<title>" \
-     -f body="$(cat /tmp/pr-<number>-body.md)" \
-     --jq '{url, title}'
+   gh api -X PATCH "repos/{owner}/{repo}/pulls/<number>" \
+     -f title="$title" \
+     -f body="$body" \
+     --jq '{url: .html_url, title}'
    ```
 
-   The single-quoted heredoc delimiter means zero shell expansion into the
-   tempfile: backticks, `$`, and quotes stay raw as they must.
-
-   **Do not use `-f body=@-` or `-f body=@file`** - the leading `@` makes
-   `gh api` file-reference the value in a way that silently corrupts PR-body
-   markdown; use `-f body="$(cat file)"` instead.
+   `{owner}` and `{repo}` are `gh api`'s own placeholder syntax - it fills
+   them in from the current directory's git remote, the same auto-detection
+   `gh pr edit` did implicitly. `.html_url` is the browsable PR page; the
+   response's own `.url` field is the API endpoint, not something to hand
+   to a person.
 
    After a successful update, confirm with the PR URL. If the PATCH fails
    (network, 404, permissions), show the error and fall back to printing the
