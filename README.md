@@ -133,7 +133,7 @@ See **[plugins/autonomous/README.md](plugins/autonomous/README.md)** for the aut
 
 ### [wild-pr](plugins/wild-pr)
 
-Open a pull request with an architecture-first description, review it against a rubric, and babysit it through CI and review feedback. Four entry points: `/wild-pr` creates the PR (via **summary-writer** for the title/body) then runs **babysit** up to three times, stopping early on a clean pass; `/wild-pr:review` posts anchored findings against a diff, branch, or PR; `/wild-pr:babysit` does a single tending pass over CI failures and review comments; `/wild-pr:summary-writer` rewrites just the description/title, bound to the net diff rather than branch history. Backed by `pr_babysit_cli.py` with a PreToolUse hook that auto-approves its invocations.
+Open a pull request with an architecture-first description, review it against a rubric, and babysit it through CI and review feedback. Four entry points: `/wild-pr` creates the PR (via **summary-writer** for the title/body) then runs **babysit** up to three times, stopping early on a clean pass; `/wild-pr:review` posts anchored findings against a diff, branch, or PR; `/wild-pr:babysit` does a single tending pass over CI failures and review comments; `/wild-pr:summary-writer` rewrites just the description/title, bound to the net diff rather than branch history. Backed by `pr_babysit_cli.py` with a PreToolUse hook that auto-approves bounded invocations.
 
 ```text
 /plugin install wild-pr@wild-horses

@@ -24,7 +24,7 @@ For each repo, the skill:
 
 - fetches `origin/<branch>` and fast-forwards with `git merge --ff-only` against the tracking ref when the working tree is clean and the current branch matches the configured one;
 - skips and reports when the current branch is different (it never silently switches branches);
-- for a dirty repo, applies the configured dirty-tree action: **ask** (the default, prompts you per repo for **skip** or **stash → pull → pop**), **skip**, or **stash**. The action resolves per-repo override first, then the config's global default, then falls back to `ask`; set it with `set-action`.
+- for a dirty repo, applies the configured dirty-tree action: **ask** (the default, prompts you per repo for **skip** or **stash → fetch/merge → pop**), **skip**, or **stash**. The action resolves per-repo override first, then the config's global default, then falls back to `ask`; set it with `set-action`.
 
 ## How it works
 
