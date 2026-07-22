@@ -281,22 +281,41 @@ architecture themselves. The rewrite led with the one idea.
    exists) before updating the PR, and after delivering, list each
    placeholder's absolute file path in your final message so the user can
    drag the files into the description.
-4. If a PR exists, update it immediately - do not ask for confirmation:
+4. If a PR exists, update it immediately via the REST API - do not ask for
+   confirmation. `gh pr edit` calls a GraphQL mutation that requires
+   `read:org` on the token; `repo`-scoped tokens (the common case for
+   fine-grained PATs and CI tokens) will fail. REST PATCH works on any
+   `repo`-scoped token.
+
+   Capture the title and body into shell variables first, each via its own
+   single-quoted heredoc - the quoted delimiter means zero shell expansion,
+   so backticks, `$`, and quotes stay raw:
 
    ```bash
-   gh pr edit <number> --title "<title>" --body "$(cat <<'EOF'
+   title=$(cat <<'TITLE_EOF'
+   <title>
+   TITLE_EOF
+   )
+   body=$(cat <<'BODY_EOF'
    <body>
-   EOF
-   )"
+   BODY_EOF
+   )
+
+   gh api -X PATCH "repos/{owner}/{repo}/pulls/<number>" \
+     -f title="$title" \
+     -f body="$body" \
+     --jq '{url: .html_url, title}'
    ```
 
-   The single-quoted `EOF` means zero shell expansion: backticks, `$`, and
-   quotes must appear raw. Escaping anything inside the heredoc corrupts the
-   markdown on GitHub.
+   `{owner}` and `{repo}` are `gh api`'s own placeholder syntax - it fills
+   them in from the current directory's git remote, the same auto-detection
+   `gh pr edit` did implicitly. `.html_url` is the browsable PR page; the
+   response's own `.url` field is the API endpoint, not something to hand
+   to a person.
 
-   After a successful update, confirm with the PR URL. If the update fails,
-   show the error and fall back to printing the title and body for
-   copy/paste.
+   After a successful update, confirm with the PR URL. If the PATCH fails
+   (network, 404, permissions), show the error and fall back to printing the
+   title and body for copy/paste.
 
 5. If no PR exists, hand the title and body to whatever opens the PR (or
    print them for copy/paste).
