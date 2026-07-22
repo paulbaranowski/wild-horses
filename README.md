@@ -88,7 +88,7 @@ Scaffold a new Claude Code plugin marketplace with proper structure, schema vali
 
 See **[plugins/marketplace/README.md](plugins/marketplace/README.md)** for the scaffolding flow.
 
-### [codepath-visualizer](plugins/codepath-visualizer/CLAUDE.md)
+### [codepath-visualizer](plugins/codepath-visualizer/README.md)
 
 Map and visualize codepaths in any codebase as an interactive architecture diagram. `/codepath-mapper` walks entry points and extracts call chains into a structured JSON file; `/codepath-visualizer` renders the resulting graph as an interactive HTML diagram you can explore in the browser. Scope the mapper to a user-facing flow (e.g. "invite new user") to produce a focused diagram of just that path.
 
@@ -101,7 +101,7 @@ Map and visualize codepaths in any codebase as an interactive architecture diagr
 /codepath-visualizer --select
 ```
 
-See **[plugins/codepath-visualizer/CLAUDE.md](plugins/codepath-visualizer/CLAUDE.md)** for the mapper/visualizer split and **[codepaths-schema.md](plugins/codepath-visualizer/codepaths-schema.md)** for the JSON schema, scoping behavior, and rendering options.
+See **[plugins/codepath-visualizer/README.md](plugins/codepath-visualizer/README.md)** for the mapper/visualizer split, **[codepaths-schema.md](plugins/codepath-visualizer/codepaths-schema.md)** for the JSON schema, scoping behavior, and rendering options, and **[plugins/codepath-visualizer/CLAUDE.md](plugins/codepath-visualizer/CLAUDE.md)** for contributor-facing template/artifact details.
 
 ### [plan-keeper](plugins/plan-keeper/README.md)
 
@@ -131,7 +131,7 @@ Drive a single task — an issue/ticket link or a plan/spec file — all the way
 
 See **[plugins/autonomous/README.md](plugins/autonomous/README.md)** for the autonomy contract, the code-style bar, and the review-to-convergence loop.
 
-### [wild-pr](plugins/wild-pr)
+### [wild-pr](plugins/wild-pr/README.md)
 
 Open a pull request with an architecture-first description, review it against a rubric, and babysit it through CI and review feedback. Four entry points: `/wild-pr` creates the PR (via **summary-writer** for the title/body) then runs **babysit** up to three times, stopping early on a clean pass; `/wild-pr:review` posts anchored findings against a diff, branch, or PR; `/wild-pr:babysit` does a single tending pass over CI failures and review comments; `/wild-pr:summary-writer` rewrites just the description/title, bound to the net diff rather than branch history. Backed by `pr_babysit_cli.py` with a PreToolUse hook that auto-approves bounded invocations.
 
@@ -147,7 +147,7 @@ Open a pull request with an architecture-first description, review it against a 
 
 See **[plugins/wild-pr/skills/wild-pr/SKILL.md](plugins/wild-pr/skills/wild-pr/SKILL.md)** for the create-then-babysit flow, **[plugins/wild-pr/skills/review/SKILL.md](plugins/wild-pr/skills/review/SKILL.md)** for the review rubric, **[plugins/wild-pr/skills/babysit/SKILL.md](plugins/wild-pr/skills/babysit/SKILL.md)** for tending behavior, and **[plugins/wild-pr/skills/summary-writer/SKILL.md](plugins/wild-pr/skills/summary-writer/SKILL.md)** for the description template and anti-patterns.
 
-### [steelman](plugins/steelman)
+### [steelman](plugins/steelman/README.md)
 
 Argue the strongest good-faith case _against_ the proposed changes in the current conversation or a named design/plan file — hidden costs, wrong assumptions, simpler alternatives, second-order effects, and the do-nothing option. A built-in red-team voice that stress-tests a plan before it ships.
 
