@@ -1,6 +1,6 @@
 ---
 name: plan-save
-description: Use when the user asks to save a plan, save the plan, persist the plan, capture planning notes for future reference, store a plan for later, or save a file (any extension — markdown, JSON, YAML, etc.) into the per-repo plans tree. Also handles paired outputs such as task-list-builder's `.json` + `.md` pair.
+description: Save a plan, design doc, or any file (markdown, JSON, YAML, etc.) into the per-repo ~/plans/<repo>/ tree, including paired outputs like task-list-builder's `.json` + `.md` pair. Use when the user asks to save a plan, save the plan, persist the plan, capture planning notes for future reference, or store a plan for later.
 ---
 
 # plan-save

@@ -1,6 +1,6 @@
 ---
 name: plan-crew
-description: Use when the user asks to see or manage the groundcrew queue, queue a plan for groundcrew, promote plans to todo (in bulk), dequeue plans, or move a plan into todo state to be picked up by groundcrew. Shows the current repo's queue by default; show every repo with "all repos".
+description: Manage the groundcrew dispatch queue - view it, queue plans for pickup, promote plans to todo in bulk, or dequeue them. Shows the current repo's queue by default; show every repo with "all repos". Use when the user asks to see or manage the groundcrew queue, queue a plan for groundcrew, promote plans to todo, dequeue plans, or move a plan into todo state to be picked up by groundcrew.
 ---
 
 # plan-crew

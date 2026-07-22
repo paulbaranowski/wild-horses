@@ -34,6 +34,7 @@ Pairs with [`plan-do`](../plan-do/) (which reads what `plan-save` wrote) and [`p
    - **`--from-path`** — for files already on disk (e.g., task-list-builder's `<date>-<runid>-<short>.<slug>.{json,md}`). The target keeps the source's basename verbatim and the source is unlinked after a successful write (atomic same-FS rename). `--topic`/`--extension`/`--date` are rejected.
 
    For paired output, calls the CLI once per file. The disk shape keeps pairs together automatically because both sources share a base name.
+   - **`--root`** (only relevant when more than one plan root is configured, see `pk root list`) names the destination root explicitly; without it, save routes to the repo's existing root or the default root.
 
 6. **Handles collisions.** On exit 2 (file already exists), asks: overwrite / suffix `-2` / pick a new name. Re-invokes with `--on-collision <choice>`. Keeps paired files in sync.
 7. **Confirms.** Returns the absolute path(s) the CLI wrote.

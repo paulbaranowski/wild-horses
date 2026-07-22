@@ -235,12 +235,19 @@ A PreToolUse hook (`hooks/hooks.json`) auto-approves `python3 .../plan_keeper_cl
 | `skills/plan-do/SKILL.md`          | Instructions for the list-and-route flow                                                                                             |
 | `skills/plan-split/SKILL.md`       | Instructions for the decompose-into-dependency-wired-slices flow                                                                     |
 | `skills/plan-done/SKILL.md`        | Instructions for the archive flow                                                                                                    |
+| `skills/plan-update/SKILL.md`      | Instructions for the frontmatter-edit flow                                                                                           |
+| `skills/plan-crew/SKILL.md`        | Instructions for the groundcrew dispatch-queue flow                                                                                  |
+| `skills/plan-linear/SKILL.md`      | Instructions for the Linear-ticket export flow                                                                                       |
+| `skills/plan-jira/SKILL.md`        | Instructions for the Jira-ticket export flow                                                                                         |
 | `scripts/plan_keeper_cli.py`       | Bundled CLI entry shim - the only sanctioned mutator for `~/plans/`                                                                  |
 | `scripts/plan_keeper/`             | CLI implementation package (errors, naming, storage, roots, frontmatter, config, http, linear, jira, push, groundcrew, upgrade, cli) |
 | `scripts/tests/`                   | Stdlib `unittest` suite - one `test_<module>.py` per package module, shared harness in `support.py`                                  |
 | `scripts/plan-keeper-cli-allow.sh` | PreToolUse hook script - auto-approves CLI Bash invocations                                                                          |
 | `hooks/hooks.json`                 | PreToolUse hook registration                                                                                                         |
 | `repo-derivation.md`               | Shared algorithm - auto-derive + override normalization rules                                                                        |
+| `plan-kinds.md`                    | Shared `Kind` taxonomy - the document-type value set and how to classify it                                                          |
+| `ticket-systems.md`                | Shared reference for the Linear/Jira per-repo config and push flow                                                                   |
+| `global-config.md`                 | Shared reference for the monorepo-subpath -> groundcrew-alias mapping                                                                |
 | `groundcrew/README.md`             | Deep reference for the groundcrew connection - `crew install`, dispatch protocol, dependencies                                       |
 
 Run the CLI tests from the repo root (stdlib only — no pytest/uv needed):

@@ -1,6 +1,6 @@
 ---
 name: cleanup-worktrees
-description: Use when the user asks to clean up git worktrees, delete merged worktrees, prune stale worktrees, free disk space from worktrees, or list cleanable worktrees. Scans configured roots, classifies each worktree as cleanable (merged PR, upstream gone, merged into the default branch, stale) or skipped (dirty, locked, unpushed), shows the cleanable set grouped by reason with sizes, and removes the ones the user picks via the bundled CLI.
+description: Reclaim disk space from stale git worktrees: scans configured roots, classifies each as cleanable (merged PR, upstream gone, merged into the default branch, stale) or skipped (dirty, locked, unpushed), shows the cleanable set grouped by reason with sizes, and removes the ones you pick. Use when the user asks to clean up git worktrees, delete merged worktrees, prune stale worktrees, free disk space from worktrees, or list cleanable worktrees.
 ---
 
 # cleanup-worktrees

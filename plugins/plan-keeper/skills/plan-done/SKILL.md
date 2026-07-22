@@ -1,6 +1,6 @@
 ---
 name: plan-done
-description: Use when the user finishes a plan, marks a plan done, archives a plan, says "I'm done with the plan", or asks to clear a completed plan.
+description: Archive a completed plan into ~/plans/<repo>/done/ with a completion stamp. Use when the user finishes a plan, marks a plan done, archives a plan, says "I'm done with the plan", or asks to clear a completed plan.
 ---
 
 # plan-done

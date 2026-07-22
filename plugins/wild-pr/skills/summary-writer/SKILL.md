@@ -1,6 +1,6 @@
 ---
 name: summary-writer
-description: Use when about to write or revise a pull-request description or title - before running `gh pr create` or `gh pr edit`, when asked to write or update a PR body, or when a repo squashes with the PR body as the commit message. Also use when an existing description reads like a changelog (file-by-file bullets, acceptance-criteria checkboxes, review-round logs) and needs rewriting.
+description: Write pull-request descriptions and titles that lead with the one structural idea, not a file-by-file changelog. Use when about to write or revise a PR description or title (before `gh pr create`/`gh pr edit`, or when a repo squashes with the PR body as the commit message), or when an existing description reads like a changelog and needs rewriting.
 user-invocable: true
 disable-model-invocation: false
 argument-hint: "[PR number or branch, optional]"

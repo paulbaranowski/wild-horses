@@ -35,7 +35,7 @@ execution-ready ──► menu (recommended first):
 3. **Classifies readiness (tier 1)** as **idea**, **spec**, or **execution-ready**.
 4. **For idea / spec** → suggests the single next pipeline stage (`brainstorming` / `writing-plans`) and confirms.
 5. **For execution-ready** → offers **all three execution engines at once**, recommended first. The recommendation comes from the plan's _shape_ (tier 2); the user picks how hands-off to be. All options are always listed, plus a manual escape hatch.
-6. **Marks the plan `in-progress`** (`file-meta set --status in-progress`) when it hands off to any skill — not on manual-steer — so it leaves this list and enters `plan-done`'s finish list. **Then hands off** via the `Skill` tool. The plan content is already in conversation context, so no explicit payload is needed. For `autonomous:autonomous`, the in-context plan _is_ the Task — no issue URL or `Ticket:` lookup.
+6. **Marks the plan `in-progress`** (`file-meta set --status in-progress --agent ''`) when it hands off to any skill — not on manual-steer — so it leaves this list and enters `plan-done`'s finish list. Clearing `Agent` in the same call keeps groundcrew from also claiming a plan you're now driving yourself. **Then hands off** via the `Skill` tool. The plan content is already in conversation context, so no explicit payload is needed. For `autonomous:autonomous`, the in-context plan _is_ the Task — no issue URL or `Ticket:` lookup.
 
 ## Classification cheatsheet
 

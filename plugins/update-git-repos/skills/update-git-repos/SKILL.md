@@ -1,11 +1,11 @@
 ---
 name: update-git-repos
-description: Use when the user asks to update all their git repos, pull main on all repos, sync repos from origin, refresh local clones, or run `git pull` across a known set of repos. Pulls every repo listed in ~/.config/wild-horses/update-git-repos/repos.json from origin/<branch> via the bundled CLI. Also handles bootstrapping that config (auto-discovery under a root directory, plus manual add/remove).
+description: Pull every repo listed in ~/.config/wild-horses/update-git-repos/repos.json from origin/<branch> via the bundled CLI, including bootstrapping that config (auto-discovery under a root directory, plus manual add/remove). Use when the user asks to update all their git repos, pull main on all repos, sync repos from origin, refresh local clones, or run `git pull` across a known set of repos.
 ---
 
 # update-git-repos
 
-Pull every repo in the config from `origin/<branch>` in one shot. When a working tree is dirty, `pull-all` applies the configured default action — `ask` (the default), `skip`, or `stash` — resolved per-repo then globally; with `ask` it prompts you per repo to pick stash-pull or skip.
+Pull every repo in the config from `origin/<branch>` in one shot. When a working tree is dirty, `pull-all` applies the configured default action — `ask` (the default), `skip`, or `stash` — resolved per-repo then globally; `ask` reports the repo for the workflow to prompt you to choose stash → fetch/merge → pop, or skip.
 
 ## Quick reference
 
