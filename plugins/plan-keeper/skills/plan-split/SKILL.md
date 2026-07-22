@@ -1,6 +1,6 @@
 ---
 name: plan-split
-description: Use when the user asks to split a plan into independently-grabbable pieces, decompose a plan/spec/design into child implementation tasks, break a plan into vertical slices or tracer bullets, or turn one big plan into several smaller groundcrew-dispatchable plans. Saves the slices into the per-repo plans tree wired with native Blocked-by dependencies.
+description: Split one plan into several smaller, independently-dispatchable plans wired with native Blocked-by dependencies, saved into the per-repo plans tree. Use when the user asks to split a plan into independently-grabbable pieces, decompose a plan/spec/design into child implementation tasks, or break a plan into vertical slices or tracer bullets.
 ---
 
 # plan-split

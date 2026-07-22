@@ -1,6 +1,6 @@
 ---
 name: update-git-repos
-description: Use when the user asks to update all their git repos, pull main on all repos, sync repos from origin, refresh local clones, or run `git pull` across a known set of repos. Pulls every repo listed in ~/.config/wild-horses/update-git-repos/repos.json from origin/<branch> via the bundled CLI. Also handles bootstrapping that config (auto-discovery under a root directory, plus manual add/remove).
+description: Pull every repo listed in ~/.config/wild-horses/update-git-repos/repos.json from origin/<branch> via the bundled CLI, including bootstrapping that config (auto-discovery under a root directory, plus manual add/remove). Use when the user asks to update all their git repos, pull main on all repos, sync repos from origin, refresh local clones, or run `git pull` across a known set of repos.
 ---
 
 # update-git-repos

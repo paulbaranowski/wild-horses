@@ -1,6 +1,6 @@
 ---
 name: plan-jira
-description: Use when the user asks to push a plan to Jira, file a Jira ticket/issue from a plan, push the plan to Jira, or update an existing Jira ticket from a plan. Supports first-time Jira setup inline.
+description: File a plan as a Jira ticket, or update an existing one from a plan; supports first-time Jira setup inline. Use when the user asks to push a plan to Jira, file a Jira ticket/issue from a plan, or update an existing Jira ticket from a plan.
 ---
 
 # plan-jira

@@ -1,6 +1,6 @@
 ---
 name: plan-list
-description: Use when the user asks to list, show, or see the saved plans for a repo (or a named bucket) without picking one to work on — a read-only inventory of what's in ~/plans/<repo>/.
+description: List the saved plans for a repo (or a named bucket) as a read-only inventory of what's in ~/plans/<repo>/, without picking one to work on. Use when the user asks to list, show, or see the saved plans for a repo.
 ---
 
 # plan-list

@@ -60,6 +60,23 @@ plugins/marketplace/               -- plugin root (skills-based)
 - Set `version` in the marketplace entry OR plugin.json, not both. Plugin.json wins silently.
 - Optional useful fields on plugin entries: `category`, `homepage`, `license`, `keywords`.
 
+### Writing descriptions
+
+Every description in this repo gets read somewhere that shows only the first sentence: the Claude plugin marketplace catalog truncates to one line, and `SKILL.md`/command descriptions get skimmed by both humans and the model before anyone reads past sentence 1. Whatever doesn't fit there might as well not exist.
+
+**The test:** read only sentence 1, nothing else. Can you tell what it does and decide whether you want it? If not, it fails.
+
+**Don't:**
+
+- **Don't open with a vague category label** ("Personal git/PR tooling") instead of the concrete thing it does.
+- **Don't open by naming internal skills, commands, or files** ("Currently ships one skill, `update-git-repos`") before stating the value they deliver.
+- **Don't open with meta/scope commentary** ("Currently ships...") that hedges about completeness instead of describing what exists.
+- **Don't lead a `SKILL.md` or command description with a bare "Use when..." clause and nothing else** (state the value first, trigger clause after). No exception for `SKILL.md`.
+
+No hard character limit; density is the problem, not length (`cleanup-worktrees` at 44 chars and `wild-pr` at 145 are both fine). `plugin.json` and `marketplace.json` entries may diverge in content; each independently must pass the test.
+
+Worked example, `plugins/update-git-repos/.claude-plugin/plugin.json`: "Personal git/PR tooling. Currently ships one skill..." became "Pull every configured git repo from origin in one shot, using `git fetch` + `git merge --ff-only`..."
+
 ### Commands vs Skills (slash menu namespacing)
 
 - **Use `commands/` for user-invoked slash commands.** Commands get the `plugin-name:command-name` prefix in the `/` autocomplete menu (e.g., `/harness:feedback-blockers`).

@@ -1,6 +1,6 @@
 ---
 name: plan-linear
-description: Use when the user asks to push a plan to Linear, file a Linear ticket/issue from a plan, push the plan to Linear, or update an existing Linear ticket from a plan. Supports first-time Linear setup inline.
+description: File a plan as a Linear ticket, or update an existing one from a plan; supports first-time Linear setup inline. Use when the user asks to push a plan to Linear, file a Linear ticket/issue from a plan, or update an existing Linear ticket from a plan.
 ---
 
 # plan-linear

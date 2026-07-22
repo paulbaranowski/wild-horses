@@ -10,7 +10,7 @@
     {
       "name": "harness",
       "source": "./plugins/harness",
-      "description": "feedback-blockers, reasoning-gaps, and setup commands for harness engineering. Analyze code for feedback-loop blockers, AI reasoning gaps, and set up the harness directory structure.",
+      "description": "Analyze code for feedback-loop blockers and AI reasoning gaps, then build, run, and inspect a structured remediation task list to fix what it finds. Ships /harness:feedback-blockers, /harness:reasoning-gaps, and three task-list skills (task-list-builder, task-list-runner, task-list-viewer).",
       "author": {
         "name": "Paul Baranowski"
       },
@@ -80,7 +80,7 @@
     {
       "name": "update-git-repos",
       "source": "./plugins/update-git-repos",
-      "description": "Personal git/PR tooling. Currently ships one skill, `update-git-repos`: pull every configured git repo from origin/<branch> in one shot. Maintains a repo list at ~/.config/wild-horses/update-git-repos/repos.json, supports bootstrap auto-discovery under a root directory, manual add/remove, and prompts per repo when working trees are dirty (skip vs stash → fetch/merge → pop). Uses `git fetch` plus `git merge --ff-only` (never `git pull`) so diverged histories never auto-merge silently.",
+      "description": "Pull every configured git repo from origin/<branch> in one shot, using `git fetch` plus `git merge --ff-only` (never `git pull`) so diverged histories never auto-merge silently. Maintains a repo list at ~/.config/wild-horses/update-git-repos/repos.json, supports bootstrap auto-discovery under a root directory, manual add/remove, and prompts per repo when working trees are dirty (skip vs stash → fetch/merge → pop).",
       "author": {
         "name": "Paul Baranowski"
       },

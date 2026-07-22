@@ -1,6 +1,6 @@
 ---
 name: plan-update
-description: Use when the user asks to change the agent on a plan, promote a plan to todo, mark a plan as ready, set a plan's status, or edit plan frontmatter. Mutates `~/plans/<repo>/<file>.md` frontmatter via plan_keeper_cli.py file-meta set.
+description: Edit a plan's frontmatter (status, assigned agent, and other fields) via plan_keeper_cli.py file-meta set. Use when the user asks to change the agent on a plan, promote a plan to todo, mark a plan as ready, set a plan's status, or edit plan frontmatter.
 ---
 
 # plan-update

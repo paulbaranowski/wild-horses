@@ -1,6 +1,6 @@
 ---
 name: plan-do
-description: Use when the user asks to work on a saved plan, do a plan, implement a plan, execute a plan, pick up a plan to work on, or resume a plan from disk.
+description: List saved plans and route the picked one to the right next skill, based on whether it reads as an idea, spec, or execution-ready plan. Use when the user asks to work on a saved plan, do a plan, implement a plan, execute a plan, pick up a plan to work on, or resume a plan from disk.
 ---
 
 # plan-do
