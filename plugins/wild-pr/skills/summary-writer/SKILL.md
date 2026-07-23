@@ -312,6 +312,33 @@ Its first draft had led with "## In scope" and ~12 per-module bullets plus an
 acceptance checklist - accurate, but the reviewer had to assemble the
 architecture themselves. The rewrite led with the one idea.
 
+## Diagram delivery
+
+When the diagram rubric triggers, in addition to embedding the mermaid
+block(s) inline in the body:
+
+1. Save each diagram's source to
+   `~/tmp/pr-assets/<repo>/<pr-number>/diagram-before.mmd` and
+   `diagram-after.mmd` (or just `diagram.mmd` for the after-only case) -
+   the branch name substitutes for `<pr-number>` until a PR number
+   exists, matching the Interface changes media-handoff convention.
+2. Attempt a best-effort PNG render of each `.mmd`:
+
+   ```bash
+   npx -y @mermaid-js/mermaid-cli -i diagram-before.mmd -o diagram-before.png
+   ```
+
+   If node/npm isn't available, or the first-run Chromium download fails
+   (no network, sandboxed session), skip the PNG, keep the `.mmd`, and
+   tell the user in the final message that installing Node/npm (or
+   running `mmdc` once to cache the download) would enable rendering
+   next time.
+
+3. List the saved `.mmd` (and `.png`, if rendered) absolute paths in the
+   final message, alongside any screenshot paths - a portable copy for
+   reuse outside GitHub (Slack, docs), even though the PR body itself
+   already has the diagram inline and needs nothing dragged in.
+
 ## Delivery
 
 1. Check for an open PR first. With no argument, use the current branch:
