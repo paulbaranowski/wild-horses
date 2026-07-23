@@ -45,6 +45,46 @@ main; the state after is HEAD; nothing in between belongs.
 - **Design PR** (new seam, refactor, new data flow, a decoupling, anything that
   introduces or shifts structure): full method below.
 
+## The diagram rubric
+
+Applies only within the Design PR bucket above - trivial PRs never reach
+this decision. Decides whether the architecture section's diagram is a
+mermaid before/after pair (or a single after-only diagram) instead of the
+default: prose alone, or the tiny inline ASCII arrow for a linear case.
+
+**Trigger a mermaid diagram when 2+ of these are true:**
+
+- The change rewires a flow/dependency graph - components added, removed,
+  or reconnected (a new seam, injected dependency, event bus introduced) -
+  not just a renamed function or added parameter.
+- Understanding the seam requires holding 4+ named entities and their
+  relationships in your head at once (pipeline stages, service
+  boundaries, state-machine states).
+- Call/dispatch order changes in a way that's awkward to state as one
+  sentence (sequential -> fan-out/fan-in, sync -> async, single-path ->
+  conditional routing).
+- The before shape and after shape are both genuinely non-trivial and
+  structurally different - a picture of each clarifies faster than a
+  paragraph of prose would.
+
+**Skip it (any one of these blocks it, even if triggers above fire):**
+
+- The change reads cleanly as one sentence with 2 entities ("X now reads
+  from Y instead of Z") - prose already carries it.
+- It's a linear 2-3 step relationship - the tiny inline ASCII arrow
+  already covers this; a full diagram is overkill.
+- It's a pure data/schema change with no flow/structural shift - that's
+  the Data/contract model section's job, not a diagram.
+- Only one side has real structure (brand-new subsystem, nothing to
+  contrast) - draft a single "After:" diagram, not a before/after pair,
+  since there's no meaningful "before" shape.
+
+When it triggers, default to a `graph TD` (or `LR`) mermaid flowchart;
+switch to `sequenceDiagram` specifically when the call/dispatch-order
+signal is what fired. Scope each diagram to the entities that changed or
+are load-bearing for the seam - not the whole system's structure. See
+Diagram delivery below for embedding and file conventions.
+
 ## The description is a translation, not a transcript
 
 Task lists, acceptance criteria, review logs, and per-file change logs are
@@ -71,8 +111,11 @@ appears.
    - Before/after: what the old structure assumed or hard-wired, and why that
      blocked the goal. This is where the _why_ lives - a refactor only makes
      sense against the constraint it removes.
-   - A small fenced ASCII diagram, only if it clarifies the seam/flow/dispatch
-     better than prose.
+   - A diagram, when the diagram rubric triggers: a mermaid before/after
+     pair (or a single after-only diagram) embedded as fenced `mermaid`
+     code blocks - GitHub renders these natively. A tiny fenced ASCII
+     arrow sketch remains fine for the linear case the rubric explicitly
+     skips; never use ASCII for a case the rubric triggers on.
    - The load-bearing decisions (2-4, each with one sentence of rationale).
      Skip decisions with an obvious default.
    - What deliberately did NOT change, and how that safety is guaranteed
