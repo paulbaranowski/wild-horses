@@ -75,9 +75,12 @@ default: prose alone, or the tiny inline ASCII arrow for a linear case.
   already covers this; a full diagram is overkill.
 - It's a pure data/schema change with no flow/structural shift - that's
   the Data/contract model section's job, not a diagram.
-- Only one side has real structure (brand-new subsystem, nothing to
-  contrast) - draft a single "After:" diagram, not a before/after pair,
-  since there's no meaningful "before" shape.
+
+**Diagram shape, not a skip condition:** if only one side has real
+structure (brand-new subsystem, nothing to contrast), that doesn't skip
+the diagram - it selects the shape. Draft a single "After:" diagram
+instead of a before/after pair, since there's no meaningful "before"
+shape to contrast against.
 
 When it triggers, default to a `graph TD` (or `LR`) mermaid flowchart;
 switch to `sequenceDiagram` specifically when the call/dispatch-order
@@ -204,10 +207,11 @@ re-derived title would say the same thing.
 2. **Recover the constraint.** What did the old code assume or hard-wire that
    the goal couldn't live with? That's your before/after.
 3. **Apply the diagram rubric.** Using the before/after just recovered,
-   check the diagram rubric: 2+ trigger signals and no skip signal means
-   draft mermaid source for a before/after pair (or a single after-only
-   diagram); otherwise the before/after stays prose-only, or a tiny ASCII
-   arrow for the linear case.
+   check the diagram rubric: 2+ trigger signals and no true skip signal
+   means draft mermaid source - a before/after pair, or a single
+   after-only diagram when only one side has real structure; otherwise
+   the before/after stays prose-only, or a tiny ASCII arrow for the
+   linear case.
 4. **Recover the requirements.** What did the change have to satisfy: needs,
    constraints, invariants, non-goals? Keep the ones a reviewer needs in
    order to judge whether the design answers them.
@@ -322,11 +326,21 @@ block(s) inline in the body:
    `diagram-after.mmd` (or just `diagram.mmd` for the after-only case) -
    the branch name substitutes for `<pr-number>` until a PR number
    exists, matching the Interface changes media-handoff convention.
-2. Attempt a best-effort PNG render of each `.mmd`:
+2. Attempt a best-effort PNG render of each `.mmd`, using the same
+   absolute save directory for both the input and the output so the PNG
+   lands next to its source rather than in the current working
+   directory:
 
    ```bash
-   npx -y @mermaid-js/mermaid-cli -i diagram-before.mmd -o diagram-before.png
+   npx -y @mermaid-js/mermaid-cli@11.16.0 \
+     -i ~/tmp/pr-assets/<repo>/<pr-number>/diagram-before.mmd \
+     -o ~/tmp/pr-assets/<repo>/<pr-number>/diagram-before.png
    ```
+
+   Pin the CLI to a known version rather than the floating `latest` tag -
+   unpinned `npx -y` executes whatever the package currently resolves to,
+   which is a supply-chain risk if that release is ever compromised. Bump
+   the pinned version here periodically.
 
    If node/npm isn't available, or the first-run Chromium download fails
    (no network, sandboxed session), skip the PNG, keep the `.mmd`, and
