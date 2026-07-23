@@ -45,6 +45,49 @@ main; the state after is HEAD; nothing in between belongs.
 - **Design PR** (new seam, refactor, new data flow, a decoupling, anything that
   introduces or shifts structure): full method below.
 
+## The diagram rubric
+
+Applies only within the Design PR bucket above - trivial PRs never reach
+this decision. Decides whether the architecture section's diagram is a
+mermaid before/after pair (or a single after-only diagram) instead of the
+default: prose alone, or the tiny inline ASCII arrow for a linear case.
+
+**Trigger a mermaid diagram when 2+ of these are true:**
+
+- The change rewires a flow/dependency graph - components added, removed,
+  or reconnected (a new seam, injected dependency, event bus introduced) -
+  not just a renamed function or added parameter.
+- Understanding the seam requires holding 4+ named entities and their
+  relationships in your head at once (pipeline stages, service
+  boundaries, state-machine states).
+- Call/dispatch order changes in a way that's awkward to state as one
+  sentence (sequential -> fan-out/fan-in, sync -> async, single-path ->
+  conditional routing).
+- The before shape and after shape are both genuinely non-trivial and
+  structurally different - a picture of each clarifies faster than a
+  paragraph of prose would.
+
+**Skip it (any one of these blocks it, even if triggers above fire):**
+
+- The change reads cleanly as one sentence with 2 entities ("X now reads
+  from Y instead of Z") - prose already carries it.
+- It's a linear 2-3 step relationship - the tiny inline ASCII arrow
+  already covers this; a full diagram is overkill.
+- It's a pure data/schema change with no flow/structural shift - that's
+  the Data/contract model section's job, not a diagram.
+
+**Diagram shape, not a skip condition:** if only one side has real
+structure (brand-new subsystem, nothing to contrast), that doesn't skip
+the diagram - it selects the shape. Draft a single "After:" diagram
+instead of a before/after pair, since there's no meaningful "before"
+shape to contrast against.
+
+When it triggers, default to a `graph TD` (or `LR`) mermaid flowchart;
+switch to `sequenceDiagram` specifically when the call/dispatch-order
+signal is what fired. Scope each diagram to the entities that changed or
+are load-bearing for the seam - not the whole system's structure. See
+Diagram delivery below for embedding and file conventions.
+
 ## The description is a translation, not a transcript
 
 Task lists, acceptance criteria, review logs, and per-file change logs are
@@ -71,8 +114,11 @@ appears.
    - Before/after: what the old structure assumed or hard-wired, and why that
      blocked the goal. This is where the _why_ lives - a refactor only makes
      sense against the constraint it removes.
-   - A small fenced ASCII diagram, only if it clarifies the seam/flow/dispatch
-     better than prose.
+   - A diagram, when the diagram rubric triggers: a mermaid before/after
+     pair (or a single after-only diagram) embedded as fenced `mermaid`
+     code blocks - GitHub renders these natively. A tiny fenced ASCII
+     arrow sketch remains fine for the linear case the rubric explicitly
+     skips; never use ASCII for a case the rubric triggers on.
    - The load-bearing decisions (2-4, each with one sentence of rationale).
      Skip decisions with an obvious default.
    - What deliberately did NOT change, and how that safety is guaranteed
@@ -160,22 +206,28 @@ re-derived title would say the same thing.
    description.
 2. **Recover the constraint.** What did the old code assume or hard-wire that
    the goal couldn't live with? That's your before/after.
-3. **Recover the requirements.** What did the change have to satisfy: needs,
+3. **Apply the diagram rubric.** Using the before/after just recovered,
+   check the diagram rubric: 2+ trigger signals and no true skip signal
+   means draft mermaid source - a before/after pair, or a single
+   after-only diagram when only one side has real structure; otherwise
+   the before/after stays prose-only, or a tiny ASCII arrow for the
+   linear case.
+4. **Recover the requirements.** What did the change have to satisfy: needs,
    constraints, invariants, non-goals? Keep the ones a reviewer needs in
    order to judge whether the design answers them.
-4. **Keep only the 2-4 decisions that shape the design.** Drop anything with
+5. **Keep only the 2-4 decisions that shape the design.** Drop anything with
    an obvious default or that's a local implementation detail.
-5. **Identify the at-risk untouched surface** and how it's protected.
-6. **Detect changed external surfaces.** CLI, API, config, UI - one
+6. **Identify the at-risk untouched surface** and how it's protected.
+7. **Detect changed external surfaces.** CLI, API, config, UI - one
    before/after example each, per the Interface changes section's rules;
    capture media only when the surface is visual.
-7. **Draft in prose, architecture section first.** The one-idea sentence,
+8. **Draft in prose, architecture section first.** The one-idea sentence,
    then before/after, then decisions, then what-didn't-change.
-8. **Compress the one idea into the title** per The title section - re-derive
+9. **Compress the one idea into the title** per The title section - re-derive
    it every run; never carry an existing title forward unexamined.
-9. **Ruthlessly demote detail.** If removing a line loses no _understanding_,
-   remove it; the commits and code already carry it.
-10. **One-pass read.** If a reviewer can't get the mental model in a single
+10. **Ruthlessly demote detail.** If removing a line loses no _understanding_,
+    remove it; the commits and code already carry it.
+11. **One-pass read.** If a reviewer can't get the mental model in a single
     read, it's still too granular.
 
 ## Smell tests (revise if any are true)
@@ -263,6 +315,38 @@ refactor"), the shape a good description takes:
 Its first draft had led with "## In scope" and ~12 per-module bullets plus an
 acceptance checklist - accurate, but the reviewer had to assemble the
 architecture themselves. The rewrite led with the one idea.
+
+## Diagram delivery
+
+When the diagram rubric triggers, in addition to embedding the mermaid
+block(s) inline in the body:
+
+1. Save each diagram's source to
+   `~/tmp/pr-assets/<repo>/<pr-number>/diagram-before.mmd` and
+   `diagram-after.mmd` (or just `diagram.mmd` for the after-only case) -
+   the branch name substitutes for `<pr-number>` until a PR number
+   exists, matching the Interface changes media-handoff convention.
+2. Attempt a best-effort PNG render of each `.mmd`, using the same
+   absolute save directory for both the input and the output so the PNG
+   lands next to its source rather than in the current working
+   directory:
+
+   ```bash
+   npx -y @mermaid-js/mermaid-cli \
+     -i ~/tmp/pr-assets/<repo>/<pr-number>/diagram-before.mmd \
+     -o ~/tmp/pr-assets/<repo>/<pr-number>/diagram-before.png
+   ```
+
+   If node/npm isn't available, or the first-run Chromium download fails
+   (no network, sandboxed session), skip the PNG, keep the `.mmd`, and
+   tell the user in the final message that installing Node/npm (or
+   running `mmdc` once to cache the download) would enable rendering
+   next time.
+
+3. List the saved `.mmd` (and `.png`, if rendered) absolute paths in the
+   final message, alongside any screenshot paths - a portable copy for
+   reuse outside GitHub (Slack, docs), even though the PR body itself
+   already has the diagram inline and needs nothing dragged in.
 
 ## Delivery
 
