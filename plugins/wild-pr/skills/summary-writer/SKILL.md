@@ -332,15 +332,10 @@ block(s) inline in the body:
    directory:
 
    ```bash
-   npx -y @mermaid-js/mermaid-cli@11.16.0 \
+   npx -y @mermaid-js/mermaid-cli \
      -i ~/tmp/pr-assets/<repo>/<pr-number>/diagram-before.mmd \
      -o ~/tmp/pr-assets/<repo>/<pr-number>/diagram-before.png
    ```
-
-   Pin the CLI to a known version rather than the floating `latest` tag -
-   unpinned `npx -y` executes whatever the package currently resolves to,
-   which is a supply-chain risk if that release is ever compromised. Bump
-   the pinned version here periodically.
 
    If node/npm isn't available, or the first-run Chromium download fails
    (no network, sandboxed session), skip the PNG, keep the `.mmd`, and
