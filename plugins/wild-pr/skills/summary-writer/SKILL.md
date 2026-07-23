@@ -203,22 +203,27 @@ re-derived title would say the same thing.
    description.
 2. **Recover the constraint.** What did the old code assume or hard-wire that
    the goal couldn't live with? That's your before/after.
-3. **Recover the requirements.** What did the change have to satisfy: needs,
+3. **Apply the diagram rubric.** Using the before/after just recovered,
+   check the diagram rubric: 2+ trigger signals and no skip signal means
+   draft mermaid source for a before/after pair (or a single after-only
+   diagram); otherwise the before/after stays prose-only, or a tiny ASCII
+   arrow for the linear case.
+4. **Recover the requirements.** What did the change have to satisfy: needs,
    constraints, invariants, non-goals? Keep the ones a reviewer needs in
    order to judge whether the design answers them.
-4. **Keep only the 2-4 decisions that shape the design.** Drop anything with
+5. **Keep only the 2-4 decisions that shape the design.** Drop anything with
    an obvious default or that's a local implementation detail.
-5. **Identify the at-risk untouched surface** and how it's protected.
-6. **Detect changed external surfaces.** CLI, API, config, UI - one
+6. **Identify the at-risk untouched surface** and how it's protected.
+7. **Detect changed external surfaces.** CLI, API, config, UI - one
    before/after example each, per the Interface changes section's rules;
    capture media only when the surface is visual.
-7. **Draft in prose, architecture section first.** The one-idea sentence,
+8. **Draft in prose, architecture section first.** The one-idea sentence,
    then before/after, then decisions, then what-didn't-change.
-8. **Compress the one idea into the title** per The title section - re-derive
+9. **Compress the one idea into the title** per The title section - re-derive
    it every run; never carry an existing title forward unexamined.
-9. **Ruthlessly demote detail.** If removing a line loses no _understanding_,
-   remove it; the commits and code already carry it.
-10. **One-pass read.** If a reviewer can't get the mental model in a single
+10. **Ruthlessly demote detail.** If removing a line loses no _understanding_,
+    remove it; the commits and code already carry it.
+11. **One-pass read.** If a reviewer can't get the mental model in a single
     read, it's still too granular.
 
 ## Smell tests (revise if any are true)
