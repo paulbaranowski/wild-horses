@@ -100,6 +100,12 @@ appears.
 
 1. **What this is** - one short paragraph: what the PR enables plus the
    smallest framing needed to understand the rest (prior state, "slice 2 of N").
+   If the PR turns on a domain noun a reader outside this subsystem would not
+   recognize - a table, aggregate, subsystem, or internal concept - say what it
+   is in one plain sentence before anything else. The test: could a teammate who
+   has never touched this area state what the thing is and why it exists, having
+   read only your first paragraph? A reader who cannot name the subject cannot
+   evaluate the architecture, however well the architecture is stated.
 
 2. **Requirements** - what the change had to satisfy: the functional needs,
    constraints, and invariants that shaped the design, plus explicit
@@ -148,11 +154,15 @@ appears.
    3 plans in ~/plans/herds/
    ```
 
-   - Capture the "after" by actually running the command when that is cheap
-     and side-effect-free; write the "before" from the old code's known
-     behavior (never check out the base branch just to capture it). A
-     brand-new surface gets an "after"-only usage example - no fabricated
-     "before".
+   - Capture the "after" by actually running the command. If you cannot run
+     it - not cheap, not side-effect-free, needs credentials you lack - then
+     omit the transcript and describe the change in prose. Never write output
+     you did not observe: invented output is indistinguishable from real
+     output to the reviewer, and is wrong exactly when the surface is
+     unfamiliar enough to need an example. Write the "before" from the old
+     code's known behavior (never check out the base branch just to capture
+     it). A brand-new surface gets an "after"-only usage example - no
+     fabricated "before".
    - Trim output to only the lines that demonstrate the change.
    - Visual interfaces (web/mobile UI): one screenshot per changed screen is
      the baseline; a recording (GIF) only when the change is an interaction
@@ -258,6 +268,10 @@ re-derived title would say the same thing.
   new feature": cut every such phrase. Describe the state after HEAD as
   measured against main, with no reference to intermediate states the
   reviewer will not see.
+- The description's central noun is never defined in plain terms, and a reader
+  outside this subsystem would have to open the code to learn what it is: define
+  it in one sentence up front. Positioning the change ("slice 2 of 11") is not
+  the same as saying what it is about.
 
 ## Don't
 
@@ -290,6 +304,9 @@ re-derived title would say the same thing.
   net diff against the base and nothing else; describe only that. If a
   fact only makes sense as a contrast with an intermediate state that
   never leaves the branch, the fact does not belong in the description.
+- **Don't write a transcript you did not run.** Not a plausible-looking
+  invocation, not adjusted output, not an example on a code path that does not
+  exist yet. Capture it or describe it in prose.
 
 ## Worked reference
 
