@@ -185,16 +185,18 @@ reader knows, and every rule below repairs a symptom of that one defect.
      arrow sketch remains fine for the linear case the rubric explicitly
      skips; never use ASCII for a case the rubric triggers on.
    - The load-bearing decisions (2-4, each with one sentence of rationale).
-     Skip decisions with an obvious default. Anything the reviewer has to
-     rule on or explicitly accept belongs in Decisions to make instead.
+     Skip decisions with an obvious default. To place one: could a competent
+     reviewer plausibly say _no_ to it, and would that no change the diff? If
+     yes, it belongs in Decision review. If the answer is just "here's why
+     this shape," it stays here.
    - What deliberately did NOT change, and how that safety is guaranteed
      (e.g. "covered by the existing X suite staying green"). The
      untouched-but-at-risk surface is often the most reassuring thing a
      reviewer can read.
 
-5. **Decisions to make** - what the reviewer has to rule on, as distinct from
-   what they merely need to understand. Omit when there is genuinely nothing.
-   Two kinds belong here:
+5. **Decision review** - the list of things a reviewer could reject: what they
+   have to rule on, as distinct from what they merely need to understand. Omit
+   when there is genuinely nothing. Two kinds belong here:
    - **Open questions** the change did not settle: the question, the options,
      which one the diff currently implements, and what evidence would change
      the answer.
@@ -206,7 +208,7 @@ reader knows, and every rule below repairs a symptom of that one defect.
 
    The architecture section keeps the decisions where a sentence of rationale
    is the whole story and no reader input is needed. This section is for the
-   ones that need a ruling.
+   ones a reviewer could say no to.
 
 6. **Interface changes** - only when the PR changes a surface an external
    consumer touches without reading the source: CLI commands/flags, HTTP/RPC
@@ -257,8 +259,33 @@ reader knows, and every rule below repairs a symptom of that one defect.
    or two field-level semantics a reviewer must hold in their head. Not the
    full schema.
 
-8. **Testing** - one paragraph: the approach (what's driven end-to-end vs.
-   stubbed, and why) and the top-line result.
+8. **Testing** - two parts that answer different questions. The first is a
+   report the reviewer reads; the second is a procedure they follow. Each is
+   omittable on its own; omit the whole section only when neither applies.
+
+   - **Automated coverage** - what the suite now guarantees: what was added or
+     changed, the approach (what's driven end-to-end vs. stubbed, and why), and
+     the top-line result. One paragraph. Don't restate the architecture
+     section's untouched-surface guarantee - that bullet names _which_ surface
+     is protected, this names what the tests do.
+   - **How to test manually** - the shortest path a reviewer can walk to see the
+     change themselves. Preconditions first (branch, migration, feature flag,
+     seed data, credentials), then the steps as real commands or a named UI
+     path, then the pass condition: what they should see if it worked. One happy
+     path, plus at most one edge case when that edge is the actual risk.
+
+   Rules for the manual part:
+
+   - Write only steps you actually walked. A recipe reconstructed from the
+     source reads exactly like a real one to the reviewer, and it fails
+     precisely when the surface is unfamiliar enough to need instructions.
+   - If a manual path exists and you didn't walk it, say so in one line. "Not
+     exercised by hand; the path is Settings > Billing > Retry" is useful to a
+     reviewer. An invented recipe is not, and silence is worse than either.
+   - Link to the existing doc rather than inlining when setup runs past ~5
+     steps or is already written down elsewhere.
+   - Omit when nothing is human-drivable (internal refactor, type-only change).
+     "Run the test suite" is the automated part's job, not a manual path.
 
 9. **Sequence / follow-ups** - when part of a series: one line on where this
    sits and what's deferred.
@@ -311,22 +338,26 @@ re-derived title would say the same thing.
    the most decision-relevant thing the PR failed to ship.
 7. **Keep only the 2-4 decisions that shape the design.** Drop anything with
    an obvious default or that's a local implementation detail.
-8. **Collect what the reviewer must rule on.** Open questions the change
+8. **Collect what a reviewer could say no to.** Open questions the change
    didn't settle, plus any settled-but-consequential choice they accept by
    merging - with what that acceptance costs if it turns out wrong.
 9. **Identify the at-risk untouched surface** and how it's protected.
 10. **Detect changed external surfaces.** CLI, API, config, UI - one
     before/after example each, per the Interface changes section's rules;
     capture media only when the surface is visual.
-11. **Draft in prose, architecture section first.** The one-idea sentence,
+11. **Walk the manual path.** If the change has a surface a human can drive,
+    drive it - recording preconditions, steps, and the pass condition as you
+    go. If you can't (no credentials, not cheap, not side-effect-free), record
+    that it's unverified rather than reconstructing steps from the code.
+12. **Draft in prose, architecture section first.** The one-idea sentence,
     then before/after, then decisions, then what-didn't-change.
-12. **Compress the one idea into the title** per The title section - re-derive
+13. **Compress the one idea into the title** per The title section - re-derive
     it every run; never carry an existing title forward unexamined.
-13. **Ruthlessly demote detail.** If removing a line loses no _understanding_,
+14. **Ruthlessly demote detail.** If removing a line loses no _understanding_,
     remove it; the commits and code already carry it.
-14. **One-pass read.** If a reviewer can't get the mental model in a single
+15. **One-pass read.** If a reviewer can't get the mental model in a single
     read, it's still too granular.
-15. **Outsider read.** Reread as someone who has seen neither the plan nor the
+16. **Outsider read.** Reread as someone who has seen neither the plan nor the
     diff: every term introduced before use, every paragraph's point in its
     first sentence, every user-facing claim carrying its number.
 
@@ -375,6 +406,13 @@ re-derived title would say the same thing.
   saying what the reader would be accepting: state it or drop the flag.
 - The user section lists only what got better: it's a pitch until the cost is
   in it too.
+- The manual test steps were never actually walked: walk them, or say in one
+  line that the path is unverified.
+- The manual steps reproduce the Interface changes transcript: that section
+  shows what the surface now is, this one says how to reach it. Cut whichever
+  is the copy.
+- The manual part's only content is the test-suite command: that's automated
+  coverage. Give a human-drivable path or omit the part.
 
 ## Don't
 
@@ -410,6 +448,14 @@ re-derived title would say the same thing.
 - **Don't write a transcript you did not run.** Not a plausible-looking
   invocation, not adjusted output, not an example on a code path that does not
   exist yet. Capture it or describe it in prose.
+- **Don't write manual test steps you did not walk.** A sequence reconstructed
+  from the source is indistinguishable from a real one to the reviewer. Walk
+  it, or state in one line that the path is unverified.
+- **Don't restate the Interface changes transcript as manual steps.** One
+  section shows what the surface now is; the other says how to reach it. When
+  they collapse to the same content, keep it in Interface changes.
+- **Don't pad the manual part with the test-suite command.** Automated coverage
+  already carries it; a manual part that only says "run the tests" is filler.
 - **Don't argue with the plan document.** No rebutting an objection no reader
   raised ("not just a Postgres side added"), no defending the design against
   the alternative you rejected in your own head. The reader arrived with no
