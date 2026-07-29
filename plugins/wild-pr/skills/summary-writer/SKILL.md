@@ -40,7 +40,8 @@ main; the state after is HEAD; nothing in between belongs.
 
 - **Trivial PR** (dependency bump, one-line fix, copy tweak): one-line
   description. If it changes an externally-consumed interface, add the
-  Interface changes section after the one-liner; otherwise stop. Nothing
+  Interface changes section after the one-liner, and its capture rules still
+  bind - never write a transcript you did not run. Otherwise stop. Nothing
   else in this skill applies to a trivial PR.
 - **Design PR** (new seam, refactor, new data flow, a decoupling, anything that
   introduces or shifts structure): full method below.
@@ -142,6 +143,9 @@ reader knows, and every rule below repairs a symptom of that one defect.
 
 ## Section template (adapt names, omit empty sections, keep this order)
 
+Sections 1 through 4 are required for a design PR; 5 through 9 appear only when
+they have content.
+
 1. **What this is** - one short paragraph: what the PR enables plus the
    smallest framing needed to understand the rest (prior state, "slice 2 of N").
    If the PR turns on a domain noun a reader outside this subsystem would not
@@ -172,7 +176,8 @@ reader knows, and every rule below repairs a symptom of that one defect.
    architecture answers, and it lets the reviewer check the design against
    what it was supposed to do.
 
-4. **The architecture** - the heart; the only mandatory section for a design PR:
+4. **The architecture** - the heart of the description, and the section every
+   other one hangs off:
    - The one idea, stated directly as a fact about the system, in the opening
      sentence. ("Event extraction is now decoupled from persistence behind
      the EventSink seam.")
@@ -185,28 +190,31 @@ reader knows, and every rule below repairs a symptom of that one defect.
      arrow sketch remains fine for the linear case the rubric explicitly
      skips; never use ASCII for a case the rubric triggers on.
    - The load-bearing decisions (2-4, each with one sentence of rationale).
-     Skip decisions with an obvious default. Anything the reviewer has to
-     rule on or explicitly accept belongs in Decisions to make instead.
+     Skip decisions with an obvious default. To place one: could a competent
+     reviewer plausibly say _no_ to it, and would that no change the diff? If
+     yes, it belongs in Decision review. If the answer is just "here's why
+     this shape," it stays here. The 2-4 counts what stays here; decisions
+     routed to Decision review carry their own budget.
    - What deliberately did NOT change, and how that safety is guaranteed
      (e.g. "covered by the existing X suite staying green"). The
      untouched-but-at-risk surface is often the most reassuring thing a
      reviewer can read.
 
-5. **Decisions to make** - what the reviewer has to rule on, as distinct from
-   what they merely need to understand. Omit when there is genuinely nothing.
-   Two kinds belong here:
+5. **Decision review** - the list of things a reviewer could reject: what they
+   have to rule on, as distinct from what they merely need to understand. Omit
+   when there is genuinely nothing. Two kinds belong here:
    - **Open questions** the change did not settle: the question, the options,
      which one the diff currently implements, and what evidence would change
      the answer.
    - **Settled choices the reviewer accepts by merging** - consequential, hard
      to reverse, and not obviously right. State exactly what merging accepts
-     and what it costs if the choice is wrong. Flagging something as needing
-     sign-off without saying what is being signed off is worse than omitting
-     it: it spends the reader's attention and returns nothing they can act on.
+     and what it costs if the choice is wrong; a flag must carry its content,
+     per the writing rules above.
 
-   The architecture section keeps the decisions where a sentence of rationale
-   is the whole story and no reader input is needed. This section is for the
-   ones that need a ruling.
+   Route every decision with the single test stated in the architecture section
+   above; don't re-derive it here. Decisions that fail it stay there, carrying
+   one sentence of rationale each. Keep this section to 1-3 items: a reviewer
+   asked to rule on everything rules on nothing.
 
 6. **Interface changes** - only when the PR changes a surface an external
    consumer touches without reading the source: CLI commands/flags, HTTP/RPC
@@ -257,8 +265,36 @@ reader knows, and every rule below repairs a symptom of that one defect.
    or two field-level semantics a reviewer must hold in their head. Not the
    full schema.
 
-8. **Testing** - one paragraph: the approach (what's driven end-to-end vs.
-   stubbed, and why) and the top-line result.
+8. **Testing** - two parts that answer different questions. The first is a
+   report the reviewer reads; the second is a procedure they follow. Each is
+   omittable on its own; omit the whole section only when neither applies.
+
+   - **Automated coverage** - what the suite now guarantees: what was added or
+     changed, the approach (what's driven end-to-end vs. stubbed, and why), and
+     the top-line result. Report only a result you observed: run the suite, or
+     say you did not rather than stating a count. A pass count nobody ran is the
+     same defect as an invented transcript, and the reviewer cannot tell either
+     from the real thing. One paragraph. Don't restate the architecture
+     section's untouched-surface guarantee - that bullet names _which_ surface
+     is protected, this names what the tests do.
+   - **How to test manually** - the shortest path a reviewer can walk to see the
+     change themselves. Preconditions first (branch, migration, feature flag,
+     seed data, credentials), then the steps as real commands or a named UI
+     path, then the pass condition: what they should see if it worked. One happy
+     path, plus at most one edge case when that edge is the actual risk.
+
+   Rules for the manual part:
+
+   - Write only steps you actually walked. A recipe reconstructed from the
+     source reads exactly like a real one to the reviewer, and it fails
+     precisely when the surface is unfamiliar enough to need instructions.
+   - If a manual path exists and you didn't walk it, say so in one line. "Not
+     exercised by hand; the path is Settings > Billing > Retry" is useful to a
+     reviewer. An invented recipe is not, and silence is worse than either.
+   - Link to the existing doc rather than inlining when setup runs past ~5
+     steps or is already written down elsewhere.
+   - Omit when nothing is human-drivable (internal refactor, type-only change).
+     "Run the test suite" is the automated part's job, not a manual path.
 
 9. **Sequence / follow-ups** - when part of a series: one line on where this
    sits and what's deferred.
@@ -311,32 +347,41 @@ re-derived title would say the same thing.
    the most decision-relevant thing the PR failed to ship.
 7. **Keep only the 2-4 decisions that shape the design.** Drop anything with
    an obvious default or that's a local implementation detail.
-8. **Collect what the reviewer must rule on.** Open questions the change
+8. **Collect what a reviewer could say no to.** Open questions the change
    didn't settle, plus any settled-but-consequential choice they accept by
    merging - with what that acceptance costs if it turns out wrong.
 9. **Identify the at-risk untouched surface** and how it's protected.
 10. **Detect changed external surfaces.** CLI, API, config, UI - one
     before/after example each, per the Interface changes section's rules;
     capture media only when the surface is visual.
-11. **Draft in prose, architecture section first.** The one-idea sentence,
+11. **Walk the manual path.** If the change has a surface a human can drive,
+    drive it - recording preconditions, steps, and the pass condition as you
+    go. If you can't (no credentials, not cheap, not side-effect-free), record
+    that it's unverified rather than reconstructing steps from the code.
+12. **Draft in prose, architecture section first.** The one-idea sentence,
     then before/after, then decisions, then what-didn't-change.
-12. **Compress the one idea into the title** per The title section - re-derive
+13. **Compress the one idea into the title** per The title section - re-derive
     it every run; never carry an existing title forward unexamined.
-13. **Ruthlessly demote detail.** If removing a line loses no _understanding_,
+14. **Ruthlessly demote detail.** If removing a line loses no _understanding_,
     remove it; the commits and code already carry it.
-14. **One-pass read.** If a reviewer can't get the mental model in a single
+15. **One-pass read.** If a reviewer can't get the mental model in a single
     read, it's still too granular.
-15. **Outsider read.** Reread as someone who has seen neither the plan nor the
+16. **Outsider read.** Reread as someone who has seen neither the plan nor the
     diff: every term introduced before use, every paragraph's point in its
     first sentence, every user-facing claim carrying its number.
+17. **Run both check lists against the draft.** The `Don't` list catches what
+    should never have been written; the smell tests catch what only surfaces on
+    a reread of the whole. Revise anything that fires, then deliver.
 
 ## Smell tests (revise if any are true)
+
+Symptoms that show up only on a reread of the finished draft. The `Don't` list
+below is the drafting-time counterpart: what never to write in the first place.
+A rule belongs in exactly one of the two lists, chosen by when you can detect it.
 
 - The first substantive section is a bulleted list of files or edits: lead
   with the idea instead.
 - You can't state the idea in a single sentence: the PR is trivial or too big.
-- The architecture section opens with a preamble ("The core move is...",
-  "The main change is..."): delete it and open with the claim itself.
 - No requirements are stated: the reviewer can't check the design against
   what it was supposed to satisfy.
 - A reviewer would learn nothing they couldn't get faster from
@@ -352,31 +397,28 @@ re-derived title would say the same thing.
 - The body was rewritten but the pre-existing title survived verbatim:
   re-derive the title from the one idea; keeping it is only right when the
   re-derived title matches.
-- The description narrates the branch's own history - "this replaces this
-  PR's original approach", "an earlier commit is reverted in-branch",
-  "originally this did X, now it does Y", "the net diff below is only the
-  new feature": cut every such phrase. Describe the state after HEAD as
-  measured against main, with no reference to intermediate states the
-  reviewer will not see.
 - The description's central noun is never defined in plain terms, and a reader
   outside this subsystem would have to open the code to learn what it is: define
   it in one sentence up front. Positioning the change ("slice 2 of 11") is not
   the same as saying what it is about.
 - A paragraph's point lands in its closing subordinate clause: invert it so
   the consequence leads and the mechanism follows.
-- A claim about the audience is qualitative ("an overcount", "not cheap")
-  where the codebase holds a constant that would make it concrete: fetch the
-  number and state it.
 - The description rebuts an objection no reader raised: you are arguing with
   the plan document, not writing for the reviewer. Cut the rebuttal.
 - A term, flag, route, or before-state is used before it is introduced: the
   reader has not seen this branch, so define it on first use.
-- Something is flagged as important, load-bearing, or needing sign-off without
-  saying what the reader would be accepting: state it or drop the flag.
 - The user section lists only what got better: it's a pitch until the cost is
   in it too.
+- The manual test steps were never actually walked: walk them, or say in one
+  line that the path is unverified.
+- The manual steps reproduce the Interface changes transcript: that section
+  shows what the surface now is, this one says how to reach it. Keep it in
+  Interface changes and cut the manual copy.
 
 ## Don't
+
+Rules that apply while drafting: things never to write in the first place.
+Symptoms detectable only on a reread live in Smell tests above.
 
 - **Don't organize any section around file paths** (per-file bullets, "new
   files" / "modified files" groupings). File-level detail belongs to the
@@ -403,13 +445,25 @@ re-derived title would say the same thing.
 - **Don't narrate the branch's own history.** No references to reverted
   commits, superseded approaches, mid-PR pivots, or "this replaces the
   original approach" / "an earlier commit is reverted in-branch" /
-  "originally this did X, now it does Y" framing. The reviewer sees the
+  "originally this did X, now it does Y" / "the net diff below is only the
+  new feature" framing. The reviewer sees the
   net diff against the base and nothing else; describe only that. If a
   fact only makes sense as a contrast with an intermediate state that
   never leaves the branch, the fact does not belong in the description.
 - **Don't write a transcript you did not run.** Not a plausible-looking
   invocation, not adjusted output, not an example on a code path that does not
   exist yet. Capture it or describe it in prose.
+- **Don't write manual test steps you did not walk.** A sequence reconstructed
+  from the source is indistinguishable from a real one to the reviewer. Walk
+  it, or state in one line that the path is unverified.
+- **Don't report a test result you did not observe.** No pass counts from
+  memory, no "all tests pass" inferred from an unrelated green run. Run the
+  suite or say you didn't.
+- **Don't restate the Interface changes transcript as manual steps.** One
+  section shows what the surface now is; the other says how to reach it. When
+  they collapse to the same content, keep it in Interface changes.
+- **Don't pad the manual part with the test-suite command.** Automated coverage
+  already carries it; a manual part that only says "run the tests" is filler.
 - **Don't argue with the plan document.** No rebutting an objection no reader
   raised ("not just a Postgres side added"), no defending the design against
   the alternative you rejected in your own head. The reader arrived with no
