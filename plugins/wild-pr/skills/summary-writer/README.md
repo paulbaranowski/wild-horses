@@ -28,13 +28,17 @@ Called automatically as step 2 of [`wild-pr`](../wild-pr/) (create-then-babysit)
 1. **Triages.** A trivial PR (dependency bump, one-line fix, copy tweak) gets a one-line description and stops; anything that introduces or shifts structure gets the full method below.
 2. **Finds the one idea.** Reads the net diff against the base (`git diff "$(git merge-base HEAD origin/main)"..HEAD`, substituting the repo's default branch if it isn't `main`; not `git log` on the branch) and asks: what single structural change makes all these edits necessary? Branch-internal history - reverted commits, superseded approaches, mid-PR pivots - never appears in the description, because the reviewer only ever sees the collapsed diff against the base.
 3. **Recovers the constraint and the requirements.** What did the old code assume or hard-wire that the goal couldn't live with (the before/after); what did the change have to satisfy (needs, constraints, invariants, non-goals).
-4. **Keeps only the load-bearing decisions** (2-4, each with one line of rationale) and names the at-risk surface that deliberately didn't change.
-5. **Detects changed external surfaces** (CLI, API, config, UI) and captures one before/after example each - screenshots/recordings for visual surfaces, saved outside the worktree and handed off as placeholders since a PR body can't accept drag-and-drop uploads via API.
-6. **Drafts in prose**, architecture section first: the one-idea sentence, then before/after, then decisions, then what-didn't-change.
-7. **Re-derives the title** from the same one idea every run - an existing title is input, never a default, and is only kept when the re-derived title would say the same thing.
-8. **Delivers.** Updates an existing PR immediately via `gh pr edit` (no confirmation needed) if one exists for the branch/argument; otherwise hands the title and body to whatever opens the PR.
+4. **Names the audience and both sides of the tradeoff.** Whoever consumes the changed surface without reading its source - the product's end user, or the developer working in this code on a refactor - and what got better for them versus what got worse, slower, or costlier. Numbers behind those claims are fetched from the codebase rather than left qualitative.
+5. **Separates what the reviewer must rule on from what they only need to understand.** Open questions the change didn't settle, plus any consequential choice the reviewer accepts by merging, stated as what that acceptance costs if it's wrong.
+6. **Keeps only the load-bearing decisions** (2-4, each with one line of rationale) and names the at-risk surface that deliberately didn't change.
+7. **Detects changed external surfaces** (CLI, API, config, UI) and captures one before/after example each - screenshots/recordings for visual surfaces, saved outside the worktree and handed off as placeholders since a PR body can't accept drag-and-drop uploads via API.
+8. **Drafts in prose**, architecture section first: the one-idea sentence, then before/after, then decisions, then what-didn't-change.
+9. **Re-derives the title** from the same one idea every run - an existing title is input, never a default, and is only kept when the re-derived title would say the same thing.
+10. **Delivers.** Updates an existing PR immediately via a REST `PATCH` (no confirmation needed) if one exists for the branch/argument; otherwise hands the title and body to whatever opens the PR.
 
 Task lists, acceptance criteria, and per-file change logs are inputs the skill reads to find the one idea - they never appear in the output themselves.
+
+Throughout, the drafting rules assume a reader who has seen neither the plan nor the diff: consequence before mechanism, terms defined on first use, claims carrying their numbers, and no phrase that sounds decisive while conveying nothing.
 
 ## Install
 
