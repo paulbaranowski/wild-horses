@@ -96,6 +96,50 @@ load-bearing decisions; the description then states those findings in prose.
 An artifact's content may inform every sentence, yet the artifact itself never
 appears.
 
+## Write for the reader's context, not your own
+
+You built the change; the reader did not. A description written straight out
+of deep immersion compresses against what _you_ know rather than what the
+reader knows, and every rule below repairs a symptom of that one defect.
+
+- **Write for a reader who has seen neither the plan nor the diff.** They know
+  the codebase; they do not know this branch. Introduce the before-state, and
+  define any vocabulary that exists only inside this work - a flag name, a
+  route, a phrase like "cut over cold" - the first time it appears. Never
+  rebut an objection no reader raised: arguing with the plan document you just
+  read ("not just a Postgres side added" - nobody proposed that) is the
+  clearest symptom of writing from your own context instead of theirs.
+
+- **Lead every paragraph with the consequence; put the mechanism after.** If
+  what the change costs or buys a person sits in the closing subordinate
+  clause, invert the sentence. The reason the paragraph exists goes first.
+
+  Buried: "The counter increments before the scan resolves, which means a
+  failed scan produces an overcount against the user rather than a free scan."
+
+  Led: "A failed scan still costs the user one of their five scans. The
+  counter increments before the scan resolves, so a failure is charged rather
+  than refunded."
+
+- **Quantify anything the reader would otherwise have to guess at.** When a
+  claim rests on a limit, a count, a threshold, or a price, grep for the
+  constant and put the number in the sentence. "An overcount" is abstract and
+  forgettable; "20% of everything a free user will ever get" is not - and the
+  number is usually one grep away. If it genuinely cannot be found, say the
+  claim is unquantified rather than dressing it in confident prose.
+
+- **Write for comprehension, not compression.** Don't drop a word the reader
+  then has to reconstruct: "only the pair is not" elides _atomic_ and makes
+  them rebuild the sentence to recover it. Don't reach for a phrase that
+  sounds decisive while conveying nothing: "and that is not cheap here" names
+  no cost. Density that reads as authoritative rather than as informative is a
+  defect, not a style.
+
+- **A flag must carry its content.** Calling something the important one
+  obliges you to say what it is. "This needs sign-off, not review" is an
+  assertion; the reader can act on it only once you state what they would be
+  accepting and what it costs if the choice is wrong.
+
 ## Section template (adapt names, omit empty sections, keep this order)
 
 1. **What this is** - one short paragraph: what the PR enables plus the
@@ -107,13 +151,28 @@ appears.
    read only your first paragraph? A reader who cannot name the subject cannot
    evaluate the architecture, however well the architecture is stated.
 
-2. **Requirements** - what the change had to satisfy: the functional needs,
+2. **What this changes for the user** - name the audience, then state both
+   sides of the tradeoff. The audience is whoever consumes the changed surface
+   without reading its source: the product's end user when the change reaches
+   them, the developer working in this code when it doesn't. A refactor's user
+   is the developer. Every design PR has an audience, so this section is never
+   omitted - the audience shifts, it never disappears. Trivial PRs never reach
+   this template at all; see Triage first.
+   - Say what got better for that audience _and_ what got worse, slower, or
+     costlier. A section carrying only upside is a pitch, not a tradeoff.
+   - Say it in feature terms, not mechanism: "a failed scan still costs a free
+     user one of their five", not "the counter increments before the scan
+     resolves". The mechanism is the architecture section's job.
+   - Put the numbers in, per the writing rules above, wherever a number exists.
+   - Two to four sentences, or the same in short bullets.
+
+3. **Requirements** - what the change had to satisfy: the functional needs,
    constraints, and invariants that shaped the design, plus explicit
    non-goals. Short bullets are fine here; this is the problem statement the
    architecture answers, and it lets the reviewer check the design against
    what it was supposed to do.
 
-3. **The architecture** - the heart; the only mandatory section for a design PR:
+4. **The architecture** - the heart; the only mandatory section for a design PR:
    - The one idea, stated directly as a fact about the system, in the opening
      sentence. ("Event extraction is now decoupled from persistence behind
      the EventSink seam.")
@@ -126,13 +185,30 @@ appears.
      arrow sketch remains fine for the linear case the rubric explicitly
      skips; never use ASCII for a case the rubric triggers on.
    - The load-bearing decisions (2-4, each with one sentence of rationale).
-     Skip decisions with an obvious default.
+     Skip decisions with an obvious default. Anything the reviewer has to
+     rule on or explicitly accept belongs in Decisions to make instead.
    - What deliberately did NOT change, and how that safety is guaranteed
      (e.g. "covered by the existing X suite staying green"). The
      untouched-but-at-risk surface is often the most reassuring thing a
      reviewer can read.
 
-4. **Interface changes** - only when the PR changes a surface an external
+5. **Decisions to make** - what the reviewer has to rule on, as distinct from
+   what they merely need to understand. Omit when there is genuinely nothing.
+   Two kinds belong here:
+   - **Open questions** the change did not settle: the question, the options,
+     which one the diff currently implements, and what evidence would change
+     the answer.
+   - **Settled choices the reviewer accepts by merging** - consequential, hard
+     to reverse, and not obviously right. State exactly what merging accepts
+     and what it costs if the choice is wrong. Flagging something as needing
+     sign-off without saying what is being signed off is worse than omitting
+     it: it spends the reader's attention and returns nothing they can act on.
+
+   The architecture section keeps the decisions where a sentence of rationale
+   is the whole story and no reader input is needed. This section is for the
+   ones that need a ruling.
+
+6. **Interface changes** - only when the PR changes a surface an external
    consumer touches without reading the source: CLI commands/flags, HTTP/RPC
    endpoints, config file formats, UI screens. Internal library APIs
    (renamed functions, changed signatures) do not count - the diff shows
@@ -177,18 +253,18 @@ appears.
      list the absolute file paths in your final message so the user can
      drag them in.
 
-5. **Data / contract model** - only when a schema or contract changed: the one
+7. **Data / contract model** - only when a schema or contract changed: the one
    or two field-level semantics a reviewer must hold in their head. Not the
    full schema.
 
-6. **Testing** - one paragraph: the approach (what's driven end-to-end vs.
+8. **Testing** - one paragraph: the approach (what's driven end-to-end vs.
    stubbed, and why) and the top-line result.
 
-7. **Sequence / follow-ups** - when part of a series: one line on where this
+9. **Sequence / follow-ups** - when part of a series: one line on where this
    sits and what's deferred.
 
-8. Footer per the target repo's convention (often none). Never add
-   "Generated with Claude Code" footers or Co-Authored-By trailers.
+10. Footer per the target repo's convention (often none). Never add
+    "Generated with Claude Code" footers or Co-Authored-By trailers.
 
 ## The title
 
@@ -225,20 +301,34 @@ re-derived title would say the same thing.
 4. **Recover the requirements.** What did the change have to satisfy: needs,
    constraints, invariants, non-goals? Keep the ones a reviewer needs in
    order to judge whether the design answers them.
-5. **Keep only the 2-4 decisions that shape the design.** Drop anything with
+5. **Name the audience and both sides of the tradeoff.** Who consumes the
+   changed surface without reading its source - the product's end user, or
+   the developer working in this code? Then: what got better for them, and
+   what got worse, slower, or costlier.
+6. **Fetch the numbers.** Before drafting, grep for the limits, counts,
+   thresholds, and prices behind every claim you are about to make about that
+   audience. A constant one grep away that never reaches the description is
+   the most decision-relevant thing the PR failed to ship.
+7. **Keep only the 2-4 decisions that shape the design.** Drop anything with
    an obvious default or that's a local implementation detail.
-6. **Identify the at-risk untouched surface** and how it's protected.
-7. **Detect changed external surfaces.** CLI, API, config, UI - one
-   before/after example each, per the Interface changes section's rules;
-   capture media only when the surface is visual.
-8. **Draft in prose, architecture section first.** The one-idea sentence,
-   then before/after, then decisions, then what-didn't-change.
-9. **Compress the one idea into the title** per The title section - re-derive
-   it every run; never carry an existing title forward unexamined.
-10. **Ruthlessly demote detail.** If removing a line loses no _understanding_,
+8. **Collect what the reviewer must rule on.** Open questions the change
+   didn't settle, plus any settled-but-consequential choice they accept by
+   merging - with what that acceptance costs if it turns out wrong.
+9. **Identify the at-risk untouched surface** and how it's protected.
+10. **Detect changed external surfaces.** CLI, API, config, UI - one
+    before/after example each, per the Interface changes section's rules;
+    capture media only when the surface is visual.
+11. **Draft in prose, architecture section first.** The one-idea sentence,
+    then before/after, then decisions, then what-didn't-change.
+12. **Compress the one idea into the title** per The title section - re-derive
+    it every run; never carry an existing title forward unexamined.
+13. **Ruthlessly demote detail.** If removing a line loses no _understanding_,
     remove it; the commits and code already carry it.
-11. **One-pass read.** If a reviewer can't get the mental model in a single
+14. **One-pass read.** If a reviewer can't get the mental model in a single
     read, it's still too granular.
+15. **Outsider read.** Reread as someone who has seen neither the plan nor the
+    diff: every term introduced before use, every paragraph's point in its
+    first sentence, every user-facing claim carrying its number.
 
 ## Smell tests (revise if any are true)
 
@@ -272,6 +362,19 @@ re-derived title would say the same thing.
   outside this subsystem would have to open the code to learn what it is: define
   it in one sentence up front. Positioning the change ("slice 2 of 11") is not
   the same as saying what it is about.
+- A paragraph's point lands in its closing subordinate clause: invert it so
+  the consequence leads and the mechanism follows.
+- A claim about the audience is qualitative ("an overcount", "not cheap")
+  where the codebase holds a constant that would make it concrete: fetch the
+  number and state it.
+- The description rebuts an objection no reader raised: you are arguing with
+  the plan document, not writing for the reviewer. Cut the rebuttal.
+- A term, flag, route, or before-state is used before it is introduced: the
+  reader has not seen this branch, so define it on first use.
+- Something is flagged as important, load-bearing, or needing sign-off without
+  saying what the reader would be accepting: state it or drop the flag.
+- The user section lists only what got better: it's a pitch until the cost is
+  in it too.
 
 ## Don't
 
@@ -307,6 +410,20 @@ re-derived title would say the same thing.
 - **Don't write a transcript you did not run.** Not a plausible-looking
   invocation, not adjusted output, not an example on a code path that does not
   exist yet. Capture it or describe it in prose.
+- **Don't argue with the plan document.** No rebutting an objection no reader
+  raised ("not just a Postgres side added"), no defending the design against
+  the alternative you rejected in your own head. The reader arrived with no
+  position to be talked out of.
+- **Don't flag importance without content.** Never write that something needs
+  sign-off, is the load-bearing one, or deserves close attention, unless the
+  same sentence says what the reader would be accepting and what it costs if
+  it's wrong.
+- **Don't elide a word the reader has to reconstruct.** "Only the pair is not"
+  is missing _atomic_. Compression that transfers work from the writer to the
+  reader is not concision.
+- **Never state a user-facing limit, count, threshold, or price
+  qualitatively** when the constant is sitting in the codebase. Grep for it
+  and write the number.
 
 ## Worked reference
 
