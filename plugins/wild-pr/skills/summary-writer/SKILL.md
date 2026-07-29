@@ -155,8 +155,9 @@ reader knows, and every rule below repairs a symptom of that one defect.
    sides of the tradeoff. The audience is whoever consumes the changed surface
    without reading its source: the product's end user when the change reaches
    them, the developer working in this code when it doesn't. A refactor's user
-   is the developer. Every PR has an audience, so this section is never
-   omitted - the audience shifts, it never disappears.
+   is the developer. Every design PR has an audience, so this section is never
+   omitted - the audience shifts, it never disappears. Trivial PRs never reach
+   this template at all; see Triage first.
    - Say what got better for that audience _and_ what got worse, slower, or
      costlier. A section carrying only upside is a pitch, not a tradeoff.
    - Say it in feature terms, not mechanism: "a failed scan still costs a free
