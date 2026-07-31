@@ -335,7 +335,7 @@ delete information.
 | Architecture: before and after    | 4 claims                        |
 | Architecture: the decisions       | 2 to 4 here, each 1 + 2 claims  |
 | Architecture: what did not change | 2 claims                        |
-| Decision review                   | 1 to 3 items, 3 claims each     |
+| Decision review                   | 1 to 3 items, 4 claims each     |
 | Data and contract model           | 3 claims                        |
 | Testing: automated coverage       | 4 claims                        |
 | Sequence and follow-ups           | 2 claims                        |
@@ -343,6 +343,10 @@ delete information.
 Each decision gets 1 claim to state it, plus up to 2 claims of rationale. The
 decision count covers only what stays in the architecture section. A decision
 routed to Decision review counts against that section instead.
+
+A Decision review item gets 4 claims. An open question needs all four: the
+question, the options, and which one the diff implements. The fourth is the
+evidence that would settle it.
 
 Interface changes and the manual test part have no claim ceiling. Their limits
 are structural: one example per changed interface, and one happy path plus at
