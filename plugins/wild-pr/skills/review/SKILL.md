@@ -8,19 +8,19 @@ argument-hint: "[pr-number-or-url] [--effort low|high] [--report]"
 
 # PR Review
 
-Review a diff against one rubric, filter to the few findings worth raising, gate with the user, optionally post as anchored PR comments. `--report` replaces the gates with a findings report for an agent caller. Two engines share everything except how the rubric is applied:
+Review a diff against one rubric and filter to the few findings worth raising. Gate with the user, then optionally post as anchored PR comments. `--report` replaces the gates with a findings report for an agent caller. Two engines share everything except how the rubric is applied:
 
 - **low** - one reviewer subagent, single pass. Default.
 - **high** - parallel reviewer subagents, one debate round, moderator filter. For large or high-stakes diffs.
 
 ## Invocation
 
-- `/wild-pr:review` - review the current branch (resolves the open PR for the branch if any, otherwise diffs against the default branch).
+- `/wild-pr:review` - review the current branch. This resolves the branch's open PR if any, and otherwise diffs against the default branch.
 - `/wild-pr:review <pr-number-or-url>` - review that PR without checking it out; forces reviewer mode. Accepts a bare number (current repo) or full GitHub URL (identifies owner/repo).
 - `--effort low|high` - pick the engine explicitly. Phrases also select: "quick"/"fast" → low; "deep"/"thorough"/"multi-perspective" → high.
 - `--report` - non-interactive: stop after Synthesize and return the findings to the caller. No user gates, no posting, no implementing. For agent callers.
 
-**Effort auto-select** (no flag, no phrase): `high` when the diff exceeds 20 changed files or 600 changed lines, else `low`. Before reviewing, print one line - `Effort: <low|high> (<N> files, <M> lines; override with --effort <other>)` - so the user can interrupt.
+**Effort auto-select** (no flag, no phrase): `high` when the diff exceeds 20 changed files or 600 changed lines, else `low`. Before reviewing, print one line: `Effort: <low|high> (<N> files, <M> lines; override with --effort <other>)`. The line lets the user interrupt.
 
 ## Scope
 
@@ -38,7 +38,7 @@ gh pr diff <N> --repo <owner>/<repo>
 gh api user --jq .login
 ```
 
-If `pr.author.login == viewer.login`, still proceed in reviewer mode but flag this in Summary so the user can switch to a current-branch run on their checkout if they meant to implement.
+If `pr.author.login == viewer.login`, still proceed in reviewer mode, but flag this in Summary. The flag lets the user switch to a current-branch run on their checkout if they meant to implement.
 
 ### Path B - current-branch path (no argument)
 
@@ -52,7 +52,7 @@ Determine **mode**:
 - PR exists and authors differ → **reviewer mode**.
 - No PR → **author mode**.
 
-**Persistence:** both efforts persist for subagents into a fresh per-run directory - `RUN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/pr-review.XXXXXX")` - so concurrent sessions never clobber each other: diff → `$RUN_DIR/diff.patch`, context → `$RUN_DIR/context.md`, changed files → `$RUN_DIR/files.txt`, metadata (PR number/url/base/author, viewer, head SHA, owner/repo, mode, `context_ref`) → `$RUN_DIR/meta.json`.
+**Persistence:** both efforts persist for subagents into a fresh per-run directory: `RUN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/pr-review.XXXXXX")`. The fresh directory means concurrent sessions never clobber each other. Write diff → `$RUN_DIR/diff.patch`, context → `$RUN_DIR/context.md`, changed files → `$RUN_DIR/files.txt`. Write metadata (PR number/url/base/author, viewer, head SHA, owner/repo, mode, `context_ref`) → `$RUN_DIR/meta.json`.
 
 ## Freshness preflight (mandatory before reading code)
 
@@ -106,7 +106,7 @@ When `context_ref = origin/<base>` (or `origin/pr-<N>` for PR head):
 
 - Read via `git show "${context_ref}:<path>"` (whole files) or `git grep -n <pattern> "${context_ref}" -- <paths>` (search).
 - Avoid reading the worktree filesystem for tracked content - it may be stale.
-- Worktree reads are OK only for files brand-new in the diff (untracked at `context_ref`); note "verified against: worktree" in the finding.
+- Worktree reads are OK only for files brand-new in the diff (untracked at `context_ref`). Note "verified against: worktree" in the finding.
 
 When `context_ref = worktree (stale, user accepted risk)`:
 
@@ -119,21 +119,21 @@ Walk the changed-file list. Activate lenses that match:
 - **Security** triggers on: `routes/`, `controllers/`, `middleware*/`, files matching `auth*`/`*permission*`/`*acl*`/`*token*`/`*session*`, response serializers, OpenAPI/contract definitions, new API endpoint files.
 - **Database** triggers on: `migrations/`, `*.sql`, files matching `schema*`, Mongoose/Prisma model files (`models/`, `*.model.ts`, `*.schema.ts`), repository/DAL files, query builders.
 - **Frontend** triggers on: `*.tsx`, `*.jsx`, `*.css`, `*.scss`, `pages/`, `components/`, `hooks/`, or anything importing from `react`, `@tanstack/react-query`, or a design-system package.
-- **Spec** triggers when a spec source exists. Look in order: (1) issue/ticket references in the PR body or commit messages (`#123`, `Closes #45`, Linear/Jira keys) - fetch via `gh` or the tracker; (2) a path the user passed as an argument; (3) a plan/PRD file under `docs/`, `specs/`, or `.scratch/` matching the branch or feature name. Nothing found → skip the lens and note "no spec available" in Summary.
+- **Spec** triggers when a spec source exists. Look in order. (1) Issue/ticket references in the PR body or commit messages (`#123`, `Closes #45`, Linear/Jira keys). Fetch these via `gh` or the tracker. (2) A path the user passed as an argument. (3) A plan/PRD file under `docs/`, `specs/`, or `.scratch/` matching the branch or feature name. Nothing found → skip the lens and note "no spec available" in Summary.
 
 Always-on lenses: **Engineering**, **Minimalism**, **Conventions**, **AntiSlop**.
 
 ## Review
 
-The rubric - severity ladder, `failure_mode` contract, do-not-raise list, NIT gate, caps, `suggested_fix` schema, and every lens checklist - lives in [references/review-rubric.md](references/review-rubric.md). It is binding for both engines.
+The rubric lives in [references/review-rubric.md](references/review-rubric.md). It holds the severity ladder, `failure_mode` contract, do-not-raise list, NIT gate, caps, `suggested_fix` schema, and every lens checklist. It is binding for both engines.
 
 ### Low effort
 
-Dispatch **one** reviewer subagent - fresh eyes on the diff, and the bulk content stays out of your context. Its prompt carries the persisted file paths, the absolute path to references/review-rubric.md with the instruction to read it in full, the active lens list, and the context-read contract from multi-agent.md §Dispatch mechanics with `<context_ref>` substituted. Finding ids use an `R` prefix in place of roster letters. The subagent walks the diff, applying every active lens - the walk is done only when every hunk has been read under each active lens. Exhaustive reading, selective output: it returns _the smallest number of high-signal findings_ in the Round 1 output shape (multi-agent.md §Round 1), flagging anything that needs deeper investigation than it can do confidently rather than guessing. If the host cannot run subagents, do that same single pass yourself inline.
+Dispatch **one** reviewer subagent - fresh eyes on the diff, and the bulk content stays out of your context. Its prompt carries four things. The persisted file paths. The absolute path to references/review-rubric.md, with the instruction to read it in full. The active lens list. And the context-read contract from multi-agent.md §Dispatch mechanics, with `<context_ref>` substituted. Finding ids use an `R` prefix in place of roster letters. The subagent walks the diff and applies every active lens. The walk is done only when it has read every hunk under each active lens. Exhaustive reading, selective output. It returns _the smallest number of high-signal findings_ in the Round 1 output shape (multi-agent.md §Round 1). When something needs deeper investigation than it can do confidently, it flags that item rather than guessing. If the host cannot run subagents, do that same single pass yourself inline.
 
 ### High effort
 
-Follow [references/multi-agent.md](references/multi-agent.md): dispatch one reviewer agent per active lens in parallel (each reads only its own rubric section), run one debate round, then moderator-filter. Return here for Synthesize.
+Follow [references/multi-agent.md](references/multi-agent.md). Dispatch one reviewer agent per active lens in parallel; each reads only its own rubric section. Run one debate round, then moderator-filter. Return here for Synthesize.
 
 ## Filter (before synthesis)
 
@@ -151,7 +151,7 @@ Track dropped items in Withdrawn (one-liner each) so the user can see what was f
 
 ### Plain language
 
-Everything below that a human reads is written in plain language: the Summary, each finding's Point and Why-it-matters, and Disagreement one-liners. Four rules, adapted from ASD-STE100 Simplified Technical English:
+Write everything below that a human reads in plain language: the Summary, each finding's Point and Why-it-matters, and Disagreement one-liners. Four rules, adapted from ASD-STE100 Simplified Technical English:
 
 - Keep each sentence to 20 words or fewer. Split a long sentence in two; never delete a word the reader must rebuild.
 - Use active voice. Passive is fine when the actor is unknown or irrelevant.
@@ -162,7 +162,7 @@ Real identifiers and real domain terms stay. Code spans, severity tags, and `fil
 
 ### Summary
 
-One short paragraph: what the change does and your overall recommendation (ship / ship with changes / do not ship). When the Spec lens ran, add one line with its verdict - requirements met, missing, or diverging - kept separate so a standards-clean diff can't mask a spec miss (and vice versa). When it was skipped, add "no spec available". Do not state the mode, engine, lenses applied, or convention sources consulted - that metadata is noise.
+One short paragraph: what the change does and your overall recommendation (ship / ship with changes / do not ship). When the Spec lens ran, add one line with its verdict: requirements met, missing, or diverging. Keep it separate, so a standards-clean diff can't mask a spec miss (and vice versa). When it was skipped, add "no spec available". Do not state the mode, engine, lenses applied, or convention sources consulted - that metadata is noise.
 
 ### Actionable
 
@@ -171,7 +171,7 @@ Up to 6 items. Format each:
 - **[SEVERITY] Title** - `file:lines`
 - **Point:** one sentence. Spec findings quote the spec line they're grounded in.
 - **Why it matters:** the `failure_mode`.
-- **Suggested fix (before → after):** two stacked fenced code blocks - first `// Before` (current code), then `// After` (replacement). Same language tag for both. For a pure deletion, show only `Before` and write "_Delete these lines._" For a pure addition, show only `After` prefixed with `// Add after line <N>`. Omit when structural; explain in prose.
+- **Suggested fix (before → after):** two stacked fenced code blocks - first `// Before` (current code), then `// After` (replacement). Same language tag for both. For a pure deletion, write "_Delete these lines._" and show only `Before`. For a pure addition, show only `After` prefixed with `// Add after line <N>`. Omit when structural; explain in prose.
 - **Lens(es):** which lens(es) surfaced this (high effort: which agents raised/agreed, by name).
 
 Order by severity (CRITICAL → MAJOR → MINOR), then by file. Number items 1..N - these ids drive the gates.
@@ -190,13 +190,13 @@ Terse one-liners of items dropped by the filter. Transparency only.
 
 ## Report mode (--report)
 
-Stop after Synthesize: print the Summary, the Actionable list, and the retained NITs as one-liners (the caller is an agent - the hide-nits default is for humans), then end. No user gates, no posting, no implementing; the caller triages every finding itself and owns any fixes.
+Stop after Synthesize: print the Summary, the Actionable list, and the retained NITs as one-liners, then end. The caller is an agent; the hide-nits default is for humans. No user gates, no posting, no implementing; the caller triages every finding itself and owns any fixes.
 
-Earlier interactive checkpoints resolve to their safe defaults instead of prompting: the freshness preflight's stop-and-ask resolves as `use-origin` (fetch failure → return an error to the caller instead of findings).
+Earlier interactive checkpoints resolve to their safe defaults instead of prompting. The freshness preflight's stop-and-ask resolves as `use-origin`. On fetch failure, return an error to the caller instead of findings.
 
 ## User gate 1 - select items
 
-Ask via the host's structured picker (`AskUserQuestion` in Claude Code; hosts without one: a numbered text prompt with the same options). Render each actionable finding as an option, plus a trailing "Show the N NIT(s) first" option when N > 0. Set `multiSelect: true`. Do not proceed until the user answers.
+Ask via the host's structured picker (`AskUserQuestion` in Claude Code). Hosts without one get a numbered text prompt with the same options. Render each actionable finding as an option, plus a trailing "Show the N NIT(s) first" option when N > 0. Set `multiSelect: true`. Do not proceed until the user answers.
 
 Option-label format: `<id> - <short title> (<SEVERITY>)`. The `description` is the one-sentence failure_mode, not the fix.
 
@@ -210,7 +210,7 @@ Gate 2 is mandatory in both modes - never auto-apply fixes and never auto-post r
 
 ### Author mode
 
-**Plan.** For the selected ids only, produce an ordered implementation plan: steps, files touched per step, tests to add/update, verification commands. Do **not** edit files yet.
+**Plan.** For the selected ids only, produce an ordered implementation plan. List steps, files touched per step, tests to add/update, and verification commands. Do **not** edit files yet.
 
 **User gate 2 (author)** - structured picker, `multiSelect: false`, options:
 
@@ -234,6 +234,6 @@ Skip the plan step - you are not implementing someone else's code.
 
 ## Posting an anchored PR review (both modes)
 
-When the user approves items to post, submit a **single** review via the GitHub Reviews API (`event: COMMENT` - never `APPROVE`/`REQUEST_CHANGES`), with every selected item as an inline comment anchored to its diff line. Never use loose issue comments.
+On approval, submit a **single** review via the GitHub Reviews API (`event: COMMENT` - never `APPROVE`/`REQUEST_CHANGES`). Anchor every selected item as an inline comment on its diff line. Never use loose issue comments.
 
-Follow [references/posting-pr-review.md](references/posting-pr-review.md) exactly - it has the `gh api` call, the payload shape, the three-block review body, and the per-comment body budget and format. After posting, print the review `html_url` and a one-line summary of how many comments were posted (and fallback general-notes count if any).
+Follow [references/posting-pr-review.md](references/posting-pr-review.md) exactly. It has the `gh api` call, the payload shape, the three-block review body, and the per-comment body budget and format. After posting, print the review `html_url` and a one-line count of posted comments. Include the fallback general-notes count if any.
