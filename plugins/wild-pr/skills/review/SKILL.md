@@ -149,6 +149,17 @@ Track dropped items in Withdrawn (one-liner each) so the user can see what was f
 
 ## Synthesize
 
+### Plain language
+
+Everything below that a human reads is written in plain language: the Summary, each finding's Point and Why-it-matters, and Disagreement one-liners. Four rules, adapted from ASD-STE100 Simplified Technical English:
+
+- Keep each sentence to 20 words or fewer. Split a long sentence in two; never delete a word the reader must rebuild.
+- Use active voice. Passive is fine when the actor is unknown or irrelevant.
+- Use one word for one idea. Pick a word, then use only that word for it.
+- Never use a figure of speech where a real name exists. Name the function, module, or table instead.
+
+Real identifiers and real domain terms stay. Code spans, severity tags, and `file:lines` anchors are not prose; leave them exactly as the format specifies.
+
 ### Summary
 
 One short paragraph: what the change does and your overall recommendation (ship / ship with changes / do not ship). When the Spec lens ran, add one line with its verdict - requirements met, missing, or diverging - kept separate so a standards-clean diff can't mask a spec miss (and vice versa). When it was skipped, add "no spec available". Do not state the mode, engine, lenses applied, or convention sources consulted - that metadata is noise.
