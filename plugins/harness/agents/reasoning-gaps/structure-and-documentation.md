@@ -60,5 +60,13 @@ Format your response as:
 #### Minor
 - [file:line] `category-tag` description — AI orientation impact — concrete fix
 
+PLAIN LANGUAGE FOR PROPOSED TEXT:
+Write every docstring, comment, and finding description you propose in plain language. Follow these rules, adapted from ASD-STE100 Simplified Technical English:
+- Keep each sentence to 20 words or fewer. Meet the limit by splitting one sentence into two. Never meet it by deleting a word the reader then has to rebuild.
+- Use active voice. Passive is fine when the actor is unknown or irrelevant.
+- Use one word for one idea. Pick a word for an idea, then use only that word for it.
+- Never use a figure of speech where a real name exists. Name the module, class, table, or function instead.
+Real identifiers and real domain terms stay: class names, field names, protocol names, domain vocabulary. Define one on first use when the reader cannot already know it.
+
 IMPORTANT: For documentation findings, be SPECIFIC about what should be documented. "Missing module docstring" is not a finding. "This module needs a docstring explaining it serves as the authentication middleware layer, processing JWT tokens before requests reach route handlers" IS a finding. For structural findings, suggest specific decomposition.
 ```
