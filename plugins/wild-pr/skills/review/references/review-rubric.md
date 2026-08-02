@@ -165,7 +165,7 @@ This PR may have been written or assisted by an LLM. Push back on what other len
 
 Default `suggested_fix` is **delete** (empty `after`) or **simplify** (smaller `after`). Suggesting "add a justifying comment" is itself slop - do not propose it.
 
-Stay in your lane. Do not raise items the Conventions lens owns (anything a documented rule file covers). Do not demand observability, tests, or error handling that does **not** exist in the diff. You only call out what's _present_ and unnecessary. Do not challenge whether the PR solves the right problem. A change that's small but unnecessary is still slop; a change that's large but earns each line is not.
+Keep to this lens's scope. Do not raise items the Conventions lens owns (anything a documented rule file covers). Do not demand observability, tests, or error handling that does **not** exist in the diff. You only call out what's _present_ and unnecessary. Do not challenge whether the PR solves the right problem. A change that's small but unnecessary is still slop; a change that's large but justifies each line is not.
 
 ## Spec (when a spec source exists)
 
