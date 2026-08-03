@@ -20,7 +20,9 @@ import argparse
 import ast
 import io
 import json
+import os
 import re
+import subprocess
 import sys
 import tokenize
 from dataclasses import dataclass, field, replace
@@ -741,24 +743,153 @@ def empty_report() -> dict:
                        "files_scanned": 0, "files_clean": 0}}
 
 
+def _blocks_for(source: str, language: str, mode: str) -> list[Block] | None:
+    if mode == "comment":
+        return comment_blocks(source, language)
+    if language == "markdown":
+        return markdown_blocks(source)[0]
+    return text_blocks(source)
+
+
+def _overlaps(block: Block, ranges: list[list[int]]) -> bool:
+    if not block.lines:
+        return False
+    lo = block.lines[0][0]
+    hi = block.lines[-1][0]
+    return any(start <= hi and lo <= end for start, end in ranges)
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
+    changed: dict[str, list[list[int]]] | None = None
+    if args.changed_lines == "-":
+        raw = json.load(sys.stdin)
+        changed = {os.path.normpath(k): v for k, v in raw.items()}
     report = empty_report()
     for path in args.files:
         ext = Path(path).suffix.lower()
         if ext not in EXTENSIONS:
             report["skipped_files"].append({"path": path, "reason": "unknown-extension"})
             continue
-        if read_source(path) is None:
+        source = read_source(path)
+        if source is None:
             report["skipped_files"].append({"path": path, "reason": "not-utf8"})
             continue
+        language, mode = EXTENSIONS[ext]
+        blocks = _blocks_for(source, language, mode)
+        if blocks is None:
+            report["errors"].append({"path": path, "error": "parse-failed"})
+            continue
         report["totals"]["files_scanned"] += 1
+        refined = [refine_block(b, language) for b in blocks]
+        if changed is not None:
+            ranges = changed.get(os.path.normpath(path), [])
+            refined = [b for b in refined if _overlaps(b, ranges)]
+        entry: dict = {"path": path, "language": language, "mode": mode,
+                       "blocks": [], "skipped_blocks": []}
+        has_violations = False
+        for block in refined:
+            span = {"kind": block.kind,
+                    "start_line": block.lines[0][0] if block.lines else 0,
+                    "end_line": block.lines[-1][0] if block.lines else 0}
+            if block.skip_reason:
+                entry["skipped_blocks"].append({**span, "skip_reason": block.skip_reason})
+                continue
+            violations = check_block(block)
+            if violations:
+                has_violations = True
+                for v in violations:
+                    report["totals"][v["kind"]] += 1
+                entry["blocks"].append({**span, "violations": violations})
+            elif args.all_blocks:
+                entry["blocks"].append({**span, "violations": []})
+        if has_violations or (args.all_blocks
+                              and (entry["blocks"] or entry["skipped_blocks"])):
+            report["files"].append(entry)
+        if not has_violations:
+            report["totals"]["files_clean"] += 1
     print(json.dumps(report, indent=2))
     return 0
 
 
+def _git_baseline(path: str, ref: str) -> bytes | None:
+    try:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                             capture_output=True, text=True, check=True,
+                             cwd=os.path.dirname(os.path.abspath(path)) or ".",
+                             ).stdout.strip()
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    rel = os.path.relpath(os.path.abspath(path), top)
+    proc = subprocess.run(["git", "-C", top, "show", f"{ref}:{rel}"], capture_output=True)
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def _verify_one(path: str, base_text: str | None) -> dict:
+    """One file's verdict. Every uncertain case fails: verify never guesses
+    in favor of the edit."""
+    ext = Path(path).suffix.lower()
+    if ext not in EXTENSIONS:
+        return {"path": path, "mode": "?", "ok": False, "reason": "unknown-extension"}
+    language, mode = EXTENSIONS[ext]
+    result = {"path": path, "mode": mode, "ok": False}
+    current = read_source(path)
+    if current is None:
+        return {**result, "reason": "not-utf8"}
+    if base_text is None:
+        return {**result, "reason": "missing-baseline"}
+    if mode == "comment":
+        cur_spans = spans_for(language, current)
+        base_spans = spans_for(language, base_text)
+        if cur_spans is None:
+            return {**result, "reason": "parse-failed"}
+        if base_spans is None:
+            return {**result, "reason": "baseline-parse-failed"}
+        cur_code = strip_spans(current, cur_spans)
+        base_code = strip_spans(base_text, base_spans)
+        if cur_code != base_code:
+            diff_at = next((k for k, (a, b) in enumerate(zip(cur_code, base_code))
+                            if a != b), min(len(cur_code), len(base_code)))
+            return {**result, "reason": "code-changed",
+                    "detail": f"first difference at stripped offset {diff_at}"}
+        return {**result, "ok": True}
+    if language == "markdown":
+        cur_p = markdown_blocks(current)[1]
+        base_p = markdown_blocks(base_text)[1]
+        for attr, reason in (("frontmatter", "frontmatter-changed"),
+                             ("fences", "fence-changed"),
+                             ("code_spans", "code-span-changed"),
+                             ("link_urls", "link-url-changed"),
+                             ("table_shapes", "table-shape-changed")):
+            if getattr(cur_p, attr) != getattr(base_p, attr):
+                return {**result, "reason": reason}
+        return {**result, "ok": True}
+    return {**result, "ok": True}  # plain text has no protected regions
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
-    print(json.dumps({"error": "not-implemented"}))
-    return 2
+    if bool(args.ref) == bool(args.baseline):
+        print(json.dumps({"error": "pass exactly one of --ref or --baseline"}))
+        return 2
+    if args.baseline and len(args.files) != 1:
+        print(json.dumps({"error": "--baseline takes exactly one file"}))
+        return 2
+    results = []
+    for path in args.files:
+        if args.baseline:
+            base_path = Path(args.baseline)
+            base_bytes = base_path.read_bytes() if base_path.exists() else None
+        else:
+            base_bytes = _git_baseline(path, args.ref)
+        base_text: str | None = None
+        if base_bytes is not None:
+            try:
+                base_text = base_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                base_text = None
+        results.append(_verify_one(path, base_text))
+    ok = all(r["ok"] for r in results)
+    print(json.dumps({"results": results, "ok": ok}, indent=2))
+    return 0 if ok else 1
 
 
 def main(argv: list[str]) -> int:

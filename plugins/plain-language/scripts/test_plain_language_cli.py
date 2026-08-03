@@ -391,5 +391,124 @@ class TestTextExtraction(unittest.TestCase):
         self.assertEqual(blocks[1].lines[0][0], 3)
 
 
+class TestScanCommand(unittest.TestCase):
+    def _scan(self, tree: dict[str, str], args: tuple[str, ...] = ()) -> dict:
+        with tempfile.TemporaryDirectory() as d:
+            paths = []
+            for name, content in tree.items():
+                p = Path(d) / name
+                p.write_text(content, encoding="utf-8")
+                paths.append(str(p))
+            proc = run_cli(["scan", *paths, *args])
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            return json.loads(proc.stdout)
+
+    def test_python_violations_reported(self):
+        long_comment = "# " + " ".join(["word"] * 21) + ".\n"
+        report = self._scan({"a.py": long_comment + "x = 1\n"})
+        self.assertEqual(report["totals"]["long-sentence"], 1)
+        block = report["files"][0]["blocks"][0]
+        self.assertEqual(block["violations"][0]["kind"], "long-sentence")
+
+    def test_clean_file_not_listed(self):
+        report = self._scan({"a.py": "# Short and fine.\nx = 1\n"})
+        self.assertEqual(report["files"], [])
+        self.assertEqual(report["totals"]["files_clean"], 1)
+
+    def test_parse_error_reported(self):
+        report = self._scan({"bad.py": "def f(:\n"})
+        self.assertEqual(report["errors"][0]["error"], "parse-failed")
+
+    def test_markdown_em_dash_found(self):
+        report = self._scan({"doc.md": "Uses a dash \u2014 badly.\n"})
+        self.assertEqual(report["totals"]["em-dash"], 1)
+
+    def test_changed_lines_filter(self):
+        long_comment = "# " + " ".join(["word"] * 21) + ".\n"
+        content = long_comment + "x = 1\n" + long_comment
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "a.py"
+            p.write_text(content, encoding="utf-8")
+            changed = json.dumps({str(p): [[3, 3]]})
+            proc = run_cli(["scan", "--changed-lines", "-", str(p)], stdin=changed)
+            report = json.loads(proc.stdout)
+        self.assertEqual(report["totals"]["long-sentence"], 1)
+        self.assertEqual(report["files"][0]["blocks"][0]["start_line"], 3)
+
+    def test_skipped_blocks_surface_reasons(self):
+        report = self._scan({"a.sh": "#!/bin/sh\n# shellcheck disable=SC2086\necho hi\n"})
+        self.assertEqual(report["files"], [])
+        report2 = self._scan({"a.sh": "#!/bin/sh\necho hi\n"}, args=("--all-blocks",))
+        reasons = [b["skip_reason"]
+                   for f in report2["files"] for b in f["skipped_blocks"]]
+        self.assertIn("shebang", reasons)
+
+
+class TestVerifyCommand(unittest.TestCase):
+    def _git_repo(self, d: str, files: dict[str, str]) -> None:
+        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                        "commit", "-q", "--allow-empty", "-m", "root"], cwd=d, check=True)
+        for name, content in files.items():
+            Path(d, name).write_text(content, encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=d, check=True)
+        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                        "commit", "-q", "-m", "base"], cwd=d, check=True)
+
+    def test_comment_edit_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._git_repo(d, {"a.py": "# old comment words\nx = 1\n"})
+            Path(d, "a.py").write_text("# new words. Split here.\nx = 1\n")
+            proc = run_cli(["verify", "--ref", "HEAD", "a.py"], cwd=d)
+            self.assertEqual(proc.returncode, 0, proc.stdout)
+
+    def test_code_edit_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._git_repo(d, {"a.py": "# c\nx = 1\n"})
+            Path(d, "a.py").write_text("# c\nx = 2\n")
+            proc = run_cli(["verify", "--ref", "HEAD", "a.py"], cwd=d)
+            self.assertEqual(proc.returncode, 1)
+            self.assertEqual(json.loads(proc.stdout)["results"][0]["reason"],
+                             "code-changed")
+
+    def test_markdown_prose_edit_passes_fence_edit_fails(self):
+        md = "Intro text.\n\n```\ncode\n```\n"
+        with tempfile.TemporaryDirectory() as d:
+            self._git_repo(d, {"doc.md": md})
+            Path(d, "doc.md").write_text("Intro text, rewritten.\n\n```\ncode\n```\n")
+            self.assertEqual(
+                run_cli(["verify", "--ref", "HEAD", "doc.md"], cwd=d).returncode, 0)
+            Path(d, "doc.md").write_text("Intro text.\n\n```\nchanged\n```\n")
+            proc = run_cli(["verify", "--ref", "HEAD", "doc.md"], cwd=d)
+            self.assertEqual(proc.returncode, 1)
+            self.assertEqual(json.loads(proc.stdout)["results"][0]["reason"],
+                             "fence-changed")
+
+    def test_missing_in_ref_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._git_repo(d, {"a.py": "x = 1\n"})
+            Path(d, "new.py").write_text("# hi\n")
+            proc = run_cli(["verify", "--ref", "HEAD", "new.py"], cwd=d)
+            self.assertEqual(proc.returncode, 1)
+            self.assertEqual(json.loads(proc.stdout)["results"][0]["reason"],
+                             "missing-baseline")
+
+    def test_baseline_file_mode(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d) / "base.py"
+            cur = Path(d) / "cur.py"
+            base.write_text("# old\nx = 1\n")
+            cur.write_text("# new\nx = 1\n")
+            self.assertEqual(
+                run_cli(["verify", "--baseline", str(base), str(cur)]).returncode, 0)
+            cur.write_text("# new\nx = 2\n")
+            self.assertEqual(
+                run_cli(["verify", "--baseline", str(base), str(cur)]).returncode, 1)
+
+    def test_ref_and_baseline_exclusive(self):
+        proc = run_cli(["verify", "--ref", "HEAD", "--baseline", "x", "a.py"])
+        self.assertEqual(proc.returncode, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
