@@ -86,14 +86,15 @@ class TestSentences(unittest.TestCase):
 
 
 class TestChecks(unittest.TestCase):
-    def _block(self, *lines: str, kind: str = "comment") -> "cli.Block":
-        return cli.Block(kind, [(i + 1, t) for i, t in enumerate(lines)])
+    def _block(self, *lines: str, kind: "cli.BlockKind" = "comment") -> "cli.Block":
+        return cli.Block(kind, [cli.ProseLine(i + 1, t)
+                                for i, t in enumerate(lines)])
 
     def test_long_sentence_flagged(self):
         words = " ".join(["word"] * 21) + "."
-        v = cli.check_block(self._block(words))
-        self.assertEqual(v[0]["kind"], "long-sentence")
-        self.assertEqual(v[0]["word_count"], 21)
+        self.assertEqual(cli.check_block(self._block(words)), [
+            {"kind": "long-sentence", "line": 1, "word_count": 21,
+             "sentence": words}])
 
     def test_twenty_words_pass(self):
         words = " ".join(["word"] * 20) + "."
@@ -113,13 +114,15 @@ class TestChecks(unittest.TestCase):
         self.assertEqual(v, [])
 
     def test_banned_token_candidate(self):
-        v = cli.check_block(self._block("This is the load-bearing part."))
-        self.assertEqual(v[0]["kind"], "banned-token")
-        self.assertEqual(v[0]["token"], "load-bearing")
+        sentence = "This is the load-bearing part."
+        self.assertEqual(cli.check_block(self._block(sentence)), [
+            {"kind": "banned-token", "line": 1, "token": "load-bearing",
+             "sentence": sentence}])
 
     def test_banned_token_plural_and_phrase(self):
         v = cli.check_block(self._block("Seams and the blast radius grow."))
-        self.assertEqual({x["token"] for x in v}, {"seams", "blast radius"})
+        tokens = {x["token"] for x in v if x["kind"] == "banned-token"}
+        self.assertEqual(tokens, {"seams", "blast radius"})
 
     def test_banned_token_in_code_span_ignored(self):
         self.assertEqual(cli.check_block(self._block("call `surface()` here")), [])
@@ -261,26 +264,26 @@ class TestBlockAssembly(unittest.TestCase):
 
 
 class TestJavascriptSpans(unittest.TestCase):
-    def _kinds(self, src: str) -> list[tuple[str, int]]:
+    def _comments(self, src: str) -> list[tuple[str, int]]:
         spans = cli.javascript_spans(src)
         assert spans is not None
         return [(src[s.start:s.end], s.start_line) for s in spans]
 
     def test_line_and_block_comments(self):
         src = "// lead\nconst x = 1; /* mid */\n"
-        self.assertEqual(self._kinds(src), [("// lead", 1), ("/* mid */", 2)])
+        self.assertEqual(self._comments(src), [("// lead", 1), ("/* mid */", 2)])
 
     def test_comment_markers_inside_strings_ignored(self):
         src = 'const a = "// no";\nconst b = \'/* no */\';\nconst c = `// no ${d}`;\n'
-        self.assertEqual(self._kinds(src), [])
+        self.assertEqual(self._comments(src), [])
 
     def test_regex_literal_not_a_comment(self):
         src = "const re = /a\\/b/; // real\n"
-        self.assertEqual(self._kinds(src), [("// real", 1)])
+        self.assertEqual(self._comments(src), [("// real", 1)])
 
     def test_division_then_comment(self):
         src = "const x = a / b; // half of it\n"
-        self.assertEqual(len(self._kinds(src)), 1)
+        self.assertEqual(len(self._comments(src)), 1)
 
     def test_multiline_block(self):
         src = "/*\n * one\n * two\n */\nlet x;\n"
@@ -316,9 +319,10 @@ class TestShellSpans(unittest.TestCase):
 
 
 class TestSkipRules(unittest.TestCase):
-    def _refined(self, lines: list[tuple[int, str]], kind: str = "comment",
+    def _refined(self, lines: list[tuple[int, str]], kind: "cli.BlockKind" = "comment",
                  language: str = "python") -> "cli.Block":
-        return cli.refine_block(cli.Block(kind, lines), language)
+        prose = [cli.ProseLine(n, t) for n, t in lines]
+        return cli.refine_block(cli.Block(kind, prose), language)
 
     def test_shebang_skipped(self):
         got = self._refined([(1, "!/usr/bin/env python3")])
@@ -482,6 +486,25 @@ class TestScanCommand(unittest.TestCase):
         self.assertEqual(report["totals"]["long-sentence"], 1)
         self.assertEqual(report["files"][0]["blocks"][0]["start_line"], 3)
 
+    def test_bad_changed_lines_input_is_named(self):
+        # A malformed map must name the offending path, not surface later as
+        # a bare unpack error.
+        for payload, needle in (
+            ('{"a.py": [[3]]}', "a.py"),
+            ('{"a.py": 7}', "a.py"),
+            ("[1, 2]", "JSON object"),
+            ("not json", "bad --changed-lines"),
+        ):
+            with self.subTest(payload=payload):
+                proc = run_cli(["scan", "--changed-lines", "-", "a.py"], stdin=payload)
+                self.assertEqual(proc.returncode, 2)
+                self.assertIn(needle, json.loads(proc.stdout)["error"])
+
+    def test_changed_lines_accepts_valid_map(self):
+        self.assertEqual(
+            cli.parse_changed_lines({"./a.py": [[1, 2], [9, 9]]}),
+            {"a.py": [cli.LineRange(1, 2), cli.LineRange(9, 9)]})
+
     def test_skipped_blocks_surface_reasons(self):
         report = self._scan({"a.sh": "#!/bin/sh\n# shellcheck disable=SC2086\necho hi\n"})
         self.assertEqual(report["files"], [])
@@ -551,6 +574,21 @@ class TestVerifyCommand(unittest.TestCase):
             cur.write_text("# new\nx = 2\n")
             self.assertEqual(
                 run_cli(["verify", "--baseline", str(base), str(cur)]).returncode, 1)
+
+    def test_symlinked_repo_path_still_finds_baseline(self):
+        # `git rev-parse` resolves symlinks and abspath does not. On macOS a
+        # repo under /tmp or /var lives behind a /private symlink, and the
+        # mismatch used to yield a false "missing-baseline".
+        with tempfile.TemporaryDirectory() as real_root:
+            repo = os.path.join(real_root, "repo")
+            os.mkdir(repo)
+            self._git_repo(repo, {"a.py": "# old\nx = 1\n"})
+            link_root = os.path.join(real_root, "link")
+            os.symlink(repo, link_root)
+            Path(link_root, "a.py").write_text("# new words.\nx = 1\n")
+            proc = run_cli(["verify", "--ref", "HEAD",
+                            os.path.join(link_root, "a.py")])
+            self.assertEqual(proc.returncode, 0, proc.stdout)
 
     def test_ref_and_baseline_exclusive(self):
         proc = run_cli(["verify", "--ref", "HEAD", "--baseline", "x", "a.py"])

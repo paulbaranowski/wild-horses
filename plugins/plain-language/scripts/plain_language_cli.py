@@ -27,9 +27,142 @@ import sys
 import tokenize
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Literal, NamedTuple, TypedDict
 
 WORD_CAP = 20
 EM_DASH = "\u2014"
+
+# The kinds `check_block` can emit. `empty_report` builds its counters from
+# this tuple, so a new kind cannot land without its counter.
+ViolationKind = Literal["long-sentence", "em-dash", "banned-token"]
+VIOLATION_KINDS: tuple[ViolationKind, ...] = ("long-sentence", "em-dash", "banned-token")
+
+BlockKind = Literal["comment", "docstring", "paragraph", "heading", "table-cell"]
+SpanKind = Literal["comment", "docstring"]
+Mode = Literal["comment", "prose"]
+Language = Literal["python", "javascript", "shell", "markdown", "text"]
+# The languages with a span extractor. `spans_for` raises for anything else,
+# so a new comment-mode entry in EXTENSIONS needs an extractor first.
+CommentLanguage = Literal["python", "javascript", "shell"]
+SkipReason = Literal["shebang", "fenced-code", "field-list", "doctest",
+                     "directive", "empty", "license", "commented-code"]
+
+# One line of prose and one sentence are both (int, str), but the ints mean
+# different things: a 1-based line number against a character offset into the
+# joined block text. Naming them keeps the two from being passed for each other.
+
+
+class ProseLine(NamedTuple):
+    lineno: int
+    text: str
+
+
+class Sentence(NamedTuple):
+    offset: int  # character offset into the joined block text
+    text: str
+
+
+class LineRange(NamedTuple):
+    start: int
+    end: int
+
+
+# --- The scan report: this is the plugin's published stdout contract. ---
+
+
+class EmDashViolation(TypedDict):
+    kind: Literal["em-dash"]
+    line: int
+    count: int
+
+
+class LongSentenceViolation(TypedDict):
+    kind: Literal["long-sentence"]
+    line: int
+    word_count: int
+    sentence: str
+
+
+class BannedTokenViolation(TypedDict):
+    kind: Literal["banned-token"]
+    line: int
+    token: str
+    sentence: str
+
+
+Violation = EmDashViolation | LongSentenceViolation | BannedTokenViolation
+
+# Hyphenated wire keys, so the functional form keeps the names exact. Every
+# ViolationKind needs an entry here; cmd_scan tallies straight into it.
+Totals = TypedDict("Totals", {
+    "long-sentence": int, "em-dash": int, "banned-token": int,
+    "files_scanned": int, "files_clean": int,
+})
+
+
+class SkippedFile(TypedDict):
+    path: str
+    reason: Literal["unknown-extension", "not-utf8"]
+
+
+class ScanError(TypedDict):
+    path: str
+    error: Literal["parse-failed"]
+
+
+class ReportedBlock(TypedDict):
+    kind: BlockKind
+    start_line: int
+    end_line: int
+    violations: list[Violation]
+
+
+class SkippedBlock(TypedDict):
+    kind: BlockKind
+    start_line: int
+    end_line: int
+    skip_reason: SkipReason
+
+
+class FileEntry(TypedDict):
+    path: str
+    language: Language
+    mode: Mode
+    blocks: list[ReportedBlock]
+    skipped_blocks: list[SkippedBlock]
+
+
+class ScanReport(TypedDict):
+    files: list[FileEntry]
+    skipped_files: list[SkippedFile]
+    errors: list[ScanError]
+    totals: Totals
+
+
+# --- The verify report: the second published stdout contract. ---
+
+VerifyReason = Literal[
+    "unknown-extension", "not-utf8", "missing-baseline", "parse-failed",
+    "baseline-parse-failed", "code-changed", "frontmatter-changed",
+    "fence-changed", "code-span-changed", "link-url-changed",
+    "table-shape-changed",
+]
+
+
+class _VerifyResultBase(TypedDict):
+    path: str
+    mode: str  # a Mode, or "unknown" for an extension the plugin does not read
+    ok: bool
+
+
+class VerifyResult(_VerifyResultBase, total=False):
+    reason: VerifyReason  # absent when ok is True
+    detail: str           # present only on code-changed
+
+
+class VerifyReport(TypedDict):
+    results: list[VerifyResult]
+    ok: bool
 
 # Candidate figures of speech from the standard. The model judges each hit:
 # literal uses ("attack surface", "half the rows") stay.
@@ -47,40 +180,47 @@ TERMINATORS = ".!?"
 CLOSERS = "\"'`*_)]}”’"
 CODE_SPAN_RE = re.compile(r"`[^`\n]+`")
 
-# extension -> (language, mode). mode "comment" edits comment prose only;
-# mode "prose" treats the whole file as prose.
-EXTENSIONS: dict[str, tuple[str, str]] = {
-    ".py": ("python", "comment"),
-    ".js": ("javascript", "comment"),
-    ".jsx": ("javascript", "comment"),
-    ".ts": ("javascript", "comment"),
-    ".tsx": ("javascript", "comment"),
-    ".mjs": ("javascript", "comment"),
-    ".cjs": ("javascript", "comment"),
-    ".sh": ("shell", "comment"),
-    ".bash": ("shell", "comment"),
-    ".zsh": ("shell", "comment"),
-    ".md": ("markdown", "prose"),
-    ".markdown": ("markdown", "prose"),
-    ".txt": ("text", "prose"),
+
+class FileType(NamedTuple):
+    """How a file is read. Mode "comment" edits comment prose only; mode
+    "prose" treats the whole file as prose."""
+
+    language: Language
+    mode: Mode
+
+
+EXTENSIONS: dict[str, FileType] = {
+    ".py": FileType("python", "comment"),
+    ".js": FileType("javascript", "comment"),
+    ".jsx": FileType("javascript", "comment"),
+    ".ts": FileType("javascript", "comment"),
+    ".tsx": FileType("javascript", "comment"),
+    ".mjs": FileType("javascript", "comment"),
+    ".cjs": FileType("javascript", "comment"),
+    ".sh": FileType("shell", "comment"),
+    ".bash": FileType("shell", "comment"),
+    ".zsh": FileType("shell", "comment"),
+    ".md": FileType("markdown", "prose"),
+    ".markdown": FileType("markdown", "prose"),
+    ".txt": FileType("text", "prose"),
 }
 
 
 @dataclass
 class Block:
-    kind: str  # "comment" | "docstring" | "paragraph" | "heading" | "table-cell"
-    lines: list[tuple[int, str]]  # (1-based line number, prose text)
-    skip_reason: str | None = None
+    kind: BlockKind
+    lines: list[ProseLine]
+    skip_reason: SkipReason | None = None
 
 
-def split_sentences(text: str) -> list[tuple[int, str]]:
+def split_sentences(text: str) -> list[Sentence]:
     """Return (offset, sentence) pairs.
 
     Three quirks the standard's own prose needs (seen in PR #185):
     a bold lead-in ending ``.**`` terminates its sentence, closing quotes
     stay attached to their sentence, and abbreviations never split.
     """
-    out: list[tuple[int, str]] = []
+    out: list[Sentence] = []
     start = 0
     i = 0
     n = len(text)
@@ -100,12 +240,12 @@ def split_sentences(text: str) -> list[tuple[int, str]]:
     return out
 
 
-def _push_sentence(out: list[tuple[int, str]], text: str, start: int, end: int) -> None:
+def _push_sentence(out: list[Sentence], text: str, start: int, end: int) -> None:
     chunk = text[start:end]
     lead = len(chunk) - len(chunk.lstrip())
     stripped = chunk.strip()
     if stripped:
-        out.append((start + lead, stripped))
+        out.append(Sentence(start + lead, stripped))
 
 
 def _is_abbreviation(text: str, dot: int) -> bool:
@@ -142,7 +282,7 @@ def block_text(block: Block) -> str:
     return "\n".join(t for _, t in block.lines)
 
 
-def _offset_line(block: Block, offset: int) -> int:
+def _line_for_offset(block: Block, offset: int) -> int:
     for lineno, text in block.lines:
         if offset <= len(text):
             return lineno
@@ -150,15 +290,20 @@ def _offset_line(block: Block, offset: int) -> int:
     return block.lines[-1][0] if block.lines else 0
 
 
-def check_block(block: Block) -> list[dict]:
-    violations: list[dict] = []
-    masked_all = _mask_code_spans(block_text(block))
+def check_block(block: Block) -> list[Violation]:
+    violations: list[Violation] = []
+    text = block_text(block)
+    # Masked twice on purpose: once per block for the line scan, once per
+    # sentence below. A code span can straddle a sentence boundary (a
+    # backticked snippet containing a "."), so slicing the block-level mask
+    # per sentence would not give the same answer.
+    masked_all = _mask_code_spans(text)
     for (lineno, _), masked_line in zip(block.lines, masked_all.split("\n")):
         count = masked_line.count(EM_DASH)
         if count:
             violations.append({"kind": "em-dash", "line": lineno, "count": count})
-    for offset, sentence in split_sentences(block_text(block)):
-        line = _offset_line(block, offset)
+    for offset, sentence in split_sentences(text):
+        line = _line_for_offset(block, offset)
         words = word_count(sentence)
         if block.kind != "heading" and words > WORD_CAP:
             violations.append({"kind": "long-sentence", "line": line,
@@ -172,23 +317,43 @@ def check_block(block: Block) -> list[dict]:
 
 @dataclass(order=True)
 class Span:
+    """A comment or docstring's place in the source. Ordering is by position
+    only: every `sorted(spans)` call means "in source order"."""
+
     start: int  # character offset, inclusive
     end: int    # character offset, exclusive
-    kind: str   # "comment" | "docstring"
-    start_line: int
-    end_line: int
+    kind: SpanKind = field(compare=False)
+    start_line: int = field(compare=False)
+    end_line: int = field(compare=False)
 
 
 def line_starts(source: str) -> list[int]:
     starts = [0]
-    for idx, ch in enumerate(source):
-        if ch == "\n":
-            starts.append(idx + 1)
+    pos = 0
+    for line in source.split("\n"):
+        pos += len(line) + 1
+        starts.append(pos)
     return starts
 
 
 def _offset(starts: list[int], line: int, col: int) -> int:
     return starts[line - 1] + col
+
+
+def _line_prefix(source: str, offset: int) -> str:
+    """The text between the start of ``offset``'s line and ``offset``.
+
+    A comment whose prefix has non-whitespace is a trailing comment. Both
+    ``comment_blocks`` (which feeds ``scan``) and ``_widen_comment_span``
+    (which feeds ``verify``) ask that question, and they must answer it the
+    same way. A disagreement makes a legitimate ``apply`` edit fail
+    verification, so the test lives here once.
+    """
+    return source[source.rfind("\n", 0, offset) + 1:offset]
+
+
+def _is_trailing_comment(prefix: str) -> bool:
+    return bool(prefix.strip())
 
 
 BOM = "﻿"
@@ -239,9 +404,9 @@ def _widen_comment_span(source: str, span: Span) -> tuple[int, int]:
     """
     if span.kind != "comment":
         return span.start, span.end
-    line_start = source.rfind("\n", 0, span.start) + 1
-    prefix = source[line_start:span.start]
-    if prefix.strip():  # code before the marker: a trailing comment
+    prefix = _line_prefix(source, span.start)
+    line_start = span.start - len(prefix)
+    if _is_trailing_comment(prefix):
         return line_start + len(prefix.rstrip()), span.end
     end = span.end + 1 if source[span.end:span.end + 1] == "\n" else span.end
     return line_start, end
@@ -253,6 +418,9 @@ def strip_spans(source: str, spans: list[Span]) -> str:
     pos = 0
     for span in sorted(spans):
         start, end = _widen_comment_span(source, span)
+        # Clamped because widening can make a full-line comment's span reach
+        # back over a preceding span's end. Without it a slice would repeat
+        # text already emitted.
         out.append(source[pos:max(pos, start)])
         pos = max(pos, end)
     out.append(source[pos:])
@@ -260,6 +428,11 @@ def strip_spans(source: str, spans: list[Span]) -> str:
 
 
 def spans_for(language: str, source: str) -> list[Span] | None:
+    """Comment and docstring spans, or None when the source will not parse.
+
+    Raises ValueError for a language with no extractor, which is a caller
+    bug rather than a bad input file.
+    """
     if language == "python":
         return python_spans(source)
     if language == "javascript":
@@ -276,7 +449,7 @@ _JS_REGEX_KEYWORDS = {"return", "typeof", "instanceof", "in", "of", "new",
 _JS_REGEX_PUNCT = set("=([{,;:!&|?+-*%^~<>")
 
 
-def javascript_spans(source: str) -> list[Span] | None:
+def javascript_spans(source: str) -> list[Span]:
     """Comment spans via a small lexer.
 
     Strings, template literals, and regex literals are skipped so their
@@ -383,7 +556,7 @@ def _js_skip_regex(source: str, i: int, line: int) -> tuple[int, int]:
     return i, line
 
 
-def shell_spans(source: str) -> list[Span] | None:
+def shell_spans(source: str) -> list[Span]:
     """Comment spans for shell.
 
     A ``#`` opens a comment when unquoted and at line start or after
@@ -440,9 +613,9 @@ def _strip_line_marker(text: str, language: str) -> str:
     return text.rstrip()
 
 
-def _block_comment_lines(raw: str, start_line: int) -> list[tuple[int, str]]:
+def _block_comment_lines(raw: str, start_line: int) -> list[ProseLine]:
     """Lines of a /* */ comment with delimiters and leading * stripped."""
-    out: list[tuple[int, str]] = []
+    out: list[ProseLine] = []
     for k, line in enumerate(raw.split("\n")):
         t = line.strip()
         for prefix in ("/**", "/*"):
@@ -453,7 +626,7 @@ def _block_comment_lines(raw: str, start_line: int) -> list[tuple[int, str]]:
             t = t[:-2].strip()
         if t.startswith("*"):
             t = t[1:].strip()
-        out.append((start_line + k, t))
+        out.append(ProseLine(start_line + k, t))
     return out
 
 
@@ -465,11 +638,12 @@ def _docstring_block(source: str, span: Span) -> Block:
     if inner.endswith(quote):
         inner = inner[: -len(quote)]
     lines = inner.split("\n")
-    indents = [len(l) - len(l.lstrip()) for l in lines[1:] if l.strip()]
+    indents = [len(ln) - len(ln.lstrip()) for ln in lines[1:] if ln.strip()]
     common = min(indents, default=0)
-    out = [(span.start_line, lines[0].strip())]
+    out = [ProseLine(span.start_line, lines[0].strip())]
     for k, line in enumerate(lines[1:], start=1):
-        out.append((span.start_line + k, line[common:].rstrip() if line.strip() else ""))
+        out.append(ProseLine(span.start_line + k,
+                             line[common:].rstrip() if line.strip() else ""))
     return Block("docstring", out)
 
 
@@ -479,11 +653,11 @@ def comment_blocks(source: str, language: str) -> list[Block] | None:
     spans = spans_for(language, source)
     if spans is None:
         return None
-    starts = line_starts(source)
     blocks: list[Block] = []
-    run: list[tuple[int, str]] = []
-    run_end_line = -2
-    run_indent = -1
+    run: list[ProseLine] = []
+    # Both stay None until a run opens; `if run` gates every read.
+    run_end_line: int | None = None
+    run_indent: int | None = None
 
     def flush_run() -> None:
         nonlocal run
@@ -497,22 +671,24 @@ def comment_blocks(source: str, language: str) -> list[Block] | None:
             blocks.append(_docstring_block(source, span))
             continue
         raw = source[span.start:span.end]
-        prefix = source[starts[span.start_line - 1]:span.start]
+        prefix = _line_prefix(source, span.start)
         if raw.startswith("/*"):
             flush_run()
             blocks.append(Block("comment", _block_comment_lines(raw, span.start_line)))
             continue
         text = _strip_line_marker(raw, language)
-        if prefix.strip():  # code before the marker: a trailing comment
+        if _is_trailing_comment(prefix):
             flush_run()
-            blocks.append(Block("comment", [(span.start_line, text)]))
-            run_end_line = -2
+            blocks.append(Block("comment", [ProseLine(span.start_line, text)]))
             continue
-        if run and span.start_line == run_end_line + 1 and len(prefix) == run_indent:
-            run.append((span.start_line, text))
+        continues_run = (run_end_line is not None
+                         and span.start_line == run_end_line + 1
+                         and len(prefix) == run_indent)
+        if run and continues_run:
+            run.append(ProseLine(span.start_line, text))
         else:
             flush_run()
-            run = [(span.start_line, text)]
+            run = [ProseLine(span.start_line, text)]
         run_end_line = span.start_line
         run_indent = len(prefix)
     flush_run()
@@ -545,12 +721,14 @@ def _extract_inline(text: str, protected: MarkdownProtected) -> str:
     """Record code spans and link URLs; return text with link syntax removed."""
     for m in CODE_SPAN_RE.finditer(text):
         protected.code_spans.append(m.group(0))
-    masked = CODE_SPAN_RE.sub(lambda m: "\x00" * len(m.group(0)), text)
-    for m in LINK_RE.finditer(masked):
-        protected.link_urls.append(m.group(2))
+    # Mask so a link-looking sequence inside a code span is not treated as a
+    # link. The fill char is never "]", ")", or whitespace, so LINK_RE cannot
+    # match across it.
+    masked = _mask_code_spans(text)
     out: list[str] = []
     pos = 0
     for m in LINK_RE.finditer(masked):
+        protected.link_urls.append(m.group(2))
         out.append(text[pos:m.start()])
         out.append(text[m.start(1):m.end(1)])
         pos = m.end()
@@ -558,11 +736,16 @@ def _extract_inline(text: str, protected: MarkdownProtected) -> str:
     return "".join(out)
 
 
-def markdown_blocks(source: str) -> tuple[list[Block], MarkdownProtected]:
+class MarkdownParse(NamedTuple):
+    blocks: list[Block]
+    protected: MarkdownProtected
+
+
+def markdown_blocks(source: str) -> MarkdownParse:
     lines = source.split("\n")
     protected = MarkdownProtected()
     blocks: list[Block] = []
-    para: list[tuple[int, str]] = []
+    para: list[ProseLine] = []
     table_rows: list[int] = []
     i = 0
     if lines and lines[0].strip() == "---":
@@ -619,8 +802,8 @@ def markdown_blocks(source: str) -> tuple[list[Block], MarkdownProtected]:
                 for cell in cells:
                     text = cell.strip()
                     if text:
-                        blocks.append(Block("table-cell",
-                                            [(lineno, _extract_inline(text, protected))]))
+                        blocks.append(Block("table-cell", [ProseLine(
+                            lineno, _extract_inline(text, protected))]))
             prev_blank = False
             i += 1
             continue
@@ -628,8 +811,8 @@ def markdown_blocks(source: str) -> tuple[list[Block], MarkdownProtected]:
         heading = HEADING_RE.match(raw)
         if heading:
             flush_para()
-            blocks.append(Block("heading",
-                                [(lineno, _extract_inline(heading.group(2), protected))]))
+            blocks.append(Block("heading", [ProseLine(
+                lineno, _extract_inline(heading.group(2), protected))]))
             prev_blank = False
             i += 1
             continue
@@ -664,22 +847,22 @@ def markdown_blocks(source: str) -> tuple[list[Block], MarkdownProtected]:
             continue
         text = BLOCKQUOTE_RE.sub("", raw)
         text = LIST_MARKER_RE.sub(r"\1", text).strip()
-        para.append((lineno, _extract_inline(text, protected)))
+        para.append(ProseLine(lineno, _extract_inline(text, protected)))
         prev_blank = False
         i += 1
     flush_para()
     flush_table()
     if fence_buf is not None:
         protected.fences.append("\n".join(fence_buf))
-    return blocks, protected
+    return MarkdownParse(blocks, protected)
 
 
 def text_blocks(source: str) -> list[Block]:
     blocks: list[Block] = []
-    para: list[tuple[int, str]] = []
+    para: list[ProseLine] = []
     for idx, raw in enumerate(source.split("\n")):
         if raw.strip():
-            para.append((idx + 1, raw.strip()))
+            para.append(ProseLine(idx + 1, raw.strip()))
         elif para:
             blocks.append(Block("paragraph", para))
             para = []
@@ -726,7 +909,7 @@ def refine_block(block: Block, language: str) -> Block:
     if lines and lines[0][0] == 1 and lines[0][1].startswith("!"):
         lines = lines[1:]
         reasons.append("shebang")
-    kept: list[tuple[int, str]] = []
+    kept: list[ProseLine] = []
     in_fence = in_doctest = in_fields = False
     for lineno, text in lines:
         stripped = text.strip()
@@ -754,7 +937,7 @@ def refine_block(block: Block, language: str) -> Block:
         if DIRECTIVE_RE.match(stripped):
             reasons.append("directive")
             continue
-        kept.append((lineno, text))
+        kept.append(ProseLine(lineno, text))
     nonempty = [t for _, t in kept if t.strip()]
     if not nonempty:
         return replace(block, lines=kept,
@@ -768,40 +951,92 @@ def refine_block(block: Block, language: str) -> Block:
 
 
 def read_source(path: str) -> str | None:
-    """Bytes in, exact text out. None when the file is not UTF-8 text."""
+    """Bytes in, exact text out.
+
+    None when the file cannot be read at all (missing, a directory, no
+    permission) or is not UTF-8 text. Callers report both as "not-utf8".
+    """
     try:
         return Path(path).read_bytes().decode("utf-8")
     except (OSError, UnicodeDecodeError):
         return None
 
 
-def empty_report() -> dict:
+def empty_report() -> ScanReport:
+    totals: dict[str, int] = {kind: 0 for kind in VIOLATION_KINDS}
+    totals["files_scanned"] = 0
+    totals["files_clean"] = 0
     return {"files": [], "skipped_files": [], "errors": [],
-            "totals": {"long-sentence": 0, "em-dash": 0, "banned-token": 0,
-                       "files_scanned": 0, "files_clean": 0}}
+            "totals": totals}  # type: ignore[typeddict-item]
 
 
-def _blocks_for(source: str, language: str, mode: str) -> list[Block] | None:
+def _blocks_for(source: str, language: Language, mode: Mode) -> list[Block] | None:
     if mode == "comment":
         return comment_blocks(source, language)
     if language == "markdown":
-        return markdown_blocks(source)[0]
+        return markdown_blocks(source).blocks
     return text_blocks(source)
 
 
-def _overlaps(block: Block, ranges: list[list[int]]) -> bool:
+def parse_changed_lines(raw: object) -> dict[str, list[LineRange]]:
+    """Validate the {path: [[start, end], ...]} stdin map.
+
+    Raises ValueError naming the offending path. Without this the bad shape
+    surfaces later as a bare unpack error with no path attached.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("--changed-lines expects a JSON object of path -> ranges")
+    out: dict[str, list[LineRange]] = {}
+    for key, ranges in raw.items():
+        if not isinstance(ranges, list):
+            raise ValueError(f"{key}: expected a list of [start, end] pairs")
+        pairs: list[LineRange] = []
+        for item in ranges:
+            if (not isinstance(item, list) or len(item) != 2
+                    or not all(isinstance(v, int) for v in item)):
+                raise ValueError(f"{key}: bad range {item!r}, want [start, end]")
+            pairs.append(LineRange(item[0], item[1]))
+        out[os.path.normpath(key)] = pairs
+    return out
+
+
+def _overlaps(block: Block, ranges: list[LineRange]) -> bool:
     if not block.lines:
         return False
-    lo = block.lines[0][0]
-    hi = block.lines[-1][0]
+    lo = block.lines[0].lineno
+    hi = block.lines[-1].lineno
     return any(start <= hi and lo <= end for start, end in ranges)
 
 
+def _scan_file(path: str, blocks: list[Block], file_type: FileType,
+               all_blocks: bool) -> FileEntry:
+    """Turn one file's refined blocks into its report entry."""
+    entry: FileEntry = {"path": path, "language": file_type.language,
+                        "mode": file_type.mode, "blocks": [], "skipped_blocks": []}
+    for block in blocks:
+        start = block.lines[0].lineno if block.lines else 0
+        end = block.lines[-1].lineno if block.lines else 0
+        if block.skip_reason:
+            entry["skipped_blocks"].append(
+                {"kind": block.kind, "start_line": start, "end_line": end,
+                 "skip_reason": block.skip_reason})
+            continue
+        violations = check_block(block)
+        if violations or all_blocks:
+            entry["blocks"].append(
+                {"kind": block.kind, "start_line": start, "end_line": end,
+                 "violations": violations})
+    return entry
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
-    changed: dict[str, list[list[int]]] | None = None
+    changed: dict[str, list[LineRange]] | None = None
     if args.changed_lines == "-":
-        raw = json.load(sys.stdin)
-        changed = {os.path.normpath(k): v for k, v in raw.items()}
+        try:
+            changed = parse_changed_lines(json.load(sys.stdin))
+        except (ValueError, json.JSONDecodeError) as exc:
+            print(json.dumps({"error": f"bad --changed-lines input: {exc}"}))
+            return 2
     report = empty_report()
     for path in args.files:
         ext = Path(path).suffix.lower()
@@ -812,94 +1047,113 @@ def cmd_scan(args: argparse.Namespace) -> int:
         if source is None:
             report["skipped_files"].append({"path": path, "reason": "not-utf8"})
             continue
-        language, mode = EXTENSIONS[ext]
-        blocks = _blocks_for(source, language, mode)
+        file_type = EXTENSIONS[ext]
+        blocks = _blocks_for(source, file_type.language, file_type.mode)
         if blocks is None:
             report["errors"].append({"path": path, "error": "parse-failed"})
             continue
         report["totals"]["files_scanned"] += 1
-        refined = [refine_block(b, language) for b in blocks]
+        refined = [refine_block(b, file_type.language) for b in blocks]
         if changed is not None:
             ranges = changed.get(os.path.normpath(path), [])
             refined = [b for b in refined if _overlaps(b, ranges)]
-        entry: dict = {"path": path, "language": language, "mode": mode,
-                       "blocks": [], "skipped_blocks": []}
-        has_violations = False
-        for block in refined:
-            span = {"kind": block.kind,
-                    "start_line": block.lines[0][0] if block.lines else 0,
-                    "end_line": block.lines[-1][0] if block.lines else 0}
-            if block.skip_reason:
-                entry["skipped_blocks"].append({**span, "skip_reason": block.skip_reason})
-                continue
-            violations = check_block(block)
-            if violations:
-                has_violations = True
-                for v in violations:
-                    report["totals"][v["kind"]] += 1
-                entry["blocks"].append({**span, "violations": violations})
-            elif args.all_blocks:
-                entry["blocks"].append({**span, "violations": []})
+        entry = _scan_file(path, refined, file_type, args.all_blocks)
+        has_violations = any(b["violations"] for b in entry["blocks"])
         if has_violations or (args.all_blocks
                               and (entry["blocks"] or entry["skipped_blocks"])):
             report["files"].append(entry)
-        if not has_violations:
+        if has_violations:
+            for block in entry["blocks"]:
+                for v in block["violations"]:
+                    report["totals"][v["kind"]] += 1
+        else:
             report["totals"]["files_clean"] += 1
     print(json.dumps(report, indent=2))
     return 0
 
 
+def _git_toplevel(directory: str, _memo: dict[str, str | None] = {}) -> str | None:
+    """The repo root for a directory, asked of git once per directory.
+
+    verify runs over a file list that usually shares one root, and the answer
+    cannot change mid-run.
+    """
+    if directory not in _memo:
+        try:
+            _memo[directory] = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"], capture_output=True,
+                text=True, check=True, cwd=directory).stdout.strip()
+        except (subprocess.CalledProcessError, OSError):
+            _memo[directory] = None
+    return _memo[directory]
+
+
 def _git_baseline(path: str, ref: str) -> bytes | None:
-    try:
-        top = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                             capture_output=True, text=True, check=True,
-                             cwd=os.path.dirname(os.path.abspath(path)) or ".",
-                             ).stdout.strip()
-    except (subprocess.CalledProcessError, OSError):
+    # realpath on both sides: `git rev-parse` resolves symlinks and abspath
+    # does not, so on macOS a repo under /tmp or /var (symlinks into
+    # /private) would otherwise produce a relpath that escapes the repo and
+    # a false "missing-baseline".
+    real = os.path.realpath(path)
+    top = _git_toplevel(os.path.dirname(real) or ".")
+    if top is None:
         return None
-    rel = os.path.relpath(os.path.abspath(path), top)
+    rel = os.path.relpath(real, os.path.realpath(top))
     proc = subprocess.run(["git", "-C", top, "show", f"{ref}:{rel}"], capture_output=True)
     return proc.stdout if proc.returncode == 0 else None
 
 
-def _verify_one(path: str, base_text: str | None) -> dict:
+# MarkdownProtected attribute -> the reason its change is reported under.
+_PROTECTED_REGIONS: tuple[tuple[str, VerifyReason], ...] = (
+    ("frontmatter", "frontmatter-changed"),
+    ("fences", "fence-changed"),
+    ("code_spans", "code-span-changed"),
+    ("link_urls", "link-url-changed"),
+    ("table_shapes", "table-shape-changed"),
+)
+
+
+def _verify_one(path: str, base_text: str | None) -> VerifyResult:
     """One file's verdict. Every uncertain case fails: verify never guesses
     in favor of the edit."""
     ext = Path(path).suffix.lower()
-    if ext not in EXTENSIONS:
-        return {"path": path, "mode": "?", "ok": False, "reason": "unknown-extension"}
-    language, mode = EXTENSIONS[ext]
-    result = {"path": path, "mode": mode, "ok": False}
+    file_type = EXTENSIONS.get(ext)
+    mode = file_type.mode if file_type else "unknown"
+    result: VerifyResult = {"path": path, "mode": mode, "ok": False}
+
+    def fail(reason: VerifyReason, detail: str | None = None) -> VerifyResult:
+        out: VerifyResult = {**result, "reason": reason}
+        if detail is not None:
+            out["detail"] = detail
+        return out
+
+    if file_type is None:
+        return fail("unknown-extension")
     current = read_source(path)
     if current is None:
-        return {**result, "reason": "not-utf8"}
+        return fail("not-utf8")
     if base_text is None:
-        return {**result, "reason": "missing-baseline"}
-    if mode == "comment":
-        cur_spans = spans_for(language, current)
-        base_spans = spans_for(language, base_text)
+        return fail("missing-baseline")
+    if file_type.mode == "comment":
+        cur_spans = spans_for(file_type.language, current)
+        base_spans = spans_for(file_type.language, base_text)
         if cur_spans is None:
-            return {**result, "reason": "parse-failed"}
+            return fail("parse-failed")
         if base_spans is None:
-            return {**result, "reason": "baseline-parse-failed"}
+            return fail("baseline-parse-failed")
         cur_code = strip_spans(current, cur_spans)
         base_code = strip_spans(base_text, base_spans)
         if cur_code != base_code:
             diff_at = next((k for k, (a, b) in enumerate(zip(cur_code, base_code))
                             if a != b), min(len(cur_code), len(base_code)))
-            return {**result, "reason": "code-changed",
-                    "detail": f"first difference at stripped offset {diff_at}"}
+            return fail("code-changed",
+                        detail=f"first difference at stripped offset {diff_at}")
         return {**result, "ok": True}
-    if language == "markdown":
-        cur_p = markdown_blocks(current)[1]
-        base_p = markdown_blocks(base_text)[1]
-        for attr, reason in (("frontmatter", "frontmatter-changed"),
-                             ("fences", "fence-changed"),
-                             ("code_spans", "code-span-changed"),
-                             ("link_urls", "link-url-changed"),
-                             ("table_shapes", "table-shape-changed")):
+    if file_type.language == "markdown":
+        cur_p = markdown_blocks(current).protected
+        base_p = markdown_blocks(base_text).protected
+        for attr, reason in _PROTECTED_REGIONS:
             if getattr(cur_p, attr) != getattr(base_p, attr):
-                return {**result, "reason": reason}
+                return fail(reason)
         return {**result, "ok": True}
     return {**result, "ok": True}  # plain text has no protected regions
 
@@ -911,22 +1165,24 @@ def cmd_verify(args: argparse.Namespace) -> int:
     if args.baseline and len(args.files) != 1:
         print(json.dumps({"error": "--baseline takes exactly one file"}))
         return 2
-    results = []
+    results: list[VerifyResult] = []
     for path in args.files:
         if args.baseline:
-            base_path = Path(args.baseline)
-            base_bytes = base_path.read_bytes() if base_path.exists() else None
+            # read_source covers the missing / unreadable / not-UTF-8 cases
+            # the same way it does for the file under test.
+            base_text = read_source(args.baseline)
         else:
             base_bytes = _git_baseline(path, args.ref)
-        base_text: str | None = None
-        if base_bytes is not None:
-            try:
-                base_text = base_bytes.decode("utf-8")
-            except UnicodeDecodeError:
-                base_text = None
+            base_text = None
+            if base_bytes is not None:
+                try:
+                    base_text = base_bytes.decode("utf-8")
+                except UnicodeDecodeError:
+                    base_text = None
         results.append(_verify_one(path, base_text))
     ok = all(r["ok"] for r in results)
-    print(json.dumps({"results": results, "ok": ok}, indent=2))
+    report: VerifyReport = {"results": results, "ok": ok}
+    print(json.dumps(report, indent=2))
     return 0 if ok else 1
 
 

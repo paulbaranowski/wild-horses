@@ -53,10 +53,6 @@ case "$cmd" in
         ;;
 esac
 
-# Anchor on both ends: `.*$` (instead of `[[:space:]]|$`) forces the regex to
-# consume the entire command string, so trailing exotic content (a stray
-# newline that somehow slipped past the case prefilter, for example) cannot
-# ride along after a matching prefix.
 approve() {
     hook_event=$(echo "$input" | jq -r '.hook_event_name // empty')
     if [[ "$hook_event" == "preToolUse" ]]; then
@@ -71,6 +67,11 @@ approve() {
 #   "..."  double-quoted  -> spaces allowed inside
 #   '...'  single-quoted  -> spaces allowed inside
 #   bare                  -> no spaces (a space would start the next argument)
+#
+# Each pattern anchors on both ends: the trailing `([[:space:]].*)?$` forces
+# the regex to consume the entire command string, so trailing exotic content
+# (a stray newline that slipped past the case prefilter, for example) cannot
+# ride along after a matching prefix.
 script=""
 if [[ "$cmd" =~ ^python3[[:space:]]+\"([^\"]+/scripts/plain_language_cli\.py)\"([[:space:]].*)?$ ]]; then
     script="${BASH_REMATCH[1]}"
