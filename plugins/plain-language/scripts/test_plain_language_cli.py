@@ -127,5 +127,91 @@ class TestChecks(unittest.TestCase):
         self.assertEqual(v[0]["line"], 2)
 
 
+PY_SAMPLE = '''\
+#!/usr/bin/env python3
+"""Module docstring here."""
+
+# a comment line
+x = 1  # trailing comment
+
+
+def f():
+    """Function docstring.
+
+    Second line.
+    """
+    return "# not a comment"
+'''
+
+
+def py_spans(src: str) -> list["cli.Span"]:
+    spans = cli.python_spans(src)
+    assert spans is not None
+    return spans
+
+
+def py_blocks(src: str) -> list["cli.Block"]:
+    blocks = cli.comment_blocks(src, "python")
+    assert blocks is not None
+    return blocks
+
+
+class TestPythonSpans(unittest.TestCase):
+    def test_finds_comments_and_docstrings(self):
+        kinds = [(s.kind, s.start_line) for s in py_spans(PY_SAMPLE)]
+        self.assertIn(("comment", 1), kinds)      # shebang is a comment token
+        self.assertIn(("docstring", 2), kinds)
+        self.assertIn(("comment", 4), kinds)
+        self.assertIn(("comment", 5), kinds)
+        self.assertIn(("docstring", 9), kinds)
+
+    def test_string_hash_not_a_comment(self):
+        self.assertFalse(any(s.start_line == 13 for s in py_spans(PY_SAMPLE)))
+
+    def test_parse_failure_returns_none(self):
+        self.assertIsNone(cli.python_spans("def f(:\n"))
+
+    def test_strip_removes_only_spans(self):
+        stripped = cli.strip_spans(PY_SAMPLE, py_spans(PY_SAMPLE))
+        self.assertNotIn("Module docstring here.", stripped)
+        self.assertNotIn("a comment line", stripped)
+        self.assertNotIn("trailing comment", stripped)
+        self.assertNotIn("Function docstring.", stripped)
+        self.assertIn("x = 1", stripped)
+        # The literal keeps its "#" text: only real comment spans are cut.
+        self.assertIn('return "# not a comment"', stripped)
+
+    def test_strip_is_stable_under_prose_edit(self):
+        edited = PY_SAMPLE.replace("Module docstring here.", "Rewritten. Twice.")
+        a = cli.strip_spans(PY_SAMPLE, py_spans(PY_SAMPLE))
+        b = cli.strip_spans(edited, py_spans(edited))
+        self.assertEqual(a, b)
+
+
+class TestBlockAssembly(unittest.TestCase):
+    def test_consecutive_lines_merge(self):
+        src = "# one\n# two\n\n# three\nx = 1\n"
+        self.assertEqual([b.lines for b in py_blocks(src)],
+                         [[(1, "one"), (2, "two")], [(4, "three")]])
+
+    def test_trailing_comment_is_own_block(self):
+        src = "# lead\nx = 1  # trail\n"
+        self.assertEqual(py_blocks(src)[1].lines, [(2, "trail")])
+
+    def test_indent_change_splits_blocks(self):
+        src = "if True:\n    pass\n# a\nif True:\n    # b\n    pass\n"
+        self.assertEqual(len(py_blocks(src)), 2)
+
+    def test_docstring_block_dedented(self):
+        src = 'def f():\n    """Top line.\n\n    Body line.\n    """\n'
+        block = py_blocks(src)[0]
+        self.assertEqual(block.kind, "docstring")
+        self.assertEqual(block.lines,
+                         [(2, "Top line."), (3, ""), (4, "Body line."), (5, "")])
+
+    def test_parse_failure_propagates(self):
+        self.assertIsNone(cli.comment_blocks("def f(:\n", "python"))
+
+
 if __name__ == "__main__":
     unittest.main()

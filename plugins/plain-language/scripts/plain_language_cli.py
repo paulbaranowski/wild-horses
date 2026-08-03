@@ -17,9 +17,12 @@ Both subcommands print JSON on stdout. ``scan`` exits 0 whenever it ran.
 from __future__ import annotations
 
 import argparse
+import ast
+import io
 import json
 import re
 import sys
+import tokenize
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -156,6 +159,173 @@ def check_block(block: Block) -> list[dict]:
                                "token": " ".join(m.group(1).lower().split()),
                                "sentence": sentence})
     return violations
+
+
+@dataclass(order=True)
+class Span:
+    start: int  # character offset, inclusive
+    end: int    # character offset, exclusive
+    kind: str   # "comment" | "docstring"
+    start_line: int
+    end_line: int
+
+
+def line_starts(source: str) -> list[int]:
+    starts = [0]
+    for idx, ch in enumerate(source):
+        if ch == "\n":
+            starts.append(idx + 1)
+    return starts
+
+
+def _offset(starts: list[int], line: int, col: int) -> int:
+    return starts[line - 1] + col
+
+
+def python_spans(source: str) -> list[Span] | None:
+    starts = line_starts(source)
+    spans: list[Span] = []
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+            if tok.type == tokenize.COMMENT:
+                spans.append(Span(_offset(starts, *tok.start), _offset(starts, *tok.end),
+                                  "comment", tok.start[0], tok.end[0]))
+        tree = ast.parse(source)
+    except (SyntaxError, tokenize.TokenError, ValueError):
+        return None
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = node.body
+            if (body and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                c = body[0].value
+                end_lineno = c.end_lineno if c.end_lineno is not None else c.lineno
+                end_col = c.end_col_offset if c.end_col_offset is not None else 0
+                spans.append(Span(_offset(starts, c.lineno, c.col_offset),
+                                  _offset(starts, end_lineno, end_col),
+                                  "docstring", c.lineno, end_lineno))
+    return sorted(spans)
+
+
+def strip_spans(source: str, spans: list[Span]) -> str:
+    """Source with every span sliced out. verify compares these strings."""
+    out: list[str] = []
+    pos = 0
+    for span in sorted(spans):
+        out.append(source[pos:span.start])
+        pos = max(pos, span.end)
+    out.append(source[pos:])
+    return "".join(out)
+
+
+def spans_for(language: str, source: str) -> list[Span] | None:
+    if language == "python":
+        return python_spans(source)
+    if language == "javascript":
+        return javascript_spans(source)
+    if language == "shell":
+        return shell_spans(source)
+    raise ValueError(f"no span extractor for {language}")
+
+
+def javascript_spans(source: str) -> list[Span] | None:
+    raise NotImplementedError  # Task 6
+
+
+def shell_spans(source: str) -> list[Span] | None:
+    raise NotImplementedError  # Task 7
+
+
+DOCSTRING_OPEN_RE = re.compile(r'^[rRbBuUfF]{0,2}("""|\'\'\'|"|\')')
+
+
+def _strip_line_marker(text: str, language: str) -> str:
+    marker = "//" if language == "javascript" else "#"
+    if text.startswith(marker):
+        text = text[len(marker):]
+        if text.startswith(" "):
+            text = text[1:]
+    return text.rstrip()
+
+
+def _block_comment_lines(raw: str, start_line: int) -> list[tuple[int, str]]:
+    """Lines of a /* */ comment with delimiters and leading * stripped."""
+    out: list[tuple[int, str]] = []
+    for k, line in enumerate(raw.split("\n")):
+        t = line.strip()
+        for prefix in ("/**", "/*"):
+            if t.startswith(prefix):
+                t = t[len(prefix):].strip()
+                break
+        if t.endswith("*/"):
+            t = t[:-2].strip()
+        if t.startswith("*"):
+            t = t[1:].strip()
+        out.append((start_line + k, t))
+    return out
+
+
+def _docstring_block(source: str, span: Span) -> Block:
+    raw = source[span.start:span.end]
+    m = DOCSTRING_OPEN_RE.match(raw)
+    quote = m.group(1) if m else '"""'
+    inner = raw[m.end():] if m else raw
+    if inner.endswith(quote):
+        inner = inner[: -len(quote)]
+    lines = inner.split("\n")
+    indents = [len(l) - len(l.lstrip()) for l in lines[1:] if l.strip()]
+    common = min(indents, default=0)
+    out = [(span.start_line, lines[0].strip())]
+    for k, line in enumerate(lines[1:], start=1):
+        out.append((span.start_line + k, line[common:].rstrip() if line.strip() else ""))
+    return Block("docstring", out)
+
+
+def comment_blocks(source: str, language: str) -> list[Block] | None:
+    """Group spans into prose blocks: line-comment runs merge, trailing
+    comments and block comments stand alone, docstrings stand alone."""
+    spans = spans_for(language, source)
+    if spans is None:
+        return None
+    starts = line_starts(source)
+    blocks: list[Block] = []
+    run: list[tuple[int, str]] = []
+    run_end_line = -2
+    run_indent = -1
+
+    def flush_run() -> None:
+        nonlocal run
+        if run:
+            blocks.append(Block("comment", run))
+            run = []
+
+    for span in spans:
+        if span.kind == "docstring":
+            flush_run()
+            blocks.append(_docstring_block(source, span))
+            continue
+        raw = source[span.start:span.end]
+        prefix = source[starts[span.start_line - 1]:span.start]
+        if raw.startswith("/*"):
+            flush_run()
+            blocks.append(Block("comment", _block_comment_lines(raw, span.start_line)))
+            continue
+        text = _strip_line_marker(raw, language)
+        if prefix.strip():  # code before the marker: a trailing comment
+            flush_run()
+            blocks.append(Block("comment", [(span.start_line, text)]))
+            run_end_line = -2
+            continue
+        if run and span.start_line == run_end_line + 1 and len(prefix) == run_indent:
+            run.append((span.start_line, text))
+        else:
+            flush_run()
+            run = [(span.start_line, text)]
+        run_end_line = span.start_line
+        run_indent = len(prefix)
+    flush_run()
+    return blocks
 
 
 def read_source(path: str) -> str | None:
