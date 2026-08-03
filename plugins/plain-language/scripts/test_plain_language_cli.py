@@ -268,5 +268,60 @@ class TestShellSpans(unittest.TestCase):
         self.assertEqual(self._texts(src), [])
 
 
+class TestSkipRules(unittest.TestCase):
+    def _refined(self, lines: list[tuple[int, str]], kind: str = "comment",
+                 language: str = "python") -> "cli.Block":
+        return cli.refine_block(cli.Block(kind, lines), language)
+
+    def test_shebang_skipped(self):
+        got = self._refined([(1, "!/usr/bin/env python3")])
+        self.assertEqual(got.skip_reason, "shebang")
+
+    def test_directive_lines_dropped(self):
+        self.assertEqual(self._refined([(3, "noqa: E501")]).skip_reason, "directive")
+        self.assertEqual(
+            self._refined([(3, "type: ignore[arg-type]")]).skip_reason, "directive")
+        self.assertEqual(
+            self._refined([(3, "eslint-disable-next-line no-console")],
+                          language="javascript").skip_reason, "directive")
+
+    def test_directive_mixed_with_prose_keeps_prose(self):
+        got = self._refined([(1, "Real sentence here."), (2, "pragma: no cover")])
+        self.assertIsNone(got.skip_reason)
+        self.assertEqual(got.lines, [(1, "Real sentence here.")])
+
+    def test_license_header_skipped(self):
+        got = self._refined([(1, "Copyright 2026 Example Corp."),
+                             (2, "Licensed under the MIT license.")])
+        self.assertEqual(got.skip_reason, "license")
+
+    def test_commented_out_code_skipped(self):
+        got = self._refined([(1, "x = compute(1)"), (2, "return x")])
+        self.assertEqual(got.skip_reason, "commented-code")
+
+    def test_doctest_dropped_from_docstring(self):
+        got = self._refined([(1, "Adds one."), (2, ""), (3, ">>> f(1)"), (4, "2")],
+                            kind="docstring")
+        self.assertIsNone(got.skip_reason)
+        self.assertEqual([t for _, t in got.lines if t.strip()], ["Adds one."])
+
+    def test_field_list_dropped_from_docstring(self):
+        got = self._refined([(1, "Does a thing."), (2, ""), (3, "Args:"),
+                             (4, "    x: the input")], kind="docstring")
+        self.assertEqual([t for _, t in got.lines if t.strip()], ["Does a thing."])
+        got = self._refined([(1, "Doc."), (2, ":param x: the input")], kind="docstring")
+        self.assertEqual([t for _, t in got.lines if t.strip()], ["Doc."])
+
+    def test_jsdoc_tags_dropped(self):
+        got = self._refined([(1, "Fetches a user."), (2, "@param id the id")],
+                            language="javascript")
+        self.assertEqual([t for _, t in got.lines if t.strip()], ["Fetches a user."])
+
+    def test_fenced_code_in_docstring_dropped(self):
+        got = self._refined([(1, "Example below."), (2, "```"), (3, "x = 1"),
+                             (4, "```")], kind="docstring")
+        self.assertEqual([t for _, t in got.lines if t.strip()], ["Example below."])
+
+
 if __name__ == "__main__":
     unittest.main()

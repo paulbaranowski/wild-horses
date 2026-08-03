@@ -479,6 +479,85 @@ def comment_blocks(source: str, language: str) -> list[Block] | None:
     return blocks
 
 
+DIRECTIVE_RE = re.compile(r"""(?xi)^\s*(?:
+      eslint-(?:disable|enable)\S*
+    | biome-ignore \b
+    | prettier-ignore \b
+    | @?ts-(?:ignore|expect-error|nocheck) \b
+    | noqa \b
+    | type:\s*ignore
+    | pragma \b
+    | pylint: | mypy: | ruff: | isort: | flake8:
+    | fmt:\s*(?:off|on)
+    | shellcheck \b
+    | istanbul \s+ ignore \b
+    | coverage: | markdownlint- | spellchecker: | cspell:
+    | vim: | vi: | emacs:
+    )""")
+LICENSE_RE = re.compile(r"(?i)\b(copyright|licen[cs]ed?|spdx-license-identifier)\b")
+FIELD_HEADER_RE = re.compile(
+    r"""(?x)^(?:
+        (?:Args|Arguments|Keyword\ Args|Kwargs|Returns?|Yields?|Raises|
+           Attributes|Parameters)\s*:\s*$
+      | :(?:param|returns?|rtype|raises|type|yields?|ivar|cvar)\b
+    )""")
+CODE_LINE_RE = re.compile(r"""(?x)
+      [;{}]\s*$
+    | ^\s*(?:def|class|return|import|from|if|elif|else:|for|while|try:|except
+            |const|let|var|function|export|await|print)\b
+    | ^\s*[A-Za-z_][\w.\[\]]*\s*(?:=|\+=|-=)\s
+    | ^\s*[A-Za-z_][\w.]*\(.*\)\s*$
+""")
+
+
+def refine_block(block: Block, language: str) -> Block:
+    """Drop non-prose lines; mark fully non-prose blocks with a skip reason."""
+    lines = list(block.lines)
+    reasons: list[str] = []
+    if lines and lines[0][0] == 1 and lines[0][1].startswith("!"):
+        lines = lines[1:]
+        reasons.append("shebang")
+    kept: list[tuple[int, str]] = []
+    in_fence = in_doctest = in_fields = False
+    for lineno, text in lines:
+        stripped = text.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            reasons.append("fenced-code")
+            continue
+        if in_fence:
+            continue
+        if block.kind == "docstring" and FIELD_HEADER_RE.match(stripped):
+            in_fields = True
+        if language == "javascript" and stripped.startswith("@"):
+            in_fields = True
+        if in_fields:
+            reasons.append("field-list")
+            continue
+        if stripped.startswith(">>>"):
+            in_doctest = True
+        if in_doctest:
+            if not stripped:
+                in_doctest = False
+            else:
+                reasons.append("doctest")
+                continue
+        if DIRECTIVE_RE.match(stripped):
+            reasons.append("directive")
+            continue
+        kept.append((lineno, text))
+    nonempty = [t for _, t in kept if t.strip()]
+    if not nonempty:
+        return replace(block, lines=kept,
+                       skip_reason=reasons[0] if reasons else "empty")
+    if LICENSE_RE.search("\n".join(nonempty)):
+        return replace(block, lines=kept, skip_reason="license")
+    codeish = sum(1 for t in nonempty if CODE_LINE_RE.search(t))
+    if len(nonempty) >= 2 and codeish * 2 >= len(nonempty):
+        return replace(block, lines=kept, skip_reason="commented-code")
+    return replace(block, lines=kept, skip_reason=None)
+
+
 def read_source(path: str) -> str | None:
     """Bytes in, exact text out. None when the file is not UTF-8 text."""
     try:
