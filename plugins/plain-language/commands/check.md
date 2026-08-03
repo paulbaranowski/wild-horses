@@ -32,13 +32,25 @@ and read the siblings alongside it.
 
    For PR scope, add `--changed-lines -` and pipe the map per `scope.md`.
 
-4. Judge every `banned-token` hit: read its sentence and decide literal or
-   figurative, per `standard.md`. Literal uses pass. Figurative uses are
-   violations.
+4. Judge every candidate hit against `standard.md`, including its "What not
+   to flag" section. Six kinds are candidates, not verdicts:
+   - `banned-token`: read the sentence and decide literal or figurative.
+     Literal uses pass. Figurative uses are violations.
+   - `filler-phrase`: a violation when the phrase carries no fact. It passes
+     when the sentence needs those words.
+   - `copula-avoidance`: a violation when "is", "are", or "has" says the same
+     thing. It passes when the verb carries real meaning.
+   - `empty-phrase`: a violation when the phrase promises depth and names
+     nothing. It passes when the sentence goes on to name the thing.
+   - `dash-substitute`: a violation when the character does an em-dash's job.
+     A number range passes.
+   - `diff-anchored`: a violation when the prose narrates a change the reader
+     cannot see. It passes in a changelog, a release note, or a migration
+     guide, because those documents are about a change.
 5. Report in this order. First the totals by kind. Then, per file, each
-   violation with its line number and sentence. Then the banned tokens you
-   judged literal and left. Then the files skipped, with reasons, and the
-   blocks skipped, grouped by reason. Last, any parse errors.
+   violation with its line number and sentence. Then the candidate hits you
+   judged correct and left, grouped by kind. Then the files skipped, with
+   reasons, and the blocks skipped, grouped by reason. Last, any parse errors.
 
 When violations exist, end with this line: run `/plain-language:apply` with
 the same argument to fix them.
@@ -47,7 +59,8 @@ the same argument to fix them.
 
 - **Don't edit any file.** This command reports only; `/plain-language:apply`
   is the one that rewrites.
-- **Don't report a `banned-token` hit as a violation before judging it.**
-  Literal uses of these words are correct and stay.
+- **Don't report a candidate hit as a violation before judging it.** All six
+  candidate kinds have correct uses, and those stay. Read "What not to flag"
+  in `standard.md` before you rule.
 - **Don't hide skipped files or blocks.** A reader needs to know what the
   scan did not cover.

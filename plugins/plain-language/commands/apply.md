@@ -37,12 +37,33 @@ and read the siblings alongside it.
    - Turn passives active where the actor is known.
    - Replace figurative banned tokens with the real name. Leave literal uses,
      and leave hits in blocks the scanner skipped.
+   - Cut each `filler-phrase` hit that carries no fact, or use the short form
+     from `standard.md`. Keep the phrase when the sentence needs those words.
+   - Rewrite each `copula-avoidance` hit around "is", "are", or "has". Keep
+     the verb when it carries real meaning.
+   - Replace each `empty-phrase` hit with the thing it gestures at. Cut the
+     sentence when no real name exists.
+   - Rewrite each `dash-substitute` hit the way you rewrite an em-dash. Leave
+     an en-dash inside a number range.
+   - Rewrite each `diff-anchored` hit to describe the thing as it is now.
+     Leave the hit in a changelog, a release note, or a migration guide.
    - In code files, edit comment and docstring interiors only. In markdown,
      never touch fences, inline code, frontmatter, URLs, or table shape.
-5. Re-run the scanner. Repeat step 4 until `long-sentence` and `em-dash`
+
+   Judge each candidate against "What not to flag" in `standard.md` before
+   you edit it. A correct use stays.
+
+5. Audit each rewrite before you move on. Ask: does it state a fact, a name,
+   a number, a date, or a path that the original did not? Splitting a long
+   sentence is where this happens. The second half needs a subject, and an
+   invented one reads fluently. `verify` cannot catch it, because a made-up
+   claim inside a comment leaves the code byte-identical. Restore the fact
+   from the original, or write the sentence without it.
+6. Re-run the scanner. Repeat step 4 until `long-sentence` and `em-dash`
    totals reach zero in scope, up to 5 passes. If violations remain after 5
-   passes, stop and report them honestly.
-6. Verify every touched file:
+   passes, stop and report them honestly. The six candidate kinds never gate
+   the loop: a hit you judged correct stays, and it would never clear.
+7. Verify every touched file:
 
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plain_language_cli.py" verify --ref HEAD FILE...
@@ -52,11 +73,12 @@ and read the siblings alongside it.
    means the edit touched protected content. Restore that file from its
    baseline and redo the rewrite.
 
-7. If the repo has a test suite, run it. Docstring edits can break doctests
+8. If the repo has a test suite, run it. Docstring edits can break doctests
    and doc tooling.
-8. Report the files touched and the violations fixed, by kind. Then the
-   banned tokens judged literal and left, the files and blocks skipped by
-   reason, and the test-suite result. Committing stays with the user.
+9. Report the files touched and the violations fixed, by kind. Then the
+   candidate hits you judged correct and left, grouped by kind. Then the
+   files and blocks skipped by reason, and the test-suite result. Committing
+   stays with the user.
 
 ## Don't
 
@@ -65,5 +87,8 @@ and read the siblings alongside it.
 - **Don't delete a comment because it looks redundant.** Whether a comment
   should exist is review's call, not this command's.
 - **Don't meet the cap by dropping facts.** Split the sentence instead.
+- **Don't add a fact the original did not state.** No name, number, date,
+  path, or reason that you cannot point to in the source text. A rewrite
+  that reads better and claims more is a defect, and `verify` will pass it.
 - **Don't skip the verify step, even for a one-line edit.**
 - **Don't commit.** Leave the worktree diff for the user.

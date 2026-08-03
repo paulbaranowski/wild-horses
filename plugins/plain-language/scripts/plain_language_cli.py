@@ -4,13 +4,16 @@
 Deterministic checks for the plain-language writing standard. Two subcommands:
 
 - ``scan`` extracts prose blocks (comments, docstrings, markdown paragraphs)
-  and reports violations: long-sentence, em-dash, banned-token.
+  and reports violations. Two are verdicts: long-sentence and em-dash. Six
+  are candidates the model rules on: banned-token, filler-phrase,
+  copula-avoidance, empty-phrase, dash-substitute, diff-anchored.
 - ``verify`` proves an edit touched prose only. Comment mode: the
   comment-stripped file is byte-identical to the baseline's stripped form.
   Prose mode: fences, inline code spans, frontmatter, link URLs, and table
   shapes are unchanged.
 
-Judgment stays with the model. Banned tokens are candidates, not verdicts.
+Judgment stays with the model. A candidate hit is a place to look, not a
+verdict.
 Both subcommands print JSON on stdout. ``scan`` exits 0 whenever it ran.
 ``verify`` exits 1 when protected content changed, 2 on usage errors.
 """
@@ -32,10 +35,19 @@ from typing import Literal, NamedTuple, TypedDict
 WORD_CAP = 20
 EM_DASH = "\u2014"
 
+# Verdicts: the scanner decides alone, and `apply` loops until both reach
+# zero. Candidates: the scanner finds a hit, and the model rules on it in
+# context. A candidate never gates the loop, because a hit judged correct
+# stays in the text and would never clear.
+VerdictKind = Literal["long-sentence", "em-dash"]
+CandidateKind = Literal["banned-token", "filler-phrase", "copula-avoidance",
+                        "empty-phrase", "dash-substitute", "diff-anchored"]
 # The kinds `check_block` can emit. `empty_report` builds its counters from
 # this tuple, so a new kind cannot land without its counter.
-ViolationKind = Literal["long-sentence", "em-dash", "banned-token"]
-VIOLATION_KINDS: tuple[ViolationKind, ...] = ("long-sentence", "em-dash", "banned-token")
+ViolationKind = VerdictKind | CandidateKind
+VIOLATION_KINDS: tuple[ViolationKind, ...] = (
+    "long-sentence", "em-dash", "banned-token", "filler-phrase",
+    "copula-avoidance", "empty-phrase", "dash-substitute", "diff-anchored")
 
 BlockKind = Literal["comment", "docstring", "paragraph", "heading", "table-cell"]
 SpanKind = Literal["comment", "docstring"]
@@ -83,19 +95,23 @@ class LongSentenceViolation(TypedDict):
     sentence: str
 
 
-class BannedTokenViolation(TypedDict):
-    kind: Literal["banned-token"]
+class CandidateViolation(TypedDict):
+    """Every candidate kind reports the same way. The payload carries the
+    text that matched, plus the sentence the model needs to rule on it."""
+    kind: CandidateKind
     line: int
     token: str
     sentence: str
 
 
-Violation = EmDashViolation | LongSentenceViolation | BannedTokenViolation
+Violation = EmDashViolation | LongSentenceViolation | CandidateViolation
 
 # Hyphenated wire keys, so the functional form keeps the names exact. Every
 # ViolationKind needs an entry here; cmd_scan tallies straight into it.
 Totals = TypedDict("Totals", {
     "long-sentence": int, "em-dash": int, "banned-token": int,
+    "filler-phrase": int, "copula-avoidance": int, "empty-phrase": int,
+    "dash-substitute": int, "diff-anchored": int,
     "files_scanned": int, "files_clean": int,
 })
 
@@ -169,6 +185,112 @@ class VerifyReport(TypedDict):
 BANNED_RE = re.compile(
     r"(?<![\w-])(blast\s+radius|load[-\s]bearing|seams?|spines?|surfaces?|halves|half)(?![\w-])",
     re.IGNORECASE)
+
+
+def _phrase_alt(*phrases: str) -> str:
+    """One alternation group from literal phrases, matched across line breaks.
+
+    A block joins its lines with "\\n", so a phrase can straddle two lines.
+    Every space becomes ``\\s+`` so the match survives the wrap.
+
+    The caller controls precedence. Python alternation is leftmost-first,
+    not longest. A phrase must precede any shorter phrase it contains.
+    """
+    return "|".join(p.replace(" ", r"\s+") for p in phrases)
+
+
+# Filler and hedging from the standard. Longer phrases first: "due to the
+# fact that" has to win over "the fact that".
+FILLER_RE = re.compile(
+    r"(?<![\w-])(" + _phrase_alt(
+        "due to the fact that",
+        "at this point in time",
+        "as a matter of fact",
+        "at the end of the day",
+        "in the event that",
+        "for the purpose of",
+        "in the process of",
+        "needless to say",
+        "in order to",
+        "in terms of",
+        "the fact that",
+        "a number of",
+    ) + r"|it\s+(?:is|should\s+be)\s+(?:important\s+to\s+note|noted|worth\s+noting)(?:\s+that)?"
+    r"|it\s+could\s+be\s+argued(?:\s+that)?"
+    r"|ha(?:s|ve|d)\s+the\s+ability\s+to"
+    r"|(?:could|may|might)\s+(?:potentially|possibly)"
+    r")(?![\w-])", re.IGNORECASE)
+
+# Copula avoidance: an elaborate verb standing in for "is", "are", or "has".
+# "a" and "an" gate the transitive hits so the nouns ("the marks", "two
+# features") do not match on their own.
+COPULA_RE = re.compile(
+    r"(?<![\w-])("
+    r"(?:serves?|served|stands?|stood|functions?|functioned)\s+as"
+    r"|(?:represents?|represented|marks?|marked|features?|featured)\s+an?"
+    r"|boasts?|boasted"
+    r")(?![\w-])", re.IGNORECASE)
+
+# Ceremony that sounds decisive and names nothing. Two shapes hit most
+# often. One claims to cut through to a deeper truth. The other announces
+# the writing instead of doing it.
+EMPTY_PHRASE_RE = re.compile(
+    r"(?<![\w-])(" + _phrase_alt(
+        "the real question is",
+        "the deeper issue",
+        "the heart of the matter",
+        "what really matters",
+        "at its core",
+        "in reality",
+        "fundamentally",
+        "here is what you need to know",
+        "here's what you need to know",
+        "without further ado",
+        "let us dive in",
+    ) + r"|let'?s\s+(?:dive\s+in|explore|look\s+at|break\s+(?:this|it)\s+down)"
+    r"|now\s+let'?s\s+(?:look\s+at|turn\s+to)"
+    r")(?![\w-])", re.IGNORECASE)
+
+# A dash the standard does not want, written as something other than U+2014.
+# All three arms use lookarounds, so group 1 is the dash by itself. Digit
+# ranges ("2020-2024" with an en-dash) stay legal and never match.
+DASH_SUBSTITUTE_RE = re.compile(
+    r"((?<=\s)–(?=\s)"          # spaced en-dash
+    r"|(?<=[A-Za-z])–(?=[A-Za-z])"  # letter-glued en-dash
+    r"|(?<=\s)--(?=\s))")            # spaced double hyphen
+
+# Prose that narrates a change instead of describing the thing as it is.
+# Legal in a changelog, a release note, or a migration guide. The model
+# rules on which document it is reading.
+DIFF_ANCHORED_RE = re.compile(
+    r"(?<![\w-])(" + _phrase_alt(
+        "instead of the old",
+        "the previous approach",
+        "the previous version",
+        "the previous implementation",
+        "the old approach",
+        "the old version",
+        "the old implementation",
+        "as of this commit",
+        "in this pr",
+        "this change",
+        "used to be",
+        "previously",
+        "formerly",
+    ) + r"|(?:was|were)\s+(?:added|removed|renamed|replaced)"
+    r"|(?:has|have)\s+been\s+(?:replaced|renamed|removed)"
+    r"|we\s+(?:changed|replaced|removed|renamed)"
+    r")(?![\w-])", re.IGNORECASE)
+
+# The order the scanner reports candidate hits in, per sentence.
+CANDIDATE_PATTERNS: tuple[tuple[CandidateKind, re.Pattern[str]], ...] = (
+    ("banned-token", BANNED_RE),
+    ("filler-phrase", FILLER_RE),
+    ("copula-avoidance", COPULA_RE),
+    ("empty-phrase", EMPTY_PHRASE_RE),
+    ("dash-substitute", DASH_SUBSTITUTE_RE),
+    ("diff-anchored", DIFF_ANCHORED_RE),
+)
 
 # Tokens like "e.g." must not end a sentence. Compared lowercase, dots kept.
 ABBREVIATIONS = {"e.g", "i.e", "etc", "vs", "cf", "ca", "approx", "resp",
@@ -278,6 +400,11 @@ def _mask_code_spans(text: str) -> str:
     return CODE_SPAN_RE.sub(lambda m: "x" * len(m.group(0)), text)
 
 
+def _matched_token(m: re.Match[str]) -> str:
+    """The match, lowercased, with any line break collapsed to one space."""
+    return " ".join(m.group(1).lower().split())
+
+
 def block_text(block: Block) -> str:
     return "\n".join(t for _, t in block.lines)
 
@@ -308,10 +435,13 @@ def check_block(block: Block) -> list[Violation]:
         if block.kind != "heading" and words > WORD_CAP:
             violations.append({"kind": "long-sentence", "line": line,
                                "word_count": words, "sentence": sentence})
-        for m in BANNED_RE.finditer(_mask_code_spans(sentence)):
-            violations.append({"kind": "banned-token", "line": line,
-                               "token": " ".join(m.group(1).lower().split()),
-                               "sentence": sentence})
+        # One masked copy, one pass per candidate kind, in table order.
+        masked = _mask_code_spans(sentence)
+        for kind, pattern in CANDIDATE_PATTERNS:
+            for m in pattern.finditer(masked):
+                violations.append({"kind": kind, "line": line,
+                                   "token": _matched_token(m),
+                                   "sentence": sentence})
     return violations
 
 

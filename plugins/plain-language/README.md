@@ -26,9 +26,12 @@ rewritten inline) and no argument (the current branch's changed files). See
   the baseline's.
 - In markdown, fences, inline code spans, frontmatter, link URLs, and table
   shapes survive every run, proven the same way.
-- Deterministic checks (sentence caps, em-dash counts, banned-token
-  candidates) live in the stdlib-only `scripts/plain_language_cli.py`.
-  Judgment calls (literal vs figurative) stay with the model.
+- Deterministic checks live in the stdlib-only
+  `scripts/plain_language_cli.py`. Two kinds are verdicts: the 20-word
+  sentence cap and the em-dash. Six kinds are candidates, and the model
+  judges each hit in context. Those six are figurative tokens, filler
+  phrases, copula substitutes, empty phrases, dash substitutes, and change
+  narration.
 - The plugin never commits. It edits the worktree and reports.
 
 ## Drift gate

@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import get_args
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plain_language_cli as cli
@@ -126,6 +127,121 @@ class TestChecks(unittest.TestCase):
 
     def test_banned_token_in_code_span_ignored(self):
         self.assertEqual(cli.check_block(self._block("call `surface()` here")), [])
+
+    def _tokens(self, kind: str, *lines: str) -> set[str]:
+        return {v["token"] for v in cli.check_block(self._block(*lines))
+                if "token" in v and v["kind"] == kind}
+
+    def test_filler_phrase_candidate(self):
+        sentence = "We cache in order to save time."
+        self.assertEqual(cli.check_block(self._block(sentence)), [
+            {"kind": "filler-phrase", "line": 1, "token": "in order to",
+             "sentence": sentence}])
+
+    def test_filler_longest_phrase_wins(self):
+        # "the fact that" sits inside "due to the fact that". One hit, not two.
+        self.assertEqual(self._tokens("filler-phrase",
+                                      "It failed due to the fact that disk was full."),
+                         {"due to the fact that"})
+
+    def test_filler_phrase_across_a_line_break(self):
+        self.assertEqual(self._tokens("filler-phrase", "It has the", "ability to run."),
+                         {"has the ability to"})
+
+    def test_filler_hedge_pair(self):
+        self.assertEqual(self._tokens("filler-phrase", "This could potentially break."),
+                         {"could potentially"})
+
+    def test_filler_phrase_in_code_span_ignored(self):
+        self.assertEqual(self._tokens("filler-phrase", "pass `--in order to` here"), set())
+
+    def test_filler_substring_of_a_word_ignored(self):
+        self.assertEqual(self._tokens("filler-phrase", "The reorder mode is off."), set())
+
+    def test_copula_avoidance_candidate(self):
+        sentence = "The cache serves as the fallback."
+        self.assertEqual(cli.check_block(self._block(sentence)), [
+            {"kind": "copula-avoidance", "line": 1, "token": "serves as",
+             "sentence": sentence}])
+
+    def test_copula_bare_boast(self):
+        self.assertEqual(self._tokens("copula-avoidance", "The gallery boasts three rooms."),
+                         {"boasts"})
+
+    def test_copula_needs_an_article(self):
+        # The nouns stay clear: only "features a"/"features an" is a candidate.
+        self.assertEqual(self._tokens("copula-avoidance", "Two features remain."), set())
+        self.assertEqual(self._tokens("copula-avoidance", "The build features a flag."),
+                         {"features a"})
+
+    def test_copula_in_code_span_ignored(self):
+        self.assertEqual(self._tokens("copula-avoidance", "call `serves as` here"), set())
+
+    def test_empty_phrase_authority_trope(self):
+        self.assertEqual(self._tokens("empty-phrase", "At its core, it caches."),
+                         {"at its core"})
+
+    def test_empty_phrase_signposting(self):
+        self.assertEqual(self._tokens("empty-phrase", "Let's dive in to the parser."),
+                         {"let's dive in"})
+
+    def test_empty_phrase_not_double_counted_with_filler(self):
+        # "at the end of the day" belongs to filler alone. One kind claims it.
+        v = cli.check_block(self._block("At the end of the day it ships."))
+        self.assertEqual([x["kind"] for x in v], ["filler-phrase"])
+
+    def test_dash_substitute_spaced_en_dash(self):
+        self.assertEqual(self._tokens("dash-substitute", "the policy – announced late"),
+                         {"–"})
+
+    def test_dash_substitute_glued_en_dash(self):
+        self.assertEqual(self._tokens("dash-substitute", "a client–server split"),
+                         {"–"})
+
+    def test_dash_substitute_spaced_double_hyphen(self):
+        self.assertEqual(self._tokens("dash-substitute", "the fix -- long overdue -- landed"),
+                         {"--"})
+
+    def test_dash_substitute_leaves_digit_ranges(self):
+        self.assertEqual(self._tokens("dash-substitute", "It ran 2020–2024 without a break."),
+                         set())
+
+    def test_dash_substitute_leaves_flags_and_hyphens(self):
+        self.assertEqual(self._tokens("dash-substitute", "pass --full to a well-known path"),
+                         set())
+
+    def test_dash_substitute_in_code_span_ignored(self):
+        self.assertEqual(self._tokens("dash-substitute", "run `a -- b` now"), set())
+
+    def test_em_dash_stays_its_own_kind(self):
+        # U+2014 is a verdict; the substitutes are candidates. Never merged.
+        v = cli.check_block(self._block("a — b and c – d"))
+        self.assertEqual(sorted({x["kind"] for x in v}),
+                         ["dash-substitute", "em-dash"])
+
+    def test_diff_anchored_narration(self):
+        self.assertEqual(self._tokens("diff-anchored", "This helper was added to fix it."),
+                         {"was added"})
+
+    def test_diff_anchored_previous_approach(self):
+        self.assertEqual(self._tokens("diff-anchored", "It beats the previous approach."),
+                         {"the previous approach"})
+
+    def test_diff_anchored_ignores_used_to_as_purpose(self):
+        # "used to hold" is a purpose, not a history. Only "used to be" hits.
+        self.assertEqual(self._tokens("diff-anchored", "The buffer used to hold results."),
+                         set())
+        self.assertEqual(self._tokens("diff-anchored", "The buffer used to be smaller."),
+                         {"used to be"})
+
+    def test_every_violation_kind_has_a_total(self):
+        totals = cli.empty_report()["totals"]
+        for kind in cli.VIOLATION_KINDS:
+            self.assertIn(kind, totals)
+
+    def test_candidate_patterns_cover_every_candidate_kind(self):
+        self.assertEqual({k for k, _ in cli.CANDIDATE_PATTERNS},
+                         set(get_args(cli.CandidateKind)))
 
     def test_heading_exempt_from_cap(self):
         words = " ".join(["word"] * 25)
