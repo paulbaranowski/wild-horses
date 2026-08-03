@@ -8,9 +8,9 @@ argument-hint: "[path | PR number or URL | free text] [--full]"
 Report where prose breaks the plain-language standard. This command never
 edits a file.
 
-Bundled assets at `${CLAUDE_PLUGIN_ROOT}` (if the variable is not
-substituted in this context, find the files with
-`Glob "**/plain-language/standard.md"` and read the siblings alongside it):
+Bundled assets at `${CLAUDE_PLUGIN_ROOT}`. If the variable is not substituted
+in this context, find the files with `Glob "**/plain-language/standard.md"`
+and read the siblings alongside it.
 
 - `standard.md` - the writing standard.
 - `scope.md` - scope resolution, the extension table, the changed-lines map.
@@ -35,9 +35,10 @@ substituted in this context, find the files with
 4. Judge every `banned-token` hit: read its sentence and decide literal or
    figurative, per `standard.md`. Literal uses pass. Figurative uses are
    violations.
-5. Report, in this order: totals by kind; per file, each violation with its
-   line number and sentence; banned tokens judged literal and left; files
-   skipped, with reasons; blocks skipped, grouped by reason; parse errors.
+5. Report in this order. First the totals by kind. Then, per file, each
+   violation with its line number and sentence. Then the banned tokens you
+   judged literal and left. Then the files skipped, with reasons, and the
+   blocks skipped, grouped by reason. Last, any parse errors.
 
 When violations exist, end with this line: run `/plain-language:apply` with
 the same argument to fix them.

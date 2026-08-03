@@ -8,9 +8,9 @@ argument-hint: "[path | PR number or URL | free text] [--full]"
 Rewrite prose until the scanner reports zero long-sentence and em-dash
 violations. Code never changes; the `verify` subcommand proves it.
 
-Bundled assets at `${CLAUDE_PLUGIN_ROOT}` (if the variable is not
-substituted in this context, find the files with
-`Glob "**/plain-language/standard.md"` and read the siblings alongside it):
+Bundled assets at `${CLAUDE_PLUGIN_ROOT}`. If the variable is not substituted
+in this context, find the files with `Glob "**/plain-language/standard.md"`
+and read the siblings alongside it.
 
 - `standard.md` - the writing standard.
 - `scope.md` - scope resolution, the extension table, the changed-lines map.
@@ -49,14 +49,14 @@ substituted in this context, find the files with
    ```
 
    Use `--baseline <copy>` for files snapshotted in step 2. A non-zero exit
-   means the edit touched protected content: restore that file from its
-   baseline and redo it.
+   means the edit touched protected content. Restore that file from its
+   baseline and redo the rewrite.
 
 7. If the repo has a test suite, run it. Docstring edits can break doctests
    and doc tooling.
-8. Report: files touched; violations fixed, by kind; banned tokens judged
-   literal and left; files and blocks skipped, by reason; test-suite result.
-   Committing stays with the user.
+8. Report the files touched and the violations fixed, by kind. Then the
+   banned tokens judged literal and left, the files and blocks skipped by
+   reason, and the test-suite result. Committing stays with the user.
 
 ## Don't
 

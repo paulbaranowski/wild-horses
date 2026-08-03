@@ -25,6 +25,7 @@ The plugins group into four themes. Each one-liner below links to the full plugi
 - **[pyright](#pyright)** — run pyright on a Python codebase and fix what it finds, using a documented playbook of fix patterns.
 - **[harness](#harness)** — diagnose where an agent would misread your code (`/harness:reasoning-gaps`) or couldn't tell whether it succeeded (`/harness:feedback-blockers`), then build, run, and inspect a remediation task list.
 - **[linting-hooks](#linting-hooks)** — auto-lint Markdown and Python the moment Claude edits them.
+- **[plain-language](#plain-language)** — rewrite prose to a 20-word-sentence standard, with a CLI that proves the code stayed byte-identical.
 
 Run comprehension, then types, then observability on a PR or feature branch — `/harness:reasoning-gaps`, then `/pyright:run-and-fix` (Python), then `/harness:feedback-blockers`. Each asks a harder question than the last. Install **[linting-hooks](#linting-hooks)** once so Markdown and Python edits auto-lint as you go.
 
@@ -172,6 +173,19 @@ PostToolUse hooks that lint Markdown and Python files immediately after Claude e
 
 See **[plugins/linting-hooks/README.md](plugins/linting-hooks/README.md)** for the bundled hooks and install behavior.
 
+### [plain-language](plugins/plain-language/README.md)
+
+Apply the plain-language writing standard (adapted from ASD-STE100 Simplified Technical English) to prose anywhere in a repo: code comments, docstrings, markdown, plain text, or pasted text. `check` reports long sentences, em-dashes, and figurative tokens; `apply` rewrites until the scan is clean. A bundled stdlib CLI then proves the edit touched prose only, by comparing the comment-stripped file against its baseline byte for byte.
+
+```text
+/plugin install plain-language@wild-horses
+
+/plain-language:check                    # report violations on the branch diff
+/plain-language:apply src/               # rewrite a directory until clean
+```
+
+See **[plugins/plain-language/README.md](plugins/plain-language/README.md)** for scope forms, guarantees, and the drift-gate example.
+
 ### [codepath-visualizer](plugins/codepath-visualizer/README.md)
 
 Map and visualize codepaths in any codebase as an interactive architecture diagram. `/codepath-mapper` walks entry points and extracts call chains into a structured JSON file; `/codepath-visualizer` renders the resulting graph as an interactive HTML diagram you can explore in the browser. Scope the mapper to a user-facing flow (e.g. "invite new user") to produce a focused diagram of just that path.
@@ -255,12 +269,12 @@ Then restart Cursor (**Developer: Reload Window**) and open **Customize** to ena
 
 Hook plugins and their Cursor equivalents:
 
-| Plugin                                                                       | Cursor hook event       | Notes                                 |
-| ---------------------------------------------------------------------------- | ----------------------- | ------------------------------------- |
-| `linting-hooks`                                                              | `postToolUse` (`Write`) | Run `/linting-hooks:install` for deps |
-| `pr-status-hook`                                                             | `stop`                  | Banner prints to Hooks stderr         |
-| `harness`, `plan-keeper`, `update-git-repos`, `cleanup-worktrees`, `wild-pr` | `preToolUse` (`Shell`)  | Auto-approve bounded plugin CLIs      |
-| `yes-no-questions-hook`                                                      | _(rule, not hook)_      | Ships as `rules/yes-no-questions.mdc` |
+| Plugin                                                                                         | Cursor hook event       | Notes                                 |
+| ---------------------------------------------------------------------------------------------- | ----------------------- | ------------------------------------- |
+| `linting-hooks`                                                                                | `postToolUse` (`Write`) | Run `/linting-hooks:install` for deps |
+| `pr-status-hook`                                                                               | `stop`                  | Banner prints to Hooks stderr         |
+| `harness`, `plan-keeper`, `update-git-repos`, `cleanup-worktrees`, `wild-pr`, `plain-language` | `preToolUse` (`Shell`)  | Auto-approve bounded plugin CLIs      |
+| `yes-no-questions-hook`                                                                        | _(rule, not hook)_      | Ships as `rules/yes-no-questions.mdc` |
 
 ## Development
 
@@ -287,6 +301,7 @@ python3 -m unittest discover -s plugins/plan-keeper/scripts/tests
 python3 -m unittest discover -s plugins/update-git-repos/scripts -p 'test_update_repos_cli.py'
 python3 -m unittest discover -s plugins/codepath-visualizer/skills/codepath-mapper -p 'test_codepaths_cli.py'
 python3 -m unittest discover -s plugins/cleanup-worktrees/scripts -p 'test_cleanup_worktrees_cli.py'
+python3 -m unittest discover -s plugins/plain-language/scripts -p 'test_plain_language_cli.py'
 ```
 
 The harness task-list CLI uses pytest via [uv](https://docs.astral.sh/uv/):

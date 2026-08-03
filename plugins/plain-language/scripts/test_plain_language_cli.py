@@ -72,6 +72,13 @@ class TestSentences(unittest.TestCase):
         got = [s for _, s in cli.split_sentences("Ask J. Smith about it.")]
         self.assertEqual(len(got), 1)
 
+    def test_possessive_ends_a_sentence(self):
+        # "baseline's." must terminate: the trailing "s" is a possessive,
+        # not an initial like the "J." above.
+        got = [s for _, s in cli.split_sentences(
+            "It matches the baseline's. Then it stops.")]
+        self.assertEqual(got, ["It matches the baseline's.", "Then it stops."])
+
     def test_offsets_point_into_text(self):
         text = "First one. Second one."
         for off, s in cli.split_sentences(text):
@@ -186,6 +193,31 @@ class TestPythonSpans(unittest.TestCase):
         a = cli.strip_spans(PY_SAMPLE, py_spans(PY_SAMPLE))
         b = cli.strip_spans(edited, py_spans(edited))
         self.assertEqual(a, b)
+
+    def test_strip_is_stable_when_a_comment_gains_lines(self):
+        # Splitting one long sentence across more comment lines is the core
+        # move of `apply`; it must not read as a code change.
+        before = "# one long sentence here\nx = 1\n"
+        after = "# one long sentence.\n# Here is the rest.\nx = 1\n"
+        self.assertEqual(cli.strip_spans(before, py_spans(before)),
+                         cli.strip_spans(after, py_spans(after)))
+
+    def test_strip_is_stable_for_indented_comment_lines(self):
+        before = "def f():\n    # a sentence\n    return 1\n"
+        after = "def f():\n    # a sentence.\n    # And another.\n    return 1\n"
+        self.assertEqual(cli.strip_spans(before, py_spans(before)),
+                         cli.strip_spans(after, py_spans(after)))
+
+    def test_strip_keeps_trailing_comment_line_intact(self):
+        # A trailing comment's line still holds code, so its newline stays.
+        src = "x = 1  # note\ny = 2\n"
+        self.assertEqual(cli.strip_spans(src, py_spans(src)), "x = 1\ny = 2\n")
+
+    def test_strip_still_detects_real_code_change(self):
+        before = "# c\nx = 1\n"
+        after = "# c\n# c2\nx = 2\n"
+        self.assertNotEqual(cli.strip_spans(before, py_spans(before)),
+                            cli.strip_spans(after, py_spans(after)))
 
 
 class TestBlockAssembly(unittest.TestCase):

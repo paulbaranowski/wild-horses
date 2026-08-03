@@ -116,8 +116,15 @@ def _is_abbreviation(text: str, dot: int) -> bool:
     while k >= 0 and (text[k].isalnum() or text[k] == "."):
         chars.append(text[k])
         k -= 1
-    token = "".join(reversed(chars)).lower().strip(".")
-    return bool(token) and (token in ABBREVIATIONS or len(token) == 1)
+    raw = "".join(reversed(chars)).strip(".")
+    if not raw:
+        return False
+    # A single letter is an initial ("Ask J. Smith") only when capitalized.
+    # A lowercase one is the tail of a possessive ("the baseline's."), which
+    # does end the sentence.
+    if len(raw) == 1:
+        return raw.isupper()
+    return raw.lower() in ABBREVIATIONS
 
 
 def word_count(sentence: str) -> int:
@@ -210,13 +217,34 @@ def python_spans(source: str) -> list[Span] | None:
     return sorted(spans)
 
 
+def _widen_comment_span(source: str, span: Span) -> tuple[int, int]:
+    """Grow a comment span to the whole line when nothing but whitespace
+    precedes it, trailing newline included.
+
+    Splitting one long sentence across more comment lines is what ``apply``
+    does. Cutting only the comment text would leave the added indent and
+    newline behind, and ``verify`` would read that as a code change. Widening
+    to whole lines makes the stripped code depend on the code alone. A
+    trailing comment keeps its newline, because its line still holds code.
+    """
+    if span.kind != "comment":
+        return span.start, span.end
+    line_start = source.rfind("\n", 0, span.start) + 1
+    prefix = source[line_start:span.start]
+    if prefix.strip():  # code before the marker: a trailing comment
+        return line_start + len(prefix.rstrip()), span.end
+    end = span.end + 1 if source[span.end:span.end + 1] == "\n" else span.end
+    return line_start, end
+
+
 def strip_spans(source: str, spans: list[Span]) -> str:
     """Source with every span sliced out. verify compares these strings."""
     out: list[str] = []
     pos = 0
     for span in sorted(spans):
-        out.append(source[pos:span.start])
-        pos = max(pos, span.end)
+        start, end = _widen_comment_span(source, span)
+        out.append(source[pos:max(pos, start)])
+        pos = max(pos, end)
     out.append(source[pos:])
     return "".join(out)
 
