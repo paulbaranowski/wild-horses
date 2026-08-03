@@ -213,5 +213,60 @@ class TestBlockAssembly(unittest.TestCase):
         self.assertIsNone(cli.comment_blocks("def f(:\n", "python"))
 
 
+class TestJavascriptSpans(unittest.TestCase):
+    def _kinds(self, src: str) -> list[tuple[str, int]]:
+        spans = cli.javascript_spans(src)
+        assert spans is not None
+        return [(src[s.start:s.end], s.start_line) for s in spans]
+
+    def test_line_and_block_comments(self):
+        src = "// lead\nconst x = 1; /* mid */\n"
+        self.assertEqual(self._kinds(src), [("// lead", 1), ("/* mid */", 2)])
+
+    def test_comment_markers_inside_strings_ignored(self):
+        src = 'const a = "// no";\nconst b = \'/* no */\';\nconst c = `// no ${d}`;\n'
+        self.assertEqual(self._kinds(src), [])
+
+    def test_regex_literal_not_a_comment(self):
+        src = "const re = /a\\/b/; // real\n"
+        self.assertEqual(self._kinds(src), [("// real", 1)])
+
+    def test_division_then_comment(self):
+        src = "const x = a / b; // half of it\n"
+        self.assertEqual(len(self._kinds(src)), 1)
+
+    def test_multiline_block(self):
+        src = "/*\n * one\n * two\n */\nlet x;\n"
+        spans = cli.javascript_spans(src)
+        assert spans is not None
+        self.assertEqual((spans[0].start_line, spans[0].end_line), (1, 4))
+
+    def test_jsx_and_ts_via_extension_map(self):
+        self.assertEqual(cli.EXTENSIONS[".tsx"], ("javascript", "comment"))
+
+
+class TestShellSpans(unittest.TestCase):
+    def _texts(self, src: str) -> list[str]:
+        spans = cli.shell_spans(src)
+        assert spans is not None
+        return [src[s.start:s.end] for s in spans]
+
+    def test_full_line_and_trailing(self):
+        src = "# lead\necho hi # trail\n"
+        self.assertEqual(self._texts(src), ["# lead", "# trail"])
+
+    def test_hash_in_quotes_ignored(self):
+        src = "echo '# no' \"# also no\"\n"
+        self.assertEqual(self._texts(src), [])
+
+    def test_param_expansion_ignored(self):
+        src = 'echo $# ${#var}\n'
+        self.assertEqual(self._texts(src), [])
+
+    def test_no_space_before_hash_ignored(self):
+        src = "echo foo#bar\n"
+        self.assertEqual(self._texts(src), [])
+
+
 if __name__ == "__main__":
     unittest.main()

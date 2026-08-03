@@ -229,12 +229,163 @@ def spans_for(language: str, source: str) -> list[Span] | None:
     raise ValueError(f"no span extractor for {language}")
 
 
+# After these, a "/" starts a regex literal, not division.
+_JS_REGEX_KEYWORDS = {"return", "typeof", "instanceof", "in", "of", "new",
+                      "delete", "void", "throw", "case", "do", "else",
+                      "yield", "await"}
+_JS_REGEX_PUNCT = set("=([{,;:!&|?+-*%^~<>")
+
+
 def javascript_spans(source: str) -> list[Span] | None:
-    raise NotImplementedError  # Task 6
+    """Comment spans via a small lexer.
+
+    Strings, template literals, and regex literals are skipped so their
+    contents never read as comments. Known v1 limits, safe because scan and
+    verify share this lexer: template interpolations are treated as template
+    text, and the regex heuristic is the standard prev-token test.
+    """
+    spans: list[Span] = []
+    i = 0
+    n = len(source)
+    line = 1
+    prev_char = ""   # last significant char outside comments and literals
+    prev_word = ""   # last identifier or keyword
+    word: list[str] = []
+    while i < n:
+        ch = source[i]
+        nxt = source[i + 1] if i + 1 < n else ""
+        if ch == "\n":
+            line += 1
+            i += 1
+            continue
+        if ch == "/" and nxt == "/":
+            start, start_line = i, line
+            while i < n and source[i] != "\n":
+                i += 1
+            spans.append(Span(start, i, "comment", start_line, start_line))
+            continue
+        if ch == "/" and nxt == "*":
+            start, start_line = i, line
+            i += 2
+            while i < n - 1 and not (source[i] == "*" and source[i + 1] == "/"):
+                if source[i] == "\n":
+                    line += 1
+                i += 1
+            i = min(i + 2, n)
+            spans.append(Span(start, i, "comment", start_line, line))
+            prev_char, prev_word, word = "", "", []
+            continue
+        if ch in "'\"":
+            i, line = _js_skip_quoted(source, i, line, ch)
+            prev_char, prev_word, word = ch, "", []
+            continue
+        if ch == "`":
+            i, line = _js_skip_quoted(source, i, line, "`", multiline=True)
+            prev_char, prev_word, word = "`", "", []
+            continue
+        if ch == "/":
+            regex_here = (prev_char == "" or prev_char in _JS_REGEX_PUNCT
+                          or prev_word in _JS_REGEX_KEYWORDS)
+            if regex_here:
+                i, line = _js_skip_regex(source, i, line)
+                prev_char, prev_word, word = "/", "", []
+                continue
+            prev_char, prev_word, word = ch, "", []
+            i += 1
+            continue
+        if ch.isalnum() or ch in "_$":
+            word.append(ch)
+            prev_char = ch
+            prev_word = "".join(word)
+        elif not ch.isspace():
+            prev_char, prev_word, word = ch, "", []
+        i += 1
+    return spans
+
+
+def _js_skip_quoted(source: str, i: int, line: int, quote: str,
+                    multiline: bool = False) -> tuple[int, int]:
+    i += 1
+    n = len(source)
+    while i < n:
+        ch = source[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == quote:
+            return i + 1, line
+        if ch == "\n":
+            if not multiline:
+                return i, line
+            line += 1
+        i += 1
+    return i, line
+
+
+def _js_skip_regex(source: str, i: int, line: int) -> tuple[int, int]:
+    i += 1
+    n = len(source)
+    in_class = False
+    while i < n:
+        ch = source[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "[":
+            in_class = True
+        elif ch == "]":
+            in_class = False
+        elif ch == "/" and not in_class:
+            return i + 1, line
+        elif ch == "\n":
+            return i, line
+        i += 1
+    return i, line
 
 
 def shell_spans(source: str) -> list[Span] | None:
-    raise NotImplementedError  # Task 7
+    """Comment spans for shell.
+
+    A ``#`` opens a comment when unquoted and at line start or after
+    whitespace. Quotes span lines, so quote state carries across newlines.
+    Heredoc bodies are lexed like ordinary lines; scan and verify share the
+    behavior, so the pair stays consistent.
+    """
+    spans: list[Span] = []
+    i = 0
+    n = len(source)
+    line = 1
+    in_single = in_double = False
+    at_line_start = True
+    prev = ""
+    while i < n:
+        ch = source[i]
+        if ch == "\n":
+            line += 1
+            at_line_start = True
+            prev = ""
+            i += 1
+            continue
+        if ch == "\\" and not in_single:
+            i += 2
+            prev = ""
+            at_line_start = False
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif (ch == "#" and not in_single and not in_double
+              and (at_line_start or prev.isspace())):
+            start = i
+            while i < n and source[i] != "\n":
+                i += 1
+            spans.append(Span(start, i, "comment", line, line))
+            continue
+        at_line_start = False
+        prev = ch
+        i += 1
+    return spans
 
 
 DOCSTRING_OPEN_RE = re.compile(r'^[rRbBuUfF]{0,2}("""|\'\'\'|"|\')')
