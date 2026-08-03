@@ -178,6 +178,21 @@ class TestPythonSpans(unittest.TestCase):
     def test_parse_failure_returns_none(self):
         self.assertIsNone(cli.python_spans("def f(:\n"))
 
+    def test_utf8_bom_still_parses(self):
+        # tokenize accepts a leading BOM but ast.parse rejects it, so a valid
+        # Windows-authored file must not read as a parse failure.
+        src = "﻿# bom comment\nx = 1\n"
+        spans = cli.python_spans(src)
+        assert spans is not None
+        self.assertEqual([src[s.start:s.end] for s in spans], ["# bom comment"])
+
+    def test_utf8_bom_keeps_docstring_offsets(self):
+        src = '﻿"""Doc line."""\nx = 1\n'
+        spans = cli.python_spans(src)
+        assert spans is not None
+        doc = [s for s in spans if s.kind == "docstring"]
+        self.assertEqual([src[s.start:s.end] for s in doc], ['"""Doc line."""'])
+
     def test_strip_removes_only_spans(self):
         stripped = cli.strip_spans(PY_SAMPLE, py_spans(PY_SAMPLE))
         self.assertNotIn("Module docstring here.", stripped)

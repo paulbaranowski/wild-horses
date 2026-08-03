@@ -191,17 +191,28 @@ def _offset(starts: list[int], line: int, col: int) -> int:
     return starts[line - 1] + col
 
 
+BOM = "﻿"
+
+
 def python_spans(source: str) -> list[Span] | None:
     starts = line_starts(source)
     spans: list[Span] = []
+    # tokenize accepts a leading BOM; ast.parse rejects it. Strip it for the
+    # parse and shift line-1 columns back, so a BOM file is not a false
+    # parse failure.
+    bom_shift = len(BOM) if source.startswith(BOM) else 0
     try:
         for tok in tokenize.generate_tokens(io.StringIO(source).readline):
             if tok.type == tokenize.COMMENT:
                 spans.append(Span(_offset(starts, *tok.start), _offset(starts, *tok.end),
                                   "comment", tok.start[0], tok.end[0]))
-        tree = ast.parse(source)
+        tree = ast.parse(source[bom_shift:])
     except (SyntaxError, tokenize.TokenError, ValueError):
         return None
+
+    def at(line: int, col: int) -> int:
+        return _offset(starts, line, col + (bom_shift if line == 1 else 0))
+
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             body = node.body
@@ -211,8 +222,7 @@ def python_spans(source: str) -> list[Span] | None:
                 c = body[0].value
                 end_lineno = c.end_lineno if c.end_lineno is not None else c.lineno
                 end_col = c.end_col_offset if c.end_col_offset is not None else 0
-                spans.append(Span(_offset(starts, c.lineno, c.col_offset),
-                                  _offset(starts, end_lineno, end_col),
+                spans.append(Span(at(c.lineno, c.col_offset), at(end_lineno, end_col),
                                   "docstring", c.lineno, end_lineno))
     return sorted(spans)
 
