@@ -323,5 +323,73 @@ class TestSkipRules(unittest.TestCase):
         self.assertEqual([t for _, t in got.lines if t.strip()], ["Example below."])
 
 
+MD_SAMPLE = """\
+---
+title: sample
+---
+
+# Heading words beyond twenty would still pass because headings are labels not sentences in this standard truly
+
+Intro paragraph with `code span` and a [link](https://example.com/x).
+
+```python
+code = "untouched"
+```
+
+- item one continues here
+- item two
+
+| Col A | Col B |
+| ----- | ----- |
+| cell prose | more prose |
+
+[ref]: https://example.com/ref
+"""
+
+
+class TestMarkdownExtraction(unittest.TestCase):
+    def setUp(self):
+        self.blocks, self.protected = cli.markdown_blocks(MD_SAMPLE)
+
+    def test_frontmatter_protected(self):
+        self.assertEqual(self.protected.frontmatter, "---\ntitle: sample\n---")
+
+    def test_fence_protected_and_not_prose(self):
+        self.assertEqual(len(self.protected.fences), 1)
+        self.assertIn('code = "untouched"', self.protected.fences[0])
+        joined = "\n".join(cli.block_text(b) for b in self.blocks)
+        self.assertNotIn("untouched", joined)
+
+    def test_heading_kind(self):
+        self.assertIn("heading", [b.kind for b in self.blocks])
+
+    def test_link_url_captured_text_kept(self):
+        self.assertIn("https://example.com/x", self.protected.link_urls)
+        self.assertIn("https://example.com/ref", self.protected.link_urls)
+        intro = next(b for b in self.blocks if "Intro" in cli.block_text(b))
+        self.assertIn("link", cli.block_text(intro))
+        self.assertNotIn("example.com/x", cli.block_text(intro))
+
+    def test_table_cells_and_shape(self):
+        cells = [cli.block_text(b) for b in self.blocks if b.kind == "table-cell"]
+        self.assertIn("cell prose", cells)
+        self.assertEqual(self.protected.table_shapes, [[2, 2, 2]])
+
+    def test_list_markers_stripped(self):
+        items = [cli.block_text(b) for b in self.blocks]
+        self.assertTrue(any(t.startswith("item one") for t in items))
+
+    def test_line_numbers_are_real(self):
+        intro = next(b for b in self.blocks if "Intro" in cli.block_text(b))
+        self.assertEqual(intro.lines[0][0], 7)
+
+
+class TestTextExtraction(unittest.TestCase):
+    def test_paragraphs_split_on_blank(self):
+        blocks = cli.text_blocks("one one.\n\ntwo two.\n")
+        self.assertEqual(len(blocks), 2)
+        self.assertEqual(blocks[1].lines[0][0], 3)
+
+
 if __name__ == "__main__":
     unittest.main()

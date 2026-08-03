@@ -479,6 +479,175 @@ def comment_blocks(source: str, language: str) -> list[Block] | None:
     return blocks
 
 
+FENCE_RE = re.compile(r"^(\s{0,3})(`{3,}|~{3,})(.*)$")
+HEADING_RE = re.compile(r"^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$")
+TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$")
+TABLE_SEP_RE = re.compile(r"^\s*\|(\s*:?-{2,}:?\s*\|)+\s*$")
+REF_DEF_RE = re.compile(r"^\s{0,3}\[[^\]]+\]:\s*(\S+)")
+LIST_MARKER_RE = re.compile(r"^(\s*)(?:[-*+]|\d{1,3}[.)])\s+")
+BLOCKQUOTE_RE = re.compile(r"^\s{0,3}>\s?")
+LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+
+
+@dataclass
+class MarkdownProtected:
+    """Regions a prose edit must leave byte-identical. verify compares two
+    of these field by field."""
+
+    frontmatter: str = ""
+    fences: list[str] = field(default_factory=list)
+    code_spans: list[str] = field(default_factory=list)
+    link_urls: list[str] = field(default_factory=list)
+    table_shapes: list[list[int]] = field(default_factory=list)
+
+
+def _extract_inline(text: str, protected: MarkdownProtected) -> str:
+    """Record code spans and link URLs; return text with link syntax removed."""
+    for m in CODE_SPAN_RE.finditer(text):
+        protected.code_spans.append(m.group(0))
+    masked = CODE_SPAN_RE.sub(lambda m: "\x00" * len(m.group(0)), text)
+    for m in LINK_RE.finditer(masked):
+        protected.link_urls.append(m.group(2))
+    out: list[str] = []
+    pos = 0
+    for m in LINK_RE.finditer(masked):
+        out.append(text[pos:m.start()])
+        out.append(text[m.start(1):m.end(1)])
+        pos = m.end()
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def markdown_blocks(source: str) -> tuple[list[Block], MarkdownProtected]:
+    lines = source.split("\n")
+    protected = MarkdownProtected()
+    blocks: list[Block] = []
+    para: list[tuple[int, str]] = []
+    table_rows: list[int] = []
+    i = 0
+    if lines and lines[0].strip() == "---":
+        j = 1
+        while j < len(lines) and lines[j].strip() not in ("---", "..."):
+            j += 1
+        if j < len(lines):
+            protected.frontmatter = "\n".join(lines[: j + 1])
+            i = j + 1
+
+    def flush_para() -> None:
+        nonlocal para
+        if para:
+            blocks.append(Block("paragraph", para))
+            para = []
+
+    def flush_table() -> None:
+        nonlocal table_rows
+        if table_rows:
+            protected.table_shapes.append(table_rows)
+            table_rows = []
+
+    fence_buf: list[str] | None = None
+    fence_char = ""
+    fence_len = 0
+    prev_blank = True
+    while i < len(lines):
+        raw = lines[i]
+        lineno = i + 1
+        fence_match = FENCE_RE.match(raw)
+        if fence_buf is not None:
+            fence_buf.append(raw)
+            if (fence_match and fence_match.group(2)[0] == fence_char
+                    and len(fence_match.group(2)) >= fence_len
+                    and not fence_match.group(3).strip()):
+                protected.fences.append("\n".join(fence_buf))
+                fence_buf = None
+            i += 1
+            continue
+        if fence_match:
+            flush_para()
+            flush_table()
+            fence_buf = [raw]
+            fence_char = fence_match.group(2)[0]
+            fence_len = len(fence_match.group(2))
+            prev_blank = False
+            i += 1
+            continue
+        if TABLE_ROW_RE.match(raw):
+            flush_para()
+            cells = raw.strip().strip("|").split("|")
+            table_rows.append(len(cells))
+            if not TABLE_SEP_RE.match(raw):
+                for cell in cells:
+                    text = cell.strip()
+                    if text:
+                        blocks.append(Block("table-cell",
+                                            [(lineno, _extract_inline(text, protected))]))
+            prev_blank = False
+            i += 1
+            continue
+        flush_table()
+        heading = HEADING_RE.match(raw)
+        if heading:
+            flush_para()
+            blocks.append(Block("heading",
+                                [(lineno, _extract_inline(heading.group(2), protected))]))
+            prev_blank = False
+            i += 1
+            continue
+        ref = REF_DEF_RE.match(raw)
+        if ref:
+            flush_para()
+            protected.link_urls.append(ref.group(1))
+            prev_blank = False
+            i += 1
+            continue
+        if raw.lstrip().startswith("<!--"):
+            flush_para()
+            while i < len(lines) and "-->" not in lines[i]:
+                i += 1
+            i += 1
+            prev_blank = False
+            continue
+        if not raw.strip():
+            flush_para()
+            prev_blank = True
+            i += 1
+            continue
+        if prev_blank and raw.startswith("    ") and not para:
+            chunk = [raw]
+            while i + 1 < len(lines) and (lines[i + 1].startswith("    ")
+                                          or not lines[i + 1].strip()):
+                i += 1
+                chunk.append(lines[i])
+            protected.fences.append("\n".join(chunk).rstrip("\n"))
+            prev_blank = True
+            i += 1
+            continue
+        text = BLOCKQUOTE_RE.sub("", raw)
+        text = LIST_MARKER_RE.sub(r"\1", text).strip()
+        para.append((lineno, _extract_inline(text, protected)))
+        prev_blank = False
+        i += 1
+    flush_para()
+    flush_table()
+    if fence_buf is not None:
+        protected.fences.append("\n".join(fence_buf))
+    return blocks, protected
+
+
+def text_blocks(source: str) -> list[Block]:
+    blocks: list[Block] = []
+    para: list[tuple[int, str]] = []
+    for idx, raw in enumerate(source.split("\n")):
+        if raw.strip():
+            para.append((idx + 1, raw.strip()))
+        elif para:
+            blocks.append(Block("paragraph", para))
+            para = []
+    if para:
+        blocks.append(Block("paragraph", para))
+    return blocks
+
+
 DIRECTIVE_RE = re.compile(r"""(?xi)^\s*(?:
       eslint-(?:disable|enable)\S*
     | biome-ignore \b
