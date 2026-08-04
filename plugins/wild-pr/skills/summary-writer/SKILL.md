@@ -613,7 +613,45 @@ body, and also:
    name substitutes for the PR number until one exists. After delivering, list
    each placeholder's absolute file path in your final message. The user can
    then drag the files into the description.
-4. If a PR exists, update it immediately via the REST API - do not ask for
+4. Check the body and title before you send them. Resolve the `plain-language`
+   CLI once, in its own Bash call:
+
+   ```bash
+   root="${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT:-}}"
+   cli="$root/../plain-language/scripts/plain_language_cli.py"
+   if [ ! -f "$cli" ]; then
+     cli=$(ls -d "$root"/../../plain-language/*/scripts/plain_language_cli.py 2>/dev/null | sort -V | tail -1)
+   fi
+   [ -f "$cli" ] && echo "$cli" || echo ABSENT
+   ```
+
+   The first path is the dev checkout, where plugins are siblings. The second
+   is the install cache, which adds a version directory. `sort -V` picks the
+   highest version.
+
+   `ABSENT` means the plugin is not installed. Skip the check, say so in your
+   final message, and go to step 5. The rules in this skill still apply.
+
+   When the path resolves, write the title and the body into one temporary
+   `.md` file. Put the title on the first line. Then scan it, passing the
+   resolved path literally:
+
+   ```bash
+   python3 "<resolved path>" scan /tmp/pr-body.md
+   ```
+
+   Use the literal path in every scan. A combined resolve-and-scan command
+   holds shell metacharacters, and the plugin's approval hook rejects those.
+
+   Read the `totals` object. Rewrite every `long-sentence` and `em-dash` hit,
+   then scan again. Stop when both reach zero, or after 5 passes. Report any
+   violation that survives 5 passes, and deliver anyway. Never drop a fact to
+   meet the cap, and never let a claim ceiling slip to shorten a sentence.
+
+   The other six kinds are candidates, not verdicts. Judge each one and leave
+   the correct uses. They never gate delivery.
+
+5. If a PR exists, update it immediately via the REST API - do not ask for
    confirmation. `gh pr edit` calls a GraphQL mutation that requires
    `read:org` on the token. `repo`-scoped tokens will fail. That is the common
    case for fine-grained PATs and CI tokens. REST PATCH works on any
@@ -649,6 +687,6 @@ body, and also:
    (network, 404, permissions), show the error. Then print the title and body
    for copy/paste.
 
-5. If no PR exists, hand the title and body to whatever opens the PR (or
+6. If no PR exists, hand the title and body to whatever opens the PR (or
    print them for copy/paste).
-6. In your final message, list any rationale you cut, per How much to write.
+7. In your final message, list any rationale you cut, per How much to write.
