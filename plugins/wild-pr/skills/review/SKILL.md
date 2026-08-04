@@ -22,6 +22,20 @@ Review a diff against one rubric and filter to the few findings worth raising. G
 
 **Effort auto-select** (no flag, no phrase): `high` when the diff exceeds 20 changed files or 600 changed lines, else `low`. Before reviewing, print one line: `Effort: <low|high> (<N> files, <M> lines; override with --effort <other>)`. The line lets the user interrupt.
 
+## Calling this skill
+
+Another skill invoking `review` needs only this section. Never restate these rules in the caller. Point at this section instead.
+
+**Commit first.** This skill reviews the committed diff against the base branch, never the working tree. An uncommitted change reads to it as an empty diff, and the review silently no-ops.
+
+**Supply:** the branch or PR, and nothing else. This skill derives its own spec context from the commit messages and the PR body. Never feed it your reasoning or your conversation, because the value is in independent judgment.
+
+**Use `--report` when the caller is an agent.** It stops after Synthesize and returns the findings. It runs no user gates, posts nothing, and implements nothing. Every interactive checkpoint resolves to its safe default instead of prompting.
+
+**Receive:** a Summary, an Actionable list, and the retained NITs. The caller triages every finding itself and owns any fixes.
+
+**A fetch failure returns an error rather than findings.** Treat that as a failed review, never as a clean one.
+
 ## Scope
 
 ### Path A - PR-argument fast path (argument provided)

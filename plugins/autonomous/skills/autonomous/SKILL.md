@@ -57,7 +57,7 @@ When the issue is ambiguous:
 
 1. Pick the simplest interpretation consistent with the issue and the codebase's existing patterns.
 2. Proceed and finish the work.
-3. Record the choice, and the alternatives you considered, in the PR description under a "Decisions" section. The reviewer can then push back if you guessed wrong.
+3. Record the choice, and the alternatives you considered, in the PR description under its Decision review section. The reviewer can then push back if you guessed wrong.
 
 The single exception is a **precondition, not a clarification**. It applies when
 you were invoked with no resolvable task target. That means the arguments hold
@@ -92,8 +92,8 @@ you there.
 1. Implement the change.
 2. Run the project's tests. If any fail, fix them before continuing.
    Pre-existing failures, "unrelated" failures, and flaky failures all count.
-   Diagnose the root cause. Then fix it, or document it in the Decisions
-   section. Never skip a test, never disable it (e.g. `it.skip`), and never rely
+   Diagnose the root cause. Then fix it, or document it in the Decision
+   review section. Never skip a test, never disable it (e.g. `it.skip`), and never rely
    on CI to catch what should pass locally.
 3. Simplify the diff. Run the three-lens review bundled at `references/simplify.md`
    (code reuse, code quality, efficiency). If the host supports sub-agents, launch
@@ -107,23 +107,16 @@ you there.
    findings only**. It also keeps important findings in one case. Such a finding
    must be cross-dimension or on a public API. The fix must **also** be a small
    local type/doc change. Fix every must-fix item; defer the rest to the PR
-   Decisions section. Skip entirely if the harness plugin is unavailable. Re-run
+   Decision review section. Skip entirely if the harness plugin is unavailable. Re-run
    step 2's tests when a fix changes behavior.
 5. Commit your work, then get an independent code review of the committed diff
-   before opening the PR. Prefer the in-marketplace `wild-pr:review` skill (wild-horses
-   `wild-pr` plugin), and use an ad-hoc sub-agent only if it is unavailable this session.
-   Commit first, because `wild-pr:review` reviews the committed diff against the base
-   branch, never the working tree. An uncommitted change reads to it as an empty diff,
-   and the review silently no-ops. Put the Task (the issue/plan) in the commit message
-   so the review has spec context to check against.
-   - **Primary - `wild-pr:review` (wild-horses):** read and execute the `wild-pr`
-     plugin's `skills/review/SKILL.md` on the committed diff, in
-     `--report --effort high` mode. Locate that file in the plugin cache or
-     marketplace checkout, the same way `/wild-pr` composes its dependency
-     skills. It derives its own spec context from the branch: the commit
-     messages, and the PR body once one exists. Do **not** feed it your reasoning
-     or this conversation. The value is in independent judgment. `--report` mode
-     is non-interactive, and it returns its findings with no gates.
+   before opening the PR. Put the Task (the issue/plan) in the commit message so
+   the review has spec context to check against.
+   - **Primary - `wild-pr:review` (wild-horses):** read the `wild-pr` plugin's
+     `skills/review/SKILL.md`. Follow its **Calling this skill** section, and
+     execute it in `--report --effort high` mode. Locate that file in the plugin
+     cache or marketplace checkout. That section is the contract; do not work
+     from memory of it, and do not restate it here.
    - **Fallback - ad-hoc sub-agent** (only if `wild-pr:review` is unavailable this
      session): spawn a sub-agent to review your changes. Hand it the diff plus the
      issue description. Do not hand it your reasoning or this conversation. The
@@ -132,11 +125,11 @@ you there.
 
    Either way, triage every finding yourself. Fix the real, in-scope ones.
    Dismiss the out-of-scope and false-positive ones. Record each dismissal with a
-   one-line reason in the PR's Decisions section. Then re-run steps 2 → 3 → 4 → 5
-   on the updated diff. Iterate until tests pass. The review must also report no
-   remaining substantive findings. "Same findings as last iteration" is **not**
-   convergence - it means your fixes were incomplete; fix harder. Document any
-   disagreement with a specific finding in the PR's Decisions section.
+   one-line reason for the PR's Decision review section. Then re-run steps
+   2 → 3 → 4 → 5 on the updated diff. Iterate until tests pass. The review must
+   also report no remaining substantive findings. "Same findings as last
+   iteration" is **not** convergence - it means your fixes were incomplete; fix
+   harder. Document any disagreement with a specific finding the same way.
 
 6. Open a pull request.
 
@@ -149,31 +142,23 @@ you there.
    Then write the title and body with `wild-pr:summary-writer`, never straight
    from your own memory of the work. You built the change, so your own draft
    compresses against what you know, not what the reviewer knows.
-   - **Primary - `wild-pr:summary-writer` (wild-horses):** read and execute the
-     `wild-pr` plugin's `skills/summary-writer/SKILL.md`. Locate that file in
-     the plugin cache or marketplace checkout, the same way step 5 locates
-     `skills/review/SKILL.md`. It owns the section list, the claim ceilings,
-     the diagram rubric, and the title. Hand it everything you gathered above.
-     Its Decision review section is where the dismissals and disagreements
-     belong. Use both the title and the body it produces.
+   - **Primary - `wild-pr:summary-writer` (wild-horses):** read the `wild-pr`
+     plugin's `skills/summary-writer/SKILL.md` and follow its **Calling this
+     skill** section. Locate that file the same way step 5 locates
+     `skills/review/SKILL.md`. That section states what to supply, what you get
+     back, and what the skill does about an existing PR. It is the contract; do
+     not work from memory of it, and do not restate it here.
    - **Fallback** (only if `wild-pr:summary-writer` is unavailable this
      session): write the title and body yourself. Lead the body with the one
      structural idea, not a file-by-file changelog. State that idea as a fact
      about the system in the first sentence. Compress the same idea into the
      title. Keep a Requirements section. Include everything you gathered above:
      the issue link, the ambiguous calls, and the step 5 dismissals. Leave out
-     file inventories, acceptance-criteria checkboxes, and review logs.
+     file inventories, acceptance-criteria checkboxes, and review logs. Then run
+     `gh pr view` yourself: update an open PR by REST PATCH, and run
+     `gh pr create` only when none exists.
 
-   Deliver the same way on both paths, and check for an open PR before you
-   deliver. On the primary path `summary-writer` runs that check itself: it
-   updates an existing PR directly, and you are done. When none exists it stops
-   at a title and body. On the fallback path, run `gh pr view` yourself to make
-   the same call.
-
-   Run `gh pr create` only when no PR exists. A create against an existing PR
-   fails, and on the primary path it fails after the body was already updated.
-   Update an existing PR with a REST PATCH instead. Step 7 needs the PR either
-   way.
+   Step 7 needs the PR to exist on either path.
 
    **Don't** append a "Generated with Claude Code" footer and **don't** add any
    "Co-Authored-By: Claude" trailer.
@@ -205,4 +190,4 @@ build:
   still own every decision it leaves open.
 
 Either way, do not stop to ask for more detail (see **Autonomy**). Record any
-ambiguous calls in the PR's "Decisions" section.
+ambiguous calls in the PR's Decision review section.

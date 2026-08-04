@@ -34,6 +34,29 @@ partway through. None of that appears in the diff, so none of it appears in the
 description. The state before this PR is main. The state after is HEAD. Nothing
 in between belongs.
 
+## Calling this skill
+
+Another skill invoking `summary-writer` needs only this section. Never restate
+these rules in the caller. Point at this section instead.
+
+**Supply:** the branch or PR to describe, and the source issue or plan URL.
+Also every ambiguous call with the alternatives you considered, and any review
+dismissals. The last two belong in Decision review. That is this skill's name
+for the section a caller may know as "Decisions".
+
+**Receive:** a title and a body. This skill re-derives the title on every run,
+so an existing title is input, never a default. Use both.
+
+**Delivery is conditional.** Delivery step 1 checks for an open PR. When one
+exists, this skill updates it by REST PATCH and the caller is done. When none
+exists, this skill returns the title and body and stops.
+
+**This skill never opens a pull request.** The caller runs `gh pr create` when
+no PR exists yet.
+
+**This skill never edits source files and never commits.** It reports any
+rationale it cut, so the caller can decide where that belongs.
+
 ## Plain language
 
 Write the description in plain language, using four rules adapted from
