@@ -68,5 +68,30 @@ Write every docstring, comment, and finding description you propose in plain lan
 - Never use a figure of speech where a real name exists. Name the module, class, table, or function instead.
 Real identifiers and real domain terms stay: class names, field names, protocol names, domain vocabulary. Define one on first use when the reader cannot already know it.
 
+CHECK THE PROSE YOU WROTE:
+After you apply a docstring or comment edit, check it. Resolve the
+plain-language CLI once, in its own Bash call:
+
+  root="${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT:-}}"
+  cli="$root/../plain-language/scripts/plain_language_cli.py"
+  if [ ! -f "$cli" ]; then
+    cli=$(ls -d "$root"/../../plain-language/*/scripts/plain_language_cli.py 2>/dev/null | sort -V | tail -1)
+  fi
+  [ -f "$cli" ] && echo "$cli" || echo ABSENT
+
+The first path is the dev checkout. The second is the install cache, which
+adds a version directory. ABSENT means the plugin is not installed: skip the
+check, say so in your report, and follow the four rules above on your own.
+
+When the path resolves, scan the file you edited, passing the path literally:
+
+  python3 "<resolved path>" scan path/to/edited_file.py
+
+Comment mode reads comment and docstring interiors only, so code never
+reaches the scanner. Rewrite every long-sentence and em-dash hit in prose you
+wrote, then scan again. Stop when both reach zero, or after 5 passes. Report
+any violation that survives 5 passes. Never rewrite a comment you did not
+write in this run, and never drop a fact to meet the cap.
+
 IMPORTANT: For documentation findings, be SPECIFIC about what should be documented. "Missing module docstring" is not a finding. A finding names the content: "This module needs a docstring explaining its role as the authentication middleware layer. It processes JWT tokens before requests reach route handlers." For structural findings, suggest specific decomposition.
 ```
