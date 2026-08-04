@@ -58,7 +58,7 @@ The Structure & Documentation Analyst carries a third placeholder, `{paste the p
 root="${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT:-}}"
 cli="$root/../plain-language/scripts/plain_language_cli.py"
 if [ ! -f "$cli" ]; then
-  cli=$(ls -d "$root"/../../plain-language/[0-9]*/scripts/plain_language_cli.py 2>/dev/null | sort -V | tail -1)
+  cli=$( { ls -d "$root"/../../plain-language/[0-9]*/scripts/plain_language_cli.py; } 2>/dev/null | sort -V | tail -1 )
 fi
 if [ -f "$cli" ]; then (cd "$(dirname "$cli")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$cli")"); else echo ABSENT; fi
 ```
