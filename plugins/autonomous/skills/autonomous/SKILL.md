@@ -138,17 +138,24 @@ you there.
    convergence - it means your fixes were incomplete; fix harder. Document any
    disagreement with a specific finding in the PR's Decisions section.
 
-6. Open a pull request. Write the title and body with `wild-pr:summary-writer`,
-   never straight from your own memory of the work. You built the change, so
-   your own draft compresses against what you know, not what the reviewer
-   knows.
+6. Open a pull request.
+
+   Gather the body's inputs first, before anything drafts prose. Read the
+   target repo's CLAUDE.md / AGENTS.md / CONTRIBUTING and recent `git log` for
+   the title and description format. A repo convention beats this step when the
+   two disagree. Collect the source issue URL, every ambiguous call with the
+   alternatives you considered, and your step 5 dismissals.
+
+   Then write the title and body with `wild-pr:summary-writer`, never straight
+   from your own memory of the work. You built the change, so your own draft
+   compresses against what you know, not what the reviewer knows.
    - **Primary - `wild-pr:summary-writer` (wild-horses):** read and execute the
      `wild-pr` plugin's `skills/summary-writer/SKILL.md`. Locate that file in
      the plugin cache or marketplace checkout, the same way step 5 locates
      `skills/review/SKILL.md`. It owns the section list, the claim ceilings,
-     the diagram rubric, and the title. Post both the title and the body it
-     produces. Hand it your step 5 dismissals and disagreements as input. Its
-     Decision review section is where that material belongs.
+     the diagram rubric, and the title. Hand it everything you gathered above.
+     Its Decision review section is where the dismissals and disagreements
+     belong. Use both the title and the body it produces.
    - **Fallback** (only if `wild-pr:summary-writer` is unavailable this
      session): write the title and body yourself. Lead the body with the one
      structural idea, not a file-by-file changelog. State that idea as a fact
@@ -157,16 +164,14 @@ you there.
      Leave out file inventories, acceptance-criteria checkboxes, and review
      logs.
 
-   Either way, neither path opens the PR. `summary-writer` stops once it has a
-   title and body when no PR exists yet. Run `gh pr create` yourself with that
-   title and body, so step 7 has a PR to tend.
+   `summary-writer` checks for an open PR before it delivers. When one exists
+   it updates that PR itself, and you are done. When none exists it stops at a
+   title and body, and you then run `gh pr create` with them. Never run
+   `gh pr create` without checking, because a create against an existing PR
+   fails after the body was already updated. Step 7 needs the PR either way.
 
-   Follow the target repo's own PR conventions. Read its CLAUDE.md /
-   AGENTS.md / CONTRIBUTING and recent `git log` for the title and description
-   format. A repo convention beats this step when the two disagree. Link back
-   to the source issue URL in the PR description. Record every ambiguous call
-   and the alternatives you considered. **Don't** append a "Generated with
-   Claude Code" footer and **don't** add any "Co-Authored-By: Claude" trailer.
+   **Don't** append a "Generated with Claude Code" footer and **don't** add any
+   "Co-Authored-By: Claude" trailer.
 
 7. Tend the PR with `wild-pr:babysit`. Invoke it on the PR you just opened. It
    snapshots CI, auto-fixes high-confidence failures, and replies to review
