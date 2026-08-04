@@ -215,7 +215,7 @@ class TestChecks(unittest.TestCase):
 
     def test_em_dash_stays_its_own_kind(self):
         # U+2014 is a verdict; the substitutes are candidates. Never merged.
-        v = cli.check_block(self._block("a — b and c – d"))
+        v = cli.check_block(self._block("a \u2014 b and c \u2013 d"))
         self.assertEqual(sorted({x["kind"] for x in v}),
                          ["dash-substitute", "em-dash"])
 
@@ -298,7 +298,7 @@ class TestPythonSpans(unittest.TestCase):
         self.assertIsNone(cli.python_spans("def f(:\n"))
 
     def test_utf8_bom_still_parses(self):
-        # tokenize accepts a leading BOM but ast.parse rejects it, so a valid
+        # tokenize accepts a leading BOM but ast.parse rejects it. A valid
         # Windows-authored file must not read as a parse failure.
         src = "﻿# bom comment\nx = 1\n"
         spans = cli.python_spans(src)
@@ -329,8 +329,8 @@ class TestPythonSpans(unittest.TestCase):
         self.assertEqual(a, b)
 
     def test_strip_is_stable_when_a_comment_gains_lines(self):
-        # Splitting one long sentence across more comment lines is the core
-        # move of `apply`; it must not read as a code change.
+        # Splitting one long sentence across more comment lines is the
+        # core move of `apply`. It must not read as a code change.
         before = "# one long sentence here\nx = 1\n"
         after = "# one long sentence.\n# Here is the rest.\nx = 1\n"
         self.assertEqual(cli.strip_spans(before, py_spans(before)),
@@ -429,6 +429,32 @@ class TestShellSpans(unittest.TestCase):
         src = 'echo $# ${#var}\n'
         self.assertEqual(self._texts(src), [])
 
+    def test_heredoc_body_is_not_a_comment(self):
+        # A "#" line inside a heredoc is content the script writes out, not a
+        # comment. Treating it as prose lets `apply` rewrite generated files
+        # while `verify` reports ok.
+        src = "cat > f.conf <<'EOF'\n# not a comment\nkey=value\nEOF\necho '# also not' # real\n"
+        self.assertEqual(self._texts(src), ["# real"])
+
+    def test_heredoc_unquoted_and_dash_forms(self):
+        for opener, closer in (("<<EOF", "EOF"), ("<<-EOF", "\tEOF"),
+                               ('<<"EOF"', "EOF"), ("<< EOF", "EOF")):
+            with self.subTest(opener=opener):
+                src = f"cat > f {opener}\n# inside\n{closer}\n# outside\n"
+                self.assertEqual(self._texts(src), ["# outside"])
+
+    def test_here_string_is_not_a_heredoc(self):
+        # "<<<" is a here-string: the rest of the line is an argument, and
+        # the following lines are ordinary script.
+        src = "grep x <<< \"$var\"\n# real comment\n"
+        self.assertEqual(self._texts(src), ["# real comment"])
+
+    def test_heredoc_line_numbers_stay_correct(self):
+        src = "cat <<'EOF'\nbody\nbody\nEOF\n# after\n"
+        spans = cli.shell_spans(src)
+        assert spans is not None
+        self.assertEqual([s.start_line for s in spans], [5])
+
     def test_no_space_before_hash_ignored(self):
         src = "echo foo#bar\n"
         self.assertEqual(self._texts(src), [])
@@ -490,6 +516,25 @@ class TestSkipRules(unittest.TestCase):
         self.assertEqual([t for _, t in got.lines if t.strip()], ["Does a thing."])
         got = self._refined([(1, "Doc."), (2, ":param x: the input")], kind="docstring")
         self.assertEqual([t for _, t in got.lines if t.strip()], ["Doc."])
+
+    def test_prose_after_a_field_list_is_still_scanned(self):
+        # The field-list latch must clear on a blank line, the way the
+        # doctest latch does. Otherwise every line after the first :param
+        # vanishes and the file reads as clean.
+        got = self._refined([(1, "Summary line."), (2, ""), (3, ":param x: the input"),
+                             (4, ":returns: the output"), (5, ""),
+                             (6, "A trailing note the reader still needs.")],
+                            kind="docstring")
+        self.assertIsNone(got.skip_reason)
+        self.assertEqual([t for _, t in got.lines if t.strip()],
+                         ["Summary line.", "A trailing note the reader still needs."])
+
+    def test_prose_after_jsdoc_tags_is_still_scanned(self):
+        got = self._refined([(1, "Fetches a user."), (2, "@param id the id"),
+                             (3, ""), (4, "Callers must hold the lock.")],
+                            language="javascript")
+        self.assertEqual([t for _, t in got.lines if t.strip()],
+                         ["Fetches a user.", "Callers must hold the lock."])
 
     def test_jsdoc_tags_dropped(self):
         got = self._refined([(1, "Fetches a user."), (2, "@param id the id")],
@@ -644,8 +689,8 @@ class TestScanCommand(unittest.TestCase):
 
 class TestVerifyCommand(unittest.TestCase):
     def _git_repo(self, d: str, files: dict[str, str]) -> None:
-        # Every git call overrides the contributor's global config. A machine
-        # with commit.gpgsign or init.templateDir set would otherwise fail
+        # Every git call overrides the contributor's global config. A
+        # machine with commit.gpgsign or init.templateDir set would fail
         # these tests for a reason unrelated to the code under test.
         git = ["git", "-c", "user.email=t@t", "-c", "user.name=t",
                "-c", "commit.gpgsign=false", "-c", "init.templateDir="]
@@ -708,8 +753,8 @@ class TestVerifyCommand(unittest.TestCase):
                 run_cli(["verify", "--baseline", str(base), str(cur)]).returncode, 1)
 
     def test_symlinked_repo_path_still_finds_baseline(self):
-        # `git rev-parse` resolves symlinks and abspath does not. On macOS a
-        # repo under /tmp or /var lives behind a /private symlink, and the
+        # `git rev-parse` resolves symlinks and abspath does not. On macOS
+        # a repo under /tmp or /var lives behind a /private symlink. That
         # mismatch used to yield a false "missing-baseline".
         with tempfile.TemporaryDirectory() as real_root:
             repo = os.path.join(real_root, "repo")

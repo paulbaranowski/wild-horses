@@ -1,10 +1,15 @@
 #!/bin/bash
 # PreToolUse hook: pre-approve `python3 .../plain_language_cli.py ...`
 # invocations so the plain-language apply loop doesn't gate on the auto-mode
-# classifier once per pass. The CLI's surface is bounded and read-only: it
-# reads the target files, and runs `git rev-parse --show-toplevel` plus
-# `git show <ref>:<path>` to fetch baselines for `verify`. It writes no file
-# and executes no file-supplied content.
+# classifier once per pass. The CLI's surface is bounded and read-only.
+# It reads the target files. It also runs `git rev-parse --show-toplevel`
+# and `git show --end-of-options <ref>:<path>` to fetch baselines for
+# `verify`. It executes no file-supplied content.
+#
+# The CLI passes --end-of-options so a `--ref` value beginning with "-"
+# cannot reach `git show` as an option. Without that flag, a crafted ref
+# made git write a file. This hook approves the whole argument surface with
+# no user prompt, so keep the flag if you touch _git_baseline.
 #
 # Outputs PreToolUse permissionDecision JSON on match. Silent no-op otherwise
 # (falls through to normal allow-list + classifier flow).
@@ -18,14 +23,15 @@ cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 
 # Match: `python3` immediately followed by the plain-language CLI as its first
 # positional argument, possibly wrapped in single or double quotes. The path
-# must end in `/scripts/plain_language_cli.py` AND sit under one of the
-# legitimate layouts (dev checkout, Cursor local, or install cache: see the
-# final test below). Approval runs whatever Python file lives at the path, so
-# a bare `/plain-language/` substring match would hand auto-approval to any
-# attacker-planted `.../plain-language/scripts/plain_language_cli.py` (for
-# example under /tmp or a malicious clone). Anchoring on the full
-# plugin-specific path structure is the repo convention (CLAUDE.md "Hook
-# design").
+# must end in `/scripts/plain_language_cli.py`. It must also sit under one
+# of the legitimate layouts: dev checkout, Cursor local, or install cache.
+# The final test below checks that.
+#
+# Approval runs whatever Python file lives at the path. A bare
+# `/plain-language/` substring match would therefore auto-approve any
+# attacker-planted copy. One under /tmp would qualify, as would one in a
+# malicious clone. Anchoring on the full plugin-specific path structure is
+# the repo convention (CLAUDE.md "Hook design").
 #
 # Anchoring on `^python3<space>` + first-token-is-the-script (not anywhere in
 # the command) prevents over-approval of unusual invocations like
@@ -36,17 +42,21 @@ cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
 # Handles Claude Code's defensive path-quoting (paths may be wrapped in `"` or
 # `'`) via the quoted alternatives below.
 #
-# Defense in depth: reject any shell control operators (`;`, `&` including a
-# bare backgrounding `&`, `|`, redirects, command substitution, backticks) up
-# front, before allow-matching. A single `&` matters: `python3 <approved-cli>
-# scan & curl evil` backgrounds the approved command and chains a second one,
-# and the allow regex's trailing `.*$` would otherwise let it ride through. So
-# `*"&"*` (which also subsumes `&&`) must be rejected, not just `&&`.
-# `\n`/`\r` are listed first because the allow regex's `.` does not match
-# newlines. Without an explicit reject, a payload like
-# `python3 .../plain_language_cli.py\nuname -a` would bypass the metachar
-# checks (newline is neither `;` nor `&`), and the regex's `.*$` clause cannot
-# see past the newline either, leaving the chained command silently approved.
+# Defense in depth: reject any shell control operator before allow-matching.
+# That covers `;`, `&` (including a bare backgrounding `&`), `|`, redirects,
+# command substitution, and backticks.
+#
+# A single `&` matters. `python3 <approved-cli> scan & curl evil` backgrounds
+# the approved command and chains a second one. The allow regex's trailing
+# `.*$` would otherwise let it ride through. So `*"&"*`, which also subsumes
+# `&&`, must be rejected.
+#
+# `\n` and `\r` are listed first because the allow regex's `.` does not match
+# newlines. Consider a payload like
+# `python3 .../plain_language_cli.py\nuname -a`. Without an explicit reject
+# it bypasses the metachar checks, because a newline is neither `;` nor `&`.
+# The regex's `.*$` clause cannot see past the newline either, so the
+# chained command would be approved silently.
 case "$cmd" in
     *$'\n'* | *$'\r'* | *";"* | *"&"* | *"|"* | *">"* | *"<"* | *'$('* | *'`'*)
         exit 0
@@ -62,16 +72,15 @@ approve() {
     fi
 }
 
-# Extract the script path from one of three forms, so a legitimate plugin path
-# containing spaces (only possible when quoted) is still captured:
-#   "..."  double-quoted  -> spaces allowed inside
-#   '...'  single-quoted  -> spaces allowed inside
-#   bare                  -> no spaces (a space would start the next argument)
+# Extract the script path from one of three forms. A legitimate plugin path
+# containing spaces is only possible when quoted, and these still capture it.
+# A double-quoted or single-quoted path may hold spaces. A bare path may
+# not, because a space would start the next argument.
 #
-# Each pattern anchors on both ends: the trailing `([[:space:]].*)?$` forces
-# the regex to consume the entire command string, so trailing exotic content
-# (a stray newline that slipped past the case prefilter, for example) cannot
-# ride along after a matching prefix.
+# Each pattern anchors on both ends. The trailing `([[:space:]].*)?$` forces
+# the regex to consume the entire command string. Trailing exotic content
+# then cannot ride along after a matching prefix. A stray newline that
+# slipped past the case prefilter is one example.
 script=""
 if [[ "$cmd" =~ ^python3[[:space:]]+\"([^\"]+/scripts/plain_language_cli\.py)\"([[:space:]].*)?$ ]]; then
     script="${BASH_REMATCH[1]}"
@@ -82,23 +91,26 @@ elif [[ "$cmd" =~ ^python3[[:space:]]+([^\"\'[:space:]]+/scripts/plain_language_
 fi
 
 if [[ -n "$script" ]]; then
-    # Assumes Claude Code EXPORTS CLAUDE_PLUGIN_ROOT into the hook's environment
-    # (not merely expanding it in the command string). If that ever stops being
-    # true, this branch is skipped and the weaker suffix fallback below applies.
-    if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
-        # Production: exact same-file match against THIS plugin's own CLI, by
-        # inode (`-ef`), so a planted copy at any other path (even one whose
-        # path string contains `/plugins/plain-language/scripts/`) is a
-        # different file and is rejected. Airtight; this is the real hook path
-        # (hooks.json always sets CLAUDE_PLUGIN_ROOT).
-        if [[ "$script" -ef "${CLAUDE_PLUGIN_ROOT}/scripts/plain_language_cli.py" ]]; then
+    # Claude Code sets CLAUDE_PLUGIN_ROOT and Cursor sets CURSOR_PLUGIN_ROOT.
+    # Read both. Checking only the Claude variable would send every Cursor
+    # invocation down the weaker suffix fallback below. That fallback is a
+    # shipped configuration (hooks/cursor-hooks.json), not a test-only path.
+    plugin_root="${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT:-}}"
+    if [[ -n "$plugin_root" ]]; then
+        # Production: exact same-file match against THIS plugin's own CLI,
+        # by inode (`-ef`). A planted copy at any other path is a different
+        # file, so it is rejected. That holds even when its path string
+        # contains `/plugins/plain-language/scripts/`. This is the real hook
+        # path under both hosts.
+        if [[ "$script" -ef "${plugin_root}/scripts/plain_language_cli.py" ]]; then
             approve
         fi
     else
-        # No plugin-root env (direct / test invocation, where the file may not
-        # even exist on disk): fall back to known layout shapes. Each pattern
-        # anchors on a plugin-specific prefix so planted copies under /tmp or
-        # arbitrary clones cannot ride the substring.
+        # Neither host variable is set: a direct or test invocation, where
+        # the file may not exist on disk. These patterns are SUFFIX matches,
+        # not prefix anchors. A planted copy would match if its path ends in
+        # one of these shapes. That is why this branch is the fallback and
+        # never the production path.
         #   - dev:       /...checkout.../plugins/plain-language/scripts/plain_language_cli.py
         #   - cursor:    /.../.cursor/plugins/local/plain-language/scripts/plain_language_cli.py
         #   - installed: /...cache/wild-horses/plain-language/<version>/scripts/plain_language_cli.py

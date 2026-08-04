@@ -59,9 +59,9 @@ CommentLanguage = Literal["python", "javascript", "shell"]
 SkipReason = Literal["shebang", "fenced-code", "field-list", "doctest",
                      "directive", "empty", "license", "commented-code"]
 
-# One line of prose and one sentence are both (int, str), but the ints mean
-# different things: a 1-based line number against a character offset into the
-# joined block text. Naming them keeps the two from being passed for each other.
+# One line of prose and one sentence are both (int, str). The ints mean
+# different things: a 1-based line number against a character offset into
+# the joined block text. Naming them keeps the two apart.
 
 
 class ProseLine(NamedTuple):
@@ -421,9 +421,9 @@ def check_block(block: Block) -> list[Violation]:
     violations: list[Violation] = []
     text = block_text(block)
     # Masked twice on purpose: once per block for the line scan, once per
-    # sentence below. A code span can straddle a sentence boundary (a
-    # backticked snippet containing a "."), so slicing the block-level mask
-    # per sentence would not give the same answer.
+    # sentence below. A code span can straddle a sentence boundary, for
+    # example a backticked snippet containing a ".". Slicing the block-level
+    # mask per sentence would not give the same answer.
     masked_all = _mask_code_spans(text)
     for (lineno, _), masked_line in zip(block.lines, masked_all.split("\n")):
         count = masked_line.count(EM_DASH)
@@ -528,9 +528,10 @@ def _widen_comment_span(source: str, span: Span) -> tuple[int, int]:
 
     Splitting one long sentence across more comment lines is what ``apply``
     does. Cutting only the comment text would leave the added indent and
-    newline behind, and ``verify`` would read that as a code change. Widening
-    to whole lines makes the stripped code depend on the code alone. A
-    trailing comment keeps its newline, because its line still holds code.
+    newline behind. ``verify`` would then read that as a code change.
+    Widening to whole lines makes the stripped code depend on the code
+    alone. A trailing comment keeps its newline, because its line still
+    holds code.
     """
     if span.kind != "comment":
         return span.start, span.end
@@ -583,9 +584,9 @@ def javascript_spans(source: str) -> list[Span]:
     """Comment spans via a small lexer.
 
     Strings, template literals, and regex literals are skipped so their
-    contents never read as comments. Known v1 limits, safe because scan and
-    verify share this lexer: template interpolations are treated as template
-    text, and the regex heuristic is the standard prev-token test.
+    contents never read as comments. Two v1 limits are safe because scan and
+    verify share this lexer. Template interpolations are treated as template
+    text. The regex heuristic is the standard prev-token test.
     """
     spans: list[Span] = []
     i = 0
@@ -686,13 +687,42 @@ def _js_skip_regex(source: str, i: int, line: int) -> tuple[int, int]:
     return i, line
 
 
+# `<<` or `<<-`, an optional quote, then the delimiter word. `<<<` is a
+# here-string and must not match, so the lookahead rejects a third `<`.
+HEREDOC_RE = re.compile(r"<<(-?)(?!<)\s*(['\"]?)([A-Za-z_][\w.-]*)\2")
+
+
+def _skip_heredoc_body(source: str, newline: int, delimiter: str,
+                       strip_tabs: bool) -> tuple[int, int]:
+    """Consume a heredoc body. Returns (index after it, lines consumed).
+
+    The body is data the script writes out, not script text, so no comment
+    span may come from it.
+    """
+    i = newline + 1
+    consumed = 1  # the newline that opened the body
+    n = len(source)
+    while i <= n:
+        end = source.find("\n", i)
+        if end == -1:
+            end = n
+        candidate = source[i:end]
+        if (candidate.lstrip("\t") if strip_tabs else candidate).strip() == delimiter:
+            return (end + 1 if end < n else n), consumed + (1 if end < n else 0)
+        if end >= n:
+            return n, consumed
+        i = end + 1
+        consumed += 1
+    return n, consumed
+
+
 def shell_spans(source: str) -> list[Span]:
     """Comment spans for shell.
 
     A ``#`` opens a comment when unquoted and at line start or after
     whitespace. Quotes span lines, so quote state carries across newlines.
-    Heredoc bodies are lexed like ordinary lines; scan and verify share the
-    behavior, so the pair stays consistent.
+    A heredoc body is skipped whole. Its lines are content the script emits,
+    so a ``#`` there is not a comment and must never be rewritten.
     """
     spans: list[Span] = []
     i = 0
@@ -703,6 +733,24 @@ def shell_spans(source: str) -> list[Span]:
     prev = ""
     while i < n:
         ch = source[i]
+        if ch == "<" and not in_single and not in_double:
+            m = HEREDOC_RE.match(source, i)
+            if m:
+                newline = source.find("\n", m.end())
+                if newline == -1:
+                    return spans  # opener with no body
+                # Lex the rest of the opener line for comments, then jump the
+                # body. `cat <<EOF  # note` keeps its trailing comment.
+                rest = shell_spans(source[m.end():newline])
+                for s in rest:
+                    spans.append(Span(s.start + m.end(), s.end + m.end(),
+                                      "comment", line, line))
+                i, consumed = _skip_heredoc_body(source, newline, m.group(3),
+                                                 strip_tabs=bool(m.group(1)))
+                line += consumed
+                at_line_start = True
+                prev = ""
+                continue
         if ch == "\n":
             line += 1
             at_line_start = True
@@ -1054,6 +1102,13 @@ def refine_block(block: Block, language: str) -> Block:
             continue
         if in_fence:
             continue
+        # A blank line ends the field list, the same way it ends a doctest.
+        # Without this the latch never clears and every later line is
+        # dropped. A trailing paragraph then never reaches the scan, and the
+        # file reads as clean. Continuation lines of one field are not
+        # blank, so they stay dropped.
+        if in_fields and not stripped:
+            in_fields = False
         if block.kind == "docstring" and FIELD_HEADER_RE.match(stripped):
             in_fields = True
         if language == "javascript" and stripped.startswith("@"):
@@ -1224,16 +1279,20 @@ def _git_toplevel(directory: str, _memo: dict[str, str | None] = {}) -> str | No
 
 
 def _git_baseline(path: str, ref: str) -> bytes | None:
-    # realpath on both sides: `git rev-parse` resolves symlinks and abspath
-    # does not, so on macOS a repo under /tmp or /var (symlinks into
-    # /private) would otherwise produce a relpath that escapes the repo and
-    # a false "missing-baseline".
+    # realpath on both sides, because `git rev-parse` resolves symlinks and
+    # abspath does not. On macOS /tmp and /var are symlinks into /private.
+    # A repo under either would otherwise produce a relpath that escapes the
+    # repo, and a false "missing-baseline".
     real = os.path.realpath(path)
     top = _git_toplevel(os.path.dirname(real) or ".")
     if top is None:
         return None
     rel = os.path.relpath(real, os.path.realpath(top))
-    proc = subprocess.run(["git", "-C", top, "show", f"{ref}:{rel}"], capture_output=True)
+    # --end-of-options so a ref beginning with "-" is read as a ref, never as
+    # a git option. Without it `--ref '--output=/tmp/x HEAD'` makes `git show`
+    # write a file, and the PreToolUse hook approves this CLI unprompted.
+    proc = subprocess.run(["git", "-C", top, "show", "--end-of-options", f"{ref}:{rel}"],
+                          capture_output=True)
     return proc.stdout if proc.returncode == 0 else None
 
 
