@@ -78,10 +78,13 @@ above on your own.
 
 Otherwise, write the prose you propose into one temporary .md file. Include
 your docstrings, comments, and finding descriptions. Include nothing that was
-already in the source. Write each one as a plain paragraph on its own line.
+already in the source. Write each one as a plain paragraph, separated by a
+blank line. Without the blank line the scanner joins them into one paragraph,
+and it then reports a long sentence you cannot clear.
+
 Leave out the "-" bullet, the [file:line] anchor, the category tag, and the
-"—" separators from the response format above. Those are format, not prose,
-and the separators would keep the em-dash count above zero forever.
+em-dash separators from the response format above. Those are format, not
+prose, and the separators would keep the em-dash count above zero forever.
 
 Create a fresh directory with mktemp -d, then write the file inside it:
 
