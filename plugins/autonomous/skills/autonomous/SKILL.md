@@ -160,15 +160,20 @@ you there.
      session): write the title and body yourself. Lead the body with the one
      structural idea, not a file-by-file changelog. State that idea as a fact
      about the system in the first sentence. Compress the same idea into the
-     title. Keep a Requirements section. Record the same step 5 dismissals.
-     Leave out file inventories, acceptance-criteria checkboxes, and review
-     logs.
+     title. Keep a Requirements section. Include everything you gathered above:
+     the issue link, the ambiguous calls, and the step 5 dismissals. Leave out
+     file inventories, acceptance-criteria checkboxes, and review logs.
 
-   `summary-writer` checks for an open PR before it delivers. When one exists
-   it updates that PR itself, and you are done. When none exists it stops at a
-   title and body, and you then run `gh pr create` with them. Never run
-   `gh pr create` without checking, because a create against an existing PR
-   fails after the body was already updated. Step 7 needs the PR either way.
+   Deliver the same way on both paths, and check for an open PR before you
+   deliver. On the primary path `summary-writer` runs that check itself: it
+   updates an existing PR directly, and you are done. When none exists it stops
+   at a title and body. On the fallback path, run `gh pr view` yourself to make
+   the same call.
+
+   Run `gh pr create` only when no PR exists. A create against an existing PR
+   fails, and on the primary path it fails after the body was already updated.
+   Update an existing PR with a REST PATCH instead. Step 7 needs the PR either
+   way.
 
    **Don't** append a "Generated with Claude Code" footer and **don't** add any
    "Co-Authored-By: Claude" trailer.
