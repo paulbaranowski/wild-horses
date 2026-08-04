@@ -138,12 +138,29 @@ you there.
    convergence - it means your fixes were incomplete; fix harder. Document any
    disagreement with a specific finding in the PR's Decisions section.
 
-6. Open a pull request. Follow the target repo's own PR conventions. Read its
-   CLAUDE.md / AGENTS.md / CONTRIBUTING and recent `git log` for the title and
-   description format. Link back to the source issue URL in the PR description.
-   Include a "Decisions" section recording any ambiguous calls and the
-   alternatives considered. **Don't** append a "Generated with Claude Code"
-   footer and **don't** add any "Co-Authored-By: Claude" trailer.
+6. Open a pull request. Write the title and body with `wild-pr:summary-writer`,
+   never straight from your own memory of the work. You built the change, so
+   your own draft compresses against what you know, not what the reviewer
+   knows.
+   - **Primary - `wild-pr:summary-writer` (wild-horses):** read and execute the
+     `wild-pr` plugin's `skills/summary-writer/SKILL.md`. Locate that file in
+     the plugin cache or marketplace checkout, the same way step 5 locates
+     `skills/review/SKILL.md`. It owns the section list, the claim ceilings,
+     the diagram rubric, and the title. Its output is the body you post.
+   - **Fallback** (only if `wild-pr:summary-writer` is unavailable this
+     session): write the body yourself. Still lead with the one structural
+     idea, not a file-by-file changelog. State that idea as a fact about the
+     system in the first sentence. Keep a Requirements section. Leave out file
+     inventories, acceptance-criteria checkboxes, and review logs.
+
+   Either way, follow the target repo's own PR conventions. Read its CLAUDE.md
+   / AGENTS.md / CONTRIBUTING and recent `git log` for the title and
+   description format. A repo convention beats this step when the two
+   disagree. Link back to the source issue URL in the PR description. Include a
+   "Decisions" section recording any ambiguous calls and the alternatives
+   considered. **Don't** append a "Generated with Claude Code" footer and
+   **don't** add any "Co-Authored-By: Claude" trailer.
+
 7. Tend the PR with `wild-pr:babysit`. Invoke it on the PR you just opened. It
    snapshots CI, auto-fixes high-confidence failures, and replies to review
    threads. Loop this 5 times. After each run, push any fixes back through
