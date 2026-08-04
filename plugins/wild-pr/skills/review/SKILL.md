@@ -234,6 +234,33 @@ Skip the plan step - you are not implementing someone else's code.
 
 ## Posting an anchored PR review (both modes)
 
+Check the review prose before you post it. Resolve the `plain-language` CLI once, in its own Bash call:
+
+```bash
+root="${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT:-}}"
+cli="$root/../plain-language/scripts/plain_language_cli.py"
+if [ ! -f "$cli" ]; then
+  cli=$(ls -d "$root"/../../plain-language/*/scripts/plain_language_cli.py 2>/dev/null | sort -V | tail -1)
+fi
+[ -f "$cli" ] && echo "$cli" || echo ABSENT
+```
+
+The first path is the dev checkout, where plugins are siblings. The second is the install cache, which adds a version directory. `sort -V` picks the highest version.
+
+`ABSENT` means the plugin is not installed. Skip the check, say so in the final message, and post as usual.
+
+When the path resolves, write the review body and every anchored comment body into one temporary `.md` file. Then scan that file once:
+
+```bash
+python3 "<resolved path>" scan /tmp/review-body.md
+```
+
+One scan covers every finding. Use the literal resolved path in each scan, because the plugin's approval hook rejects shell metacharacters.
+
+Rewrite every `long-sentence` and `em-dash` hit, then scan again. Stop when both reach zero, or after 5 passes. Report any violation that survives 5 passes, and post anyway. Never drop a `file:line` anchor, a severity, or a tag to meet the cap. The other six kinds are candidates you judge, and they never gate posting.
+
+This check runs on the posting path only. `--report` mode stops before posting and returns findings to an agent caller, so no human reads that prose.
+
 On approval, submit a **single** review via the GitHub Reviews API (`event: COMMENT` - never `APPROVE`/`REQUEST_CHANGES`). Anchor every selected item as an inline comment on its diff line. Never use loose issue comments.
 
 Follow [references/posting-pr-review.md](references/posting-pr-review.md) exactly. It has the `gh api` call, the payload shape, the three-block review body, and the per-comment body budget and format. After posting, print the review `html_url` and a one-line count of posted comments. Include the fallback general-notes count if any.
