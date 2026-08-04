@@ -710,6 +710,11 @@ def shell_spans(source: str) -> list[Span]:
             i += 1
             continue
         if ch == "\\" and not in_single:
+            # A backslash escapes the next character, and that character can
+            # be the newline. Count it, or every later span reports a line
+            # number one too low for each continuation it passed.
+            if source[i + 1:i + 2] == "\n":
+                line += 1
             i += 2
             prev = ""
             at_line_start = False

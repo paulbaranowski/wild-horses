@@ -433,6 +433,18 @@ class TestShellSpans(unittest.TestCase):
         src = "echo foo#bar\n"
         self.assertEqual(self._texts(src), [])
 
+    def test_line_continuation_keeps_line_numbers(self):
+        # A backslash-newline consumes a real newline. Miss it and every
+        # later comment reports a line number that is one too low.
+        src = "echo one \\\ntwo\n# comment\n"
+        spans = cli.shell_spans(src)
+        self.assertEqual([s.start_line for s in spans], [3])
+
+    def test_escaped_char_is_not_a_line(self):
+        src = "echo \\# not a comment\n# real\n"
+        spans = cli.shell_spans(src)
+        self.assertEqual([s.start_line for s in spans], [2])
+
 
 class TestSkipRules(unittest.TestCase):
     def _refined(self, lines: list[tuple[int, str]], kind: "cli.BlockKind" = "comment",
@@ -632,14 +644,18 @@ class TestScanCommand(unittest.TestCase):
 
 class TestVerifyCommand(unittest.TestCase):
     def _git_repo(self, d: str, files: dict[str, str]) -> None:
-        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
-        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
-                        "commit", "-q", "--allow-empty", "-m", "root"], cwd=d, check=True)
+        # Every git call overrides the contributor's global config. A machine
+        # with commit.gpgsign or init.templateDir set would otherwise fail
+        # these tests for a reason unrelated to the code under test.
+        git = ["git", "-c", "user.email=t@t", "-c", "user.name=t",
+               "-c", "commit.gpgsign=false", "-c", "init.templateDir="]
+        subprocess.run([*git, "init", "-q"], cwd=d, check=True)
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "root"],
+                       cwd=d, check=True)
         for name, content in files.items():
             Path(d, name).write_text(content, encoding="utf-8")
-        subprocess.run(["git", "add", "-A"], cwd=d, check=True)
-        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
-                        "commit", "-q", "-m", "base"], cwd=d, check=True)
+        subprocess.run([*git, "add", "-A"], cwd=d, check=True)
+        subprocess.run([*git, "commit", "-q", "-m", "base"], cwd=d, check=True)
 
     def test_comment_edit_passes(self):
         with tempfile.TemporaryDirectory() as d:

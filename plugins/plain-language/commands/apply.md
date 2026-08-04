@@ -8,7 +8,7 @@ argument-hint: "[path | PR number or URL | free text] [--full]"
 Rewrite prose until the scanner reports zero long-sentence and em-dash
 violations. Code never changes; the `verify` subcommand proves it.
 
-Bundled assets at `${CLAUDE_PLUGIN_ROOT}`. If the variable is not substituted
+Bundled assets at `${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}`. If the variable is not substituted
 in this context, find the files with `Glob "**/plain-language/standard.md"`
 and read the siblings alongside it.
 
@@ -66,7 +66,7 @@ and read the siblings alongside it.
 7. Verify every touched file:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plain_language_cli.py" verify --ref HEAD FILE...
+   python3 "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/plain_language_cli.py" verify --ref HEAD FILE...
    ```
 
    Use `--baseline <copy>` for files snapshotted in step 2. A non-zero exit

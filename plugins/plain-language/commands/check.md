@@ -8,7 +8,7 @@ argument-hint: "[path | PR number or URL | free text] [--full]"
 Report where prose breaks the plain-language standard. This command never
 edits a file.
 
-Bundled assets at `${CLAUDE_PLUGIN_ROOT}`. If the variable is not substituted
+Bundled assets at `${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}`. If the variable is not substituted
 in this context, find the files with `Glob "**/plain-language/standard.md"`
 and read the siblings alongside it.
 
@@ -27,7 +27,7 @@ and read the siblings alongside it.
 3. Run the scanner:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plain_language_cli.py" scan FILE...
+   python3 "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/plain_language_cli.py" scan FILE...
    ```
 
    For PR scope, add `--changed-lines -` and pipe the map per `scope.md`.

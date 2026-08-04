@@ -25,7 +25,7 @@ The plugins group into four themes. Each one-liner below links to the full plugi
 - **[pyright](#pyright)** — run pyright on a Python codebase and fix what it finds, using a documented playbook of fix patterns.
 - **[harness](#harness)** — diagnose where an agent would misread your code (`/harness:reasoning-gaps`) or couldn't tell whether it succeeded (`/harness:feedback-blockers`), then build, run, and inspect a remediation task list.
 - **[linting-hooks](#linting-hooks)** — auto-lint Markdown and Python the moment Claude edits them.
-- **[plain-language](#plain-language)** — rewrite prose to a 20-word-sentence standard, with a CLI that proves the code stayed byte-identical.
+- **[plain-language](#plain-language)** — rewrite prose to a 20-word-sentence standard, with a CLI that proves non-prose content stayed byte-identical.
 
 Run comprehension, then types, then observability on a PR or feature branch — `/harness:reasoning-gaps`, then `/pyright:run-and-fix` (Python), then `/harness:feedback-blockers`. Each asks a harder question than the last. Install **[linting-hooks](#linting-hooks)** once so Markdown and Python edits auto-lint as you go.
 
@@ -175,7 +175,7 @@ See **[plugins/linting-hooks/README.md](plugins/linting-hooks/README.md)** for t
 
 ### [plain-language](plugins/plain-language/README.md)
 
-Apply the plain-language writing standard (adapted from ASD-STE100 Simplified Technical English) to prose anywhere in a repo: code comments, docstrings, markdown, plain text, or pasted text. `check` reports long sentences, em-dashes, and figurative tokens; `apply` rewrites until the scan is clean. A bundled stdlib CLI then proves the edit touched prose only, by comparing the comment-stripped file against its baseline byte for byte.
+Apply a plain-language writing standard adapted from ASD-STE100 Simplified Technical English. It covers prose anywhere in a repo: code comments, docstrings, markdown, plain text, or pasted text. `check` reports long sentences, em-dashes, filler phrases, and figurative tokens. `apply` rewrites until the scan is clean. A bundled stdlib CLI then proves the edit touched prose only. It compares the comment-stripped file against its baseline byte for byte.
 
 ```text
 /plugin install plain-language@wild-horses

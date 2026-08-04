@@ -2,7 +2,7 @@
   "hooks": {
     "preToolUse": [
       {
-        "command": "bash \"./scripts/plain-language-cli-allow.sh\"",
+        "command": "bash \"${CURSOR_PLUGIN_ROOT}/scripts/plain-language-cli-allow.sh\"",
         "matcher": "Shell",
         "timeout": 5
       }

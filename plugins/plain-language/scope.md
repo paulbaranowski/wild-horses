@@ -30,9 +30,14 @@ notice.
 
 ## Changed-lines map (PR scope)
 
-Fetch the diff with `gh pr diff <number>`. For each file, collect the
-new-side line ranges of added or modified lines from the hunk headers. A
-header `@@ -a,b +c,d @@` gives the new-side start `c` and length `d`. Emit:
+Fetch the diff with `gh pr diff <number>`. For each file, parse the diff
+body and keep only new-side lines that carry a `+` prefix. Skip the `+++`
+file header. Coalesce adjacent kept lines into ranges.
+
+A hunk header `@@ -a,b +c,d @@` gives the bounds of the whole hunk, and
+those bounds include unchanged context lines. Use the header to track the
+current new-side line number, never as a range of changed lines. Taking
+`[c, c+d-1]` would report prose the PR never touched. Emit:
 
 ```json
 {
@@ -46,7 +51,7 @@ header `@@ -a,b +c,d @@` gives the new-side start `c` and length `d`. Emit:
 Pipe it to the scanner on stdin:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plain_language_cli.py" scan --changed-lines - FILE... <<'EOF'
+python3 "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/plain_language_cli.py" scan --changed-lines - FILE... <<'EOF'
 { "relative/path.py": [[12, 18]] }
 EOF
 ```
