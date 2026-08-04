@@ -63,7 +63,7 @@ fi
 if [ -f "$cli" ]; then (cd "$(dirname "$cli")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$cli")"); else echo ABSENT; fi
 ```
 
-Substitute whatever it prints, including the word `ABSENT`. `ABSENT` means the plain-language plugin is not installed, and the agent then skips its own prose check.
+Substitute whatever it prints. `ABSENT` can mean the plain-language plugin is not installed. It can also mean `${CLAUDE_PLUGIN_ROOT}` was not substituted here, the same case line 12 covers for the bundled assets. On `ABSENT`, try `Glob "**/plain-language/scripts/plain_language_cli.py"`, then `Glob "**/plain-language/*/scripts/plain_language_cli.py"`, and substitute the first match. Substitute `ABSENT` only when both find nothing; the agent then skips its own prose check.
 
 | #   | Agent                             | Prompt file                                                                  |
 | --- | --------------------------------- | ---------------------------------------------------------------------------- |

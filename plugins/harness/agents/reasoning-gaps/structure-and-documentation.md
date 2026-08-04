@@ -78,9 +78,20 @@ above on your own.
 
 Otherwise, write the prose you propose into one temporary .md file. Include
 your docstrings, comments, and finding descriptions. Include nothing that was
-already in the source. Create the file with mktemp:
+already in the source. Write each one as a plain paragraph on its own line.
+Leave out the "-" bullet, the [file:line] anchor, the category tag, and the
+"—" separators from the response format above. Those are format, not prose,
+and the separators would keep the em-dash count above zero forever.
 
-  mktemp "${TMPDIR:-/tmp}/reasoning-gaps.XXXXXX.md"
+Create a fresh directory with mktemp -d, then write the file inside it:
+
+  mktemp -d "${TMPDIR:-/tmp}/reasoning-gaps.XXXXXX"
+
+Name the file prose.md in the directory it prints. Keep the .md extension,
+because the scanner skips a file whose extension it does not know. Put the X
+characters last in the template. BSD mktemp only replaces a trailing run of
+them, so a name like reasoning-gaps.XXXXXX.md is taken literally and the
+second run fails.
 
 Then scan that file, passing both paths literally:
 
@@ -90,7 +101,8 @@ Scan your own prose only. Scanning a source file would report pre-existing
 comments, and you must not rewrite those. The count would never reach zero.
 Rewrite every long-sentence and em-dash hit, then scan again. Stop when both
 reach zero, or after 5 passes. Report any violation that survives 5 passes.
-Never drop a fact to meet the cap.
+Never drop a fact to meet the cap. Then put the corrected prose back into the
+response format above, separators included.
 
 IMPORTANT: For documentation findings, be SPECIFIC about what should be documented. "Missing module docstring" is not a finding. A finding names the content: "This module needs a docstring explaining its role as the authentication middleware layer. It processes JWT tokens before requests reach route handlers." For structural findings, suggest specific decomposition.
 ```

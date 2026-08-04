@@ -247,7 +247,7 @@ if [ -f "$cli" ]; then (cd "$(dirname "$cli")" && printf '%s/%s\n' "$(pwd -P)" "
 
 The first path is the dev checkout, where plugins are siblings. The second is the install cache, which adds a version directory. `sort -V` picks the highest of the numeric version directories. The `cd`/`pwd -P` step prints an absolute path with no `..` segments, which the approval hook needs to match.
 
-`ABSENT` means the plugin is not installed. Skip the check, say so in the final message, and post as usual.
+`ABSENT` means the plugin is not installed. It can also mean `${CLAUDE_PLUGIN_ROOT}` was not substituted in this context. Before you skip, try `Glob "**/plain-language/scripts/plain_language_cli.py"`, then `Glob "**/plain-language/*/scripts/plain_language_cli.py"`. Use the first match. Skip the check only when both find nothing. Then say so in the final message and post as usual.
 
 When the path resolves, write the review body and every anchored comment body into `$RUN_DIR/review-body.md`. That is the per-run directory from the Persistence rule, so concurrent sessions never overwrite each other. Then scan that file once:
 

@@ -47,9 +47,12 @@ file contents into prompts.
 The Structure & Documentation Analyst carries a third placeholder,
 `{paste the plain-language scanner path here}`. Resolve it here and substitute
 the result, because a dispatched agent has no `CLAUDE_PLUGIN_ROOT`. Locate the
-scanner with Glob `**/plain-language/scripts/plain_language_cli.py` and
-substitute its absolute path. Substitute the word `ABSENT` when Glob finds
-nothing; the agent then skips its own prose check.
+scanner with Glob `**/plain-language/scripts/plain_language_cli.py`. That
+pattern matches a dev checkout, where plugins are siblings. If it finds
+nothing, try `**/plain-language/*/scripts/plain_language_cli.py`, which
+matches the install cache, where a version directory sits between the two.
+Substitute the absolute path of the first match. Substitute the word `ABSENT`
+when both find nothing; the agent then skips its own prose check.
 
 | Agent                             | Prompt file (under harness plugin)                     |
 | --------------------------------- | ------------------------------------------------------ |

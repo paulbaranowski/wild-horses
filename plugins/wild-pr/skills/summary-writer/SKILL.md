@@ -630,16 +630,28 @@ body, and also:
    highest of the numeric version directories. The `cd`/`pwd -P` step prints an
    absolute path with no `..` segments, which the approval hook needs to match.
 
-   `ABSENT` means the plugin is not installed. Skip the check, say so in your
-   final message, and go to step 5. The rules in this skill still apply.
+   `ABSENT` means the plugin is not installed. It can also mean
+   `${CLAUDE_PLUGIN_ROOT}` was not substituted in this context. Before you
+   skip, try `Glob "**/plain-language/scripts/plain_language_cli.py"`, then
+   `Glob "**/plain-language/*/scripts/plain_language_cli.py"`. Use the first
+   match. Skip the check only when both find nothing. Then say so in your
+   final message and go to step 5. The rules in this skill still apply.
 
    When the path resolves, write the title and the body into one temporary
-   `.md` file. Put the title on the first line. Create it with `mktemp` so
-   concurrent runs never overwrite each other:
+   `.md` file. Put the title on the first line. Create a fresh directory with
+   `mktemp -d` so concurrent runs never overwrite each other:
 
    ```bash
-   mktemp "${TMPDIR:-/tmp}/pr-body.XXXXXX.md"
+   mktemp -d "${TMPDIR:-/tmp}/pr-body.XXXXXX"
    ```
+
+   Write the body as `pr-body.md` inside the directory it prints. Keep the
+   `.md` extension. The scanner skips a file whose extension it does not know.
+   Markdown mode is also what protects fences, inline code, and table shape.
+
+   Put the `X` characters last in the template. BSD `mktemp` only replaces a
+   trailing run of them. A name like `pr-body.XXXXXX.md` is taken literally,
+   and the second run then fails.
 
    Then scan that file, passing both the CLI path and the body path literally:
 
