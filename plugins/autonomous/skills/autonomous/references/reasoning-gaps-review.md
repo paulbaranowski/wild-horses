@@ -46,13 +46,26 @@ file contents into prompts.
 
 The Structure & Documentation Analyst carries a third placeholder,
 `{paste the plain-language scanner path here}`. Resolve it here and substitute
-the result, because a dispatched agent has no `CLAUDE_PLUGIN_ROOT`. Locate the
-scanner with Glob `**/plain-language/scripts/plain_language_cli.py`. That
-pattern matches a dev checkout, where plugins are siblings. If it finds
-nothing, try `**/plain-language/*/scripts/plain_language_cli.py`, which
-matches the install cache, where a version directory sits between the two.
-Substitute the absolute path of the first match. Substitute the word `ABSENT`
-when both find nothing; the agent then skips its own prose check.
+the result, because a dispatched agent has no `CLAUDE_PLUGIN_ROOT`:
+
+```bash
+root="${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT:-}}"
+cli="$root/../plain-language/scripts/plain_language_cli.py"
+if [ ! -f "$cli" ]; then
+  cli=$( { ls -d "$root"/../../plain-language/[0-9]*/scripts/plain_language_cli.py; } 2>/dev/null | sort -V | tail -1 )
+fi
+if [ -f "$cli" ]; then (cd "$(dirname "$cli")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$cli")"); else echo ABSENT; fi
+```
+
+Resolve from the plugin root first, not from the workspace. This skill runs
+inside a target repo, and that repo does not hold the marketplace tree. A
+workspace Glob therefore finds nothing even when the plugin is installed.
+
+Substitute whatever the snippet prints. On `ABSENT`, try
+Glob `**/plain-language/scripts/plain_language_cli.py`, then
+`**/plain-language/*/scripts/plain_language_cli.py`, and substitute the first
+match. Substitute `ABSENT` only when all three find nothing; the agent then
+skips its own prose check.
 
 | Agent                             | Prompt file (under harness plugin)                     |
 | --------------------------------- | ------------------------------------------------------ |
