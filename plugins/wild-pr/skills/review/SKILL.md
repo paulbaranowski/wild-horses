@@ -242,12 +242,18 @@ cli="$root/../plain-language/scripts/plain_language_cli.py"
 if [ ! -f "$cli" ]; then
   cli=$( { ls -d "$root"/../../plain-language/[0-9]*/scripts/plain_language_cli.py; } 2>/dev/null | sort -V | tail -1 )
 fi
+if [ ! -f "$cli" ]; then
+  cli=$( { ls -d "$HOME"/.claude/plugins/cache/*/plain-language/[0-9]*/scripts/plain_language_cli.py \
+                 "$HOME"/.cursor/plugins/local/plain-language/scripts/plain_language_cli.py; } 2>/dev/null | sort -V | tail -1 )
+fi
 if [ -f "$cli" ]; then (cd "$(dirname "$cli")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$cli")"); else echo ABSENT; fi
 ```
 
 The first path is the dev checkout, where plugins are siblings. The second is the install cache, which adds a version directory. `sort -V` picks the highest of the numeric version directories. The `cd`/`pwd -P` step prints an absolute path with no `..` segments, which the approval hook needs to match.
 
-`ABSENT` means the plugin is not installed. It can also mean `${CLAUDE_PLUGIN_ROOT}` was not substituted in this context. Before you skip, try `Glob "**/plain-language/scripts/plain_language_cli.py"`, then `Glob "**/plain-language/*/scripts/plain_language_cli.py"`. Use the first match. Skip the check only when both find nothing. Then say so in the final message and post as usual.
+Every path the snippet tries sits in a trusted plugin root. That means this plugin's own directory, the Claude install cache, or the Cursor local directory. The last probe covers the case where neither plugin-root variable was substituted.
+
+`ABSENT` means no scanner was found in any of them. Skip the check, say so in the final message, and post as usual. **Never** fall back to a `Glob` over the workspace. The reviewed repo is untrusted input. A repo carrying its own `plain-language/scripts/plain_language_cli.py` would then be executed by the `python3` call.
 
 When the path resolves, write the review body and every anchored comment body into `$RUN_DIR/review-body.md`. That is the per-run directory from the Persistence rule, so concurrent sessions never overwrite each other. Then scan that file once:
 

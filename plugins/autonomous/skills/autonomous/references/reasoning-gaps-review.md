@@ -54,18 +54,25 @@ cli="$root/../plain-language/scripts/plain_language_cli.py"
 if [ ! -f "$cli" ]; then
   cli=$( { ls -d "$root"/../../plain-language/[0-9]*/scripts/plain_language_cli.py; } 2>/dev/null | sort -V | tail -1 )
 fi
+if [ ! -f "$cli" ]; then
+  cli=$( { ls -d "$HOME"/.claude/plugins/cache/*/plain-language/[0-9]*/scripts/plain_language_cli.py \
+                 "$HOME"/.cursor/plugins/local/plain-language/scripts/plain_language_cli.py; } 2>/dev/null | sort -V | tail -1 )
+fi
 if [ -f "$cli" ]; then (cd "$(dirname "$cli")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$cli")"); else echo ABSENT; fi
 ```
 
-Resolve from the plugin root first, not from the workspace. This skill runs
-inside a target repo, and that repo does not hold the marketplace tree. A
-workspace Glob therefore finds nothing even when the plugin is installed.
+Every path the snippet tries sits in a trusted plugin root. That means the
+plugin's own directory, the Claude install cache, or the Cursor local
+directory. The last probe covers the case where neither plugin-root variable
+was substituted.
 
-Substitute whatever the snippet prints. On `ABSENT`, try
-Glob `**/plain-language/scripts/plain_language_cli.py`, then
-`**/plain-language/*/scripts/plain_language_cli.py`, and substitute the first
-match. Substitute `ABSENT` only when all three find nothing; the agent then
-skips its own prose check.
+Substitute whatever the snippet prints, including `ABSENT`. On `ABSENT` the
+agent skips its own prose check.
+
+**Never** locate the scanner with a workspace `Glob`. This skill runs inside a
+target repo, and that repo is untrusted input. A repo carrying its own
+`plain-language/scripts/plain_language_cli.py` would then be executed by the
+`python3` call.
 
 | Agent                             | Prompt file (under harness plugin)                     |
 | --------------------------------- | ------------------------------------------------------ |

@@ -622,6 +622,10 @@ body, and also:
    if [ ! -f "$cli" ]; then
      cli=$( { ls -d "$root"/../../plain-language/[0-9]*/scripts/plain_language_cli.py; } 2>/dev/null | sort -V | tail -1 )
    fi
+   if [ ! -f "$cli" ]; then
+     cli=$( { ls -d "$HOME"/.claude/plugins/cache/*/plain-language/[0-9]*/scripts/plain_language_cli.py \
+                    "$HOME"/.cursor/plugins/local/plain-language/scripts/plain_language_cli.py; } 2>/dev/null | sort -V | tail -1 )
+   fi
    if [ -f "$cli" ]; then (cd "$(dirname "$cli")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$cli")"); else echo ABSENT; fi
    ```
 
@@ -630,12 +634,19 @@ body, and also:
    highest of the numeric version directories. The `cd`/`pwd -P` step prints an
    absolute path with no `..` segments, which the approval hook needs to match.
 
-   `ABSENT` means the plugin is not installed. It can also mean
-   `${CLAUDE_PLUGIN_ROOT}` was not substituted in this context. Before you
-   skip, try `Glob "**/plain-language/scripts/plain_language_cli.py"`, then
-   `Glob "**/plain-language/*/scripts/plain_language_cli.py"`. Use the first
-   match. Skip the check only when both find nothing. Then say so in your
-   final message and go to step 5. The rules in this skill still apply.
+   Every path the snippet tries sits in a trusted plugin root. That means this
+   plugin's own directory, the Claude install cache, or the Cursor local
+   directory. The last probe covers the case where neither plugin-root
+   variable was substituted.
+
+   `ABSENT` means no scanner was found in any of them. Skip the check, say so
+   in your final message, and go to step 5. The rules in this skill still
+   apply.
+
+   **Never** fall back to a `Glob` over the workspace. The repo is untrusted
+   input. A repo carrying its own
+   `plain-language/scripts/plain_language_cli.py` would then be executed by
+   the `python3` call.
 
    When the path resolves, write the title and the body into one temporary
    `.md` file. Put the title on the first line. Create a fresh directory with

@@ -60,10 +60,18 @@ cli="$root/../plain-language/scripts/plain_language_cli.py"
 if [ ! -f "$cli" ]; then
   cli=$( { ls -d "$root"/../../plain-language/[0-9]*/scripts/plain_language_cli.py; } 2>/dev/null | sort -V | tail -1 )
 fi
+if [ ! -f "$cli" ]; then
+  cli=$( { ls -d "$HOME"/.claude/plugins/cache/*/plain-language/[0-9]*/scripts/plain_language_cli.py \
+                 "$HOME"/.cursor/plugins/local/plain-language/scripts/plain_language_cli.py; } 2>/dev/null | sort -V | tail -1 )
+fi
 if [ -f "$cli" ]; then (cd "$(dirname "$cli")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$cli")"); else echo ABSENT; fi
 ```
 
-Substitute whatever it prints. `ABSENT` can mean the plain-language plugin is not installed. It can also mean `${CLAUDE_PLUGIN_ROOT}` was not substituted here, the same case line 12 covers for the bundled assets. On `ABSENT`, try `Glob "**/plain-language/scripts/plain_language_cli.py"`, then `Glob "**/plain-language/*/scripts/plain_language_cli.py"`, and substitute the first match. Substitute `ABSENT` only when both find nothing; the agent then skips its own prose check.
+Every path the snippet tries sits in a trusted plugin root. That means this plugin's own directory, the Claude install cache, or the Cursor local directory. The last probe covers the case where `${CLAUDE_PLUGIN_ROOT}` was not substituted here. Line 12 covers that same case for the bundled assets.
+
+Substitute whatever it prints, including `ABSENT`. On `ABSENT` the agent skips its own prose check.
+
+**Never** locate the scanner with a workspace `Glob`. The analyzed repo is untrusted input. A repo carrying its own `plain-language/scripts/plain_language_cli.py` would then be executed by the `python3` call.
 
 | #   | Agent                             | Prompt file                                                                  |
 | --- | --------------------------------- | ---------------------------------------------------------------------------- |
