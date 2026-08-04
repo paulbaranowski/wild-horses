@@ -146,20 +146,27 @@ you there.
      `wild-pr` plugin's `skills/summary-writer/SKILL.md`. Locate that file in
      the plugin cache or marketplace checkout, the same way step 5 locates
      `skills/review/SKILL.md`. It owns the section list, the claim ceilings,
-     the diagram rubric, and the title. Its output is the body you post.
+     the diagram rubric, and the title. Post both the title and the body it
+     produces. Hand it your step 5 dismissals and disagreements as input. Its
+     Decision review section is where that material belongs.
    - **Fallback** (only if `wild-pr:summary-writer` is unavailable this
-     session): write the body yourself. Still lead with the one structural
-     idea, not a file-by-file changelog. State that idea as a fact about the
-     system in the first sentence. Keep a Requirements section. Leave out file
-     inventories, acceptance-criteria checkboxes, and review logs.
+     session): write the title and body yourself. Lead the body with the one
+     structural idea, not a file-by-file changelog. State that idea as a fact
+     about the system in the first sentence. Compress the same idea into the
+     title. Keep a Requirements section. Record the same step 5 dismissals.
+     Leave out file inventories, acceptance-criteria checkboxes, and review
+     logs.
 
-   Either way, follow the target repo's own PR conventions. Read its CLAUDE.md
-   / AGENTS.md / CONTRIBUTING and recent `git log` for the title and
-   description format. A repo convention beats this step when the two
-   disagree. Link back to the source issue URL in the PR description. Include a
-   "Decisions" section recording any ambiguous calls and the alternatives
-   considered. **Don't** append a "Generated with Claude Code" footer and
-   **don't** add any "Co-Authored-By: Claude" trailer.
+   Either way, neither path opens the PR. `summary-writer` stops once it has a
+   title and body when no PR exists yet. Run `gh pr create` yourself with that
+   title and body, so step 7 has a PR to tend.
+
+   Follow the target repo's own PR conventions. Read its CLAUDE.md /
+   AGENTS.md / CONTRIBUTING and recent `git log` for the title and description
+   format. A repo convention beats this step when the two disagree. Link back
+   to the source issue URL in the PR description. Record every ambiguous call
+   and the alternatives you considered. **Don't** append a "Generated with
+   Claude Code" footer and **don't** add any "Co-Authored-By: Claude" trailer.
 
 7. Tend the PR with `wild-pr:babysit`. Invoke it on the PR you just opened. It
    snapshots CI, auto-fixes high-confidence failures, and replies to review
