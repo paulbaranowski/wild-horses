@@ -136,6 +136,16 @@
       },
       "category": "development",
       "license": "MIT"
+    },
+    {
+      "name": "plain-language",
+      "source": "./plugins/plain-language",
+      "description": "Apply the plain-language writing standard to prose anywhere in a repo: code comments, docstrings, markdown, plain text, or pasted text. /plain-language:check scans a path, PR, branch diff, or the whole repo and reports long sentences, em-dashes, filler phrases, and figurative tokens; /plain-language:apply rewrites until the scan is clean, and a bundled stdlib CLI verifies non-prose content and protected markdown regions stayed byte-identical.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
     }
   ]
 }
