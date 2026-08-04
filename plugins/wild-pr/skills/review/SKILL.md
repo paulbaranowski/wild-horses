@@ -240,22 +240,22 @@ Check the review prose before you post it. Resolve the `plain-language` CLI once
 root="${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT:-}}"
 cli="$root/../plain-language/scripts/plain_language_cli.py"
 if [ ! -f "$cli" ]; then
-  cli=$(ls -d "$root"/../../plain-language/*/scripts/plain_language_cli.py 2>/dev/null | sort -V | tail -1)
+  cli=$(ls -d "$root"/../../plain-language/[0-9]*/scripts/plain_language_cli.py 2>/dev/null | sort -V | tail -1)
 fi
-[ -f "$cli" ] && echo "$cli" || echo ABSENT
+if [ -f "$cli" ]; then (cd "$(dirname "$cli")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$cli")"); else echo ABSENT; fi
 ```
 
-The first path is the dev checkout, where plugins are siblings. The second is the install cache, which adds a version directory. `sort -V` picks the highest version.
+The first path is the dev checkout, where plugins are siblings. The second is the install cache, which adds a version directory. `sort -V` picks the highest of the numeric version directories. The `cd`/`pwd -P` step prints an absolute path with no `..` segments, which the approval hook needs to match.
 
 `ABSENT` means the plugin is not installed. Skip the check, say so in the final message, and post as usual.
 
-When the path resolves, write the review body and every anchored comment body into one temporary `.md` file. Then scan that file once:
+When the path resolves, write the review body and every anchored comment body into `$RUN_DIR/review-body.md`. That is the per-run directory from the Persistence rule, so concurrent sessions never overwrite each other. Then scan that file once:
 
 ```bash
-python3 "<resolved path>" scan /tmp/review-body.md
+python3 "<resolved cli path>" scan "<RUN_DIR>/review-body.md"
 ```
 
-One scan covers every finding. Use the literal resolved path in each scan, because the plugin's approval hook rejects shell metacharacters.
+One scan covers every finding. Use literal paths in each scan. A shell variable does not survive to the next Bash call, so `$cli` and `$RUN_DIR` are both empty there.
 
 Rewrite every `long-sentence` and `em-dash` hit, then scan again. Stop when both reach zero, or after 5 passes. Report any violation that survives 5 passes, and post anyway. Never drop a `file:line` anchor, a severity, or a tag to meet the cap. The other six kinds are candidates you judge, and they never gate posting.
 

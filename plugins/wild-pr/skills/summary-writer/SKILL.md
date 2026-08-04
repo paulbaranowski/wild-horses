@@ -142,7 +142,7 @@ Every rule below repairs a symptom of that one defect.
   reason the paragraph exists goes first.
 
   Buried: "The counter increments before the scan resolves, so a failed scan
-  is charged rather than refunded."
+  produces an overcount."
 
   Led: "A failed scan still costs the user one of their five scans. The counter
   increments before the scan resolves, so a failure is charged, not refunded."
@@ -620,28 +620,37 @@ body, and also:
    root="${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT:-}}"
    cli="$root/../plain-language/scripts/plain_language_cli.py"
    if [ ! -f "$cli" ]; then
-     cli=$(ls -d "$root"/../../plain-language/*/scripts/plain_language_cli.py 2>/dev/null | sort -V | tail -1)
+     cli=$(ls -d "$root"/../../plain-language/[0-9]*/scripts/plain_language_cli.py 2>/dev/null | sort -V | tail -1)
    fi
-   [ -f "$cli" ] && echo "$cli" || echo ABSENT
+   if [ -f "$cli" ]; then (cd "$(dirname "$cli")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$cli")"); else echo ABSENT; fi
    ```
 
    The first path is the dev checkout, where plugins are siblings. The second
    is the install cache, which adds a version directory. `sort -V` picks the
-   highest version.
+   highest of the numeric version directories. The `cd`/`pwd -P` step prints an
+   absolute path with no `..` segments, which the approval hook needs to match.
 
    `ABSENT` means the plugin is not installed. Skip the check, say so in your
    final message, and go to step 5. The rules in this skill still apply.
 
    When the path resolves, write the title and the body into one temporary
-   `.md` file. Put the title on the first line. Then scan it, passing the
-   resolved path literally:
+   `.md` file. Put the title on the first line. Create it with `mktemp` so
+   concurrent runs never overwrite each other:
 
    ```bash
-   python3 "<resolved path>" scan /tmp/pr-body.md
+   mktemp "${TMPDIR:-/tmp}/pr-body.XXXXXX.md"
    ```
 
-   Use the literal path in every scan. A combined resolve-and-scan command
-   holds shell metacharacters, and the plugin's approval hook rejects those.
+   Then scan that file, passing both the CLI path and the body path literally:
+
+   ```bash
+   python3 "<resolved cli path>" scan "<mktemp body path>"
+   ```
+
+   Use literal paths in every scan. A shell variable does not survive to the
+   next Bash call, so `$cli` is empty there. A combined resolve-and-scan
+   command would keep the variable, but it holds shell metacharacters, and the
+   plugin's approval hook rejects those.
 
    Read the `totals` object. Rewrite every `long-sentence` and `em-dash` hit,
    then scan again. Stop when both reach zero, or after 5 passes. Report any

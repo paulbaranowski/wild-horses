@@ -44,6 +44,13 @@ indicated file, substitute `{paste relevant CLAUDE.md sections here}` and
 result as the Agent prompt. Agents read the files themselves — do not paste
 file contents into prompts.
 
+The Structure & Documentation Analyst carries a third placeholder,
+`{paste the plain-language scanner path here}`. Resolve it here and substitute
+the result, because a dispatched agent has no `CLAUDE_PLUGIN_ROOT`. Locate the
+scanner with Glob `**/plain-language/scripts/plain_language_cli.py` and
+substitute its absolute path. Substitute the word `ABSENT` when Glob finds
+nothing; the agent then skips its own prose check.
+
 | Agent                             | Prompt file (under harness plugin)                     |
 | --------------------------------- | ------------------------------------------------------ |
 | Type & Data Contract Analyst      | `agents/reasoning-gaps/types-and-data-contracts.md`    |

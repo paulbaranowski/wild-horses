@@ -50,7 +50,20 @@ Also read the project's CLAUDE.md if it exists — agents need project conventio
 
 **CRITICAL REQUIREMENT:** You MUST launch all three agents in a SINGLE response message containing exactly 3 Agent tool calls. This is non-negotiable. Do NOT launch them one at a time. Do NOT wait for one to finish before launching the next. One message, three Agent tool calls, all concurrent.
 
-For each agent below, read the indicated prompt file, substitute the two placeholders inside the fenced block (`{paste relevant CLAUDE.md sections here}` and `{paste the file list here}`), and pass the resulting prompt body to the Agent tool. Each agent must READ the files itself — do not paste file contents into prompts.
+For each agent below, read the indicated prompt file. Substitute the placeholders inside the fenced block: `{paste relevant CLAUDE.md sections here}` and `{paste the file list here}`. Then pass the resulting prompt body to the Agent tool. Each agent must READ the files itself. Do not paste file contents into prompts.
+
+The Structure & Documentation Analyst carries a third placeholder, `{paste the plain-language scanner path here}`. Resolve it here and substitute the result, because a dispatched agent has no `CLAUDE_PLUGIN_ROOT` and cannot resolve it itself:
+
+```bash
+root="${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT:-}}"
+cli="$root/../plain-language/scripts/plain_language_cli.py"
+if [ ! -f "$cli" ]; then
+  cli=$(ls -d "$root"/../../plain-language/[0-9]*/scripts/plain_language_cli.py 2>/dev/null | sort -V | tail -1)
+fi
+if [ -f "$cli" ]; then (cd "$(dirname "$cli")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$cli")"); else echo ABSENT; fi
+```
+
+Substitute whatever it prints, including the word `ABSENT`. `ABSENT` means the plain-language plugin is not installed, and the agent then skips its own prose check.
 
 | #   | Agent                             | Prompt file                                                                  |
 | --- | --------------------------------- | ---------------------------------------------------------------------------- |
