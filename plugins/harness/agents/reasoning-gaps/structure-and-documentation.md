@@ -1,4 +1,4 @@
-# Structure & Documentation Analyst — Agent prompt template
+# Structure & Documentation Analyst: agent prompt template
 
 The orchestrator dispatches the contents of the fenced block below as a single Agent tool call. Before dispatching, substitute:
 

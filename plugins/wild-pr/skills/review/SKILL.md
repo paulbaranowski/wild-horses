@@ -83,11 +83,11 @@ Warn template (substitute verified state):
 
 > Freshness check for `<owner>/<repo>` at `<worktree-path>`:
 >
-> - on branch `<HEAD-branch>`
-> - `<N>` ahead, `<M>` behind `origin/<base>` (last: `<short-sha> <iso-date>`)
-> - working tree: `<clean | dirty: N file(s)>`
+> - on branch `<HEAD-branch>`.
+> - `<N>` ahead, `<M>` behind `origin/<base>` (last: `<short-sha> <iso-date>`).
+> - working tree: `<clean | dirty: N file(s)>`.
 >
-> Reading from this worktree may surface findings based on stale state.
+> Reading from this worktree may produce findings based on stale state.
 > Reply: `proceed` (use worktree, accept the risk), `use-origin` (read context via `git show origin/<base>:<path>` - recommended), or `stop`.
 
 **Never** run `git checkout`, `stash`, `reset`, or other state-modifying git on the user's behalf. The skill warns and asks; the user resolves local state. `git fetch` is allowed (read-only).
@@ -182,7 +182,7 @@ Items where agents substantively disagreed and did not converge. One sentence pe
 
 ### Nits
 
-Do **not** print by default. Print only: _"N nit(s) available (M from convention audit)."_ Surface a "show the N NIT(s) first" option in gate 1. If N is 0, omit this section.
+Do **not** print by default. Print only: _"N nit(s) available (M from convention audit)."_ Offer a "show the N NIT(s) first" option in gate 1. If N is 0, omit this section.
 
 ### Withdrawn
 
@@ -220,7 +220,7 @@ Gate 2 is mandatory in both modes - never auto-apply fixes and never auto-post r
 - `Edit the plan` - revise, re-ask this gate.
 - `Cancel` - stop.
 
-**Execute.** Track each step with the host's task tracker. Apply the plan, run verification, report results. If a step surfaces a new substantive issue not in the selected items, stop and ask before expanding scope.
+**Execute.** Track each step with the host's task tracker. Apply the plan, run verification, report results. If a step reveals a new substantive issue not in the selected items, stop and ask before expanding scope.
 
 ### Reviewer mode
 
