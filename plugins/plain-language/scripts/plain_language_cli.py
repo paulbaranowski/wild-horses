@@ -692,28 +692,33 @@ def _js_skip_regex(source: str, i: int, line: int) -> tuple[int, int]:
 HEREDOC_RE = re.compile(r"<<(-?)(?!<)\s*(['\"]?)([A-Za-z_][\w.-]*)\2")
 
 
-def _skip_heredoc_body(source: str, newline: int, delimiter: str,
+def _skip_heredoc_body(source: str, start: int, delimiter: str,
                        strip_tabs: bool) -> tuple[int, int]:
-    """Consume a heredoc body. Returns (index after it, lines consumed).
+    """Consume one heredoc body. Returns (index after it, newlines consumed).
 
     The body is data the script writes out, not script text, so no comment
     span may come from it.
+
+    Bash ends the body only on a line that is exactly the delimiter. An
+    indented or trailing-space form is still body data. `<<-` strips leading
+    tabs, and never spaces, so the comparison is exact after that strip.
     """
-    i = newline + 1
-    consumed = 1  # the newline that opened the body
+    i = start
     n = len(source)
-    while i <= n:
+    while i < n:
         end = source.find("\n", i)
         if end == -1:
             end = n
         candidate = source[i:end]
-        if (candidate.lstrip("\t") if strip_tabs else candidate).strip() == delimiter:
-            return (end + 1 if end < n else n), consumed + (1 if end < n else 0)
+        if strip_tabs:
+            candidate = candidate.lstrip("\t")
+        if candidate == delimiter:
+            stop = end + 1 if end < n else n
+            return stop, source.count("\n", start, stop)
         if end >= n:
-            return n, consumed
+            break
         i = end + 1
-        consumed += 1
-    return n, consumed
+    return n, source.count("\n", start, n)
 
 
 def shell_spans(source: str) -> list[Span]:
@@ -723,6 +728,10 @@ def shell_spans(source: str) -> list[Span]:
     whitespace. Quotes span lines, so quote state carries across newlines.
     A heredoc body is skipped whole. Its lines are content the script emits,
     so a ``#`` there is not a comment and must never be rewritten.
+
+    An opener only queues its delimiter. The bodies are consumed at the end
+    of the line, in declaration order. One line may declare several, as in
+    ``cat <<A <<B``, and the rest of that line is still script.
     """
     spans: list[Span] = []
     i = 0
@@ -731,31 +740,26 @@ def shell_spans(source: str) -> list[Span]:
     in_single = in_double = False
     at_line_start = True
     prev = ""
+    pending: list[tuple[str, bool]] = []  # (delimiter, strip leading tabs)
     while i < n:
         ch = source[i]
         if ch == "<" and not in_single and not in_double:
             m = HEREDOC_RE.match(source, i)
             if m:
-                newline = source.find("\n", m.end())
-                if newline == -1:
-                    return spans  # opener with no body
-                # Lex the rest of the opener line for comments, then jump the
-                # body. `cat <<EOF  # note` keeps its trailing comment.
-                rest = shell_spans(source[m.end():newline])
-                for s in rest:
-                    spans.append(Span(s.start + m.end(), s.end + m.end(),
-                                      "comment", line, line))
-                i, consumed = _skip_heredoc_body(source, newline, m.group(3),
-                                                 strip_tabs=bool(m.group(1)))
-                line += consumed
-                at_line_start = True
+                pending.append((m.group(3), bool(m.group(1))))
+                i = m.end()
+                at_line_start = False
                 prev = ""
                 continue
         if ch == "\n":
             line += 1
+            i += 1
             at_line_start = True
             prev = ""
-            i += 1
+            for delimiter, strip_tabs in pending:
+                i, consumed = _skip_heredoc_body(source, i, delimiter, strip_tabs)
+                line += consumed
+            pending = []
             continue
         if ch == "\\" and not in_single:
             # A backslash escapes the next character, and that character can

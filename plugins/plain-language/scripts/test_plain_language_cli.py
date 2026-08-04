@@ -443,6 +443,33 @@ class TestShellSpans(unittest.TestCase):
                 src = f"cat > f {opener}\n# inside\n{closer}\n# outside\n"
                 self.assertEqual(self._texts(src), ["# outside"])
 
+    def test_heredoc_terminator_must_sit_at_line_start(self):
+        # Bash ends a plain heredoc only on a line that is exactly the
+        # delimiter. Indented or trailing-space forms are still body data,
+        # so a later "#" line must not become a comment.
+        src = ("cat <<EOF\n"
+               "  EOF\n"
+               "EOF \n"
+               "# still data\n"
+               "EOF\n"
+               "# real\n")
+        self.assertEqual(self._texts(src), ["# real"])
+
+    def test_dash_heredoc_strips_tabs_only(self):
+        # `<<-` strips leading tabs, never spaces.
+        self.assertEqual(self._texts("cat <<-EOF\n\tEOF\n# real\n"), ["# real"])
+        self.assertEqual(
+            self._texts("cat <<-EOF\n  EOF\n# data\nEOF\n# real\n"), ["# real"])
+
+    def test_multiple_heredocs_on_one_line(self):
+        # `cat <<A <<B` reads body A then body B, in declaration order.
+        src = "cat <<A <<B\n# in A\nA\n# in B\nB\n# real\n"
+        self.assertEqual(self._texts(src), ["# real"])
+
+    def test_trailing_comment_on_a_heredoc_opener(self):
+        src = "cat <<EOF # note\nbody\nEOF\n# real\n"
+        self.assertEqual(self._texts(src), ["# note", "# real"])
+
     def test_here_string_is_not_a_heredoc(self):
         # "<<<" is a here-string: the rest of the line is an argument, and
         # the following lines are ordinary script.
