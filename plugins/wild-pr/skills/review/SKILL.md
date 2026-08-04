@@ -22,6 +22,20 @@ Review a diff against one rubric and filter to the few findings worth raising. G
 
 **Effort auto-select** (no flag, no phrase): `high` when the diff exceeds 20 changed files or 600 changed lines, else `low`. Before reviewing, print one line: `Effort: <low|high> (<N> files, <M> lines; override with --effort <other>)`. The line lets the user interrupt.
 
+## Calling this skill
+
+Another skill invoking `review` needs only this section. Never restate these rules in the caller. Point at this section instead.
+
+**Commit first.** This skill reviews the committed diff against the base branch, never the working tree. An uncommitted change reads to it as an empty diff, and the review silently no-ops.
+
+**Supply:** the branch or PR, and nothing else. This skill derives its own spec context from the commit messages and the PR body. Never feed it your reasoning or your conversation, because the value is in independent judgment.
+
+**Use `--report` when the caller is an agent.** It stops after Synthesize and returns the findings. It runs no user gates, posts nothing, and implements nothing. Every interactive checkpoint resolves to its safe default instead of prompting.
+
+**Receive:** a Summary, an Actionable list, and the retained NITs. The caller triages every finding itself and owns any fixes.
+
+**A fetch failure returns an error rather than findings.** Treat that as a failed review, never as a clean one.
+
 ## Scope
 
 ### Path A - PR-argument fast path (argument provided)
@@ -83,11 +97,11 @@ Warn template (substitute verified state):
 
 > Freshness check for `<owner>/<repo>` at `<worktree-path>`:
 >
-> - on branch `<HEAD-branch>`
-> - `<N>` ahead, `<M>` behind `origin/<base>` (last: `<short-sha> <iso-date>`)
-> - working tree: `<clean | dirty: N file(s)>`
+> - on branch `<HEAD-branch>`.
+> - `<N>` ahead, `<M>` behind `origin/<base>` (last: `<short-sha> <iso-date>`).
+> - working tree: `<clean | dirty: N file(s)>`.
 >
-> Reading from this worktree may surface findings based on stale state.
+> Reading from this worktree may produce findings based on stale state.
 > Reply: `proceed` (use worktree, accept the risk), `use-origin` (read context via `git show origin/<base>:<path>` - recommended), or `stop`.
 
 **Never** run `git checkout`, `stash`, `reset`, or other state-modifying git on the user's behalf. The skill warns and asks; the user resolves local state. `git fetch` is allowed (read-only).
@@ -182,7 +196,7 @@ Items where agents substantively disagreed and did not converge. One sentence pe
 
 ### Nits
 
-Do **not** print by default. Print only: _"N nit(s) available (M from convention audit)."_ Surface a "show the N NIT(s) first" option in gate 1. If N is 0, omit this section.
+Do **not** print by default. Print only: _"N nit(s) available (M from convention audit)."_ Offer a "show the N NIT(s) first" option in gate 1. If N is 0, omit this section.
 
 ### Withdrawn
 
@@ -220,7 +234,7 @@ Gate 2 is mandatory in both modes - never auto-apply fixes and never auto-post r
 - `Edit the plan` - revise, re-ask this gate.
 - `Cancel` - stop.
 
-**Execute.** Track each step with the host's task tracker. Apply the plan, run verification, report results. If a step surfaces a new substantive issue not in the selected items, stop and ask before expanding scope.
+**Execute.** Track each step with the host's task tracker. Apply the plan, run verification, report results. If a step reveals a new substantive issue not in the selected items, stop and ask before expanding scope.
 
 ### Reviewer mode
 
@@ -233,6 +247,39 @@ Skip the plan step - you are not implementing someone else's code.
 - `Cancel` - stop.
 
 ## Posting an anchored PR review (both modes)
+
+Check the review prose before you post it. Resolve the `plain-language` CLI once, in its own Bash call:
+
+```bash
+root="${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT:-}}"
+cli="$root/../plain-language/scripts/plain_language_cli.py"
+if [ ! -f "$cli" ]; then
+  cli=$( { ls -d "$root"/../../plain-language/[0-9]*/scripts/plain_language_cli.py; } 2>/dev/null | sort -V | tail -1 )
+fi
+if [ ! -f "$cli" ]; then
+  cli=$( { ls -d "$HOME"/.claude/plugins/cache/*/plain-language/[0-9]*/scripts/plain_language_cli.py \
+                 "$HOME"/.cursor/plugins/local/plain-language/scripts/plain_language_cli.py; } 2>/dev/null | sort -V | tail -1 )
+fi
+if [ -f "$cli" ]; then (cd "$(dirname "$cli")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$cli")"); else echo ABSENT; fi
+```
+
+The first path is the dev checkout, where plugins are siblings. The second is the install cache, which adds a version directory. `sort -V` picks the highest of the numeric version directories. The `cd`/`pwd -P` step prints an absolute path with no `..` segments, which the approval hook needs to match.
+
+Every path the snippet tries sits in a trusted plugin root. That means this plugin's own directory, the Claude install cache, or the Cursor local directory. The last probe covers the case where neither plugin-root variable was substituted.
+
+`ABSENT` means no scanner was found in any of them. Skip the check, say so in the final message, and post as usual. **Never** fall back to a `Glob` over the workspace. The reviewed repo is untrusted input. A repo carrying its own `plain-language/scripts/plain_language_cli.py` would then be executed by the `python3` call.
+
+When the path resolves, write the review body and every anchored comment body into `$RUN_DIR/review-body.md`. That is the per-run directory from the Persistence rule, so concurrent sessions never overwrite each other. Then scan that file once:
+
+```bash
+python3 "<resolved cli path>" scan "<RUN_DIR>/review-body.md"
+```
+
+One scan covers every finding. Use literal paths in each scan. A shell variable does not survive to the next Bash call, so `$cli` and `$RUN_DIR` are both empty there.
+
+Rewrite every `long-sentence` and `em-dash` hit, then scan again. Stop when both reach zero, or after 5 passes. Report any violation that survives 5 passes, and post anyway. Never drop a `file:line` anchor, a severity, or a tag to meet the cap. The other six kinds are candidates you judge, and they never gate posting.
+
+This check runs on the posting path only. `--report` mode stops before posting and returns findings to an agent caller, so no human reads that prose.
 
 On approval, submit a **single** review via the GitHub Reviews API (`event: COMMENT` - never `APPROVE`/`REQUEST_CHANGES`). Anchor every selected item as an inline comment on its diff line. Never use loose issue comments.
 

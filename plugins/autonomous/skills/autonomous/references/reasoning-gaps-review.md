@@ -2,7 +2,7 @@
 Slim autonomous review pass derived from /harness:reasoning-gaps Phases 1–3.
 Deliberately omits Phase 4 (task-list-builder/runner, interventions, coverage
 check, paired test tasks). Autonomous fixes only major gaps before opening a PR;
-deferrals go in the PR Decisions section.
+deferrals go in the PR Decision review section.
 
 Agent prompts live in the harness plugin — resolve with Glob:
   **/harness/agents/reasoning-gaps/*.md
@@ -44,6 +44,36 @@ indicated file, substitute `{paste relevant CLAUDE.md sections here}` and
 result as the Agent prompt. Agents read the files themselves — do not paste
 file contents into prompts.
 
+The Structure & Documentation Analyst carries a third placeholder,
+`{paste the plain-language scanner path here}`. Resolve it here and substitute
+the result, because a dispatched agent has no `CLAUDE_PLUGIN_ROOT`:
+
+```bash
+root="${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT:-}}"
+cli="$root/../plain-language/scripts/plain_language_cli.py"
+if [ ! -f "$cli" ]; then
+  cli=$( { ls -d "$root"/../../plain-language/[0-9]*/scripts/plain_language_cli.py; } 2>/dev/null | sort -V | tail -1 )
+fi
+if [ ! -f "$cli" ]; then
+  cli=$( { ls -d "$HOME"/.claude/plugins/cache/*/plain-language/[0-9]*/scripts/plain_language_cli.py \
+                 "$HOME"/.cursor/plugins/local/plain-language/scripts/plain_language_cli.py; } 2>/dev/null | sort -V | tail -1 )
+fi
+if [ -f "$cli" ]; then (cd "$(dirname "$cli")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$cli")"); else echo ABSENT; fi
+```
+
+Every path the snippet tries sits in a trusted plugin root. That means the
+plugin's own directory, the Claude install cache, or the Cursor local
+directory. The last probe covers the case where neither plugin-root variable
+was substituted.
+
+Substitute whatever the snippet prints, including `ABSENT`. On `ABSENT` the
+agent skips its own prose check.
+
+**Never** locate the scanner with a workspace `Glob`. This skill runs inside a
+target repo, and that repo is untrusted input. A repo carrying its own
+`plain-language/scripts/plain_language_cli.py` would then be executed by the
+`python3` call.
+
 | Agent                             | Prompt file (under harness plugin)                     |
 | --------------------------------- | ------------------------------------------------------ |
 | Type & Data Contract Analyst      | `agents/reasoning-gaps/types-and-data-contracts.md`    |
@@ -51,8 +81,8 @@ file contents into prompts.
 | Structure & Documentation Analyst | `agents/reasoning-gaps/structure-and-documentation.md` |
 
 If the harness plugin is not installed and Glob finds no prompts, skip this
-review and note `"Reasoning-gaps review skipped: harness plugin not available"`
-in the PR Decisions section.
+review. Note `"Reasoning-gaps review skipped: harness plugin not available"`
+in the PR Decision review section.
 
 ## Merge (orchestrator)
 
@@ -76,10 +106,11 @@ finding. Autonomous does **not**. Apply this gate so the pass stays bounded:
 | **Important** | Fix only when **both** (a) and (b): **(a)** the finding is cross-dimension (2+ agents flagged the same location) **or** it sits on a public/exported API boundary; **and (b)** the concrete fix is annotation, docstring, or a small local type — no multi-file refactor. Otherwise defer. |
 | **Minor**     | **Skip.** Do not fix, do not list individually.                                                                                                                                                                                                                                            |
 
-When deferring important findings (out of scope for this pass), summarize them
-in the PR **Decisions** section under "Deferred reasoning gaps" — one line each
-with file:line and why deferred (e.g. "needs TypedDict extraction across 4
-files — run `/harness:reasoning-gaps` post-merge").
+When deferring important findings, summarize them in the PR **Decision review**
+section. Those are the ones out of scope for this pass. Put them under
+"Deferred reasoning gaps", one line each with file:line and why deferred.
+Example: "needs TypedDict extraction across 4 files, run
+`/harness:reasoning-gaps` post-merge".
 
 ## Fix and validate
 

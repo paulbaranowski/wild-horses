@@ -94,6 +94,22 @@ Worked example, `plugins/update-git-repos/.claude-plugin/plugin.json`: "Personal
 
 - **When multiple skills consume a structured format, define the schema in one doc and have skills link to it — never re-state it.** Example: `plugins/harness/task-list-schema.md` defines the runner's task JSON schema; both `task-list-builder` and `task-list-runner` link to it from their `SKILL.md` (line 13 of each) instead of duplicating field definitions. Schema drift between paired skills is a real cost — a definition that exists in two places will eventually diverge.
 
+### Call contracts between skills
+
+The rule above covers data. This one covers behavior: what a caller must supply, what it gets back, and what the callee will not do.
+
+- **A skill that other skills invoke ships a `## Calling this skill` section near the top of its `SKILL.md`.** It states four things. Those are the caller's inputs, the caller's return, what the skill does alone, and what it never does. Callers read that one section instead of the whole file. Canonical examples: `plugins/wild-pr/skills/summary-writer/SKILL.md` and `plugins/wild-pr/skills/review/SKILL.md`.
+- **A caller points at that section and never restates it.** `plugins/autonomous/skills/autonomous/SKILL.md` steps 5 and 6 name the section and stop. Why: a caller that paraphrases the contract is working from memory of a file it did not re-read. That paraphrase then rots silently when the callee changes.
+- **Both sides use one word for one idea.** `summary-writer` calls its section `Decision review`, so `autonomous` calls it that too. Two names for one section is how a caller ends up writing content that the callee drops.
+
+Why this exists: nine sites in this repo compose a skill by reading another skill's `SKILL.md`. Before the contract sections, wiring `autonomous` into `summary-writer` produced five separate defects in review. Every one was a wrong guess about the callee's delivery behavior:
+
+- who owns the title;
+- who opens the PR;
+- where decisions go;
+- what the inputs are;
+- what happens when the skill is absent.
+
 ### CLI design for agent loops
 
 Conventions for Python CLIs (like `plugins/harness/skills/task-list-runner/task_list_cli.py`) that get auto-approved by a harness PreToolUse hook and called by dispatched agents.

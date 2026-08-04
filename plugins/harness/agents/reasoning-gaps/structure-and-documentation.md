@@ -1,9 +1,10 @@
-# Structure & Documentation Analyst — Agent prompt template
+# Structure & Documentation Analyst: agent prompt template
 
 The orchestrator dispatches the contents of the fenced block below as a single Agent tool call. Before dispatching, substitute:
 
 - `{paste relevant CLAUDE.md sections here}` → the project's CLAUDE.md content (or "No CLAUDE.md found" if absent).
 - `{paste the file list here}` → the newline-separated list of absolute file paths produced in Phase 1.
+- `{paste the plain-language scanner path here}` → the absolute path to `plain_language_cli.py`, or the word `ABSENT`. Resolve it yourself before dispatching; a dispatched agent has no `CLAUDE_PLUGIN_ROOT` and cannot resolve it.
 
 Pass everything between the ` ```text ` and ` ``` ` lines as the prompt argument.
 
@@ -67,6 +68,44 @@ Write every docstring, comment, and finding description you propose in plain lan
 - Use one word for one idea. Pick a word for an idea, then use only that word for it.
 - Never use a figure of speech where a real name exists. Name the module, class, table, or function instead.
 Real identifiers and real domain terms stay: class names, field names, protocol names, domain vocabulary. Define one on first use when the reader cannot already know it.
+
+CHECK THE PROSE YOU PROPOSE:
+PLAIN-LANGUAGE SCANNER: {paste the plain-language scanner path here}
+
+Before you report, check the prose you wrote. If the scanner path above reads
+ABSENT, skip this check, say so in your report, and follow the four rules
+above on your own.
+
+Otherwise, write the prose you propose into one temporary .md file. Include
+your docstrings, comments, and finding descriptions. Include nothing that was
+already in the source. Write each one as a plain paragraph, separated by a
+blank line. Without the blank line the scanner joins them into one paragraph,
+and it then reports a long sentence you cannot clear.
+
+Leave out the "-" bullet, the [file:line] anchor, the category tag, and the
+em-dash separators from the response format above. Those are format, not
+prose, and the separators would keep the em-dash count above zero forever.
+
+Create a fresh directory with mktemp -d, then write the file inside it:
+
+  mktemp -d "${TMPDIR:-/tmp}/reasoning-gaps.XXXXXX"
+
+Name the file prose.md in the directory it prints. Keep the .md extension,
+because the scanner skips a file whose extension it does not know. Put the X
+characters last in the template. BSD mktemp only replaces a trailing run of
+them, so a name like reasoning-gaps.XXXXXX.md is taken literally and the
+second run fails.
+
+Then scan that file, passing both paths literally:
+
+  python3 "<scanner path>" scan "<temp file path>"
+
+Scan your own prose only. Scanning a source file would report pre-existing
+comments, and you must not rewrite those. The count would never reach zero.
+Rewrite every long-sentence and em-dash hit, then scan again. Stop when both
+reach zero, or after 5 passes. Report any violation that survives 5 passes.
+Never drop a fact to meet the cap. Then put the corrected prose back into the
+response format above, separators included.
 
 IMPORTANT: For documentation findings, be SPECIFIC about what should be documented. "Missing module docstring" is not a finding. A finding names the content: "This module needs a docstring explaining its role as the authentication middleware layer. It processes JWT tokens before requests reach route handlers." For structural findings, suggest specific decomposition.
 ```

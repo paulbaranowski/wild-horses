@@ -34,6 +34,29 @@ partway through. None of that appears in the diff, so none of it appears in the
 description. The state before this PR is main. The state after is HEAD. Nothing
 in between belongs.
 
+## Calling this skill
+
+Another skill invoking `summary-writer` needs only this section. Never restate
+these rules in the caller. Point at this section instead.
+
+**Supply:** the branch or PR to describe, and the source issue or plan URL.
+Also every ambiguous call with the alternatives you considered, and any review
+dismissals. The last two belong in Decision review. That is this skill's name
+for the section a caller may know as "Decisions".
+
+**Receive:** a title and a body. This skill re-derives the title on every run,
+so an existing title is input, never a default. Use both.
+
+**Delivery is conditional.** Delivery step 1 checks for an open PR. When one
+exists, this skill updates it by REST PATCH and the caller is done. When none
+exists, this skill returns the title and body and stops.
+
+**This skill never opens a pull request.** The caller runs `gh pr create` when
+no PR exists yet.
+
+**This skill never edits source files and never commits.** It reports any
+rationale it cut, so the caller can decide where that belongs.
+
 ## Plain language
 
 Write the description in plain language, using four rules adapted from
@@ -141,8 +164,8 @@ Every rule below repairs a symptom of that one defect.
   cost or the benefit sits in the closing clause, invert the sentence. The
   reason the paragraph exists goes first.
 
-  Buried: "The counter increments before the scan resolves, which means a
-  failed scan produces an overcount against the user rather than a free scan."
+  Buried: "The counter increments before the scan resolves, so a failed scan
+  produces an overcount."
 
   Led: "A failed scan still costs the user one of their five scans. The counter
   increments before the scan resolves, so a failure is charged, not refunded."
@@ -326,19 +349,19 @@ A claim that runs to two sentences still counts once. So splitting a long
 sentence never changes the count, and the 20-word rule can never force you to
 delete information.
 
-| Section                           | Limit                           |
-| --------------------------------- | ------------------------------- |
-| What this is                      | 5 claims                        |
-| What this changes for the user    | 4 claims                        |
-| Requirements                      | 3 to 6 bullets, 1 claim each    |
-| Architecture: the one idea        | 1 claim                         |
-| Architecture: before and after    | 4 claims                        |
-| Architecture: the decisions       | 2 to 4 here, each 1 + 2 claims  |
-| Architecture: what did not change | 2 claims                        |
-| Decision review                   | 1 to 3 items, 4 claims each     |
-| Data and contract model           | 3 claims                        |
-| Testing: automated coverage       | 4 claims                        |
-| Sequence and follow-ups           | 2 claims                        |
+| Section                           | Limit                          |
+| --------------------------------- | ------------------------------ |
+| What this is                      | 5 claims                       |
+| What this changes for the user    | 4 claims                       |
+| Requirements                      | 3 to 6 bullets, 1 claim each   |
+| Architecture: the one idea        | 1 claim                        |
+| Architecture: before and after    | 4 claims                       |
+| Architecture: the decisions       | 2 to 4 here, each 1 + 2 claims |
+| Architecture: what did not change | 2 claims                       |
+| Decision review                   | 1 to 3 items, 4 claims each    |
+| Data and contract model           | 3 claims                       |
+| Testing: automated coverage       | 4 claims                       |
+| Sequence and follow-ups           | 2 claims                       |
 
 Each decision gets 1 claim to state it, plus up to 2 claims of rationale. The
 decision count covers only what stays in the architecture section. A decision
@@ -390,8 +413,8 @@ title would say the same thing.
    has structure. Otherwise keep the before and after in prose, or use a tiny
    ASCII arrow for the linear case.
 4. **Recover the requirements.** What did the change have to satisfy: needs,
-   constraints, invariants, non-goals? Keep the ones a reviewer needs in order
-   to judge whether the design answers them.
+   constraints, invariants, non-goals? Keep the ones a reviewer needs to judge
+   whether the design answers them.
 5. **Name the audience and both sides of the tradeoff.** Who depends on the
    changed code without reading it: the product's end user, or the developer
    working in this code? Then say what got better for them, and what
@@ -570,12 +593,12 @@ body, and also:
 
 1. Save each diagram's source to
    `~/tmp/pr-assets/<repo>/<pr-number>/diagram-before.mmd` and
-   `diagram-after.mmd` (or just `diagram.mmd` for the after-only case) -
-   the branch name substitutes for `<pr-number>` until a PR number
-   exists, matching the Interface changes media-handoff convention.
-2. Attempt a best-effort PNG render of each `.mmd`, using the same
-   absolute save directory for both the input and the output so the PNG
-   lands next to its source rather than in the current working
+   `diagram-after.mmd`. Use just `diagram.mmd` for the after-only
+   case. The branch name substitutes for `<pr-number>` until a PR number
+   exists. This matches the Interface changes media-handoff convention.
+2. Attempt a best-effort PNG render of each `.mmd`. Use the same
+   absolute save directory for both the input and the output. The PNG
+   then lands beside its source, not in the current working
    directory:
 
    ```bash
@@ -584,16 +607,17 @@ body, and also:
      -o ~/tmp/pr-assets/<repo>/<pr-number>/diagram-before.png
    ```
 
-   If node/npm isn't available, or the first-run Chromium download fails
-   (no network, sandboxed session), skip the PNG, keep the `.mmd`, and
-   tell the user in the final message that installing Node/npm (or
-   running `mmdc` once to cache the download) would enable rendering
-   next time.
+   If node/npm isn't available, the render fails. The first-run Chromium
+   download can also fail (no network, sandboxed session). In either case,
+   skip the PNG and keep the `.mmd`. Tell the user in the final message how
+   to enable rendering next time. Install Node/npm, or run `mmdc` once to
+   cache the download.
 
-3. List the saved `.mmd` (and `.png`, if rendered) absolute paths in the
-   final message, alongside any screenshot paths - a portable copy for
-   reuse outside GitHub (Slack, docs), even though the PR body itself
-   already has the diagram inline and needs nothing dragged in.
+3. List the saved `.mmd` absolute paths in the final message, alongside any
+   screenshot paths. Include the `.png` paths when you rendered them. These
+   give the user a portable copy for reuse outside GitHub, such as Slack or
+   docs. The PR body itself already has the diagram inline and needs nothing
+   dragged in.
 
 ## Delivery
 
@@ -601,25 +625,95 @@ body, and also:
    `gh pr view --json number,title,url,body` (non-zero exit means none). When
    a PR number or branch was passed as the argument, target it instead:
    `gh pr view <arg> --json number,title,url,body`.
-2. Generate the title alongside the body per The title section - re-derived
-   from the one idea on every run, including when the PR already has a
+2. Generate the title alongside the body, per The title section. Re-derive it
+   from the one idea on every run. Do this even when the PR already has a
    title.
 3. If the existing body already contains GitHub-hosted media
-   (`user-attachments` URLs), carry those links into the new body unchanged;
-   placeholders are only for interfaces not yet illustrated. For any remaining
+   (`user-attachments` URLs), carry those links into the new body unchanged.
+   Placeholders are only for interfaces not yet illustrated. For any remaining
    placeholders, make sure the assets are already saved under
-   `~/tmp/pr-assets/<repo>/<pr-number>/` (branch name until a PR number
-   exists) before updating the PR, and after delivering, list each
-   placeholder's absolute file path in your final message so the user can
-   drag the files into the description.
-4. If a PR exists, update it immediately via the REST API - do not ask for
+   `~/tmp/pr-assets/<repo>/<pr-number>/` before updating the PR. The branch
+   name substitutes for the PR number until one exists. After delivering, list
+   each placeholder's absolute file path in your final message. The user can
+   then drag the files into the description.
+4. Check the body and title before you send them. Resolve the `plain-language`
+   CLI once, in its own Bash call:
+
+   ```bash
+   root="${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT:-}}"
+   cli="$root/../plain-language/scripts/plain_language_cli.py"
+   if [ ! -f "$cli" ]; then
+     cli=$( { ls -d "$root"/../../plain-language/[0-9]*/scripts/plain_language_cli.py; } 2>/dev/null | sort -V | tail -1 )
+   fi
+   if [ ! -f "$cli" ]; then
+     cli=$( { ls -d "$HOME"/.claude/plugins/cache/*/plain-language/[0-9]*/scripts/plain_language_cli.py \
+                    "$HOME"/.cursor/plugins/local/plain-language/scripts/plain_language_cli.py; } 2>/dev/null | sort -V | tail -1 )
+   fi
+   if [ -f "$cli" ]; then (cd "$(dirname "$cli")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$cli")"); else echo ABSENT; fi
+   ```
+
+   The first path is the dev checkout, where plugins are siblings. The second
+   is the install cache, which adds a version directory. `sort -V` picks the
+   highest of the numeric version directories. The `cd`/`pwd -P` step prints an
+   absolute path with no `..` segments, which the approval hook needs to match.
+
+   Every path the snippet tries sits in a trusted plugin root. That means this
+   plugin's own directory, the Claude install cache, or the Cursor local
+   directory. The last probe covers the case where neither plugin-root
+   variable was substituted.
+
+   `ABSENT` means no scanner was found in any of them. Skip the check, say so
+   in your final message, and go to step 5. The rules in this skill still
+   apply.
+
+   **Never** fall back to a `Glob` over the workspace. The repo is untrusted
+   input. A repo carrying its own
+   `plain-language/scripts/plain_language_cli.py` would then be executed by
+   the `python3` call.
+
+   When the path resolves, write the title and the body into one temporary
+   `.md` file. Put the title on the first line. Create a fresh directory with
+   `mktemp -d` so concurrent runs never overwrite each other:
+
+   ```bash
+   mktemp -d "${TMPDIR:-/tmp}/pr-body.XXXXXX"
+   ```
+
+   Write the body as `pr-body.md` inside the directory it prints. Keep the
+   `.md` extension. The scanner skips a file whose extension it does not know.
+   Markdown mode is also what protects fences, inline code, and table shape.
+
+   Put the `X` characters last in the template. BSD `mktemp` only replaces a
+   trailing run of them. A name like `pr-body.XXXXXX.md` is taken literally,
+   and the second run then fails.
+
+   Then scan that file, passing both the CLI path and the body path literally:
+
+   ```bash
+   python3 "<resolved cli path>" scan "<mktemp body path>"
+   ```
+
+   Use literal paths in every scan. A shell variable does not survive to the
+   next Bash call, so `$cli` is empty there. A combined resolve-and-scan
+   command would keep the variable, but it holds shell metacharacters, and the
+   plugin's approval hook rejects those.
+
+   Read the `totals` object. Rewrite every `long-sentence` and `em-dash` hit,
+   then scan again. Stop when both reach zero, or after 5 passes. Report any
+   violation that survives 5 passes, and deliver anyway. Never drop a fact to
+   meet the cap, and never let a claim ceiling slip to shorten a sentence.
+
+   The other six kinds are candidates, not verdicts. Judge each one and leave
+   the correct uses. They never gate delivery.
+
+5. If a PR exists, update it immediately via the REST API - do not ask for
    confirmation. `gh pr edit` calls a GraphQL mutation that requires
-   `read:org` on the token; `repo`-scoped tokens (the common case for
-   fine-grained PATs and CI tokens) will fail. REST PATCH works on any
+   `read:org` on the token. `repo`-scoped tokens will fail. That is the common
+   case for fine-grained PATs and CI tokens. REST PATCH works on any
    `repo`-scoped token.
 
    Capture the title and body into shell variables first, each via its own
-   single-quoted heredoc - the quoted delimiter means zero shell expansion,
+   single-quoted heredoc. The quoted delimiter means zero shell expansion,
    so backticks, `$`, and quotes stay raw:
 
    ```bash
@@ -638,16 +732,16 @@ body, and also:
      --jq '{url: .html_url, title}'
    ```
 
-   `{owner}` and `{repo}` are `gh api`'s own placeholder syntax - it fills
-   them in from the current directory's git remote, the same auto-detection
-   `gh pr edit` did implicitly. `.html_url` is the browsable PR page; the
-   response's own `.url` field is the API endpoint, not something to hand
-   to a person.
+   `{owner}` and `{repo}` are `gh api`'s own placeholder syntax. It fills
+   them in from the current directory's git remote. That is the same
+   auto-detection `gh pr edit` did implicitly. `.html_url` is the browsable PR
+   page. The response's own `.url` field is the API endpoint, not something to
+   hand to a person.
 
    After a successful update, confirm with the PR URL. If the PATCH fails
-   (network, 404, permissions), show the error and fall back to printing the
-   title and body for copy/paste.
+   (network, 404, permissions), show the error. Then print the title and body
+   for copy/paste.
 
-5. If no PR exists, hand the title and body to whatever opens the PR (or
+6. If no PR exists, hand the title and body to whatever opens the PR (or
    print them for copy/paste).
-6. In your final message, list any rationale you cut, per How much to write.
+7. In your final message, list any rationale you cut, per How much to write.
