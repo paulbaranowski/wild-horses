@@ -276,6 +276,7 @@ The PR-level summary should:
 
 Report:
 
+- Lead with the PR URL, in full: `PR: https://github.com/<owner>/<repo>/pull/<n>`. Never a bare number. A caller such as `/wild-pr` ends its run inside this report. A report with no link leaves the user nothing to click.
 - Commits made (with URLs).
 - Merge conflict status if relevant (resolved or aborted with reason).
 - CI checks fixed / still failing / skipped-with-diagnosis.

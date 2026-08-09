@@ -21,6 +21,20 @@ If either skill is missing, stop and tell the user what to install. Do not inven
 
 ---
 
+## The PR link rule
+
+Two moments make a PR URL known. `/wild-pr` creates the PR, or preflight finds one that already exists. From then on, end every message with the link on its own last line:
+
+```text
+PR: https://github.com/<owner>/<repo>/pull/<n>
+```
+
+This holds on every exit path. Those are: clean, three passes spent, hard stuck, aborted mid-run, and a preflight PR that already existed. Print the full URL. A bare number does not satisfy this rule, so `PR #340 created` is a failure.
+
+The rule outlives the phase that captured the URL. Placement differs by writer: your own messages end with the link, and a babysit report leads with it. Restate the line yourself after each pass, so your message still ends with it.
+
+---
+
 ## Composing other skills
 
 For each dependency skill or command:
@@ -53,7 +67,7 @@ Resolve the repo's actual default branch from `gh repo view` (fallback: `git sym
 Stop and report if:
 
 - Not on a git repo, or on the repository's default branch with no feature branch.
-- An open PR already exists for this branch — print its URL and ask whether to (a) skip create and only run the babysit loop on it, or (b) abort. Do not open a duplicate.
+- An open PR already exists for this branch. Ask whether to (a) skip create and only run the babysit loop on it, or (b) abort. Do not open a duplicate. **The PR link rule** applies from here, so end that message with the link line.
   - **If (a):** capture that PR's URL/number, run **Commit uncommitted work (if dirty)** below, then the push step if needed, **skip Phases 2–3 entirely**, and jump to Phase 4 with that URL as the babysit target.
   - **If (b):** stop. Do not continue.
 
@@ -137,7 +151,7 @@ Notes:
 - Quote `"$TITLE"` at the `gh` call so spaces and metacharacters do not word-split.
 - Capture the PR URL from `gh pr create` output (or `gh pr view --json url -q .url` right after).
 
-Print the PR URL, then continue — do not wait for the user.
+Print the link line from **The PR link rule**, then continue. Do not wait for the user.
 
 ---
 
@@ -151,11 +165,12 @@ For each pass `N` in `1..3`:
 
 1. Compose **babysit** per **Composing other skills**, with the captured PR URL as its argument.
 2. After the pass finishes, note its stop condition (`clean` / `progressing` / `stuck`).
-3. **Early exit (clean):** if the pass exits **clean**, stop the loop. Do not run remaining passes.
-4. **Stuck — soft vs hard:**
-   - **Soft stuck** (CI still pending after watch timeout, or similar "re-run could help"): count the pass, then continue to the next pass immediately.
-   - **Hard stuck** (auth/infra/external check/diagnosis-only with nothing actionable): stop the loop and report. Do not burn remaining passes.
-5. **Progressing:** count the pass and start the next one immediately. CI wait lives inside babysit's own `gh pr checks --watch`, not between passes.
+3. Print the link line from **The PR link rule** before you act on that stop condition. Every pass ends with a clickable link, not just the last one.
+4. **Early exit (clean):** if the pass exits **clean**, stop the loop. Do not run remaining passes.
+5. **Stuck.** Soft and hard stuck get different handling.
+   - **Soft stuck** means a re-run could help, for example CI still pending after the watch timeout. Count the pass, then continue to the next pass immediately.
+   - **Hard stuck** means nothing is actionable: auth, infra, an external check, or a diagnosis-only result. Stop the loop and report. Do not burn remaining passes.
+6. **Progressing:** count the pass and start the next one immediately. CI wait lives inside babysit's own `gh pr checks --watch`, not between passes.
 
 After the loop (3 passes or early clean/hard-stuck stop), summarize:
 
@@ -174,11 +189,13 @@ After the loop (3 passes or early clean/hard-stuck stop), summarize:
 - Use summary-writer for every title/body — never a changelog-style stub.
 - Use babysit for tending — never a hand-rolled "check CI and reply" shortcut.
 - Push when the branch has no upstream, **or** when local `HEAD` is ahead of its upstream — before create **and** before a babysit-only jump to Phase 4 (same rule as Phase 1).
-- Return the PR URL in the final summary.
+- Follow **The PR link rule**. Once the URL is known, every message ends with the link.
 - Own the outer babysit loop: on `progressing` or soft `stuck`, run the next pass yourself.
 
 **Don't:**
 
+- **Don't print a bare PR number** in place of the URL. `PR #340 created` gives the user nothing to click.
+- **Don't end any message** without the link once the PR URL is known. Error reports and stuck reports carry it too.
 - **Don't open a second PR** when one already exists for the branch.
 - **Don't commit** files that look like secrets — stop and ask the user instead.
 - **Don't run more than three** babysit passes in this skill, even if the PR is still progressing.
