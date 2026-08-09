@@ -67,7 +67,7 @@ Resolve the repo's actual default branch from `gh repo view` (fallback: `git sym
 Stop and report if:
 
 - Not on a git repo, or on the repository's default branch with no feature branch.
-- An open PR already exists for this branch. Print the link line from **The PR link rule** first. Then ask whether to (a) skip create and only run the babysit loop on it, or (b) abort. Do not open a duplicate.
+- An open PR already exists for this branch. Ask whether to (a) skip create and only run the babysit loop on it, or (b) abort. Do not open a duplicate. **The PR link rule** applies from here, so end that message with the link line.
   - **If (a):** capture that PR's URL/number, run **Commit uncommitted work (if dirty)** below, then the push step if needed, **skip Phases 2–3 entirely**, and jump to Phase 4 with that URL as the babysit target.
   - **If (b):** stop. Do not continue.
 
