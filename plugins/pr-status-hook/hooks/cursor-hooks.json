@@ -4,7 +4,7 @@
       {
         "command": "python3 \"${CURSOR_PLUGIN_ROOT}/scripts/pr_announce.py\"",
         "matcher": "Shell",
-        "timeout": 15
+        "timeout": 20
       }
     ],
     "stop": [
