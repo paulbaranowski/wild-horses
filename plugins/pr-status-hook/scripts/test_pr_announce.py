@@ -200,6 +200,11 @@ class TestBuildClaudePayload(unittest.TestCase):
         built = json.loads(hook.build_claude_payload(PR_URL))
         self.assertEqual(built["systemMessage"], f"PR: {PR_URL}")
 
+    def test_keeps_the_raw_json_out_of_the_transcript(self):
+        """Without suppressOutput the hook's own JSON prints after every call."""
+        built = json.loads(hook.build_claude_payload(PR_URL))
+        self.assertTrue(built["suppressOutput"])
+
 
 class TestAnnounce(unittest.TestCase):
     """Gate-by-gate, with `git`/`gh` faked through a patched runner factory."""

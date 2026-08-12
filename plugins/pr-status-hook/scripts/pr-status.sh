@@ -22,7 +22,10 @@ dirty=$(git status --porcelain 2>/dev/null | grep -c .)
 ahead=$(git rev-list --count '@{u}..HEAD' 2>/dev/null || true)
 
 # Open PR for this branch (empty if none / gh unavailable).
-pr_url=$(gh pr view --json url --jq .url 2>/dev/null || true)
+# `gh pr view` reports the branch's most recent PR whatever its state, so the
+# query drops anything that is not open. Without the filter a merged branch
+# reports its dead PR as live at every turn end.
+pr_url=$(gh pr view --json url,state --jq 'select(.state == "OPEN") | .url' 2>/dev/null || true)
 
 # Nothing interesting -> stay silent.
 if [ -z "$pr_url" ] && [ -n "$ahead" ] && [ "$ahead" = "0" ] && [ "$dirty" = "0" ]; then

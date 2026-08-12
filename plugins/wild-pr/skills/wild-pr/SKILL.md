@@ -149,7 +149,7 @@ Notes:
 
 - `--body-file -` with a single-quoted heredoc keeps `$`, backticks, and quotes in the body literal.
 - Quote `"$TITLE"` at the `gh` call so spaces and metacharacters do not word-split.
-- Capture the PR URL from `gh pr create` output (or `gh pr view --json url -q .url` right after).
+- Capture the PR URL from `gh pr create` output. If that output carries no URL, `gh pr view --json url -q .url` is the one tool call allowed before the link message below.
 
 Phase 3 is not complete when `gh pr create` returns. It is complete when the user has seen the link. So emit a user-facing message whose last line is the link line from **The PR link rule**. Call no tool between `gh pr create` and that message.
 
