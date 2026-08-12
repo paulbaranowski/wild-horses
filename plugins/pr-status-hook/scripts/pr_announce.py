@@ -34,6 +34,7 @@ from pr_hook_common import (
     announceable_branch,
     emit,
     make_runner,
+    new_deadline,
     open_pr_url,
     parse_hook_input,
     read_stdin,
@@ -130,7 +131,8 @@ def announce(hook: HookInput, tmp_root: Path, now: float) -> Optional[str]:
     if not is_trigger_command(hook.command):
         return None
 
-    branch = announceable_branch(make_runner(hook.cwd, GIT_TIMEOUT_SECONDS))
+    deadline = new_deadline()
+    branch = announceable_branch(make_runner(hook.cwd, GIT_TIMEOUT_SECONDS, deadline))
     if branch is None:
         return None
 
@@ -138,7 +140,7 @@ def announce(hook: HookInput, tmp_root: Path, now: float) -> Optional[str]:
     if not should_announce(marker, now, ANNOUNCE_INTERVAL_SECONDS):
         return None
 
-    url = open_pr_url(make_runner(hook.cwd, GH_TIMEOUT_SECONDS))
+    url = open_pr_url(make_runner(hook.cwd, GH_TIMEOUT_SECONDS, deadline))
     if url is None:
         # No PR yet. Leave the marker alone so the next call checks again.
         return None

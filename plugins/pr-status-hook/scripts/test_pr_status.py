@@ -127,7 +127,7 @@ class TestMainHonoursTheParserContract(unittest.TestCase):
         real = hook.make_runner
         self.addCleanup(lambda: setattr(hook, "make_runner", real))
         # Everything a banner needs, so only the payload gate can stop it.
-        hook.make_runner = lambda cwd, timeout: runner(
+        hook.make_runner = lambda cwd, timeout, deadline=None: runner(
             {
                 ("git", "rev-parse", "--abbrev-ref", "HEAD"): "feat/x",
                 ("gh", "pr", "view"): PR_URL,

@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from typing import Callable, Final, Optional, Sequence
 
@@ -28,6 +29,11 @@ SKIPPED_BRANCHES: Final = frozenset({"HEAD", "main", "master"})
 
 GIT_TIMEOUT_SECONDS: Final = 5.0
 GH_TIMEOUT_SECONDS: Final = 10.0
+
+# What one hook run may spend in total, across every subprocess it starts. It
+# sits well under the 20 second wrapper timeout in hooks.json. So the wrapper
+# never has to kill a run that is still trying to print.
+TOTAL_BUDGET_SECONDS: Final = 12.0
 
 # Cursor spells its events in camelCase and writes hook banners to stderr.
 # Claude uses PascalCase and a JSON object on stdout.
@@ -80,17 +86,42 @@ def read_stdin() -> str:
     return sys.stdin.read() if not sys.stdin.isatty() else ""
 
 
-def make_runner(cwd: str, timeout: float) -> CommandRunner:
-    """Build a command runner rooted at the directory the hook fired in."""
+def new_deadline() -> float:
+    """Start the shared budget for one hook run.
+
+    Per-call timeouts do not bound a hook. `pr_status.py` makes three `git`
+    calls and one `gh` call. Its per-call budget therefore sums to 25 seconds,
+    against a 20 second wrapper. A hook killed by its wrapper prints nothing,
+    which is the one outcome these scripts exist to avoid. So every runner in a
+    run shares one deadline. The total cannot exceed it, however many calls the
+    script grows.
+    """
+    return time.monotonic() + TOTAL_BUDGET_SECONDS
+
+
+def make_runner(cwd: str, timeout: float, deadline: Optional[float] = None) -> CommandRunner:
+    """Build a command runner rooted at the directory the hook fired in.
+
+    `timeout` caps one call. `deadline` caps the whole run, and the shorter of
+    the two wins. Omitting the deadline keeps the per-call behavior, which suits
+    a caller that makes exactly one call.
+    """
 
     def run(argv: Sequence[str]) -> Optional[str]:
+        limit = timeout
+        if deadline is not None:
+            limit = min(timeout, deadline - time.monotonic())
+            if limit <= 0:
+                # The budget is spent. Report nothing rather than start a call
+                # the wrapper would kill mid-flight.
+                return None
         try:
             done = subprocess.run(
                 list(argv),
                 cwd=cwd or None,
                 capture_output=True,
                 text=True,
-                timeout=timeout,
+                timeout=limit,
             )
         except (OSError, subprocess.SubprocessError):
             # A missing or hanging `git`/`gh` leaves nothing to report. These

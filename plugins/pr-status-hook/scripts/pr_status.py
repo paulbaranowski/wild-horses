@@ -28,6 +28,7 @@ from pr_hook_common import (
     announceable_branch,
     emit,
     make_runner,
+    new_deadline,
     open_pr_url,
     parse_hook_input,
     read_stdin,
@@ -115,12 +116,14 @@ def main() -> int:
         # process working directory and could still print a banner.
         return 0
 
-    git = make_runner(hook.cwd, GIT_TIMEOUT_SECONDS)
+    # One budget across all four subprocess calls this run makes.
+    deadline = new_deadline()
+    git = make_runner(hook.cwd, GIT_TIMEOUT_SECONDS, deadline)
     branch = announceable_branch(git)
     if branch is None:
         return 0
 
-    status = read_status(git, make_runner(hook.cwd, GH_TIMEOUT_SECONDS))
+    status = read_status(git, make_runner(hook.cwd, GH_TIMEOUT_SECONDS, deadline))
     if is_quiet(status):
         return 0
 

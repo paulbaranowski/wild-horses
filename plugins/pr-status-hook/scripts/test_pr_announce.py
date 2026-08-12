@@ -173,7 +173,7 @@ class TestAnnounce(unittest.TestCase):
             mapping[BRANCH] = branch
         if url is not None:
             mapping[PR_VIEW] = url
-        hook.make_runner = lambda cwd, timeout: runner(mapping)
+        hook.make_runner = lambda cwd, timeout, deadline=None: runner(mapping)
 
     def test_non_trigger_command_announces_nothing(self):
         self.fake_git_and_gh()

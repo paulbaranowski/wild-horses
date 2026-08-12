@@ -13,9 +13,10 @@ import contextlib
 import io
 import json
 import sys
+import time
 import unittest
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
@@ -144,6 +145,38 @@ class TestMakeRunner(unittest.TestCase):
     def test_it_runs_in_the_directory_it_was_given(self):
         run = common.make_runner("/", common.GIT_TIMEOUT_SECONDS)
         self.assertEqual(run(["pwd"]), "/")
+
+
+class TestSharedDeadline(unittest.TestCase):
+    """One run's calls share a budget, so the wrapper never has to kill them.
+
+    Per-call timeouts do not bound a hook. `pr_status.py` makes four calls, so
+    its per-call budget summed to 25 seconds against a 20 second wrapper.
+    """
+
+    def test_the_budget_stays_under_the_wrapper_timeout(self):
+        """The wrapper in hooks.json is 20s; leave room to print after."""
+        self.assertLess(common.TOTAL_BUDGET_SECONDS, 20.0)
+
+    def test_a_spent_budget_starts_no_further_call(self):
+        past = time.monotonic() - 1.0
+        run = common.make_runner("", common.GIT_TIMEOUT_SECONDS, past)
+        self.assertIsNone(run(["echo", "hello"]))
+
+    def test_a_live_budget_still_runs(self):
+        run = common.make_runner("", common.GIT_TIMEOUT_SECONDS, common.new_deadline())
+        self.assertEqual(run(["echo", "hello"]), "hello")
+
+    def test_the_deadline_shortens_a_long_per_call_timeout(self):
+        """A 10s call with 0.3s of budget left must be capped at the budget."""
+        started = time.monotonic()
+        run = common.make_runner("", 10.0, time.monotonic() + 0.3)
+        self.assertIsNone(run([sys.executable, "-c", "import time; time.sleep(5)"]))
+        self.assertLess(time.monotonic() - started, 3.0)
+
+    def test_no_deadline_keeps_the_per_call_timeout(self):
+        run = common.make_runner("", common.GIT_TIMEOUT_SECONDS)
+        self.assertEqual(run(["echo", "hello"]), "hello")
 
 
 class TestEmit(unittest.TestCase):
