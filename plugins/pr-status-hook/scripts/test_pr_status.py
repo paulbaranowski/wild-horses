@@ -4,8 +4,9 @@
 This hook runs at every turn end in every session. A regression here is the
 most visible one this plugin can ship.
 
-`characterize.sh` builds thirteen repository states and records what the hook
-prints for each into `golden-banners.txt`. `TestRecordedBanners` replays that.
+`characterize.sh` builds one repository state per case it lists, and records
+what the hook prints for each into `golden-banners.txt`. `TestRecordedBanners`
+replays that. The script is the count; restating it here only drifts.
 It started as proof that the Python port matched the shell script it replaced,
 which it did byte for byte. It is kept because it is the only test here that
 runs against real git repositories.
@@ -30,8 +31,6 @@ sys.path.insert(0, str(HERE))
 import pr_status as hook  # noqa: E402
 
 PR_URL = "https://github.com/acme/widgets/pull/42"
-PORCELAIN = ("git", "status", "--porcelain")
-AHEAD = ("git", "rev-list", "--count", "@{u}..HEAD")
 
 
 def runner(mapping: Dict[Tuple[str, ...], str]):
@@ -82,19 +81,18 @@ class TestParseWorkTree(unittest.TestCase):
     def test_reads_every_field_from_one_output(self):
         tree = hook.parse_work_tree(PORCELAIN_V2)
         self.assertEqual(tree.branch, "feat/x")
-        self.assertEqual(tree.upstream, "origin/feat/x")
         self.assertEqual(tree.ahead, "2")
-        self.assertEqual(tree.dirty, 2)
         self.assertEqual(tree.head_sha, "abc123")
+        # Two non-header lines, and neither of the four headers counts.
+        self.assertEqual(tree.dirty, 2)
 
     def test_a_detached_head_has_no_branch(self):
         tree = hook.parse_work_tree("# branch.oid abc\n# branch.head (detached)\n")
         self.assertIsNone(tree.branch)
 
     def test_no_upstream_leaves_ahead_unknown(self):
-        """`git` omits both header lines, and that absence is the signal."""
+        """`git` omits `# branch.ab`, and that absence is the signal."""
         tree = hook.parse_work_tree("# branch.oid abc\n# branch.head feat/x\n")
-        self.assertIsNone(tree.upstream)
         self.assertIsNone(tree.ahead)
 
     def test_level_with_upstream_is_zero_not_none(self):
@@ -106,10 +104,6 @@ class TestParseWorkTree(unittest.TestCase):
     def test_a_clean_tree_counts_no_files(self):
         tree = hook.parse_work_tree("# branch.head feat/x\n")
         self.assertEqual(tree.dirty, 0)
-
-    def test_header_lines_are_never_counted_as_files(self):
-        tree = hook.parse_work_tree(PORCELAIN_V2)
-        self.assertEqual(tree.dirty, 2)
 
     def test_no_output_at_all_is_survivable(self):
         tree = hook.parse_work_tree(None)
@@ -161,9 +155,6 @@ class TestBuildBanner(unittest.TestCase):
             hook.build_banner("feat/x", status(pr_url=PR_URL, ahead="2", dirty=3)),
             f"PR: {PR_URL} · ⚠ 2 commit(s) NOT pushed · ✎ 3 file(s) uncommitted",
         )
-
-    def test_the_link_is_the_full_url(self):
-        self.assertIn(PR_URL, hook.build_banner("feat/x", status(pr_url=PR_URL)))
 
     def test_a_merged_pr_still_shows_its_link(self):
         """The link is most wanted at the moment the PR merges, not least."""
@@ -218,7 +209,7 @@ class TestMainHonoursTheParserContract(unittest.TestCase):
 
 
 class TestRecordedBanners(unittest.TestCase):
-    """The banner this hook prints, across thirteen repository states.
+    """The banner this hook prints, across every state `characterize.sh` builds.
 
     Every other test in this file feeds a fake runner a canned string. This
     one builds real git repositories and runs the real hook against them. It is

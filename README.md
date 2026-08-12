@@ -126,13 +126,13 @@ A `UserPromptSubmit` hook that injects a per-turn reminder to pose decision ques
 
 ### [pr-status-hook](plugins/pr-status-hook/README.md)
 
-Prints the branch's PR link the moment `gh` knows it, so a run that spends twenty minutes in CI cannot finish without printing that link. A `PostToolUse` hook does that, matching `gh pr create`, `gh pr view`, and `gh pr checks`, and holding itself to one banner per branch per five minutes. A second hook runs on `Stop` and reports, at every turn-end, whether a PR exists for the current branch, with its link. A PR that merged mid-session keeps its link and gains a `(merged)` label, because that is when you most want to click it. It also reports whether the last commits were actually pushed, and whether the working tree is dirty. Both read real `git`/`gh` state, never memory. Stays silent unless there is something worth reporting. Exits early on non-repos, detached HEAD, and default branches. No command. Both fire automatically once installed.
+Prints the branch's PR link the moment `gh` knows it. A run that spends twenty minutes in CI cannot finish without printing that link. A `PostToolUse` hook does that, matching `gh pr create`, `gh pr view`, and `gh pr checks`. It holds itself to one banner per branch per five minutes. A second hook runs on `Stop` and reports whether a PR exists for the current branch, with its link. A PR that merged mid-session keeps its link and gains a `(merged)` label. That is when you most want to click it. The turn-end hook also reports whether the last commits reached the remote, and whether the tree is dirty. Both read real `git`/`gh` state, never memory. Stays silent unless there is something worth reporting. Exits early on non-repos, detached HEAD, and default branches. No command. Both fire automatically once installed.
 
 ```text
 /plugin install pr-status-hook@wild-horses
 ```
 
-See **[plugins/pr-status-hook/README.md](plugins/pr-status-hook/README.md)** for the seven invariants both hooks hold, the `gh` and hook-event facts that are easy to get wrong, and the recorded-banner tests.
+See **[plugins/pr-status-hook/README.md](plugins/pr-status-hook/README.md)** for the invariants both hooks hold. It also lists the `gh` and hook-event facts that cost debugging time, plus the recorded-banner tests.
 
 ### [pyright](plugins/pyright/README.md)
 
@@ -217,7 +217,7 @@ See **[plugins/marketplace/README.md](plugins/marketplace/README.md)** for the s
 
 ## Standalone CLI: `plan-keeper`
 
-The I/O backend behind the plan-keeper skills. `plan_keeper_cli.py` is a zero-dependency stdlib tool that manages the `~/plans/<repo>/` tree (save, list, archive, frontmatter, and Linear/Jira push) is also distributed as a standalone command-line tool via Homebrew, for working with your plans outside an agent session:
+The I/O backend behind the plan-keeper skills is `plan_keeper_cli.py`. It is a zero-dependency stdlib tool that manages the `~/plans/<repo>/` tree: save, list, archive, frontmatter, and Linear/Jira push. It also ships as a standalone command-line tool via Homebrew, for working with your plans outside an agent session:
 
 ```text
 brew install paulbaranowski/tap/plan-keeper

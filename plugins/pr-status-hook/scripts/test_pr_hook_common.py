@@ -2,8 +2,8 @@
 """Tests for pr_hook_common.py.
 
 This module holds what the two hooks must not disagree on, so a bug here breaks
-both at once. The `OPEN` filter gets the most attention. It is the rule that
-used to live twice, and getting it wrong reports a merged PR as live.
+both at once. The `gh` query and `pr_link` get the most attention. Those are the
+rules that used to live twice, once in `jq` and once in Python.
 
 Stdlib-only, so no pytest is needed. Unittest discovery works too.
 
@@ -150,31 +150,31 @@ class TestMakeRunner(unittest.TestCase):
     """The runner is the only place these hooks touch the outside world."""
 
     def test_returns_trimmed_stdout(self):
-        run = common.make_runner("", common.GIT_TIMEOUT_SECONDS)
+        run = common.make_runner("", common.GIT_TIMEOUT_SECONDS, common.new_deadline())
         self.assertEqual(run(["echo", "  hello  "]), "hello")
 
     def test_a_failing_command_is_none(self):
-        run = common.make_runner("", common.GIT_TIMEOUT_SECONDS)
+        run = common.make_runner("", common.GIT_TIMEOUT_SECONDS, common.new_deadline())
         self.assertIsNone(run(["false"]))
 
     def test_a_missing_binary_is_none_not_an_exception(self):
-        run = common.make_runner("", common.GIT_TIMEOUT_SECONDS)
+        run = common.make_runner("", common.GIT_TIMEOUT_SECONDS, common.new_deadline())
         self.assertIsNone(run(["definitely-not-a-real-binary-9f3a"]))
 
     def test_empty_output_is_none(self):
-        run = common.make_runner("", common.GIT_TIMEOUT_SECONDS)
+        run = common.make_runner("", common.GIT_TIMEOUT_SECONDS, common.new_deadline())
         self.assertIsNone(run(["true"]))
 
     def test_it_runs_in_the_directory_it_was_given(self):
-        run = common.make_runner("/", common.GIT_TIMEOUT_SECONDS)
+        run = common.make_runner("/", common.GIT_TIMEOUT_SECONDS, common.new_deadline())
         self.assertEqual(run(["pwd"]), "/")
 
 
 class TestSharedDeadline(unittest.TestCase):
     """One run's calls share a budget, so the wrapper never has to kill them.
 
-    Per-call timeouts do not bound a hook. `pr_status.py` makes four calls, so
-    its per-call budget summed to 25 seconds against a 20 second wrapper.
+    Per-call timeouts do not bound a hook. `pr_announce.py` makes three calls,
+    so its per-call budget sums to 20 seconds, which is the wrapper exactly.
     """
 
     def test_the_budget_stays_under_the_wrapper_timeout(self):
@@ -197,9 +197,32 @@ class TestSharedDeadline(unittest.TestCase):
         self.assertIsNone(run([sys.executable, "-c", "import time; time.sleep(5)"]))
         self.assertLess(time.monotonic() - started, 3.0)
 
-    def test_no_deadline_keeps_the_per_call_timeout(self):
-        run = common.make_runner("", common.GIT_TIMEOUT_SECONDS)
-        self.assertEqual(run(["echo", "hello"]), "hello")
+
+class TestPrLink(unittest.TestCase):
+    """One spelling for one link, because two hooks print it.
+
+    The two banners once used `PR <url>` and `PR: <url>`, and later agreed on
+    the form while disagreeing about the state label. Both read this function
+    now, so neither can drift from the other again.
+    """
+
+    def link(self, state: str) -> str:
+        return common.pr_link(common.PullRequest(url=PR_URL, state=state))
+
+    def test_an_open_pr_is_the_bare_link(self):
+        self.assertEqual(self.link("OPEN"), f"PR: {PR_URL}")
+
+    def test_a_merged_pr_carries_its_state(self):
+        """An unlabelled link reads as open, whatever the PR actually is."""
+        self.assertEqual(self.link("MERGED"), f"PR: {PR_URL} (merged)")
+
+    def test_a_closed_pr_carries_its_state(self):
+        self.assertEqual(self.link("CLOSED"), f"PR: {PR_URL} (closed)")
+
+    def test_the_link_survives_every_state(self):
+        """The link is the guaranteed part. The label is the extra."""
+        for state in ("OPEN", "MERGED", "CLOSED", "SOMETHING_NEW"):
+            self.assertIn(PR_URL, self.link(state), state)
 
 
 class TestEmit(unittest.TestCase):

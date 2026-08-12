@@ -47,16 +47,13 @@ run_case() {
     local repo="$WORK/repos/$name"
     rm -rf "$repo"; mkdir -p "$repo"; cd "$repo" || return
 
-    # Each case gets its own TMPDIR, because the hook keeps its PR cache and
-    # rate-limit marker there. Two cases built in the same second can produce
-    # the same commit sha, and a shared cache would let one case answer for
-    # another. That would make this recording depend on run order.
-    export TMPDIR="$WORK/tmp/$name"
     # XDG_STATE_HOME is where the hooks keep the PR cache and the rate-limit
-    # marker. Per case, so one case cannot answer for another, and so a run
-    # never writes into the real home directory.
+    # marker. Per case, because two cases built in the same second can produce
+    # the same commit sha. A shared cache would then let one case answer for
+    # another, which would make this recording depend on run order. Per case
+    # also keeps a run out of the real home directory.
     export XDG_STATE_HOME="$WORK/state/$name"
-    mkdir -p "$TMPDIR" "$XDG_STATE_HOME"
+    mkdir -p "$XDG_STATE_HOME"
 
     git init -q -b "$branch" .
     git config user.email t@example.com; git config user.name Test

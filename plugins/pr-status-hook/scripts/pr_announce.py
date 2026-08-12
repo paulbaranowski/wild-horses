@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PostToolUse hook: print the open PR's URL the moment it becomes knowable.
+"""PostToolUse hook: print the branch's PR link the moment it becomes knowable.
 
 The sibling `pr_status.py` Stop hook already reports this URL. It only runs
 when a turn ends. A user interrupt never reaches that point. Neither does a
@@ -31,6 +31,7 @@ from pr_hook_common import (
     GH_TIMEOUT_SECONDS,
     GIT_TIMEOUT_SECONDS,
     HookInput,
+    PullRequest,
     announceable_branch,
     emit,
     make_runner,
@@ -38,6 +39,7 @@ from pr_hook_common import (
     find_pull_request,
     parse_hook_input,
     pr_cache_path,
+    pr_link,
     read_stdin,
     state_root,
     write_pr_cache,
@@ -98,9 +100,12 @@ def should_announce(marker: Path, now: float, interval: float) -> bool:
 
     An unreadable marker counts as due. Losing the rate limit costs the user one
     duplicate line. Losing the banner costs them the link this hook exists for.
+
+    `lstat` rather than `stat`, so a planted symlink cannot decide this. That
+    matches the `O_NOFOLLOW` on the write beside it and on the PR cache.
     """
     try:
-        last = marker.stat().st_mtime
+        last = os.lstat(marker).st_mtime
     except OSError:
         # Covers both a missing marker and an unreadable one.
         return True
@@ -114,22 +119,33 @@ def touch_marker(marker: Path, now: float) -> None:
     escaping OSError costs them the banner itself. It also puts a traceback in
     the result of every `gh pr` call. So this write stays advisory, like the
     reads around it.
+
+    `O_NOFOLLOW` and mode `0600` under a `0700` directory, matching the PR cache.
+    The marker holds only an mtime, so a redirected write could at most create
+    or touch another file. Two writes into one private directory should not
+    disagree about that.
     """
     try:
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.touch()
-        os.utime(marker, (now, now))
+        marker.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            os.utime(fd, (now, now))
+        finally:
+            os.close(fd)
     except OSError:
         return
 
 
-def announce(hook: HookInput, root: Optional[Path], now: float) -> Optional[str]:
-    """Decide whether to announce, and return the URL when the answer is yes.
+def announce(hook: HookInput, root: Optional[Path], now: float) -> Optional[PullRequest]:
+    """Decide whether to announce, and return the PR when the answer is yes.
 
     Returns None at every gate that does not apply, so the caller stays quiet.
 
+    The pull request comes back whole, not as a URL. The caller words the
+    banner through `pr_link`, which needs the state.
+
     Announcing also stamps the rate-limit marker, so calling this twice in a row
-    yields the URL once. That write is the reason this is not a pure predicate.
+    yields the PR once. That write is the reason this is not a pure predicate.
     """
     if not is_trigger_command(hook.command):
         return None
@@ -145,8 +161,9 @@ def announce(hook: HookInput, root: Optional[Path], now: float) -> Optional[str]
     if marker is not None and not should_announce(marker, now, ANNOUNCE_INTERVAL_SECONDS):
         return None
 
-    # State is ignored here. One branch has one pull request. A link that
-    # vanishes the moment it merges is the opposite of this hook's job.
+    # Any state announces. A link that vanishes the moment it merges is the
+    # opposite of this hook's job. `pr_link` labels a non-open one, so the
+    # banner never passes a dead PR off as live.
     pull = find_pull_request(make_runner(hook.cwd, GH_TIMEOUT_SECONDS, deadline))
     if pull is None:
         # No PR yet. Leave the marker alone so the next call checks again.
@@ -163,7 +180,7 @@ def announce(hook: HookInput, root: Optional[Path], now: float) -> Optional[str]
 
     if marker is not None:
         touch_marker(marker, now)
-    return pull.url
+    return pull
 
 
 def main() -> int:
@@ -171,11 +188,11 @@ def main() -> int:
     if hook is None:
         return 0
 
-    url = announce(hook, state_root(), time.time())
-    if url is None:
+    pull = announce(hook, state_root(), time.time())
+    if pull is None:
         return 0
 
-    emit(f"PR: {url}", hook.event_name, CURSOR_POST_TOOL_EVENT)
+    emit(pr_link(pull), hook.event_name, CURSOR_POST_TOOL_EVENT)
     return 0
 
 

@@ -17,7 +17,9 @@ No command. Both hooks fire automatically once installed.
 | `pr_announce.py` | `PostToolUse` on Bash | Print the PR link as soon as a `gh pr` command reveals it |
 | `pr_status.py`   | `Stop`                | Report PR, push, and dirty-tree state as the turn ends    |
 
-`pr_hook_common.py` holds what the two must not disagree on. That covers reading the harness payload, running a command, asking `gh` for the pull request, and choosing the output channel.
+**Cursor:** hooks register via `hooks/cursor-hooks.json` (`postToolUse` on `Shell`, and `stop`). Same scripts; the matcher and event spelling differ from Claude's `Bash` and `Stop`.
+
+`pr_hook_common.py` holds what the two must not disagree on. That covers reading the harness payload and running a command. It also covers asking `gh` for the pull request, spelling the link, and choosing the output channel.
 
 ## Invariants
 
@@ -32,13 +34,13 @@ A `Stop` hook never runs on a user interrupt, and cannot run while a turn is sti
 **3. `pr_announce.py` never reads the PR cache.**
 It runs at the instant `gh pr create` changes the answer. A cached "no PR" would suppress the one banner this plugin exists to guarantee. It only writes the cache, so `pr_status.py` can reuse that answer instead of asking `gh` again.
 
-**4. The link shows whatever state the pull request is in.**
-A PR that merges mid-session must not make its own link vanish. That is the moment you most want to click it. `pr_status.py` labels a non-open state, because every other fact on that line already carries its own.
+**4. The link shows whatever state the pull request is in, labelled.**
+A PR that merges mid-session must not make its own link vanish. That is the moment you most want to click it. Both banners label a non-open state, through `pr_link` in the shared module. An unlabelled link reads as an open PR. So one hook must not print bare while the other labels.
 
 The link is the guaranteed part, not the label. State comes from the same cached answer. So a PR that merges can keep reading as open for up to `PR_CACHE_TTL_SECONDS`. A new commit changes the key and asks `gh` again.
 
 **5. One run is bounded by one shared deadline, not by per-call timeouts.**
-Per-call budgets sum. Four calls at 5 or 10 seconds each reach 25 seconds, past the wrapper timeout. A hook the wrapper kills prints nothing, which is the one outcome these scripts exist to avoid. Every runner in a run shares `TOTAL_BUDGET_SECONDS`, so adding a call cannot break the bound.
+Per-call budgets sum. `pr_announce.py` makes three calls at 5 or 10 seconds each, reaching 20 seconds, which is the wrapper timeout exactly. A hook the wrapper kills prints nothing, which is the one outcome these scripts exist to avoid. Every runner in a run shares `TOTAL_BUDGET_SECONDS`, so adding a call cannot break the bound.
 
 **6. Neither hook depends on `jq`.**
 The shell version failed silent without it: no output, exit 0, no error. Silent is the one failure mode a status hook cannot afford. That is why these are Python and not shell.
@@ -47,7 +49,7 @@ The shell version failed silent without it: no output, exit 0, no error. Silent 
 On Linux `TMPDIR` is often `/tmp`, which is world-writable. Both the cache and the rate-limit marker use paths derived from a branch name and a commit sha. A local user who guesses one could plant a URL the banner then prints. Both live under `XDG_STATE_HOME` at mode `0700`. Both open with `O_NOFOLLOW`, so a planted symlink cannot redirect a read or a write. A directory that cannot be made usable yields no state rather than an error, per the next invariant.
 
 **8. Nothing here blocks or fails a tool call.**
-Every gate returns quietly. That covers a missing binary, an unreadable marker, and a malformed payload. It also covers an unwritable cache, and a state directory that cannot be created. Losing state costs a `gh` call or a duplicate banner. Raising would cost the banner itself, plus a traceback after every turn end.
+Every gate returns quietly. That covers a missing binary, an unreadable marker, and a malformed payload. It also covers an unwritable cache, and a state directory that cannot be created. Losing state costs a `gh` call at every turn end. It also drops the rate limit. Every matching `gh pr` call then announces. Raising would cost the banner itself, plus a traceback after every turn end.
 
 ## Facts that are easy to get wrong
 
@@ -70,7 +72,7 @@ Four things cost real debugging time. Read them before changing a query or a gat
 python3 -m unittest discover -s plugins/pr-status-hook/scripts -p 'test_*.py'
 ```
 
-`characterize.sh` builds fifteen repository states and records what the hook prints for each into `golden-banners.txt`. It began as proof that the Python port matched the shell script it replaced, which it did byte for byte. It is kept for a second reason. It is the only test here that uses real git repositories rather than a fake runner.
+`characterize.sh` builds one repository state per case it lists, and records what the hook prints for each into `golden-banners.txt`. It began as proof that the Python port matched the shell script it replaced, which it did byte for byte. It is kept for a second reason. It is the only test here that uses real git repositories rather than a fake runner.
 
 To change a banner on purpose, run `characterize.sh` and commit the new recording with the code change. The fixture diff is then the reviewable statement of what users will see differently.
 

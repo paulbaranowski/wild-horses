@@ -35,6 +35,7 @@ from pr_hook_common import (
     find_pull_request,
     parse_hook_input,
     pr_cache_path,
+    pr_link,
     read_pr_cache,
     read_stdin,
     state_root,
@@ -60,12 +61,11 @@ class WorkTree:
     """Everything one `git status --porcelain=v2 --branch` call reports.
 
     `branch` is None on a detached HEAD, which that format spells `(detached)`.
-    `upstream` is None when the branch was never pushed. Then `ahead` is None
-    too, because a branch with no upstream cannot be counted against one.
+    `ahead` is None when the branch was never pushed, because a branch with no
+    upstream cannot be counted against one.
     """
 
     branch: Optional[str]
-    upstream: Optional[str]
     ahead: Optional[str]
     dirty: int
     head_sha: str
@@ -75,9 +75,10 @@ def parse_work_tree(porcelain: Optional[str]) -> WorkTree:
     """Read branch, upstream, ahead count, and dirty count from one output.
 
     This replaced three separate `git` calls. Each header line is optional, and
-    an absent `# branch.upstream` is the signal for "never pushed".
+    an absent `# branch.ab` is the signal for "never pushed". `git` emits that
+    line only when the branch has an upstream to count against.
     """
-    branch = upstream = ahead = None
+    branch = ahead = None
     head_sha = ""
     dirty = 0
     for line in (porcelain or "").splitlines():
@@ -95,14 +96,10 @@ def parse_work_tree(porcelain: Optional[str]) -> WorkTree:
             head_sha = value
         elif key == "branch.head":
             branch = None if value == "(detached)" else value
-        elif key == "branch.upstream":
-            upstream = value
         elif key == "branch.ab":
             # `+N -M`, where N is commits we have that the upstream does not.
             ahead = value.lstrip("+")
-    return WorkTree(
-        branch=branch, upstream=upstream, ahead=ahead, dirty=dirty, head_sha=head_sha
-    )
+    return WorkTree(branch=branch, ahead=ahead, dirty=dirty, head_sha=head_sha)
 
 
 def read_work_tree(run: CommandRunner) -> WorkTree:
@@ -122,19 +119,13 @@ def is_quiet(status: BranchStatus) -> bool:
 def build_banner(branch: str, status: BranchStatus) -> str:
     """Word the three facts as one line.
 
-    The link uses the `PR: <url>` form that wild-pr's link rule defines, which
-    is also what `pr_announce.py` prints. Two banners for one link once used two
-    spellings, and a reader scanning for a link should only learn one.
+    `pr_link` spells the link, so this banner and `pr_announce.py`'s cannot
+    drift. That includes the state label a non-open PR carries.
     """
     if status.pull is None:
         parts = [f"No PR for branch '{branch}'"]
-    elif status.pull.is_open:
-        parts = [f"PR: {status.pull.url}"]
     else:
-        # The link still shows after a merge, which is when it is most wanted.
-        # The state is spelled out because every other fact on this line
-        # carries its own. An unlabelled link reads as an open PR.
-        parts = [f"PR: {status.pull.url} ({status.pull.state.lower()})"]
+        parts = [pr_link(status.pull)]
 
     if status.ahead is None:
         parts.append("⚠ branch has no upstream (never pushed)")
@@ -189,7 +180,7 @@ def main() -> int:
         # process working directory and could still print a banner.
         return 0
 
-    # One budget across all four subprocess calls this run makes.
+    # One budget across every subprocess call this run makes.
     deadline = new_deadline()
     tree = read_work_tree(make_runner(hook.cwd, GIT_TIMEOUT_SECONDS, deadline))
     if tree.branch is None or tree.branch in SKIPPED_BRANCHES:

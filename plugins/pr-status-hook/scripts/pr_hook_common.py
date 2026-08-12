@@ -5,11 +5,12 @@
 answers "what is this branch's state right now". They run on different events
 and print different text. Everything below is what they must not disagree on.
 That covers reading the harness payload and running a command. It also covers
-which branches can own a PR and how to ask `gh` for an open one. Last, it
-covers which channel the banner goes out on.
+which branches can own a PR. Next comes the `gh` query for that branch's pull
+request, and how to spell the link. Last comes the channel a banner goes out on.
 
-The `OPEN` filter is the reason this module exists. It lived twice before, once
-in `jq` and once in Python. A rule written down twice is a rule that drifts.
+The `gh` query is the reason this module exists. It lived twice before, once in
+`jq` and once in Python, and the two drifted on the state filter. The query now
+reports the state, and each caller decides what a non-open state means.
 
 Neither script needs `jq`. A hook that depends on it fails silent when it is
 missing. Silent is the one failure mode a status hook cannot afford.
@@ -103,32 +104,29 @@ def read_stdin() -> str:
 def new_deadline() -> float:
     """Start the shared budget for one hook run.
 
-    Per-call timeouts do not bound a hook. `pr_status.py` makes three `git`
-    calls and one `gh` call. Its per-call budget therefore sums to 25 seconds,
-    against a 20 second wrapper. A hook killed by its wrapper prints nothing,
-    which is the one outcome these scripts exist to avoid. So every runner in a
-    run shares one deadline. The total cannot exceed it, however many calls the
-    script grows.
+    Per-call timeouts do not bound a hook. `pr_announce.py` makes two `git`
+    calls and one `gh` call. Its per-call budget therefore sums to 20 seconds,
+    which is the wrapper timeout exactly. A hook killed by its wrapper prints
+    nothing, which is the one outcome these scripts exist to avoid. So every
+    runner in a run shares one deadline. The total cannot exceed it, however
+    many calls either script grows.
     """
     return time.monotonic() + TOTAL_BUDGET_SECONDS
 
 
-def make_runner(cwd: str, timeout: float, deadline: Optional[float] = None) -> CommandRunner:
+def make_runner(cwd: str, timeout: float, deadline: float) -> CommandRunner:
     """Build a command runner rooted at the directory the hook fired in.
 
     `timeout` caps one call. `deadline` caps the whole run, and the shorter of
-    the two wins. Omitting the deadline keeps the per-call behavior, which suits
-    a caller that makes exactly one call.
+    the two wins. Every caller passes a deadline, so no run can outlive it.
     """
 
     def run(argv: Sequence[str]) -> Optional[str]:
-        limit = timeout
-        if deadline is not None:
-            limit = min(timeout, deadline - time.monotonic())
-            if limit <= 0:
-                # The budget is spent. Report nothing rather than start a call
-                # the wrapper would kill mid-flight.
-                return None
+        limit = min(timeout, deadline - time.monotonic())
+        if limit <= 0:
+            # The budget is spent. Report nothing rather than start a call the
+            # wrapper would kill mid-flight.
+            return None
         try:
             done = subprocess.run(
                 list(argv),
@@ -173,12 +171,12 @@ class PullRequest:
 def find_pull_request(run: CommandRunner) -> Optional[PullRequest]:
     """Ask `gh` for this branch's most recent PR, or None when there is none.
 
-    The state comes back with the URL rather than filtering on it. A PR that merges mid-session should not make its own link disappear. That
-    is what a `state == "OPEN"` filter does, at the moment you most want to
-    click.
+    The state comes back with the URL rather than filtering on it. A PR that
+    merges mid-session should not make its own link disappear. That is what a
+    `state == "OPEN"` filter does, at the moment you most want to click.
 
-    Callers decide what a non-open state means for them. `pr_status.py` labels
-    it. `pr_announce.py` ignores it, because one branch has one pull request.
+    Callers decide what a non-open state means for them. Both banners label it,
+    through `pr_link` below.
     """
     # A raw string, so `jq` receives `\(...)` and `\t` and expands them itself.
     jq = r'"\(.state)\t\(.url)"'
@@ -189,6 +187,19 @@ def find_pull_request(run: CommandRunner) -> Optional[PullRequest]:
     if not url.startswith("http"):
         return None
     return PullRequest(url=url, state=state)
+
+
+def pr_link(pull: PullRequest) -> str:
+    """Spell one pull request's link the way both banners spell it.
+
+    `PR: <url>` is the form wild-pr's link rule defines. A non-open PR carries
+    its state. The link outlives the merge, and an unlabelled link reads as an
+    open one. Two banners for one link once used two spellings, and a reader
+    scanning for a link should only learn one.
+    """
+    if pull.is_open:
+        return f"PR: {pull.url}"
+    return f"PR: {pull.url} ({pull.state.lower()})"
 
 
 def state_root() -> Optional[Path]:
