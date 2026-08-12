@@ -25,14 +25,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Final, Optional, Sequence
 
-# Commands worth checking after. `create` is the moment a URL first exists.
-# `view` covers the path where preflight finds a PR that already existed, so no
-# create ever runs. `checks` opens each long CI wait, which is the silence the
-# user most needs a link in front of.
+# Commands worth checking after. All three fire once the command returns,
+# because that is what PostToolUse means. None can announce ahead of the tool
+# it matches.
+#
+# `create` is the moment a URL first exists. It is the one that beats the CI
+# wait. `view` covers the path where preflight finds a PR that already existed.
+# It also opens each babysit pass. `checks` fires when a long `--watch`
+# returns. So a pass that ran silently for minutes ends with the link on screen.
 TRIGGER_COMMANDS: Final = ("gh pr create", "gh pr view", "gh pr checks")
 
-# Branches that never have a PR of their own.
-SKIPPED_BRANCHES: Final = frozenset({"HEAD", "main", "master", ""})
+# Branches that never have a PR of their own. A detached HEAD answers `HEAD`.
+SKIPPED_BRANCHES: Final = frozenset({"HEAD", "main", "master"})
 
 # A babysit pass opens with `gh pr view` and can then burn 600 seconds inside
 # `gh pr checks --watch`. At five minutes a three-pass run yields roughly three
@@ -99,24 +103,14 @@ def is_trigger_command(command: str) -> bool:
     return any(trigger in command for trigger in TRIGGER_COMMANDS)
 
 
-def current_branch(run: CommandRunner) -> Optional[str]:
-    """Return the checked-out branch name, or None outside a git work tree.
+def announceable_branch(run: CommandRunner) -> Optional[str]:
+    """Return the checked-out branch when it can own a PR, else None.
 
-    One call does both jobs. `git rev-parse` already fails outside a repo. On a
+    One `git` call does every job here. It fails outside a work tree. On a
     detached HEAD it answers `HEAD`, which `SKIPPED_BRANCHES` rejects.
     """
-    return run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
-
-
-def is_announceable_branch(branch: Optional[str]) -> bool:
-    """Report whether a branch is one that can own a pull request."""
-    return branch is not None and branch not in SKIPPED_BRANCHES
-
-
-def announceable_branch(run: CommandRunner) -> Optional[str]:
-    """Return the checked-out branch when it can own a PR, else None."""
-    branch = current_branch(run)
-    return branch if is_announceable_branch(branch) else None
+    branch = run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    return branch if branch and branch not in SKIPPED_BRANCHES else None
 
 
 def marker_path(tmp_root: Path, session_id: str, branch: str) -> Path:
@@ -148,18 +142,43 @@ def should_announce(marker: Path, now: float, interval: float) -> bool:
 
 
 def open_pr_url(run: CommandRunner) -> Optional[str]:
-    """Ask `gh` for the open PR's URL, or return None when there is none."""
-    url = run(["gh", "pr", "view", "--json", "url", "--jq", ".url"])
+    """Ask `gh` for the open PR's URL, or return None when there is none.
+
+    `gh pr view` reports the branch's most recent PR whatever its state. So the
+    query asks for the state and drops anything that is not open. Without that
+    filter a closed PR prints a dead link. Worse, it stamps the marker, which
+    then silences the real banner when `gh pr create` runs moments later.
+    """
+    url = run(
+        [
+            "gh",
+            "pr",
+            "view",
+            "--json",
+            "url,state",
+            "--jq",
+            'select(.state == "OPEN") | .url',
+        ]
+    )
     if url is None or not url.startswith("http"):
         return None
     return url
 
 
 def touch_marker(marker: Path, now: float) -> None:
-    """Stamp the marker so the next few calls stay quiet."""
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.touch()
-    os.utime(marker, (now, now))
+    """Stamp the marker so the next few calls stay quiet.
+
+    A marker this process cannot write costs the user one duplicate banner. An
+    escaping OSError costs them the banner itself. It also puts a traceback in
+    the result of every `gh pr` call. So this write stays advisory, like the
+    reads around it.
+    """
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+        os.utime(marker, (now, now))
+    except OSError:
+        return
 
 
 def build_claude_payload(url: str) -> str:

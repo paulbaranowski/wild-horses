@@ -9,6 +9,8 @@ Stdlib-only, so no pytest is needed. Unittest discovery works too.
 
     python3 plugins/pr-status-hook/scripts/test_pr_announce.py
 """
+import contextlib
+import io
 import json
 import subprocess
 import sys
@@ -16,6 +18,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+from unittest import mock
 
 HERE = Path(__file__).parent
 SCRIPT = HERE / "pr_announce.py"
@@ -101,27 +104,20 @@ class TestIsTriggerCommand(unittest.TestCase):
         self.assertFalse(hook.is_trigger_command(""))
 
 
-class TestBranchGates(unittest.TestCase):
+class TestAnnounceableBranch(unittest.TestCase):
     def test_default_branches_are_skipped(self):
-        for branch in ("main", "master", "HEAD", ""):
-            self.assertFalse(hook.is_announceable_branch(branch), branch)
+        for branch in ("main", "master"):
+            self.assertIsNone(hook.announceable_branch(runner({BRANCH: branch})), branch)
 
-    def test_feature_branch_is_announceable(self):
-        self.assertTrue(hook.is_announceable_branch("emdash/show-pr-link"))
-
-    def test_missing_branch_is_skipped(self):
-        self.assertFalse(hook.is_announceable_branch(None))
+    def test_detached_head_is_skipped(self):
+        self.assertIsNone(hook.announceable_branch(runner({BRANCH: "HEAD"})))
 
     def test_outside_a_work_tree_there_is_no_branch(self):
-        self.assertIsNone(hook.current_branch(runner({})))
+        self.assertIsNone(hook.announceable_branch(runner({})))
 
-    def test_announceable_branch_filters_the_default_branch(self):
-        run = runner({BRANCH: "main"})
-        self.assertIsNone(hook.announceable_branch(run))
-
-    def test_announceable_branch_returns_a_feature_branch(self):
-        run = runner({BRANCH: "feat/x"})
-        self.assertEqual(hook.announceable_branch(run), "feat/x")
+    def test_feature_branch_is_announceable(self):
+        run = runner({BRANCH: "emdash/show-pr-link"})
+        self.assertEqual(hook.announceable_branch(run), "emdash/show-pr-link")
 
 
 class TestMarkerPath(unittest.TestCase):
@@ -161,6 +157,15 @@ class TestShouldAnnounce(unittest.TestCase):
         hook.touch_marker(self.marker, now=1000.0)
         self.assertTrue(hook.should_announce(self.marker, now=1300.0, interval=300.0))
 
+    def test_an_unwritable_marker_does_not_raise(self):
+        """A marker we cannot write costs a duplicate banner, never the banner."""
+        unwritable = Path(self.tmp.name) / "ro" / "marker"
+        unwritable.parent.mkdir()
+        unwritable.parent.chmod(0o500)
+        self.addCleanup(unwritable.parent.chmod, 0o700)
+        hook.touch_marker(unwritable, now=1000.0)
+        self.assertTrue(hook.should_announce(unwritable, now=1000.0, interval=300.0))
+
 
 class TestOpenPrUrl(unittest.TestCase):
     def test_returns_the_url_gh_reports(self):
@@ -172,17 +177,28 @@ class TestOpenPrUrl(unittest.TestCase):
     def test_non_url_output_is_rejected(self):
         self.assertIsNone(hook.open_pr_url(runner({PR_VIEW: "no pull requests found"})))
 
+    def test_the_query_filters_on_open_state(self):
+        """A closed PR must not print, and must not stamp the marker.
+
+        `gh pr view` reports the branch's most recent PR whatever its state.
+        So the state filter has to live in the query itself.
+        """
+        seen = []
+
+        def run(argv):
+            seen.append(list(argv))
+            return None
+
+        hook.open_pr_url(run)
+        self.assertIn("url,state", seen[0])
+        self.assertIn('select(.state == "OPEN") | .url', seen[0])
+
 
 class TestBuildClaudePayload(unittest.TestCase):
-    def test_carries_the_banner(self):
-        built = json.loads(hook.build_claude_payload(PR_URL))
-        self.assertEqual(built["systemMessage"], f"PR: {PR_URL}")
-        self.assertTrue(built["suppressOutput"])
-
-    def test_uses_the_link_rule_format(self):
+    def test_carries_the_link_rule_banner(self):
         """wild-pr's link rule spells this `PR: <url>`, so the banner matches."""
         built = json.loads(hook.build_claude_payload(PR_URL))
-        self.assertTrue(built["systemMessage"].startswith("PR: http"))
+        self.assertEqual(built["systemMessage"], f"PR: {PR_URL}")
 
 
 class TestAnnounce(unittest.TestCase):
@@ -272,6 +288,36 @@ class TestAnnounce(unittest.TestCase):
         self.assertIsNone(hook.announce(parsed, self.root, now=1000.0))
         self.fake_git_and_gh(url=PR_URL)
         self.assertEqual(hook.announce(parsed, self.root, now=1005.0), PR_URL)
+
+
+class TestMainEmits(unittest.TestCase):
+    """`main` picks the channel the banner reaches the user through.
+
+    Every other end-to-end case asserts silence, so without these two the print
+    itself carries no test. Swapping the branches would keep the suite green.
+    """
+
+    def setUp(self):
+        real_announce = hook.announce
+        self.addCleanup(lambda: setattr(hook, "announce", real_announce))
+        hook.announce = lambda parsed, tmp_root, now: PR_URL
+
+    def emit(self, event):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(sys, "stdin", io.StringIO(payload(event=event))):
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                self.assertEqual(hook.main(), 0)
+        return out.getvalue(), err.getvalue()
+
+    def test_claude_gets_the_json_banner(self):
+        out, err = self.emit("PostToolUse")
+        self.assertEqual(json.loads(out)["systemMessage"], f"PR: {PR_URL}")
+        self.assertEqual(err, "")
+
+    def test_cursor_gets_the_stderr_banner(self):
+        out, err = self.emit(hook.CURSOR_EVENT_NAME)
+        self.assertEqual(out, "")
+        self.assertEqual(err.strip(), f"PR: {PR_URL}")
 
 
 class TestEndToEnd(unittest.TestCase):

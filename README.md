@@ -18,7 +18,7 @@ The plugins group into four themes. Each one-liner below links to the full plugi
 - **[update-git-repos](#update-git-repos)** — pull every configured git repo from `origin` in one shot.
 - **[cleanup-worktrees](#cleanup-worktrees)** — find and remove stale git worktrees that are safe to delete.
 - **[yes-no-questions-hook](#yes-no-questions-hook)** — nudge the agent to pose decisions as numbered yes/no questions.
-- **[pr-status-hook](#pr-status-hook)** — report PR / push / dirty-tree state at the end of every turn.
+- **[pr-status-hook](#pr-status-hook)** — print the branch's PR link once `gh` knows it, plus push and dirty-tree state.
 
 **Make code agent-readable** — can an agent understand your code and safely edit it?
 
@@ -126,7 +126,7 @@ A `UserPromptSubmit` hook that injects a per-turn reminder to pose decision ques
 
 ### [pr-status-hook](plugins/pr-status-hook)
 
-A `Stop` hook that reports, at every turn-end, whether an open PR exists for the current branch (with its link), whether the last commits were actually pushed, and whether the working tree is dirty — all computed from real `git`/`gh` state, never from memory. Stays silent unless there is something worth reporting, and exits early on non-repos, detached HEAD, and default branches. No command — it fires automatically once installed.
+Two hooks. A `PostToolUse` hook prints the branch's PR link once `gh` knows it. So a run that spends twenty minutes in CI cannot finish without printing that link. It matches `gh pr create`, `gh pr view`, and `gh pr checks`. It holds itself to one banner per branch per five minutes. A `Stop` hook then reports, at every turn-end, whether an open PR exists for the current branch (with its link). It also reports whether the last commits were actually pushed, and whether the working tree is dirty. Both read real `git`/`gh` state, never memory. Stays silent unless there is something worth reporting. Exits early on non-repos, detached HEAD, and default branches. No command. Both fire automatically once installed.
 
 ```text
 /plugin install pr-status-hook@wild-horses
@@ -269,12 +269,12 @@ Then restart Cursor (**Developer: Reload Window**) and open **Customize** to ena
 
 Hook plugins and their Cursor equivalents:
 
-| Plugin                                                                                         | Cursor hook event       | Notes                                 |
-| ---------------------------------------------------------------------------------------------- | ----------------------- | ------------------------------------- |
-| `linting-hooks`                                                                                | `postToolUse` (`Write`) | Run `/linting-hooks:install` for deps |
-| `pr-status-hook`                                                                               | `stop`                  | Banner prints to Hooks stderr         |
-| `harness`, `plan-keeper`, `update-git-repos`, `cleanup-worktrees`, `wild-pr`, `plain-language` | `preToolUse` (`Shell`)  | Auto-approve bounded plugin CLIs      |
-| `yes-no-questions-hook`                                                                        | _(rule, not hook)_      | Ships as `rules/yes-no-questions.mdc` |
+| Plugin                                                                                         | Cursor hook event               | Notes                                 |
+| ---------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------- |
+| `linting-hooks`                                                                                | `postToolUse` (`Write`)         | Run `/linting-hooks:install` for deps |
+| `pr-status-hook`                                                                               | `stop`, `postToolUse` (`Shell`) | Banner prints to Hooks stderr         |
+| `harness`, `plan-keeper`, `update-git-repos`, `cleanup-worktrees`, `wild-pr`, `plain-language` | `preToolUse` (`Shell`)          | Auto-approve bounded plugin CLIs      |
+| `yes-no-questions-hook`                                                                        | _(rule, not hook)_              | Ships as `rules/yes-no-questions.mdc` |
 
 ## Development
 
