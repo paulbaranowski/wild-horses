@@ -12,6 +12,7 @@ Stdlib-only, so no pytest is needed. Unittest discovery works too.
 import contextlib
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -62,6 +63,22 @@ def runner(mapping):
 
 BRANCH = ("git", "rev-parse", "--abbrev-ref", "HEAD")
 PR_VIEW = ("gh", "pr", "view")
+
+
+_SCRATCH_STATE = tempfile.TemporaryDirectory()
+
+
+def setUpModule():
+    """Keep the hooks' state directory out of the real home while testing.
+
+    `state_root()` honours XDG_STATE_HOME. Redirecting it here means a test run
+    never leaves cache or marker files behind for a real session to read.
+    """
+    os.environ["XDG_STATE_HOME"] = _SCRATCH_STATE.name
+
+
+def tearDownModule():
+    _SCRATCH_STATE.cleanup()
 
 
 class TestIsTriggerCommand(unittest.TestCase):

@@ -37,6 +37,7 @@ from pr_hook_common import (
     pr_cache_path,
     read_pr_cache,
     read_stdin,
+    state_root,
     write_pr_cache,
 )
 
@@ -59,8 +60,8 @@ class WorkTree:
     """Everything one `git status --porcelain=v2 --branch` call reports.
 
     `branch` is None on a detached HEAD, which that format spells `(detached)`.
-    `upstream` is None when the branch was never pushed, and then `ahead` is
-    None too, because a branch with no upstream cannot be counted against one.
+    `upstream` is None when the branch was never pushed. Then `ahead` is None
+    too, because a branch with no upstream cannot be counted against one.
     """
 
     branch: Optional[str]
@@ -132,7 +133,7 @@ def build_banner(branch: str, status: BranchStatus) -> str:
     else:
         # The link still shows after a merge, which is when it is most wanted.
         # The state is spelled out because every other fact on this line
-        # carries its own, and an unlabelled link reads as an open PR.
+        # carries its own. An unlabelled link reads as an open PR.
         parts = [f"PR: {status.pull.url} ({status.pull.state.lower()})"]
 
     if status.ahead is None:
@@ -149,20 +150,22 @@ def build_banner(branch: str, status: BranchStatus) -> str:
 
 
 def find_pr(
-    tree: WorkTree, cwd: str, deadline: float, tmp_root: Path, now: float
+    tree: WorkTree, cwd: str, deadline: float, root: Path, now: float
 ) -> Optional[PullRequest]:
     """Find this branch's open PR, avoiding `gh` when a fresh answer is cached.
 
     `gh pr view` measures around 500ms, and this hook runs at every turn end.
 
-    An earlier version also skipped `gh` when the branch had no upstream, on the
-    reasoning that an unpushed branch cannot have a pull request. That is wrong.
+    An earlier version also skipped `gh` when the branch had no upstream. The
+    reasoning was that an unpushed branch cannot have a PR. That is wrong.
     `gh pr view` resolves by branch name against the remote, not by local
-    tracking config, so `git branch --unset-upstream` and a recreated local
+    tracking config. So `git branch --unset-upstream` and a recreated local
     branch both leave an open PR reachable with no upstream. The recorded
     `pr-no-upstream` case is exactly that state, and it caught the mistake.
     """
-    cache = pr_cache_path(tmp_root, tree.branch or "", tree.head_sha)
+    # `cwd` is the repository identifier. Two clones sit at different paths,
+    # and a fork and its upstream resolve to different pull requests.
+    cache = pr_cache_path(root, cwd, tree.branch or "", tree.head_sha)
     cached = read_pr_cache(cache, now)
     if cached is not None:
         return cached
@@ -187,9 +190,8 @@ def main() -> int:
     if tree.branch is None or tree.branch in SKIPPED_BRANCHES:
         return 0
 
-    tmp_root = Path(os.environ.get("TMPDIR") or "/tmp")
     status = BranchStatus(
-        pull=find_pr(tree, hook.cwd, deadline, tmp_root, time.time()),
+        pull=find_pr(tree, hook.cwd, deadline, state_root(), time.time()),
         ahead=tree.ahead,
         dirty=tree.dirty,
     )

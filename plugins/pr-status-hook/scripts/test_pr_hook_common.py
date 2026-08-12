@@ -12,7 +12,9 @@ Stdlib-only, so no pytest is needed. Unittest discovery works too.
 import contextlib
 import io
 import json
+import os
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -44,6 +46,22 @@ def parse(raw) -> common.HookInput:
     result = common.parse_hook_input(raw)
     assert result is not None, f"expected a parsable payload, got {raw!r}"
     return result
+
+
+_SCRATCH_STATE = tempfile.TemporaryDirectory()
+
+
+def setUpModule():
+    """Keep the hooks' state directory out of the real home while testing.
+
+    `state_root()` honours XDG_STATE_HOME. Redirecting it here means a test run
+    never leaves cache or marker files behind for a real session to read.
+    """
+    os.environ["XDG_STATE_HOME"] = _SCRATCH_STATE.name
+
+
+def tearDownModule():
+    _SCRATCH_STATE.cleanup()
 
 
 class TestParseHookInput(unittest.TestCase):
@@ -214,6 +232,37 @@ class TestEmit(unittest.TestCase):
         self.assertEqual(err, "")
         self.assertEqual(json.loads(out)["systemMessage"], "PR: x")
 
+class TestStateRootIsPrivate(unittest.TestCase):
+    """The cache and marker hold data the hook prints to the user.
+
+    A world-writable `/tmp` lets any local user pre-create the path. They can
+    poison the URL the banner shows, or point it at a file the hook's own user
+    can write. Neither needs to guess much: the key is derived from a branch
+    name and a commit sha.
+    """
+
+    def test_the_root_is_not_world_writable(self):
+        root = common.state_root()
+        self.assertEqual(root.stat().st_mode & 0o077, 0, f"{root} is group/other accessible")
+
+    def test_the_root_is_owned_by_this_user(self):
+        self.assertEqual(common.state_root().stat().st_uid, os.getuid())
+
+    def test_a_write_does_not_follow_a_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "victim"
+            link = Path(tmp) / "entry"
+            link.symlink_to(target)
+            common.write_pr_cache(link, common.PullRequest(url=PR_URL, state="OPEN"))
+            self.assertFalse(target.exists(), "write followed the symlink to its target")
+
+    def test_a_read_does_not_follow_a_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            planted = Path(tmp) / "planted"
+            planted.write_text("OPEN\thttps://evil.example/pull/1")
+            link = Path(tmp) / "entry"
+            link.symlink_to(planted)
+            self.assertIsNone(common.read_pr_cache(link, now=time.time()))
 
 if __name__ == "__main__":
     unittest.main()

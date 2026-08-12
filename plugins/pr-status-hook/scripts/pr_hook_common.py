@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -42,11 +43,10 @@ PR_CACHE_DIR_NAME: Final = "wild-horses-pr-cache"
 # How long a cached PR answer may be reused. It buys back a `gh` call that
 # measures around 500ms, on a hook that runs at every turn end.
 #
-# An hour rather than a minute, because the staleness it allows costs nothing
-# here. One branch has one pull request, so a cache entry can only go stale by
-# that PR changing state, and the banner shows the link either way. A new
-# commit changes the key and asks again. The bound exists only so an entry
-# cannot outlive the work by days if TMPDIR is never swept.
+# An hour rather than a minute, because the staleness it allows costs little
+# here. One branch has one pull request. So an entry can only go stale by that
+# PR changing state, and the banner shows the link either way. The label can
+# lag, which is the price. A new commit changes the key and asks again.
 PR_CACHE_TTL_SECONDS: Final = 3600.0
 
 # Cursor spells its events in camelCase and writes hook banners to stderr.
@@ -173,9 +173,9 @@ class PullRequest:
 def find_pull_request(run: CommandRunner) -> Optional[PullRequest]:
     """Ask `gh` for this branch's most recent PR, or None when there is none.
 
-    The state comes back with the URL rather than filtering on it. A PR that
-    merges mid-session should not make its own link disappear, which is what a
-    `state == "OPEN"` filter does at the moment you most want to click it.
+    The state comes back with the URL rather than filtering on it. A PR that merges mid-session should not make its own link disappear. That
+    is what a `state == "OPEN"` filter does, at the moment you most want to
+    click.
 
     Callers decide what a non-open state means for them. `pr_status.py` labels
     it. `pr_announce.py` ignores it, because one branch has one pull request.
@@ -191,14 +191,33 @@ def find_pull_request(run: CommandRunner) -> Optional[PullRequest]:
     return PullRequest(url=url, state=state)
 
 
-def pr_cache_path(tmp_root: Path, branch: str, head_sha: str) -> Path:
+def state_root() -> Path:
+    """A private directory for what these hooks keep between runs.
+
+    Not `TMPDIR`. On Linux that is often `/tmp`, which is world-writable. Both paths below
+    are derived from a branch name and a commit sha. A local user who guesses one can plant a file the banner then prints. They
+    can also leave a symlink that redirects a write. Neither is exotic on a shared machine.
+
+    The directory is created private, and re-chmodded if it already exists. An
+    entry planted before first run cannot inherit loose permissions.
+    """
+    base = os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")
+    root = Path(base) / "wild-horses" / "pr-status-hook"
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    root.chmod(0o700)
+    return root
+
+
+def pr_cache_path(root: Path, repo_id: str, branch: str, head_sha: str) -> Path:
     """Where one branch's last known PR answer is kept.
 
     The key carries the commit, so a new commit asks `gh` again rather than
-    trusting an answer from before it.
+    trusting an answer from before it. It carries a repository identifier too,
+    because a branch name and sha do not name a repository. Two clones can
+    share both, and a fork and its upstream resolve to different pull requests.
     """
-    digest = hashlib.sha256(f"{branch}\0{head_sha}".encode()).hexdigest()[:16]
-    return tmp_root / PR_CACHE_DIR_NAME / digest
+    digest = hashlib.sha256(f"{repo_id}\0{branch}\0{head_sha}".encode()).hexdigest()[:16]
+    return root / PR_CACHE_DIR_NAME / digest
 
 
 def read_pr_cache(path: Path, now: float) -> Optional[PullRequest]:
@@ -209,11 +228,18 @@ def read_pr_cache(path: Path, now: float) -> Optional[PullRequest]:
     would suppress the one banner this plugin exists to guarantee.
     """
     try:
-        if (now - path.stat().st_mtime) >= PR_CACHE_TTL_SECONDS:
-            return None
-        line = path.read_text().strip()
+        # O_NOFOLLOW so a planted symlink cannot redirect this read.
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     except OSError:
         return None
+    try:
+        if (now - os.fstat(fd).st_mtime) >= PR_CACHE_TTL_SECONDS:
+            return None
+        line = os.read(fd, 4096).decode("utf-8", "replace").strip()
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
     if "\t" not in line:
         return None
     state, url = line.split("\t", 1)
@@ -223,12 +249,18 @@ def read_pr_cache(path: Path, now: float) -> Optional[PullRequest]:
 def write_pr_cache(path: Path, pull: PullRequest) -> None:
     """Record a pull request both hooks can reuse.
 
-    `pr_announce.py` writes here after every fresh lookup, so a PR it just
-    announced is already warm for the next turn end.
+    `pr_announce.py` writes here after every fresh lookup. A PR it just
+    announced is then already recorded for the next turn end.
     """
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"{pull.state}\t{pull.url}")
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # O_NOFOLLOW so a planted symlink cannot redirect this write.
+        # Without it the target could be any file this user can write.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        try:
+            os.write(fd, f"{pull.state}\t{pull.url}".encode())
+        finally:
+            os.close(fd)
     except OSError:
         # A cache we cannot write costs a `gh` call, never a banner.
         return

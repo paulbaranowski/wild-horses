@@ -52,7 +52,11 @@ run_case() {
     # the same commit sha, and a shared cache would let one case answer for
     # another. That would make this recording depend on run order.
     export TMPDIR="$WORK/tmp/$name"
-    mkdir -p "$TMPDIR"
+    # XDG_STATE_HOME is where the hooks keep the PR cache and the rate-limit
+    # marker. Per case, so one case cannot answer for another, and so a run
+    # never writes into the real home directory.
+    export XDG_STATE_HOME="$WORK/state/$name"
+    mkdir -p "$TMPDIR" "$XDG_STATE_HOME"
 
     git init -q -b "$branch" .
     git config user.email t@example.com; git config user.name Test

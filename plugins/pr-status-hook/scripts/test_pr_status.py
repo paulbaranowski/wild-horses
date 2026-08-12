@@ -16,8 +16,10 @@ Stdlib-only, so no pytest is needed. Unittest discovery works too.
 """
 import contextlib
 import io
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -56,6 +58,22 @@ PORCELAIN_V2 = """\
 1 .M N... 100644 100644 100644 aaa bbb a.txt
 ? untracked.txt
 """
+
+
+_SCRATCH_STATE = tempfile.TemporaryDirectory()
+
+
+def setUpModule():
+    """Keep the hooks' state directory out of the real home while testing.
+
+    `state_root()` honours XDG_STATE_HOME. Redirecting it here means a test run
+    never leaves cache or marker files behind for a real session to read.
+    """
+    os.environ["XDG_STATE_HOME"] = _SCRATCH_STATE.name
+
+
+def tearDownModule():
+    _SCRATCH_STATE.cleanup()
 
 
 class TestParseWorkTree(unittest.TestCase):

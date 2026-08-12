@@ -30,10 +30,12 @@ The banner is a `systemMessage`, which the harness prints whatever the agent doe
 A `Stop` hook never runs on a user interrupt, and cannot run while a turn is still blocked. `/wild-pr` blocks inside `gh pr checks --watch` for up to 600 seconds per pass. So turn end is the one moment that a long run may never reach.
 
 **3. `pr_announce.py` never reads the PR cache.**
-It runs at the instant `gh pr create` changes the answer. A cached "no PR" would suppress the one banner this plugin exists to guarantee. It only writes the cache, so `pr_status.py` starts warm.
+It runs at the instant `gh pr create` changes the answer. A cached "no PR" would suppress the one banner this plugin exists to guarantee. It only writes the cache, so `pr_status.py` can reuse that answer instead of asking `gh` again.
 
 **4. The link shows whatever state the pull request is in.**
-A PR that merges mid-session must not make its own link vanish. That is the moment you most want to click it. `pr_status.py` labels a non-open state. Every other fact on that line already carries its own, and a bare link reads as open.
+A PR that merges mid-session must not make its own link vanish. That is the moment you most want to click it. `pr_status.py` labels a non-open state, because every other fact on that line already carries its own.
+
+The link is the guaranteed part, not the label. State comes from the same cached answer. So a PR that merges can keep reading as open for up to `PR_CACHE_TTL_SECONDS`. A new commit changes the key and asks `gh` again.
 
 **5. One run is bounded by one shared deadline, not by per-call timeouts.**
 Per-call budgets sum. Four calls at 5 or 10 seconds each reach 25 seconds, past the wrapper timeout. A hook the wrapper kills prints nothing, which is the one outcome these scripts exist to avoid. Every runner in a run shares `TOTAL_BUDGET_SECONDS`, so adding a call cannot break the bound.
@@ -41,7 +43,10 @@ Per-call budgets sum. Four calls at 5 or 10 seconds each reach 25 seconds, past 
 **6. Neither hook depends on `jq`.**
 The shell version failed silent without it: no output, exit 0, no error. Silent is the one failure mode a status hook cannot afford. That is why these are Python and not shell.
 
-**7. Nothing here blocks or fails a tool call.**
+**7. State lives in a private directory, never `TMPDIR`.**
+On Linux `TMPDIR` is often `/tmp`, which is world-writable. Both the cache and the rate-limit marker use paths derived from a branch name and a commit sha. A local user who guesses one could plant a URL the banner then prints. Both live under `XDG_STATE_HOME` at mode `0700`. Both open with `O_NOFOLLOW`, so a planted symlink cannot redirect a read or a write.
+
+**8. Nothing here blocks or fails a tool call.**
 Every gate returns quietly. That covers a missing binary, an unreadable marker, a malformed payload, and an unwritable cache. Each costs a banner at most.
 
 ## Facts that are easy to get wrong
@@ -55,7 +60,7 @@ Four things cost real debugging time. Read them before changing a query or a gat
 
 ## Cost
 
-`gh pr view` measures around 500 ms, and `pr_status.py` runs at every turn end. Two things hold that down. One `git status --porcelain=v2 --branch` call replaces three separate `git` calls. A PR answer is also cached per branch and commit. A warm turn end costs about 70 ms instead of about 525 ms.
+`gh pr view` measures around 500 ms, and `pr_status.py` runs at every turn end. Two things hold that down. One `git status --porcelain=v2 --branch` call replaces three separate `git` calls. A PR answer is also cached per repository, branch, and commit. A turn end that reuses one costs about 70 ms instead of about 525 ms.
 
 `pr_announce.py` also rate-limits itself to one banner per branch per five minutes, so a babysit loop cannot spam the transcript.
 
