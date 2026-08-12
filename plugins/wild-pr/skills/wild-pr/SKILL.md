@@ -151,7 +151,9 @@ Notes:
 - Quote `"$TITLE"` at the `gh` call so spaces and metacharacters do not word-split.
 - Capture the PR URL from `gh pr create` output (or `gh pr view --json url -q .url` right after).
 
-Print the link line from **The PR link rule**, then continue. Do not wait for the user.
+Phase 3 is not complete when `gh pr create` returns. It is complete when the user has seen the link. So emit a user-facing message whose last line is the link line from **The PR link rule**. Call no tool between `gh pr create` and that message.
+
+Then continue. Do not wait for the user.
 
 ---
 
@@ -196,6 +198,7 @@ After the loop (3 passes or early clean/hard-stuck stop), summarize:
 
 - **Don't print a bare PR number** in place of the URL. `PR #340 created` gives the user nothing to click.
 - **Don't end any message** without the link once the PR URL is known. Error reports and stuck reports carry it too.
+- **Don't call a tool between `gh pr create` and the message carrying the link.** Phase 4 can run for twenty minutes. A user who interrupts it never gets a link the run deferred.
 - **Don't open a second PR** when one already exists for the branch.
 - **Don't commit** files that look like secrets — stop and ask the user instead.
 - **Don't run more than three** babysit passes in this skill, even if the PR is still progressing.

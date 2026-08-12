@@ -110,7 +110,7 @@
     {
       "name": "pr-status-hook",
       "source": "plugins/pr-status-hook",
-      "description": "Stop hook that reports PR / push / dirty-tree state at the end of every turn from real git/gh state.",
+      "description": "Prints the branch's PR link as soon as `gh` knows it. Also reports push and dirty-tree state at every turn end, from real git/gh state.",
       "author": {
         "name": "Paul Baranowski"
       },
