@@ -1,44 +1,44 @@
 # wild-horses
 
-A [Claude Code](https://claude.ai/code) plugin marketplace of tools for working on code with AI agents — making code agent-readable, planning and shipping work, and smoothing the day-to-day agent workflow.
+A [Claude Code](https://claude.ai/code) plugin marketplace of tools for working on code with AI agents. They make code agent-readable, help you plan and ship work, and smooth the day-to-day agent workflow.
 
 ## Overview
 
 The plugins group into four themes. Each one-liner below links to the full plugin entry further down.
 
-**Plan and ship work** — turn an idea into a merged PR.
+**Plan and ship work.** Turn an idea into a merged PR.
 
-- **[plan-keeper](#plan-keeper)** — capture, route, queue, and archive markdown plans in `~/plans/<repo>/`, kept outside every worktree so plans outlive them (also a standalone Homebrew CLI).
-- **[autonomous](#autonomous)** — drive a single issue or plan file all the way to an opened PR, with no human in the loop.
+- **[plan-keeper](#plan-keeper)**: capture, route, queue, and archive markdown plans in `~/plans/<repo>/`, kept outside every worktree so plans outlive them (also a standalone Homebrew CLI).
+- **[autonomous](#autonomous)**: drive a single issue or plan file all the way to an opened PR, with no human in the loop.
 - **[wild-pr](#wild-pr)**: open a PR with an architecture-first description, review it against a rubric, and babysit it through CI and review feedback.
-- **[steelman](#steelman)** — argue the strongest good-faith case _against_ a plan before you commit to it.
+- **[steelman](#steelman)**: argue the strongest good-faith case _against_ a plan before you commit to it.
 
-**Smooth the agent workflow** — quality-of-life hooks and utilities.
+**Smooth the agent workflow.** Quality-of-life hooks and utilities.
 
-- **[update-git-repos](#update-git-repos)** — pull every configured git repo from `origin` in one shot.
-- **[cleanup-worktrees](#cleanup-worktrees)** — find and remove stale git worktrees that are safe to delete.
-- **[yes-no-questions-hook](#yes-no-questions-hook)** — nudge the agent to pose decisions as numbered yes/no questions.
+- **[update-git-repos](#update-git-repos)**: pull every configured git repo from `origin` in one shot.
+- **[cleanup-worktrees](#cleanup-worktrees)**: find and remove stale git worktrees that are safe to delete.
+- **[yes-no-questions-hook](#yes-no-questions-hook)**: nudge the agent to pose decisions as numbered yes/no questions.
 - **[pr-status-hook](#pr-status-hook)**: print the branch's PR link once `gh` knows it, plus push and dirty-tree state.
 
-**Make code agent-readable** — can an agent understand your code and safely edit it?
+**Make code agent-readable.** Can an agent understand your code and safely edit it?
 
-- **[pyright](#pyright)** — run pyright on a Python codebase and fix what it finds, using a documented playbook of fix patterns.
-- **[harness](#harness)** — diagnose where an agent would misread your code (`/harness:reasoning-gaps`) or couldn't tell whether it succeeded (`/harness:feedback-blockers`), then build, run, and inspect a remediation task list.
-- **[linting-hooks](#linting-hooks)** — auto-lint Markdown and Python the moment Claude edits them.
-- **[plain-language](#plain-language)** — rewrite prose to a 20-word-sentence standard, with a CLI that proves non-prose content stayed byte-identical.
+- **[pyright](#pyright)**: run pyright on a Python codebase and fix what it finds, using a documented playbook of fix patterns.
+- **[harness](#harness)**: diagnose where an agent would misread your code (`/harness:reasoning-gaps`) or couldn't tell whether it succeeded (`/harness:feedback-blockers`), then build, run, and inspect a remediation task list.
+- **[linting-hooks](#linting-hooks)**: auto-lint Markdown and Python the moment Claude edits them.
+- **[plain-language](#plain-language)**: rewrite prose to a 20-word-sentence standard, with a CLI that proves non-prose content stayed byte-identical.
 
-Run comprehension, then types, then observability on a PR or feature branch — `/harness:reasoning-gaps`, then `/pyright:run-and-fix` (Python), then `/harness:feedback-blockers`. Each asks a harder question than the last. Install **[linting-hooks](#linting-hooks)** once so Markdown and Python edits auto-lint as you go.
+Run comprehension, then types, then observability on a PR or feature branch. That is `/harness:reasoning-gaps`, then `/pyright:run-and-fix` (Python), then `/harness:feedback-blockers`. Each asks a harder question than the last. Install **[linting-hooks](#linting-hooks)** once so Markdown and Python edits auto-lint as you go.
 
-**Understand and scaffold** — see what's there, or stand up something new.
+**Understand and scaffold.** See what's there, or stand up something new.
 
-- **[codepath-visualizer](#codepath-visualizer)** — map a codebase's call chains into an interactive architecture diagram.
-- **[marketplace](#marketplace)** — scaffold a new Claude Code plugin marketplace with proper structure and schema.
+- **[codepath-visualizer](#codepath-visualizer)**: map a codebase's call chains into an interactive architecture diagram.
+- **[marketplace](#marketplace)**: scaffold a new Claude Code plugin marketplace with proper structure and schema.
 
 ## Plugins
 
 ### [plan-keeper](plugins/plan-keeper/README.md)
 
-A local task-management system for plans that live outside your code: capture an idea straight from conversation, route it through spec and execution stages as it matures, then dispatch it to whichever engine fits — a single autonomous run, a structured task list, or step-by-step execution with review gates — or queue it for the groundcrew to pick up unattended. Plans live in `~/plans/<repo>/`, decoupled from any single worktree, so they survive worktrees being spun up and torn down. Everything is tracked locally by default; filing out to Linear or Jira is an optional export, not the system of record. Every step triggers from natural phrasing — no slash command required.
+A local task-management system for plans that live outside your code: capture an idea straight from conversation, route it through spec and execution stages as it matures, then dispatch it to whichever engine fits. That is a single autonomous run, a structured task list, or step-by-step execution with review gates. You can also queue it for the groundcrew to pick up unattended. Plans live in `~/plans/<repo>/`, decoupled from any single worktree, so they survive worktrees being spun up and torn down. Everything is tracked locally by default; filing out to Linear or Jira is an optional export, not the system of record. Every step triggers from natural phrasing, with no slash command required.
 
 ```text
 /plugin install plan-keeper@wild-horses
@@ -52,7 +52,7 @@ See **[plugins/plan-keeper/README.md](plugins/plan-keeper/README.md)** for the n
 
 ### [autonomous](plugins/autonomous/README.md)
 
-Drive a single task — an issue/ticket link or a plan/spec file — all the way to an opened pull request, with no human in the loop. Hand it a Linear/GitHub issue URL, a path to a plan file, or a plan already in the conversation, and it implements, tests, simplifies the diff, runs a bounded reasoning-gaps review (critical only), runs an independent sub-agent review to convergence, opens a PR following the target repo's own conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.
+Drive a single task, either an issue/ticket link or a plan/spec file, all the way to an opened pull request, with no human in the loop. Hand it a Linear/GitHub issue URL, a path to a plan file, or a plan already in the conversation, and it implements, tests, simplifies the diff, runs a bounded reasoning-gaps review (critical only), runs an independent sub-agent review to convergence, opens a PR following the target repo's own conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.
 
 ```text
 /plugin install autonomous@wild-horses
@@ -82,7 +82,7 @@ See **[plugins/wild-pr/skills/wild-pr/SKILL.md](plugins/wild-pr/skills/wild-pr/S
 
 ### [steelman](plugins/steelman/README.md)
 
-Argue the strongest good-faith case _against_ the proposed changes in the current conversation or a named design/plan file — hidden costs, wrong assumptions, simpler alternatives, second-order effects, and the do-nothing option. A built-in red-team voice that stress-tests a plan before it ships.
+Argue the strongest good-faith case _against_ the proposed changes in the current conversation or a named design/plan file. It names hidden costs, wrong assumptions, simpler alternatives, second-order effects, and the do-nothing option. A built-in red-team voice that stress-tests a plan before it ships.
 
 ```text
 /plugin install steelman@wild-horses
@@ -106,7 +106,7 @@ See **[plugins/update-git-repos/README.md](plugins/update-git-repos/README.md)**
 
 ### [cleanup-worktrees](plugins/cleanup-worktrees/README.md)
 
-Reclaim disk space from git worktrees that are safe to delete. Scans configured roots (direct repos and parent directories), classifies each worktree as cleanable (merged PR, upstream gone, merged into the default branch, or stale) or skipped (dirty, locked, unpushed), shows the cleanable set grouped by reason with sizes, and removes the ones you pick — re-validating before each removal, never `--force`.
+Reclaim disk space from git worktrees that are safe to delete. Scans configured roots (direct repos and parent directories), classifies each worktree as cleanable (merged PR, upstream gone, merged into the default branch, or stale) or skipped (dirty, locked, unpushed), shows the cleanable set grouped by reason with sizes, and removes the ones you pick. It re-validates before each removal, and never uses `--force`.
 
 ```text
 /plugin install cleanup-worktrees@wild-horses
@@ -118,7 +118,7 @@ See **[plugins/cleanup-worktrees/README.md](plugins/cleanup-worktrees/README.md)
 
 ### [yes-no-questions-hook](plugins/yes-no-questions-hook)
 
-A `UserPromptSubmit` hook that injects a per-turn reminder to pose decision questions as numbered yes/no questions — collapsing every either/or into a single yes/no rather than an inline "X, or Y?" or a pick-one menu. A portable, shareable restatement of a personal `CLAUDE.md` rule. No command — it fires automatically once installed.
+A `UserPromptSubmit` hook that injects a per-turn reminder to pose decision questions as numbered yes/no questions. It collapses every either/or into a single yes/no rather than an inline "X, or Y?" or a pick-one menu. A portable, shareable restatement of a personal `CLAUDE.md` rule. No command. It fires automatically once installed.
 
 ```text
 /plugin install yes-no-questions-hook@wild-horses
@@ -166,7 +166,7 @@ See **[plugins/harness/README.md](plugins/harness/README.md)** for what each com
 
 ### [linting-hooks](plugins/linting-hooks/README.md)
 
-PostToolUse hooks that lint Markdown and Python files immediately after Claude edits them — `prettier` + `markdownlint-cli2` on `.md`, `pyright` on `.py`. Both are non-blocking. Hook registration is automatic; `/linting-hooks:install` handles the per-machine software.
+PostToolUse hooks that lint Markdown and Python files immediately after Claude edits them. That is `prettier` plus `markdownlint-cli2` on `.md`, and `pyright` on `.py`. Both are non-blocking. Hook registration is automatic; `/linting-hooks:install` handles the per-machine software.
 
 ```text
 /plugin install linting-hooks@wild-horses
@@ -217,7 +217,7 @@ See **[plugins/marketplace/README.md](plugins/marketplace/README.md)** for the s
 
 ## Standalone CLI: `plan-keeper`
 
-The I/O backend behind the plan-keeper skills — `plan_keeper_cli.py`, a zero-dependency stdlib tool that manages the `~/plans/<repo>/` tree (save, list, archive, frontmatter, and Linear/Jira push) — is also distributed as a standalone command-line tool via Homebrew, for working with your plans outside an agent session:
+The I/O backend behind the plan-keeper skills. `plan_keeper_cli.py` is a zero-dependency stdlib tool that manages the `~/plans/<repo>/` tree (save, list, archive, frontmatter, and Linear/Jira push) is also distributed as a standalone command-line tool via Homebrew, for working with your plans outside an agent session:
 
 ```text
 brew install paulbaranowski/tap/plan-keeper
@@ -230,7 +230,7 @@ EOF
 pk --help                            # all subcommands (plan-keeper is an alias)
 ```
 
-It is the same source file the plan-keeper plugin invokes in-place — packaged from `plugins/plan-keeper/scripts/` with no second copy to drift. Both the plugin's skills and this CLI read and write the same `~/plans/<repo>/` tree, so they interoperate directly.
+It is the same source file the plan-keeper plugin invokes in-place, packaged from `plugins/plan-keeper/scripts/` with no second copy to drift. Both the plugin's skills and this CLI read and write the same `~/plans/<repo>/` tree, so they interoperate directly.
 
 ## Install
 
@@ -257,7 +257,7 @@ Point at the repo root (the directory that contains `.claude-plugin/marketplace.
 
 wild-horses ships dual manifests: `.claude-plugin/` for Claude Code and `.cursor-plugin/` for Cursor. Hooks use `hooks/hooks.json` (Claude) and `hooks/cursor-hooks.json` (Cursor) side by side.
 
-**Local install** (copy catalog plugins as real files — no symlinks):
+**Local install** (copy catalog plugins as real files, no symlinks):
 
 ```bash
 # From a wild-horses checkout (or any marketplace root with .cursor-plugin/marketplace.json)
@@ -280,7 +280,7 @@ Hook plugins and their Cursor equivalents:
 
 ## Development
 
-This repo is a Claude Code plugin marketplace — each directory under `plugins/` is an independently versioned plugin. **[CLAUDE.md](CLAUDE.md)** is the contributor guide: marketplace layout, commands vs skills namespacing, versioning rules, and repo hygiene.
+This repo is a Claude Code plugin marketplace. Each directory under `plugins/` is an independently versioned plugin. **[CLAUDE.md](CLAUDE.md)** is the contributor guide: marketplace layout, commands vs skills namespacing, versioning rules, and repo hygiene.
 
 ### Validate
 
@@ -296,7 +296,7 @@ A PostToolUse hook (`.claude/hooks/validate-plugin.sh`) runs the same check auto
 
 ### Test
 
-Bundled CLIs ship stdlib-only unittest suites — no extra dependencies:
+Bundled CLIs ship stdlib-only unittest suites, with no extra dependencies:
 
 ```text
 python3 -m unittest discover -s plugins/plan-keeper/scripts/tests
@@ -315,7 +315,7 @@ uv run pytest plugins/harness/skills/task-list-runner/test_task_list_cli.py
 
 ### Versioning
 
-Every change to a plugin's skills, commands, agents, or hooks requires a version bump in that plugin's `plugins/<name>/.claude-plugin/plugin.json` (patch for fixes, minor for features, major for breaking changes). The plan-keeper CLI also keeps `plugins/plan-keeper/scripts/plan_keeper/__init__.py` (`__version__`) in lockstep — see `plugins/plan-keeper/README.md`.
+Every change to a plugin's skills, commands, agents, or hooks requires a version bump in that plugin's `plugins/<name>/.claude-plugin/plugin.json` (patch for fixes, minor for features, major for breaking changes). The plan-keeper CLI also keeps `plugins/plan-keeper/scripts/plan_keeper/__init__.py` (`__version__`) in lockstep. See `plugins/plan-keeper/README.md`.
 
 ## License
 
