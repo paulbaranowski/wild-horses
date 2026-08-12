@@ -264,5 +264,31 @@ class TestStateRootIsPrivate(unittest.TestCase):
             link.symlink_to(planted)
             self.assertIsNone(common.read_pr_cache(link, now=time.time()))
 
+class TestStateRootFailsQuietly(unittest.TestCase):
+    """An unwritable state directory costs a cache, never a banner.
+
+    Both hooks call `state_root()` before they can print anything. If it
+    raises, the harness gets a traceback after every turn end. The link this
+    plugin exists to show then never appears.
+    """
+
+    def unwritable_root(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        blocked = Path(scratch.name) / "blocked"
+        blocked.mkdir(mode=0o500)
+        self.addCleanup(blocked.chmod, 0o700)
+        return blocked / "state"
+
+    def test_an_unwritable_root_returns_none(self):
+        prior = os.environ.get("XDG_STATE_HOME")
+        os.environ["XDG_STATE_HOME"] = str(self.unwritable_root())
+        self.addCleanup(os.environ.__setitem__, "XDG_STATE_HOME", prior or "")
+        self.assertIsNone(common.state_root())
+
+    def test_a_writable_root_is_returned(self):
+        self.assertIsNotNone(common.state_root())
+
+
 if __name__ == "__main__":
     unittest.main()

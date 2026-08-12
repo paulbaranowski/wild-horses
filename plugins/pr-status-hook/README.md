@@ -44,10 +44,10 @@ Per-call budgets sum. Four calls at 5 or 10 seconds each reach 25 seconds, past 
 The shell version failed silent without it: no output, exit 0, no error. Silent is the one failure mode a status hook cannot afford. That is why these are Python and not shell.
 
 **7. State lives in a private directory, never `TMPDIR`.**
-On Linux `TMPDIR` is often `/tmp`, which is world-writable. Both the cache and the rate-limit marker use paths derived from a branch name and a commit sha. A local user who guesses one could plant a URL the banner then prints. Both live under `XDG_STATE_HOME` at mode `0700`. Both open with `O_NOFOLLOW`, so a planted symlink cannot redirect a read or a write.
+On Linux `TMPDIR` is often `/tmp`, which is world-writable. Both the cache and the rate-limit marker use paths derived from a branch name and a commit sha. A local user who guesses one could plant a URL the banner then prints. Both live under `XDG_STATE_HOME` at mode `0700`. Both open with `O_NOFOLLOW`, so a planted symlink cannot redirect a read or a write. A directory that cannot be made usable yields no state rather than an error, per the next invariant.
 
 **8. Nothing here blocks or fails a tool call.**
-Every gate returns quietly. That covers a missing binary, an unreadable marker, a malformed payload, and an unwritable cache. Each costs a banner at most.
+Every gate returns quietly. That covers a missing binary, an unreadable marker, and a malformed payload. It also covers an unwritable cache, and a state directory that cannot be created. Losing state costs a `gh` call or a duplicate banner. Raising would cost the banner itself, plus a traceback after every turn end.
 
 ## Facts that are easy to get wrong
 

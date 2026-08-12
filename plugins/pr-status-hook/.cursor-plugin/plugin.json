@@ -1,7 +1,7 @@
 {
   "name": "pr-status-hook",
   "description": "Prints your branch's pull-request link the moment `gh` knows it. A run that spends twenty minutes in CI can no longer finish without printing that link. Also reports at every turn end whether the last commits were actually pushed, and whether the working tree is dirty. Everything comes from real git/gh state, never from the agent's memory. Stays silent when there is nothing to report.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "author": {
     "name": "Paul Baranowski"
   },

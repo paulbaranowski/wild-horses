@@ -191,7 +191,7 @@ def find_pull_request(run: CommandRunner) -> Optional[PullRequest]:
     return PullRequest(url=url, state=state)
 
 
-def state_root() -> Path:
+def state_root() -> Optional[Path]:
     """A private directory for what these hooks keep between runs.
 
     Not `TMPDIR`. On Linux that is often `/tmp`, which is world-writable. Both paths below
@@ -200,11 +200,20 @@ def state_root() -> Path:
 
     The directory is created private, and re-chmodded if it already exists. An
     entry planted before first run cannot inherit loose permissions.
+
+    Returns None when the directory cannot be made usable. Callers then run
+    without a cache or a marker, which costs a `gh` call or a duplicate banner.
     """
     base = os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")
     root = Path(base) / "wild-horses" / "pr-status-hook"
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    root.chmod(0o700)
+    try:
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        root.chmod(0o700)
+    except OSError:
+        # Both hooks call this before they can print. Raising here would put
+        # a traceback after every turn end, and cost the banner entirely. So
+        # an unusable directory returns None, and callers run without state.
+        return None
     return root
 
 

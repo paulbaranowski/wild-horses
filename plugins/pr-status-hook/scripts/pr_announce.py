@@ -123,7 +123,7 @@ def touch_marker(marker: Path, now: float) -> None:
         return
 
 
-def announce(hook: HookInput, tmp_root: Path, now: float) -> Optional[str]:
+def announce(hook: HookInput, root: Optional[Path], now: float) -> Optional[str]:
     """Decide whether to announce, and return the URL when the answer is yes.
 
     Returns None at every gate that does not apply, so the caller stays quiet.
@@ -139,8 +139,10 @@ def announce(hook: HookInput, tmp_root: Path, now: float) -> Optional[str]:
     if branch is None:
         return None
 
-    marker = marker_path(tmp_root, hook.session_id, branch)
-    if not should_announce(marker, now, ANNOUNCE_INTERVAL_SECONDS):
+    # No usable state directory means no rate limit. That costs a duplicate
+    # banner at worst, where skipping the announcement costs the link.
+    marker = None if root is None else marker_path(root, hook.session_id, branch)
+    if marker is not None and not should_announce(marker, now, ANNOUNCE_INTERVAL_SECONDS):
         return None
 
     # State is ignored here. One branch has one pull request. A link that
@@ -156,10 +158,11 @@ def announce(hook: HookInput, tmp_root: Path, now: float) -> Optional[str]:
     head_sha = make_runner(hook.cwd, GIT_TIMEOUT_SECONDS, deadline)(
         ["git", "rev-parse", "HEAD"]
     )
-    if head_sha:
-        write_pr_cache(pr_cache_path(tmp_root, hook.cwd, branch, head_sha), pull)
+    if head_sha and root is not None:
+        write_pr_cache(pr_cache_path(root, hook.cwd, branch, head_sha), pull)
 
-    touch_marker(marker, now)
+    if marker is not None:
+        touch_marker(marker, now)
     return pull.url
 
 

@@ -150,7 +150,7 @@ def build_banner(branch: str, status: BranchStatus) -> str:
 
 
 def find_pr(
-    tree: WorkTree, cwd: str, deadline: float, root: Path, now: float
+    tree: WorkTree, cwd: str, deadline: float, root: Optional[Path], now: float
 ) -> Optional[PullRequest]:
     """Find this branch's open PR, avoiding `gh` when a fresh answer is cached.
 
@@ -163,6 +163,11 @@ def find_pr(
     branch both leave an open PR reachable with no upstream. The recorded
     `pr-no-upstream` case is exactly that state, and it caught the mistake.
     """
+    # No usable state directory means no cache. Ask `gh` every time rather than
+    # lose the banner, which is the only thing here that must not be lost.
+    if root is None:
+        return find_pull_request(make_runner(cwd, GH_TIMEOUT_SECONDS, deadline))
+
     # `cwd` is the repository identifier. Two clones sit at different paths,
     # and a fork and its upstream resolve to different pull requests.
     cache = pr_cache_path(root, cwd, tree.branch or "", tree.head_sha)
