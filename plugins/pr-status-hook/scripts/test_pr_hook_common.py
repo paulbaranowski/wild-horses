@@ -96,31 +96,36 @@ class TestAnnounceableBranch(unittest.TestCase):
         self.assertEqual(common.announceable_branch(run), "emdash/show-pr-link")
 
 
-class TestOpenPrUrl(unittest.TestCase):
-    def test_returns_the_url_gh_reports(self):
-        self.assertEqual(common.open_pr_url(runner({PR_VIEW: PR_URL})), PR_URL)
+class TestFindPullRequest(unittest.TestCase):
+    def test_returns_url_and_state(self):
+        pull = common.find_pull_request(runner({PR_VIEW: f"OPEN\t{PR_URL}"}))
+        self.assertEqual(pull, common.PullRequest(url=PR_URL, state="OPEN"))
+        self.assertTrue(pull.is_open)
+
+    def test_a_merged_pr_is_still_returned(self):
+        """The state is reported, not filtered. A merged PR keeps its link."""
+        pull = common.find_pull_request(runner({PR_VIEW: f"MERGED\t{PR_URL}"}))
+        self.assertEqual(pull.url, PR_URL)
+        self.assertFalse(pull.is_open)
 
     def test_no_pr_returns_none(self):
-        self.assertIsNone(common.open_pr_url(runner({})))
+        self.assertIsNone(common.find_pull_request(runner({})))
+
+    def test_output_without_a_separator_is_rejected(self):
+        self.assertIsNone(common.find_pull_request(runner({PR_VIEW: "no pull requests found"})))
 
     def test_non_url_output_is_rejected(self):
-        self.assertIsNone(common.open_pr_url(runner({PR_VIEW: "no pull requests found"})))
+        self.assertIsNone(common.find_pull_request(runner({PR_VIEW: "OPEN\tnot-a-url"})))
 
-    def test_the_query_filters_on_open_state(self):
-        """A closed PR must never be reported as live.
-
-        `gh pr view` reports the branch's most recent PR whatever its state.
-        So the state filter has to live in the query itself.
-        """
+    def test_the_query_asks_for_both_fields(self):
         seen = []
 
         def run(argv):
             seen.append(list(argv))
             return None
 
-        common.open_pr_url(run)
+        common.find_pull_request(run)
         self.assertIn("url,state", seen[0])
-        self.assertIn('select(.state == "OPEN") | .url', seen[0])
 
 
 class TestMakeRunner(unittest.TestCase):

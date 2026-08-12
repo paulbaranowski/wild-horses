@@ -112,6 +112,26 @@ raw-trailing: ''
 
 raw-trailing: ''
 
+### pr-merged
+--- event=Stop rc=0 ---
+{"suppressOutput": true, "systemMessage": "PR: https://github.com/o/r/pull/7 (merged) · ✓ all commits pushed"}
+raw-non-ascii: ·✓
+raw-trailing: '\n'
+--- event=stop rc=0 ---
+PR: https://github.com/o/r/pull/7 (merged) · ✓ all commits pushed
+
+raw-trailing: '\n'
+
+### pr-closed
+--- event=Stop rc=0 ---
+{"suppressOutput": true, "systemMessage": "PR: https://github.com/o/r/pull/7 (closed) · ⚠ 1 commit(s) NOT pushed · ✎ 1 file(s) uncommitted"}
+raw-non-ascii: ·⚠✎
+raw-trailing: '\n'
+--- event=stop rc=0 ---
+PR: https://github.com/o/r/pull/7 (closed) · ⚠ 1 commit(s) NOT pushed · ✎ 1 file(s) uncommitted
+
+raw-trailing: '\n'
+
 ### outside-a-work-tree
 --- event=Stop rc=0 ---
 

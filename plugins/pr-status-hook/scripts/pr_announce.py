@@ -35,9 +35,11 @@ from pr_hook_common import (
     emit,
     make_runner,
     new_deadline,
-    open_pr_url,
+    find_pull_request,
     parse_hook_input,
+    pr_cache_path,
     read_stdin,
+    write_pr_cache,
 )
 
 # Commands worth checking after. All three fire once the command returns,
@@ -140,13 +142,24 @@ def announce(hook: HookInput, tmp_root: Path, now: float) -> Optional[str]:
     if not should_announce(marker, now, ANNOUNCE_INTERVAL_SECONDS):
         return None
 
-    url = open_pr_url(make_runner(hook.cwd, GH_TIMEOUT_SECONDS, deadline))
-    if url is None:
+    # State is ignored here. One branch has one pull request, and a link that
+    # vanishes the moment it merges is the opposite of this hook's job.
+    pull = find_pull_request(make_runner(hook.cwd, GH_TIMEOUT_SECONDS, deadline))
+    if pull is None:
         # No PR yet. Leave the marker alone so the next call checks again.
         return None
 
+    # This hook never reads the PR cache, because it runs at the instant
+    # `gh pr create` changes the answer and a stale entry would suppress the
+    # banner. It writes one, so the Stop hook can skip its own `gh` call.
+    head_sha = make_runner(hook.cwd, GIT_TIMEOUT_SECONDS, deadline)(
+        ["git", "rev-parse", "HEAD"]
+    )
+    if head_sha:
+        write_pr_cache(pr_cache_path(tmp_root, branch, head_sha), pull)
+
     touch_marker(marker, now)
-    return url
+    return pull.url
 
 
 def main() -> int:

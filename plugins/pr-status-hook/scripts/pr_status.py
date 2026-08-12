@@ -14,24 +14,30 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 from pr_hook_common import (
     CURSOR_STOP_EVENT,
     GH_TIMEOUT_SECONDS,
     GIT_TIMEOUT_SECONDS,
+    SKIPPED_BRANCHES,
     CommandRunner,
-    announceable_branch,
+    PullRequest,
     emit,
     make_runner,
     new_deadline,
-    open_pr_url,
+    find_pull_request,
     parse_hook_input,
+    pr_cache_path,
+    read_pr_cache,
     read_stdin,
+    write_pr_cache,
 )
 
 
@@ -43,35 +49,64 @@ class BranchStatus:
     different report from being level with one.
     """
 
-    pr_url: Optional[str]
+    pull: Optional[PullRequest]
     ahead: Optional[str]
     dirty: int
 
 
-def count_dirty(run: CommandRunner) -> int:
-    """Count files with uncommitted changes."""
-    porcelain = run(["git", "status", "--porcelain"])
-    if porcelain is None:
-        return 0
-    return sum(1 for line in porcelain.splitlines() if line.strip())
+@dataclass(frozen=True)
+class WorkTree:
+    """Everything one `git status --porcelain=v2 --branch` call reports.
 
-
-def count_ahead(run: CommandRunner) -> Optional[str]:
-    """Count commits not yet on the upstream, or None when there is no upstream.
-
-    `git rev-list` fails rather than answering zero when `@{u}` resolves to
-    nothing, and that failure is the signal for "never pushed".
+    `branch` is None on a detached HEAD, which that format spells `(detached)`.
+    `upstream` is None when the branch was never pushed, and then `ahead` is
+    None too, because a branch with no upstream cannot be counted against one.
     """
-    return run(["git", "rev-list", "--count", "@{u}..HEAD"])
+
+    branch: Optional[str]
+    upstream: Optional[str]
+    ahead: Optional[str]
+    dirty: int
+    head_sha: str
 
 
-def read_status(git: CommandRunner, gh: CommandRunner) -> BranchStatus:
-    """Gather the three facts the banner reports."""
-    return BranchStatus(
-        pr_url=open_pr_url(gh),
-        ahead=count_ahead(git),
-        dirty=count_dirty(git),
+def parse_work_tree(porcelain: Optional[str]) -> WorkTree:
+    """Read branch, upstream, ahead count, and dirty count from one output.
+
+    This replaced three separate `git` calls. Each header line is optional, and
+    an absent `# branch.upstream` is the signal for "never pushed".
+    """
+    branch = upstream = ahead = None
+    head_sha = ""
+    dirty = 0
+    for line in (porcelain or "").splitlines():
+        if not line.strip():
+            continue
+        if not line.startswith("# "):
+            # Every non-header line is one file with something uncommitted.
+            dirty += 1
+            continue
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        key, value = parts[1], parts[2]
+        if key == "branch.oid":
+            head_sha = value
+        elif key == "branch.head":
+            branch = None if value == "(detached)" else value
+        elif key == "branch.upstream":
+            upstream = value
+        elif key == "branch.ab":
+            # `+N -M`, where N is commits we have that the upstream does not.
+            ahead = value.lstrip("+")
+    return WorkTree(
+        branch=branch, upstream=upstream, ahead=ahead, dirty=dirty, head_sha=head_sha
     )
+
+
+def read_work_tree(run: CommandRunner) -> WorkTree:
+    """Ask `git` once for every local fact the banner needs."""
+    return parse_work_tree(run(["git", "status", "--porcelain=v2", "--branch"]))
 
 
 def is_quiet(status: BranchStatus) -> bool:
@@ -80,7 +115,7 @@ def is_quiet(status: BranchStatus) -> bool:
     Only a branch with no PR, level with its upstream, and clean stays silent.
     A missing upstream is remarkable, so `ahead` of None is never quiet.
     """
-    return status.pr_url is None and status.ahead == "0" and status.dirty == 0
+    return status.pull is None and status.ahead == "0" and status.dirty == 0
 
 
 def build_banner(branch: str, status: BranchStatus) -> str:
@@ -90,10 +125,15 @@ def build_banner(branch: str, status: BranchStatus) -> str:
     is also what `pr_announce.py` prints. Two banners for one link once used two
     spellings, and a reader scanning for a link should only learn one.
     """
-    if status.pr_url:
-        parts = [f"PR: {status.pr_url}"]
-    else:
+    if status.pull is None:
         parts = [f"No PR for branch '{branch}'"]
+    elif status.pull.is_open:
+        parts = [f"PR: {status.pull.url}"]
+    else:
+        # The link still shows after a merge, which is when it is most wanted.
+        # The state is spelled out because every other fact on this line
+        # carries its own, and an unlabelled link reads as an open PR.
+        parts = [f"PR: {status.pull.url} ({status.pull.state.lower()})"]
 
     if status.ahead is None:
         parts.append("⚠ branch has no upstream (never pushed)")
@@ -108,6 +148,31 @@ def build_banner(branch: str, status: BranchStatus) -> str:
     return " · ".join(parts)
 
 
+def find_pr(
+    tree: WorkTree, cwd: str, deadline: float, tmp_root: Path, now: float
+) -> Optional[PullRequest]:
+    """Find this branch's open PR, avoiding `gh` when a fresh answer is cached.
+
+    `gh pr view` measures around 500ms, and this hook runs at every turn end.
+
+    An earlier version also skipped `gh` when the branch had no upstream, on the
+    reasoning that an unpushed branch cannot have a pull request. That is wrong.
+    `gh pr view` resolves by branch name against the remote, not by local
+    tracking config, so `git branch --unset-upstream` and a recreated local
+    branch both leave an open PR reachable with no upstream. The recorded
+    `pr-no-upstream` case is exactly that state, and it caught the mistake.
+    """
+    cache = pr_cache_path(tmp_root, tree.branch or "", tree.head_sha)
+    cached = read_pr_cache(cache, now)
+    if cached is not None:
+        return cached
+
+    pull = find_pull_request(make_runner(cwd, GH_TIMEOUT_SECONDS, deadline))
+    if pull is not None:
+        write_pr_cache(cache, pull)
+    return pull
+
+
 def main() -> int:
     hook = parse_hook_input(read_stdin())
     if hook is None:
@@ -118,16 +183,20 @@ def main() -> int:
 
     # One budget across all four subprocess calls this run makes.
     deadline = new_deadline()
-    git = make_runner(hook.cwd, GIT_TIMEOUT_SECONDS, deadline)
-    branch = announceable_branch(git)
-    if branch is None:
+    tree = read_work_tree(make_runner(hook.cwd, GIT_TIMEOUT_SECONDS, deadline))
+    if tree.branch is None or tree.branch in SKIPPED_BRANCHES:
         return 0
 
-    status = read_status(git, make_runner(hook.cwd, GH_TIMEOUT_SECONDS, deadline))
+    tmp_root = Path(os.environ.get("TMPDIR") or "/tmp")
+    status = BranchStatus(
+        pull=find_pr(tree, hook.cwd, deadline, tmp_root, time.time()),
+        ahead=tree.ahead,
+        dirty=tree.dirty,
+    )
     if is_quiet(status):
         return 0
 
-    emit(build_banner(branch, status), hook.event_name, CURSOR_STOP_EVENT)
+    emit(build_banner(tree.branch, status), hook.event_name, CURSOR_STOP_EVENT)
     return 0
 
 

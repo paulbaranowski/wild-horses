@@ -172,7 +172,7 @@ class TestAnnounce(unittest.TestCase):
         if branch is not None:
             mapping[BRANCH] = branch
         if url is not None:
-            mapping[PR_VIEW] = url
+            mapping[PR_VIEW] = f"OPEN\t{url}"
         hook.make_runner = lambda cwd, timeout, deadline=None: runner(mapping)
 
     def test_non_trigger_command_announces_nothing(self):

@@ -17,11 +17,13 @@ missing. Silent is the one failure mode a status hook cannot afford.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Final, Optional, Sequence
 
 # Branches that never have a PR of their own. A detached HEAD answers `HEAD`.
@@ -34,6 +36,18 @@ GH_TIMEOUT_SECONDS: Final = 10.0
 # sits well under the 20 second wrapper timeout in hooks.json. So the wrapper
 # never has to kill a run that is still trying to print.
 TOTAL_BUDGET_SECONDS: Final = 12.0
+
+PR_CACHE_DIR_NAME: Final = "wild-horses-pr-cache"
+
+# How long a cached PR answer may be reused. It buys back a `gh` call that
+# measures around 500ms, on a hook that runs at every turn end.
+#
+# An hour rather than a minute, because the staleness it allows costs nothing
+# here. One branch has one pull request, so a cache entry can only go stale by
+# that PR changing state, and the banner shows the link either way. A new
+# commit changes the key and asks again. The bound exists only so an entry
+# cannot outlive the work by days if TMPDIR is never swept.
+PR_CACHE_TTL_SECONDS: Final = 3600.0
 
 # Cursor spells its events in camelCase and writes hook banners to stderr.
 # Claude uses PascalCase and a JSON object on stdout.
@@ -144,27 +158,80 @@ def announceable_branch(run: CommandRunner) -> Optional[str]:
     return branch if branch and branch not in SKIPPED_BRANCHES else None
 
 
-def open_pr_url(run: CommandRunner) -> Optional[str]:
-    """Ask `gh` for the open PR's URL, or return None when there is none.
+@dataclass(frozen=True)
+class PullRequest:
+    """A branch's most recent pull request, whatever state it is in."""
 
-    `gh pr view` reports the branch's most recent PR whatever its state. So the
-    query asks for the state and drops anything that is not open. Without that
-    filter a merged branch reports its dead PR as live.
+    url: str
+    state: str
+
+    @property
+    def is_open(self) -> bool:
+        return self.state == "OPEN"
+
+
+def find_pull_request(run: CommandRunner) -> Optional[PullRequest]:
+    """Ask `gh` for this branch's most recent PR, or None when there is none.
+
+    The state comes back with the URL rather than filtering on it. A PR that
+    merges mid-session should not make its own link disappear, which is what a
+    `state == "OPEN"` filter does at the moment you most want to click it.
+
+    Callers decide what a non-open state means for them. `pr_status.py` labels
+    it. `pr_announce.py` ignores it, because one branch has one pull request.
     """
-    url = run(
-        [
-            "gh",
-            "pr",
-            "view",
-            "--json",
-            "url,state",
-            "--jq",
-            'select(.state == "OPEN") | .url',
-        ]
-    )
-    if url is None or not url.startswith("http"):
+    # A raw string, so `jq` receives `\(...)` and `\t` and expands them itself.
+    jq = r'"\(.state)\t\(.url)"'
+    line = run(["gh", "pr", "view", "--json", "url,state", "--jq", jq])
+    if line is None or "\t" not in line:
         return None
-    return url
+    state, url = line.split("\t", 1)
+    if not url.startswith("http"):
+        return None
+    return PullRequest(url=url, state=state)
+
+
+def pr_cache_path(tmp_root: Path, branch: str, head_sha: str) -> Path:
+    """Where one branch's last known PR answer is kept.
+
+    The key carries the commit, so a new commit asks `gh` again rather than
+    trusting an answer from before it.
+    """
+    digest = hashlib.sha256(f"{branch}\0{head_sha}".encode()).hexdigest()[:16]
+    return tmp_root / PR_CACHE_DIR_NAME / digest
+
+
+def read_pr_cache(path: Path, now: float) -> Optional[PullRequest]:
+    """Return a cached pull request that is still fresh, else None.
+
+    Only `pr_status.py` reads this. `pr_announce.py` must not, because it runs
+    at the instant `gh pr create` changes the answer. A cached "no PR" there
+    would suppress the one banner this plugin exists to guarantee.
+    """
+    try:
+        if (now - path.stat().st_mtime) >= PR_CACHE_TTL_SECONDS:
+            return None
+        line = path.read_text().strip()
+    except OSError:
+        return None
+    if "\t" not in line:
+        return None
+    state, url = line.split("\t", 1)
+    return PullRequest(url=url, state=state) if url.startswith("http") else None
+
+
+def write_pr_cache(path: Path, pull: PullRequest) -> None:
+    """Record a pull request both hooks can reuse.
+
+    `pr_announce.py` writes here after every fresh lookup, so a PR it just
+    announced is already warm for the next turn end.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{pull.state}\t{pull.url}")
+    except OSError:
+        # A cache we cannot write costs a `gh` call, never a banner.
+        return
 
 
 def emit(banner: str, event_name: str, cursor_event: str) -> None:

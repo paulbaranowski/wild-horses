@@ -124,13 +124,15 @@ A `UserPromptSubmit` hook that injects a per-turn reminder to pose decision ques
 /plugin install yes-no-questions-hook@wild-horses
 ```
 
-### [pr-status-hook](plugins/pr-status-hook)
+### [pr-status-hook](plugins/pr-status-hook/README.md)
 
-Prints the branch's PR link the moment `gh` knows it, so a run that spends twenty minutes in CI cannot finish without printing that link. A `PostToolUse` hook does that, matching `gh pr create`, `gh pr view`, and `gh pr checks`, and holding itself to one banner per branch per five minutes. A second hook runs on `Stop` and reports, at every turn-end, whether an open PR exists for the current branch (with its link). It also reports whether the last commits were actually pushed, and whether the working tree is dirty. Both read real `git`/`gh` state, never memory. Stays silent unless there is something worth reporting. Exits early on non-repos, detached HEAD, and default branches. No command. Both fire automatically once installed.
+Prints the branch's PR link the moment `gh` knows it, so a run that spends twenty minutes in CI cannot finish without printing that link. A `PostToolUse` hook does that, matching `gh pr create`, `gh pr view`, and `gh pr checks`, and holding itself to one banner per branch per five minutes. A second hook runs on `Stop` and reports, at every turn-end, whether a PR exists for the current branch, with its link. A PR that merged mid-session keeps its link and gains a `(merged)` label, because that is when you most want to click it. It also reports whether the last commits were actually pushed, and whether the working tree is dirty. Both read real `git`/`gh` state, never memory. Stays silent unless there is something worth reporting. Exits early on non-repos, detached HEAD, and default branches. No command. Both fire automatically once installed.
 
 ```text
 /plugin install pr-status-hook@wild-horses
 ```
+
+See **[plugins/pr-status-hook/README.md](plugins/pr-status-hook/README.md)** for the seven invariants both hooks hold, the `gh` and hook-event facts that are easy to get wrong, and the recorded-banner tests.
 
 ### [pyright](plugins/pyright/README.md)
 

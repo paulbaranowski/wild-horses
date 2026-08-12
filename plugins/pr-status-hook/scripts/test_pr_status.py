@@ -42,33 +42,61 @@ def runner(mapping: Dict[Tuple[str, ...], str]):
     return run
 
 
-def status(pr_url: Optional[str] = None, ahead: Optional[str] = "0", dirty: int = 0):
-    return hook.BranchStatus(pr_url=pr_url, ahead=ahead, dirty=dirty)
+def status(pr_url: Optional[str] = None, ahead: Optional[str] = "0", dirty: int = 0,
+           state: str = "OPEN"):
+    pull = hook.PullRequest(url=pr_url, state=state) if pr_url else None
+    return hook.BranchStatus(pull=pull, ahead=ahead, dirty=dirty)
 
 
-class TestCountDirty(unittest.TestCase):
-    def test_a_clean_tree_is_zero(self):
-        self.assertEqual(hook.count_dirty(runner({})), 0)
-
-    def test_each_porcelain_line_is_one_file(self):
-        run = runner({PORCELAIN: " M a.txt\n?? b.txt\n M c.txt"})
-        self.assertEqual(hook.count_dirty(run), 3)
-
-    def test_blank_lines_do_not_count(self):
-        run = runner({PORCELAIN: " M a.txt\n\n?? b.txt\n"})
-        self.assertEqual(hook.count_dirty(run), 2)
+PORCELAIN_V2 = """\
+# branch.oid abc123
+# branch.head feat/x
+# branch.upstream origin/feat/x
+# branch.ab +2 -0
+1 .M N... 100644 100644 100644 aaa bbb a.txt
+? untracked.txt
+"""
 
 
-class TestCountAhead(unittest.TestCase):
-    def test_no_upstream_is_none(self):
-        """`git rev-list` fails rather than answering zero, and that is the signal."""
-        self.assertIsNone(hook.count_ahead(runner({})))
+class TestParseWorkTree(unittest.TestCase):
+    """One `git status --porcelain=v2 --branch` replaced three separate calls."""
 
-    def test_level_with_upstream_is_zero(self):
-        self.assertEqual(hook.count_ahead(runner({AHEAD: "0"})), "0")
+    def test_reads_every_field_from_one_output(self):
+        tree = hook.parse_work_tree(PORCELAIN_V2)
+        self.assertEqual(tree.branch, "feat/x")
+        self.assertEqual(tree.upstream, "origin/feat/x")
+        self.assertEqual(tree.ahead, "2")
+        self.assertEqual(tree.dirty, 2)
+        self.assertEqual(tree.head_sha, "abc123")
 
-    def test_unpushed_commits_are_counted(self):
-        self.assertEqual(hook.count_ahead(runner({AHEAD: "3"})), "3")
+    def test_a_detached_head_has_no_branch(self):
+        tree = hook.parse_work_tree("# branch.oid abc\n# branch.head (detached)\n")
+        self.assertIsNone(tree.branch)
+
+    def test_no_upstream_leaves_ahead_unknown(self):
+        """`git` omits both header lines, and that absence is the signal."""
+        tree = hook.parse_work_tree("# branch.oid abc\n# branch.head feat/x\n")
+        self.assertIsNone(tree.upstream)
+        self.assertIsNone(tree.ahead)
+
+    def test_level_with_upstream_is_zero_not_none(self):
+        tree = hook.parse_work_tree(
+            "# branch.head feat/x\n# branch.upstream origin/feat/x\n# branch.ab +0 -0\n"
+        )
+        self.assertEqual(tree.ahead, "0")
+
+    def test_a_clean_tree_counts_no_files(self):
+        tree = hook.parse_work_tree("# branch.head feat/x\n")
+        self.assertEqual(tree.dirty, 0)
+
+    def test_header_lines_are_never_counted_as_files(self):
+        tree = hook.parse_work_tree(PORCELAIN_V2)
+        self.assertEqual(tree.dirty, 2)
+
+    def test_no_output_at_all_is_survivable(self):
+        tree = hook.parse_work_tree(None)
+        self.assertIsNone(tree.branch)
+        self.assertEqual(tree.dirty, 0)
 
 
 class TestIsQuiet(unittest.TestCase):
@@ -119,6 +147,20 @@ class TestBuildBanner(unittest.TestCase):
     def test_the_link_is_the_full_url(self):
         self.assertIn(PR_URL, hook.build_banner("feat/x", status(pr_url=PR_URL)))
 
+    def test_a_merged_pr_still_shows_its_link(self):
+        """The link is most wanted at the moment the PR merges, not least."""
+        banner = hook.build_banner("feat/x", status(pr_url=PR_URL, state="MERGED"))
+        self.assertIn(PR_URL, banner)
+
+    def test_a_non_open_pr_is_labelled(self):
+        """An unlabelled link reads as open, and every other fact is labelled."""
+        self.assertIn("(merged)", hook.build_banner("feat/x", status(pr_url=PR_URL, state="MERGED")))
+        self.assertIn("(closed)", hook.build_banner("feat/x", status(pr_url=PR_URL, state="CLOSED")))
+
+    def test_an_open_pr_is_not_labelled(self):
+        """The common case must look exactly as it did before labelling."""
+        self.assertNotIn("(", hook.build_banner("feat/x", status(pr_url=PR_URL)).split(" · ")[0])
+
 
 class TestMainHonoursTheParserContract(unittest.TestCase):
     """An unusable payload means silence, the same as in pr_announce.py."""
@@ -129,9 +171,13 @@ class TestMainHonoursTheParserContract(unittest.TestCase):
         # Everything a banner needs, so only the payload gate can stop it.
         hook.make_runner = lambda cwd, timeout, deadline=None: runner(
             {
-                ("git", "rev-parse", "--abbrev-ref", "HEAD"): "feat/x",
-                ("gh", "pr", "view"): PR_URL,
-                AHEAD: "0",
+                ("git", "status", "--porcelain=v2", "--branch"): (
+                    "# branch.oid abc123\n"
+                    "# branch.head feat/x\n"
+                    "# branch.upstream origin/feat/x\n"
+                    "# branch.ab +0 -0\n"
+                ),
+                ("gh", "pr", "view"): f"OPEN\t{PR_URL}",
             }
         )
 
