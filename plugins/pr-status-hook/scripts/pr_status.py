@@ -109,19 +109,22 @@ def build_banner(branch: str, status: BranchStatus) -> str:
 
 def main() -> int:
     hook = parse_hook_input(read_stdin())
-    cwd = hook.cwd if hook else ""
-    event_name = hook.event_name if hook else ""
+    if hook is None:
+        # The shared parser returns None for a payload it cannot use, and that
+        # means stay quiet. Carrying on with empty defaults would read the
+        # process working directory and could still print a banner.
+        return 0
 
-    git = make_runner(cwd, GIT_TIMEOUT_SECONDS)
+    git = make_runner(hook.cwd, GIT_TIMEOUT_SECONDS)
     branch = announceable_branch(git)
     if branch is None:
         return 0
 
-    status = read_status(git, make_runner(cwd, GH_TIMEOUT_SECONDS))
+    status = read_status(git, make_runner(hook.cwd, GH_TIMEOUT_SECONDS))
     if is_quiet(status):
         return 0
 
-    emit(build_banner(branch, status), event_name, CURSOR_STOP_EVENT)
+    emit(build_banner(branch, status), hook.event_name, CURSOR_STOP_EVENT)
     return 0
 
 

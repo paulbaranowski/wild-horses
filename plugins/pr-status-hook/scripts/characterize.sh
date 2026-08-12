@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Record what a pr-status hook prints across every repository state it handles.
 #
-# This exists to port pr-status.sh to Python without changing its output. Run it
-# against the shell script, keep the result, then run it against the Python one.
-# The two recordings must match byte for byte.
+# The recording lives in golden-banners.txt and test_pr_status.py replays it.
+# To change a banner on purpose, run this and commit the new recording with the
+# code change. The fixture diff then shows what users will see differently.
+#
+# It was written to port pr-status.sh to Python without changing its output, by
+# running it against each and comparing. That is why it takes the hook command
+# as an argument rather than hard-coding one.
 #
 # Usage: characterize.sh <path-to-hook-command...>
-#   characterize.sh bash ./pr-status.sh
 #   characterize.sh python3 ./pr_status.py
 set -uo pipefail
 
@@ -63,11 +66,14 @@ run_case() {
 
     echo "### $name"
     for event in Stop stop; do
-        local out
-        out=$(printf '{"hook_event_name":"%s"}' "$event" \
-              | FAKE_PR_URL="$pr" "${HOOK_CMD[@]}" 2>&1)
-        echo "--- event=$event rc=$? ---"
-        normalize "$out"
+        local rc=0
+        # Redirect to a file rather than capture with $( ), which strips every
+        # trailing newline. A port that changed terminal bytes would otherwise
+        # be invisible to a recording that claims byte fidelity.
+        printf '{"hook_event_name":"%s"}' "$event" \
+            | FAKE_PR_URL="$pr" "${HOOK_CMD[@]}" > "$WORK/out.bin" 2>&1 || rc=$?
+        echo "--- event=$event rc=$rc ---"
+        normalize "$WORK/out.bin"
     done
     echo
 }
@@ -80,9 +86,9 @@ run_case() {
 # difference. `json.dumps` escaped `·` to `\u00b7` where `jq` wrote it raw.
 # So the escaped form is now reported alongside the parsed object.
 normalize() {
-    printf '%s' "$1" | python3 -c '
+    python3 - "$1" <<'NORM'
 import json, sys
-raw = sys.stdin.read()
+raw = open(sys.argv[1], "rb").read().decode("utf-8")
 try:
     parsed = json.loads(raw)
 except ValueError:
@@ -91,7 +97,8 @@ else:
     print(json.dumps(parsed, sort_keys=True, ensure_ascii=False))
     non_ascii = [c for c in raw if ord(c) > 127]
     print("raw-non-ascii:", "".join(sorted(set(non_ascii))) or "(none)")
-'
+print("raw-trailing:", repr(raw[len(raw.rstrip("\r\n")):]))
+NORM
 }
 
 #         name                       branch   upstream dirty pr
@@ -112,7 +119,9 @@ run_case  skip-master                master   level    1     "https://github.com
 mkdir -p "$WORK/notrepo"; cd "$WORK/notrepo" || exit
 echo "### outside-a-work-tree"
 for event in Stop stop; do
-    out=$(printf '{"hook_event_name":"%s"}' "$event" | "${HOOK_CMD[@]}" 2>&1)
-    echo "--- event=$event rc=$? ---"
-    normalize "$out"
+    rc=0
+    printf '{"hook_event_name":"%s"}' "$event" \
+        | "${HOOK_CMD[@]}" > "$WORK/out.bin" 2>&1 || rc=$?
+    echo "--- event=$event rc=$rc ---"
+    normalize "$WORK/out.bin"
 done

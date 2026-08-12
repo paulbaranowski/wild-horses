@@ -1,86 +1,121 @@
 ### no-pr-clean-level
 --- event=Stop rc=0 ---
 
+raw-trailing: ''
 --- event=stop rc=0 ---
 
+raw-trailing: ''
 
 ### no-pr-no-upstream
 --- event=Stop rc=0 ---
 {"suppressOutput": true, "systemMessage": "No PR for branch 'feat/x' · ⚠ branch has no upstream (never pushed)"}
 raw-non-ascii: ·⚠
+raw-trailing: '\n'
 --- event=stop rc=0 ---
 No PR for branch 'feat/x' · ⚠ branch has no upstream (never pushed)
+
+raw-trailing: '\n'
 
 ### no-pr-ahead
 --- event=Stop rc=0 ---
 {"suppressOutput": true, "systemMessage": "No PR for branch 'feat/x' · ⚠ 1 commit(s) NOT pushed"}
 raw-non-ascii: ·⚠
+raw-trailing: '\n'
 --- event=stop rc=0 ---
 No PR for branch 'feat/x' · ⚠ 1 commit(s) NOT pushed
+
+raw-trailing: '\n'
 
 ### no-pr-dirty
 --- event=Stop rc=0 ---
 {"suppressOutput": true, "systemMessage": "No PR for branch 'feat/x' · ✓ all commits pushed · ✎ 2 file(s) uncommitted"}
 raw-non-ascii: ·✎✓
+raw-trailing: '\n'
 --- event=stop rc=0 ---
 No PR for branch 'feat/x' · ✓ all commits pushed · ✎ 2 file(s) uncommitted
+
+raw-trailing: '\n'
 
 ### no-pr-ahead-dirty
 --- event=Stop rc=0 ---
 {"suppressOutput": true, "systemMessage": "No PR for branch 'feat/x' · ⚠ 1 commit(s) NOT pushed · ✎ 3 file(s) uncommitted"}
 raw-non-ascii: ·⚠✎
+raw-trailing: '\n'
 --- event=stop rc=0 ---
 No PR for branch 'feat/x' · ⚠ 1 commit(s) NOT pushed · ✎ 3 file(s) uncommitted
 
+raw-trailing: '\n'
+
 ### pr-clean-level
 --- event=Stop rc=0 ---
-{"suppressOutput": true, "systemMessage": "PR https://github.com/o/r/pull/7 · ✓ all commits pushed"}
+{"suppressOutput": true, "systemMessage": "PR: https://github.com/o/r/pull/7 · ✓ all commits pushed"}
 raw-non-ascii: ·✓
+raw-trailing: '\n'
 --- event=stop rc=0 ---
-PR https://github.com/o/r/pull/7 · ✓ all commits pushed
+PR: https://github.com/o/r/pull/7 · ✓ all commits pushed
+
+raw-trailing: '\n'
 
 ### pr-no-upstream
 --- event=Stop rc=0 ---
-{"suppressOutput": true, "systemMessage": "PR https://github.com/o/r/pull/7 · ⚠ branch has no upstream (never pushed)"}
+{"suppressOutput": true, "systemMessage": "PR: https://github.com/o/r/pull/7 · ⚠ branch has no upstream (never pushed)"}
 raw-non-ascii: ·⚠
+raw-trailing: '\n'
 --- event=stop rc=0 ---
-PR https://github.com/o/r/pull/7 · ⚠ branch has no upstream (never pushed)
+PR: https://github.com/o/r/pull/7 · ⚠ branch has no upstream (never pushed)
+
+raw-trailing: '\n'
 
 ### pr-ahead
 --- event=Stop rc=0 ---
-{"suppressOutput": true, "systemMessage": "PR https://github.com/o/r/pull/7 · ⚠ 1 commit(s) NOT pushed"}
+{"suppressOutput": true, "systemMessage": "PR: https://github.com/o/r/pull/7 · ⚠ 1 commit(s) NOT pushed"}
 raw-non-ascii: ·⚠
+raw-trailing: '\n'
 --- event=stop rc=0 ---
-PR https://github.com/o/r/pull/7 · ⚠ 1 commit(s) NOT pushed
+PR: https://github.com/o/r/pull/7 · ⚠ 1 commit(s) NOT pushed
+
+raw-trailing: '\n'
 
 ### pr-ahead-dirty
 --- event=Stop rc=0 ---
-{"suppressOutput": true, "systemMessage": "PR https://github.com/o/r/pull/7 · ⚠ 1 commit(s) NOT pushed · ✎ 1 file(s) uncommitted"}
+{"suppressOutput": true, "systemMessage": "PR: https://github.com/o/r/pull/7 · ⚠ 1 commit(s) NOT pushed · ✎ 1 file(s) uncommitted"}
 raw-non-ascii: ·⚠✎
+raw-trailing: '\n'
 --- event=stop rc=0 ---
-PR https://github.com/o/r/pull/7 · ⚠ 1 commit(s) NOT pushed · ✎ 1 file(s) uncommitted
+PR: https://github.com/o/r/pull/7 · ⚠ 1 commit(s) NOT pushed · ✎ 1 file(s) uncommitted
+
+raw-trailing: '\n'
 
 ### pr-slashy-branch
 --- event=Stop rc=0 ---
-{"suppressOutput": true, "systemMessage": "PR https://github.com/o/r/pull/7 · ✓ all commits pushed"}
+{"suppressOutput": true, "systemMessage": "PR: https://github.com/o/r/pull/7 · ✓ all commits pushed"}
 raw-non-ascii: ·✓
+raw-trailing: '\n'
 --- event=stop rc=0 ---
-PR https://github.com/o/r/pull/7 · ✓ all commits pushed
+PR: https://github.com/o/r/pull/7 · ✓ all commits pushed
+
+raw-trailing: '\n'
 
 ### skip-main
 --- event=Stop rc=0 ---
 
+raw-trailing: ''
 --- event=stop rc=0 ---
 
+raw-trailing: ''
 
 ### skip-master
 --- event=Stop rc=0 ---
 
+raw-trailing: ''
 --- event=stop rc=0 ---
 
+raw-trailing: ''
 
 ### outside-a-work-tree
 --- event=Stop rc=0 ---
 
+raw-trailing: ''
 --- event=stop rc=0 ---
 
+raw-trailing: ''

@@ -2,23 +2,26 @@
 """Tests for pr_status.py.
 
 This hook runs at every turn end in every session. A regression here is the
-most visible one this plugin can ship, and `pr-status.sh` had no tests at all.
-So the port was guarded a second way. `characterize.sh` drives the hook across
-thirteen repository states. `golden-pr-status.txt` is what the original shell
-script printed for each. `TestGoldenParity` re-runs that comparison.
+most visible one this plugin can ship.
 
-Exactly one difference from the shell script is intended, and that class names
-it. Everything else must still match byte for byte.
+`characterize.sh` builds thirteen repository states and records what the hook
+prints for each into `golden-banners.txt`. `TestRecordedBanners` replays that.
+It started as proof that the Python port matched the shell script it replaced,
+which it did byte for byte. It is kept because it is the only test here that
+runs against real git repositories.
 
 Stdlib-only, so no pytest is needed. Unittest discovery works too.
 
     python3 plugins/pr-status-hook/scripts/test_pr_status.py
 """
+import contextlib
+import io
 import subprocess
 import sys
 import unittest
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+from unittest import mock
 
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
@@ -117,37 +120,65 @@ class TestBuildBanner(unittest.TestCase):
         self.assertIn(PR_URL, hook.build_banner("feat/x", status(pr_url=PR_URL)))
 
 
-class TestGoldenParity(unittest.TestCase):
-    """The port must print what the shell script printed, for every state.
+class TestMainHonoursTheParserContract(unittest.TestCase):
+    """An unusable payload means silence, the same as in pr_announce.py."""
 
-    One difference is deliberate, and it is the only one allowed. The banner now
-    spells the link `PR: <url>` to match wild-pr's link rule, where the shell
-    script wrote `PR <url>`. `golden-pr-status.txt` stays the pristine shell
-    recording, and that single substitution is applied here where a reader can
-    see it. Every other byte still has to match.
+    def setUp(self):
+        real = hook.make_runner
+        self.addCleanup(lambda: setattr(hook, "make_runner", real))
+        # Everything a banner needs, so only the payload gate can stop it.
+        hook.make_runner = lambda cwd, timeout: runner(
+            {
+                ("git", "rev-parse", "--abbrev-ref", "HEAD"): "feat/x",
+                ("gh", "pr", "view"): PR_URL,
+                AHEAD: "0",
+            }
+        )
+
+    def run_main(self, payload: str):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(sys, "stdin", io.StringIO(payload)):
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                self.assertEqual(hook.main(), 0)
+        return out.getvalue(), err.getvalue()
+
+    def test_malformed_json_prints_nothing(self):
+        out, err = self.run_main("}{ not json")
+        self.assertEqual(out, "")
+        self.assertEqual(err, "")
+
+    def test_a_valid_payload_still_prints(self):
+        """The guard must not silence the ordinary path."""
+        out, _ = self.run_main('{"hook_event_name": "Stop", "cwd": ""}')
+        self.assertIn(PR_URL, out)
+
+
+class TestRecordedBanners(unittest.TestCase):
+    """The banner this hook prints, across thirteen repository states.
+
+    Every other test in this file feeds a fake runner a canned string. This
+    one builds real git repositories and runs the real hook against them. It is
+    the only end-to-end coverage here.
+
+    To change a banner on purpose, run `characterize.sh` and commit the new
+    `golden-banners.txt` alongside the code change. The diff on that file is
+    then the reviewable statement of what users will see differently.
     """
 
-    INTENDED_CHANGE = ("PR https://", "PR: https://")
+    def test_matches_the_recorded_banners(self):
+        """Compared as bytes.
 
-    def expected(self) -> str:
-        golden = (HERE / "golden-pr-status.txt").read_text()
-        old, new = self.INTENDED_CHANGE
-        self.assertIn(old, golden, "the golden record no longer contains what we rewrite")
-        return golden.replace(old, new)
-
-    def test_matches_the_recorded_shell_output(self):
+        Text mode decodes and normalizes line endings, so it cannot enforce the
+        byte-for-byte claim this fixture makes. `read_bytes` and a binary
+        capture can.
+        """
+        recorded = (HERE / "golden-banners.txt").read_bytes()
         done = subprocess.run(
             ["bash", str(HERE / "characterize.sh"), "python3", str(HERE / "pr_status.py")],
             capture_output=True,
-            text=True,
         )
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout, self.expected())
-
-    def test_the_substitution_is_the_only_thing_it_forgives(self):
-        """A second, undeclared change must still fail the comparison."""
-        tampered = self.expected().replace("all commits pushed", "all commits shipped")
-        self.assertNotEqual(tampered, self.expected())
+        self.assertEqual(done.returncode, 0, done.stderr.decode("utf-8", "replace"))
+        self.assertEqual(done.stdout, recorded)
 
 
 if __name__ == "__main__":
