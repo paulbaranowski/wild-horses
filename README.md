@@ -8,9 +8,9 @@ The plugins group into four themes. Each one-liner below links to the full plugi
 
 **Plan and ship work.** Turn an idea into a merged PR.
 
-- **[plan-keeper](#plan-keeper)**: capture, route, queue, and archive markdown plans in `~/plans/<repo>/`, kept outside every worktree so plans outlive them (also a standalone Homebrew CLI).
-- **[autonomous](#autonomous)**: drive a single issue or plan file all the way to an opened PR, with no human in the loop.
-- **[wild-pr](#wild-pr)**: open a PR with an architecture-first description, review it against a rubric, and babysit it through CI and review feedback.
+- **[plan-keeper](#plan-keeper)**: capture, route, queue, and archive markdown plans in `~/plans/<repo>/`. They sit outside every worktree, so plans outlive them (also a standalone Homebrew CLI).
+- **[autonomous](#autonomous)**: drive a single issue or plan file all the way to an opened PR. No human in the loop.
+- **[wild-pr](#wild-pr)**: open a PR with an architecture-first description. Review it against a rubric, then babysit it through CI and review feedback.
 - **[steelman](#steelman)**: argue the strongest good-faith case _against_ a plan before you commit to it.
 
 **Smooth the agent workflow.** Quality-of-life hooks and utilities.
@@ -23,7 +23,7 @@ The plugins group into four themes. Each one-liner below links to the full plugi
 **Make code agent-readable.** Can an agent understand your code and safely edit it?
 
 - **[pyright](#pyright)**: run pyright on a Python codebase and fix what it finds, using a documented playbook of fix patterns.
-- **[harness](#harness)**: diagnose where an agent would misread your code (`/harness:reasoning-gaps`) or couldn't tell whether it succeeded (`/harness:feedback-blockers`), then build, run, and inspect a remediation task list.
+- **[harness](#harness)**: diagnose where an agent would misread your code (`/harness:reasoning-gaps`), or could not tell whether it succeeded (`/harness:feedback-blockers`). Then build, run, and inspect a remediation task list.
 - **[linting-hooks](#linting-hooks)**: auto-lint Markdown and Python the moment Claude edits them.
 - **[plain-language](#plain-language)**: rewrite prose to a 20-word-sentence standard, with a CLI that proves non-prose content stayed byte-identical.
 
@@ -38,7 +38,7 @@ Run comprehension, then types, then observability on a PR or feature branch. Tha
 
 ### [plan-keeper](plugins/plan-keeper/README.md)
 
-A local task-management system for plans that live outside your code: capture an idea straight from conversation, route it through spec and execution stages as it matures, then dispatch it to whichever engine fits. That is a single autonomous run, a structured task list, or step-by-step execution with review gates. You can also queue it for the groundcrew to pick up unattended. Plans live in `~/plans/<repo>/`, decoupled from any single worktree, so they survive worktrees being spun up and torn down. Everything is tracked locally by default; filing out to Linear or Jira is an optional export, not the system of record. Every step triggers from natural phrasing, with no slash command required.
+A local task-management system for plans that live outside your code. Capture an idea straight from conversation. Route it through spec and execution stages as it matures, then dispatch it to whichever engine fits. That is a single autonomous run, a structured task list, or step-by-step execution with review gates. You can also queue it for the groundcrew to pick up unattended. Plans live in `~/plans/<repo>/`, decoupled from any single worktree, so they survive worktrees being spun up and torn down. Everything is tracked locally by default. Filing out to Linear or Jira is an optional export, not the system of record. Every step triggers from natural phrasing, with no slash command required.
 
 ```text
 /plugin install plan-keeper@wild-horses
@@ -52,7 +52,7 @@ See **[plugins/plan-keeper/README.md](plugins/plan-keeper/README.md)** for the n
 
 ### [autonomous](plugins/autonomous/README.md)
 
-Drive a single task, either an issue/ticket link or a plan/spec file, all the way to an opened pull request, with no human in the loop. Hand it a Linear/GitHub issue URL, a path to a plan file, or a plan already in the conversation, and it implements, tests, simplifies the diff, runs a bounded reasoning-gaps review (critical only), runs an independent sub-agent review to convergence, opens a PR following the target repo's own conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.
+Drive a single task all the way to an opened pull request, with no human in the loop. The task is either an issue/ticket link or a plan/spec file. Hand it a Linear/GitHub issue URL, a path to a plan file, or a plan already in the conversation. It then implements, tests, and simplifies the diff. It runs a bounded reasoning-gaps review (critical only), then an independent sub-agent review to convergence. Last, it opens a PR following the target repo's own conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.
 
 ```text
 /plugin install autonomous@wild-horses
@@ -106,7 +106,7 @@ See **[plugins/update-git-repos/README.md](plugins/update-git-repos/README.md)**
 
 ### [cleanup-worktrees](plugins/cleanup-worktrees/README.md)
 
-Reclaim disk space from git worktrees that are safe to delete. Scans configured roots (direct repos and parent directories), classifies each worktree as cleanable (merged PR, upstream gone, merged into the default branch, or stale) or skipped (dirty, locked, unpushed), shows the cleanable set grouped by reason with sizes, and removes the ones you pick. It re-validates before each removal, and never uses `--force`.
+Reclaim disk space from git worktrees that are safe to delete. Scans configured roots, which are direct repos and parent directories. Classifies each worktree as cleanable or skipped. Cleanable means a merged PR, an upstream gone, merged into the default branch, or stale. Skipped means dirty, locked, or unpushed. Shows the cleanable set grouped by reason with sizes, and removes the ones you pick. It re-validates before each removal, and never uses `--force`.
 
 ```text
 /plugin install cleanup-worktrees@wild-horses
@@ -315,7 +315,7 @@ uv run pytest plugins/harness/skills/task-list-runner/test_task_list_cli.py
 
 ### Versioning
 
-Every change to a plugin's skills, commands, agents, or hooks requires a version bump in that plugin's `plugins/<name>/.claude-plugin/plugin.json` (patch for fixes, minor for features, major for breaking changes). The plan-keeper CLI also keeps `plugins/plan-keeper/scripts/plan_keeper/__init__.py` (`__version__`) in lockstep. See `plugins/plan-keeper/README.md`.
+Every change to a plugin's skills, commands, agents, or hooks requires a version bump. It goes in that plugin's `plugins/<name>/.claude-plugin/plugin.json` (patch for fixes, minor for features, major for breaking changes). The plan-keeper CLI also keeps `plugins/plan-keeper/scripts/plan_keeper/__init__.py` (`__version__`) in lockstep. See `plugins/plan-keeper/README.md`.
 
 ## License
 
