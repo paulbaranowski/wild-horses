@@ -7,6 +7,9 @@ So the port was guarded a second way. `characterize.sh` drives the hook across
 thirteen repository states. `golden-pr-status.txt` is what the original shell
 script printed for each. `TestGoldenParity` re-runs that comparison.
 
+Exactly one difference from the shell script is intended, and that class names
+it. Everything else must still match byte for byte.
+
 Stdlib-only, so no pytest is needed. Unittest discovery works too.
 
     python3 plugins/pr-status-hook/scripts/test_pr_status.py
@@ -89,7 +92,7 @@ class TestBuildBanner(unittest.TestCase):
     def test_pr_and_all_pushed(self):
         self.assertEqual(
             hook.build_banner("feat/x", status(pr_url=PR_URL)),
-            f"PR {PR_URL} · ✓ all commits pushed",
+            f"PR: {PR_URL} · ✓ all commits pushed",
         )
 
     def test_no_pr_names_the_branch(self):
@@ -107,7 +110,7 @@ class TestBuildBanner(unittest.TestCase):
     def test_unpushed_and_dirty(self):
         self.assertEqual(
             hook.build_banner("feat/x", status(pr_url=PR_URL, ahead="2", dirty=3)),
-            f"PR {PR_URL} · ⚠ 2 commit(s) NOT pushed · ✎ 3 file(s) uncommitted",
+            f"PR: {PR_URL} · ⚠ 2 commit(s) NOT pushed · ✎ 3 file(s) uncommitted",
         )
 
     def test_the_link_is_the_full_url(self):
@@ -115,17 +118,36 @@ class TestBuildBanner(unittest.TestCase):
 
 
 class TestGoldenParity(unittest.TestCase):
-    """The port must print what the shell script printed, for every state."""
+    """The port must print what the shell script printed, for every state.
+
+    One difference is deliberate, and it is the only one allowed. The banner now
+    spells the link `PR: <url>` to match wild-pr's link rule, where the shell
+    script wrote `PR <url>`. `golden-pr-status.txt` stays the pristine shell
+    recording, and that single substitution is applied here where a reader can
+    see it. Every other byte still has to match.
+    """
+
+    INTENDED_CHANGE = ("PR https://", "PR: https://")
+
+    def expected(self) -> str:
+        golden = (HERE / "golden-pr-status.txt").read_text()
+        old, new = self.INTENDED_CHANGE
+        self.assertIn(old, golden, "the golden record no longer contains what we rewrite")
+        return golden.replace(old, new)
 
     def test_matches_the_recorded_shell_output(self):
-        golden = HERE / "golden-pr-status.txt"
         done = subprocess.run(
             ["bash", str(HERE / "characterize.sh"), "python3", str(HERE / "pr_status.py")],
             capture_output=True,
             text=True,
         )
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout, golden.read_text())
+        self.assertEqual(done.stdout, self.expected())
+
+    def test_the_substitution_is_the_only_thing_it_forgives(self):
+        """A second, undeclared change must still fail the comparison."""
+        tampered = self.expected().replace("all commits pushed", "all commits shipped")
+        self.assertNotEqual(tampered, self.expected())
 
 
 if __name__ == "__main__":

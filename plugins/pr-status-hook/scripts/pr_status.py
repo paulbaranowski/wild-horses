@@ -83,9 +83,14 @@ def is_quiet(status: BranchStatus) -> bool:
 
 
 def build_banner(branch: str, status: BranchStatus) -> str:
-    """Word the three facts as one line."""
+    """Word the three facts as one line.
+
+    The link uses the `PR: <url>` form that wild-pr's link rule defines, which
+    is also what `pr_announce.py` prints. Two banners for one link once used two
+    spellings, and a reader scanning for a link should only learn one.
+    """
     if status.pr_url:
-        parts = [f"PR {status.pr_url}"]
+        parts = [f"PR: {status.pr_url}"]
     else:
         parts = [f"No PR for branch '{branch}'"]
 
