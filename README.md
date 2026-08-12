@@ -18,7 +18,7 @@ The plugins group into four themes. Each one-liner below links to the full plugi
 - **[update-git-repos](#update-git-repos)** — pull every configured git repo from `origin` in one shot.
 - **[cleanup-worktrees](#cleanup-worktrees)** — find and remove stale git worktrees that are safe to delete.
 - **[yes-no-questions-hook](#yes-no-questions-hook)** — nudge the agent to pose decisions as numbered yes/no questions.
-- **[pr-status-hook](#pr-status-hook)** — print the branch's PR link once `gh` knows it, plus push and dirty-tree state.
+- **[pr-status-hook](#pr-status-hook)**: print the branch's PR link once `gh` knows it, plus push and dirty-tree state.
 
 **Make code agent-readable** — can an agent understand your code and safely edit it?
 
@@ -126,7 +126,7 @@ A `UserPromptSubmit` hook that injects a per-turn reminder to pose decision ques
 
 ### [pr-status-hook](plugins/pr-status-hook)
 
-Two hooks. A `PostToolUse` hook prints the branch's PR link once `gh` knows it. So a run that spends twenty minutes in CI cannot finish without printing that link. It matches `gh pr create`, `gh pr view`, and `gh pr checks`. It holds itself to one banner per branch per five minutes. A `Stop` hook then reports, at every turn-end, whether an open PR exists for the current branch (with its link). It also reports whether the last commits were actually pushed, and whether the working tree is dirty. Both read real `git`/`gh` state, never memory. Stays silent unless there is something worth reporting. Exits early on non-repos, detached HEAD, and default branches. No command. Both fire automatically once installed.
+Prints the branch's PR link the moment `gh` knows it, so a run that spends twenty minutes in CI cannot finish without printing that link. A `PostToolUse` hook does that, matching `gh pr create`, `gh pr view`, and `gh pr checks`, and holding itself to one banner per branch per five minutes. A second hook runs on `Stop` and reports, at every turn-end, whether an open PR exists for the current branch (with its link). It also reports whether the last commits were actually pushed, and whether the working tree is dirty. Both read real `git`/`gh` state, never memory. Stays silent unless there is something worth reporting. Exits early on non-repos, detached HEAD, and default branches. No command. Both fire automatically once installed.
 
 ```text
 /plugin install pr-status-hook@wild-horses

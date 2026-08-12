@@ -15,6 +15,7 @@ The URL always comes from `gh`, never from the model's account of what it did.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 
@@ -72,8 +73,15 @@ def marker_path(tmp_root: Path, session_id: str, branch: str) -> Path:
 
     Both parts are sanitized because branch names contain slashes. A raw slash
     would turn the marker into a nested directory that does not exist.
+
+    Sanitizing alone collides. `feat/a` and `feat_a` are both valid branches, and
+    both become `feat_a`. Sharing one marker would let either branch mute the
+    other's banner for five minutes. Worktrees make two branches in one session
+    ordinary. So the name also carries a digest of the raw values. That keeps the
+    branch readable for whoever debugs a stuck marker.
     """
-    name = f"{_sanitize(session_id)}--{_sanitize(branch)}"
+    digest = hashlib.sha256(f"{session_id}\0{branch}".encode()).hexdigest()[:8]
+    name = f"{_sanitize(session_id)}--{_sanitize(branch)}-{digest}"
     return tmp_root / MARKER_DIR_NAME / name
 
 

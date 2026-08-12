@@ -89,12 +89,32 @@ class TestMarkerPath(unittest.TestCase):
 
     def test_session_and_branch_both_appear(self):
         path = hook.marker_path(Path("/tmp"), "sess-1", "feat")
-        self.assertEqual(path.name, "sess-1--feat")
+        self.assertTrue(path.name.startswith("sess-1--feat-"), path.name)
 
     def test_different_branches_get_different_markers(self):
         first = hook.marker_path(Path("/tmp"), "s", "feat/a")
         second = hook.marker_path(Path("/tmp"), "s", "feat/b")
         self.assertNotEqual(first, second)
+
+    def test_branches_that_sanitize_alike_still_differ(self):
+        """`feat/a` and `feat_a` are both valid, and both sanitize to `feat_a`.
+
+        Sharing a marker would let one branch mute the other's banner for five
+        minutes. Worktrees make two branches in one session ordinary.
+        """
+        slashed = hook.marker_path(Path("/tmp"), "s", "feat/a")
+        underscored = hook.marker_path(Path("/tmp"), "s", "feat_a")
+        self.assertNotEqual(slashed, underscored)
+
+    def test_sessions_that_sanitize_alike_still_differ(self):
+        first = hook.marker_path(Path("/tmp"), "a/b", "feat")
+        second = hook.marker_path(Path("/tmp"), "a_b", "feat")
+        self.assertNotEqual(first, second)
+
+    def test_the_branch_stays_readable_in_the_name(self):
+        """Whoever debugs a stuck marker should recognize it on sight."""
+        path = hook.marker_path(Path("/tmp"), "sess-1", "emdash/show-pr-link")
+        self.assertIn("emdash_show-pr-link", path.name)
 
 
 class TestShouldAnnounce(unittest.TestCase):

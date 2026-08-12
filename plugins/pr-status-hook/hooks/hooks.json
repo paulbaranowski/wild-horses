@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/pr_announce.py\"",
-            "timeout": 15
+            "timeout": 20
           }
         ]
       }
@@ -18,7 +18,7 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/pr_status.py\"",
-            "timeout": 15
+            "timeout": 20
           }
         ]
       }
