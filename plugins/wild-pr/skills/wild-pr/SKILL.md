@@ -200,8 +200,8 @@ After the loop (3 passes or early clean/hard-stuck stop), summarize:
 - **Don't end any message** without the link once the PR URL is known. Error reports and stuck reports carry it too.
 - **Don't call any other tool between `gh pr create` and the message carrying the link.** The one exception is `gh pr view --json url -q .url`, and only when create printed no URL. Phase 4 can run for twenty minutes, and a user who interrupts it never gets a deferred link.
 - **Don't open a second PR** when one already exists for the branch.
-- **Don't commit** files that look like secrets — stop and ask the user instead.
+- **Don't commit** files that look like secrets. Stop and ask the user instead.
 - **Don't run more than three** babysit passes in this skill, even if the PR is still progressing.
-- **Don't stop after a `progressing` exit** to wait for the user or suggest `/loop` — continue to the next pass until 3 or early exit.
-- **Don't paraphrase** summary-writer or babysit from memory — Read each skill's SKILL.md (or babysit's command file) before executing it.
+- **Don't stop after a `progressing` exit** to wait for the user or suggest `/loop`. Continue to the next pass until 3 or early exit.
+- **Don't paraphrase** summary-writer or babysit from memory. Read each skill's SKILL.md (or babysit's command file) before executing it.
 - **Don't** append "Generated with Claude" footers or Co-Authored-By trailers.
