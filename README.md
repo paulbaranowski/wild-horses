@@ -302,6 +302,7 @@ python3 -m unittest discover -s plugins/update-git-repos/scripts -p 'test_update
 python3 -m unittest discover -s plugins/codepath-visualizer/skills/codepath-mapper -p 'test_codepaths_cli.py'
 python3 -m unittest discover -s plugins/cleanup-worktrees/scripts -p 'test_cleanup_worktrees_cli.py'
 python3 -m unittest discover -s plugins/plain-language/scripts -p 'test_plain_language_cli.py'
+python3 -m unittest discover -s plugins/pr-status-hook/scripts -p 'test_*.py'
 ```
 
 The harness task-list CLI uses pytest via [uv](https://docs.astral.sh/uv/):

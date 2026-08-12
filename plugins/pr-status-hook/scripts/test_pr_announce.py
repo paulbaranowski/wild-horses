@@ -25,6 +25,7 @@ SCRIPT = HERE / "pr_announce.py"
 
 sys.path.insert(0, str(HERE))
 import pr_announce as hook  # noqa: E402
+import pr_hook_common as common  # noqa: E402
 
 PR_URL = "https://github.com/acme/widgets/pull/42"
 
@@ -40,9 +41,9 @@ def payload(command="gh pr create --title x", session="sess-1", event="PostToolU
     )
 
 
-def parse(raw) -> hook.HookInput:
+def parse(raw) -> common.HookInput:
     """Parse a payload the tests know is well-formed, and narrow away the None."""
-    result = hook.parse_hook_input(raw)
+    result = common.parse_hook_input(raw)
     assert result is not None, f"expected a parsable payload, got {raw!r}"
     return result
 
@@ -63,30 +64,6 @@ BRANCH = ("git", "rev-parse", "--abbrev-ref", "HEAD")
 PR_VIEW = ("gh", "pr", "view")
 
 
-class TestParseHookInput(unittest.TestCase):
-    def test_reads_the_fields_it_needs(self):
-        parsed = parse(payload(command="gh pr view", session="abc"))
-        self.assertEqual(parsed.command, "gh pr view")
-        self.assertEqual(parsed.session_id, "abc")
-        self.assertEqual(parsed.event_name, "PostToolUse")
-        self.assertEqual(parsed.cwd, "/repo")
-
-    def test_malformed_json_is_unusable(self):
-        self.assertIsNone(hook.parse_hook_input("not json{"))
-
-    def test_non_object_payload_is_unusable(self):
-        self.assertIsNone(hook.parse_hook_input('["a", "b"]'))
-
-    def test_missing_fields_fall_back(self):
-        parsed = parse("{}")
-        self.assertEqual(parsed.command, "")
-        self.assertEqual(parsed.session_id, "nosession")
-
-    def test_tool_input_without_command_is_empty(self):
-        parsed = parse(json.dumps({"tool_input": {"description": "x"}}))
-        self.assertEqual(parsed.command, "")
-
-
 class TestIsTriggerCommand(unittest.TestCase):
     def test_matches_the_three_triggers(self):
         for command in ("gh pr create --draft", "gh pr view --json url", "gh pr checks --watch"):
@@ -102,22 +79,6 @@ class TestIsTriggerCommand(unittest.TestCase):
     def test_ignores_unrelated_commands(self):
         self.assertFalse(hook.is_trigger_command("npm test"))
         self.assertFalse(hook.is_trigger_command(""))
-
-
-class TestAnnounceableBranch(unittest.TestCase):
-    def test_default_branches_are_skipped(self):
-        for branch in ("main", "master"):
-            self.assertIsNone(hook.announceable_branch(runner({BRANCH: branch})), branch)
-
-    def test_detached_head_is_skipped(self):
-        self.assertIsNone(hook.announceable_branch(runner({BRANCH: "HEAD"})))
-
-    def test_outside_a_work_tree_there_is_no_branch(self):
-        self.assertIsNone(hook.announceable_branch(runner({})))
-
-    def test_feature_branch_is_announceable(self):
-        run = runner({BRANCH: "emdash/show-pr-link"})
-        self.assertEqual(hook.announceable_branch(run), "emdash/show-pr-link")
 
 
 class TestMarkerPath(unittest.TestCase):
@@ -165,45 +126,6 @@ class TestShouldAnnounce(unittest.TestCase):
         self.addCleanup(unwritable.parent.chmod, 0o700)
         hook.touch_marker(unwritable, now=1000.0)
         self.assertTrue(hook.should_announce(unwritable, now=1000.0, interval=300.0))
-
-
-class TestOpenPrUrl(unittest.TestCase):
-    def test_returns_the_url_gh_reports(self):
-        self.assertEqual(hook.open_pr_url(runner({PR_VIEW: PR_URL})), PR_URL)
-
-    def test_no_pr_returns_none(self):
-        self.assertIsNone(hook.open_pr_url(runner({})))
-
-    def test_non_url_output_is_rejected(self):
-        self.assertIsNone(hook.open_pr_url(runner({PR_VIEW: "no pull requests found"})))
-
-    def test_the_query_filters_on_open_state(self):
-        """A closed PR must not print, and must not stamp the marker.
-
-        `gh pr view` reports the branch's most recent PR whatever its state.
-        So the state filter has to live in the query itself.
-        """
-        seen = []
-
-        def run(argv):
-            seen.append(list(argv))
-            return None
-
-        hook.open_pr_url(run)
-        self.assertIn("url,state", seen[0])
-        self.assertIn('select(.state == "OPEN") | .url', seen[0])
-
-
-class TestBuildClaudePayload(unittest.TestCase):
-    def test_carries_the_link_rule_banner(self):
-        """wild-pr's link rule spells this `PR: <url>`, so the banner matches."""
-        built = json.loads(hook.build_claude_payload(PR_URL))
-        self.assertEqual(built["systemMessage"], f"PR: {PR_URL}")
-
-    def test_keeps_the_raw_json_out_of_the_transcript(self):
-        """Without suppressOutput the hook's own JSON prints after every call."""
-        built = json.loads(hook.build_claude_payload(PR_URL))
-        self.assertTrue(built["suppressOutput"])
 
 
 class TestAnnounce(unittest.TestCase):
@@ -320,7 +242,7 @@ class TestMainEmits(unittest.TestCase):
         self.assertEqual(err, "")
 
     def test_cursor_gets_the_stderr_banner(self):
-        out, err = self.emit(hook.CURSOR_EVENT_NAME)
+        out, err = self.emit(common.CURSOR_POST_TOOL_EVENT)
         self.assertEqual(out, "")
         self.assertEqual(err.strip(), f"PR: {PR_URL}")
 

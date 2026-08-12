@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PostToolUse hook: print the open PR's URL the moment it becomes knowable.
 
-The sibling `pr-status.sh` Stop hook already reports this URL. It only runs
+The sibling `pr_status.py` Stop hook already reports this URL. It only runs
 when a turn ends. A user interrupt never reaches that point. Neither does a
 turn still blocked inside `gh pr checks --watch`. So a `/wild-pr` run can
 create a pull request, then spend twenty minutes in its babysit loop. The user
@@ -15,15 +15,28 @@ The URL always comes from `gh`, never from the model's account of what it did.
 
 from __future__ import annotations
 
-import json
 import os
-import re
-import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import re
 import time
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Final, Optional, Sequence
+from typing import Final, Optional
+
+from pr_hook_common import (
+    CURSOR_POST_TOOL_EVENT,
+    GH_TIMEOUT_SECONDS,
+    GIT_TIMEOUT_SECONDS,
+    HookInput,
+    announceable_branch,
+    emit,
+    make_runner,
+    open_pr_url,
+    parse_hook_input,
+    read_stdin,
+)
 
 # Commands worth checking after. All three fire once the command returns,
 # because that is what PostToolUse means. None can announce ahead of the tool
@@ -35,63 +48,14 @@ from typing import Callable, Final, Optional, Sequence
 # returns. So a pass that ran silently for minutes ends with the link on screen.
 TRIGGER_COMMANDS: Final = ("gh pr create", "gh pr view", "gh pr checks")
 
-# Branches that never have a PR of their own. A detached HEAD answers `HEAD`.
-SKIPPED_BRANCHES: Final = frozenset({"HEAD", "main", "master"})
-
 # A babysit pass opens with `gh pr view` and can then burn 600 seconds inside
 # `gh pr checks --watch`. At five minutes a three-pass run yields roughly three
 # banners, while two `gh pr view` calls seconds apart collapse into one.
 ANNOUNCE_INTERVAL_SECONDS: Final = 300.0
 
-GIT_TIMEOUT_SECONDS: Final = 5.0
-GH_TIMEOUT_SECONDS: Final = 10.0
-
 MARKER_DIR_NAME: Final = "wild-horses-pr-announce"
 
-# Cursor spells the event in camelCase and writes hook banners to stderr.
-CURSOR_EVENT_NAME: Final = "postToolUse"
-
 _UNSAFE_PATH_CHARS: Final = re.compile(r"[^A-Za-z0-9_.-]")
-
-# Runs a command and returns its trimmed stdout, or None if it failed.
-CommandRunner = Callable[[Sequence[str]], Optional[str]]
-
-
-@dataclass(frozen=True)
-class HookInput:
-    """The fields this hook reads out of the harness's stdin payload."""
-
-    command: str
-    session_id: str
-    event_name: str
-    cwd: str
-
-
-def parse_hook_input(raw: str) -> Optional[HookInput]:
-    """Parse the harness payload, or return None when it is unusable.
-
-    A malformed payload means there is nothing to announce. The hook returns
-    None so the caller can exit quietly. Raising instead would put a traceback
-    in the result of every Bash tool call the user makes.
-    """
-    try:
-        payload = json.loads(raw)
-    except (ValueError, TypeError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-
-    tool_input = payload.get("tool_input")
-    command = ""
-    if isinstance(tool_input, dict):
-        command = str(tool_input.get("command") or "")
-
-    return HookInput(
-        command=command,
-        session_id=str(payload.get("session_id") or "nosession"),
-        event_name=str(payload.get("hook_event_name") or ""),
-        cwd=str(payload.get("cwd") or ""),
-    )
 
 
 def is_trigger_command(command: str) -> bool:
@@ -101,16 +65,6 @@ def is_trigger_command(command: str) -> bool:
     are often embedded: `BASE=$(gh pr view --json baseRefName --jq .baseRefName)`.
     """
     return any(trigger in command for trigger in TRIGGER_COMMANDS)
-
-
-def announceable_branch(run: CommandRunner) -> Optional[str]:
-    """Return the checked-out branch when it can own a PR, else None.
-
-    One `git` call does every job here. It fails outside a work tree. On a
-    detached HEAD it answers `HEAD`, which `SKIPPED_BRANCHES` rejects.
-    """
-    branch = run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
-    return branch if branch and branch not in SKIPPED_BRANCHES else None
 
 
 def marker_path(tmp_root: Path, session_id: str, branch: str) -> Path:
@@ -141,30 +95,6 @@ def should_announce(marker: Path, now: float, interval: float) -> bool:
     return (now - last) >= interval
 
 
-def open_pr_url(run: CommandRunner) -> Optional[str]:
-    """Ask `gh` for the open PR's URL, or return None when there is none.
-
-    `gh pr view` reports the branch's most recent PR whatever its state. So the
-    query asks for the state and drops anything that is not open. Without that
-    filter a closed PR prints a dead link. Worse, it stamps the marker, which
-    then silences the real banner when `gh pr create` runs moments later.
-    """
-    url = run(
-        [
-            "gh",
-            "pr",
-            "view",
-            "--json",
-            "url,state",
-            "--jq",
-            'select(.state == "OPEN") | .url',
-        ]
-    )
-    if url is None or not url.startswith("http"):
-        return None
-    return url
-
-
 def touch_marker(marker: Path, now: float) -> None:
     """Stamp the marker so the next few calls stay quiet.
 
@@ -179,43 +109,6 @@ def touch_marker(marker: Path, now: float) -> None:
         os.utime(marker, (now, now))
     except OSError:
         return
-
-
-def build_claude_payload(url: str) -> str:
-    """Build the banner the harness prints to the user.
-
-    `systemMessage` is the guarantee. The harness prints it whatever the model
-    does next. The link reaches the user even when the run is interrupted.
-
-    Nothing here talks to the model. `PostToolUse` documents no supported way to
-    add context to the model's turn. The one channel it does document is exit
-    code 2, which means failure. So the duty to restate the link stays where it
-    can be read. That is **The PR link rule** in wild-pr's SKILL.md.
-    """
-    return json.dumps({"systemMessage": f"PR: {url}", "suppressOutput": True})
-
-
-def make_runner(cwd: str, timeout: float) -> CommandRunner:
-    """Build a command runner rooted at the directory the tool call ran in."""
-
-    def run(argv: Sequence[str]) -> Optional[str]:
-        try:
-            done = subprocess.run(
-                list(argv),
-                cwd=cwd or None,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        except (OSError, subprocess.SubprocessError):
-            # A missing or hanging `git`/`gh` leaves nothing to announce. This
-            # hook is advisory, so it stays silent instead of failing the turn.
-            return None
-        if done.returncode != 0:
-            return None
-        return done.stdout.strip() or None
-
-    return run
 
 
 def announce(hook: HookInput, tmp_root: Path, now: float) -> Optional[str]:
@@ -247,8 +140,7 @@ def announce(hook: HookInput, tmp_root: Path, now: float) -> Optional[str]:
 
 
 def main() -> int:
-    raw = sys.stdin.read() if not sys.stdin.isatty() else ""
-    hook = parse_hook_input(raw)
+    hook = parse_hook_input(read_stdin())
     if hook is None:
         return 0
 
@@ -257,11 +149,7 @@ def main() -> int:
     if url is None:
         return 0
 
-    if hook.event_name == CURSOR_EVENT_NAME:
-        print(f"PR: {url}", file=sys.stderr)
-        return 0
-
-    print(build_claude_payload(url))
+    emit(f"PR: {url}", hook.event_name, CURSOR_POST_TOOL_EVENT)
     return 0
 
 
