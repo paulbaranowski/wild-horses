@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+"""PostToolUse hook: print the branch's PR link the moment it becomes knowable.
+
+The sibling `pr_status.py` Stop hook already reports this URL. It only runs
+when a turn ends. A user interrupt never reaches that point. Neither does a
+turn still blocked inside `gh pr checks --watch`. So a `/wild-pr` run can
+create a pull request, then spend twenty minutes in its babysit loop. The user
+never gets a link.
+
+This hook ties the same guarantee to the `gh` call instead of to turn end. It
+also rate-limits itself, so a babysit loop cannot spam the user.
+
+The URL always comes from `gh`, never from the model's account of what it did.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import re
+import time
+from pathlib import Path
+from typing import Final, Optional
+
+from pr_hook_common import (
+    CURSOR_POST_TOOL_EVENT,
+    GH_TIMEOUT_SECONDS,
+    GIT_TIMEOUT_SECONDS,
+    HookInput,
+    PullRequest,
+    announceable_branch,
+    emit,
+    make_runner,
+    new_deadline,
+    find_pull_request,
+    parse_hook_input,
+    pr_cache_path,
+    pr_link,
+    read_stdin,
+    state_root,
+    write_pr_cache,
+)
+
+# Commands worth checking after. All three fire once the command returns,
+# because that is what PostToolUse means. None can announce ahead of the tool
+# it matches.
+#
+# `create` is the moment a URL first exists. It is the one that beats the CI
+# wait. `view` covers the path where preflight finds a PR that already existed.
+# It also opens each babysit pass. `checks` fires when a long `--watch`
+# returns. So a pass that ran silently for minutes ends with the link on screen.
+TRIGGER_COMMANDS: Final = ("gh pr create", "gh pr view", "gh pr checks")
+
+# A babysit pass opens with `gh pr view` and can then burn 600 seconds inside
+# `gh pr checks --watch`. At five minutes a three-pass run yields roughly three
+# banners, while two `gh pr view` calls seconds apart collapse into one.
+ANNOUNCE_INTERVAL_SECONDS: Final = 300.0
+
+MARKER_DIR_NAME: Final = "wild-horses-pr-announce"
+
+_UNSAFE_PATH_CHARS: Final = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+def is_trigger_command(command: str) -> bool:
+    """Report whether this Bash command is one worth checking for a PR after.
+
+    Matches anywhere in the command, not just at the start, because these calls
+    are often embedded: `BASE=$(gh pr view --json baseRefName --jq .baseRefName)`.
+    """
+    return any(trigger in command for trigger in TRIGGER_COMMANDS)
+
+
+def marker_path(tmp_root: Path, session_id: str, branch: str) -> Path:
+    """Build the rate-limit marker's path for one session and branch.
+
+    Both parts are sanitized because branch names contain slashes. A raw slash
+    would turn the marker into a nested directory that does not exist.
+
+    Sanitizing alone collides. `feat/a` and `feat_a` are both valid branches, and
+    both become `feat_a`. Sharing one marker would let either branch mute the
+    other's banner for five minutes. Worktrees make two branches in one session
+    ordinary. So the name also carries a digest of the raw values. That keeps the
+    branch readable for whoever debugs a stuck marker.
+    """
+    digest = hashlib.sha256(f"{session_id}\0{branch}".encode()).hexdigest()[:8]
+    name = f"{_sanitize(session_id)}--{_sanitize(branch)}-{digest}"
+    return tmp_root / MARKER_DIR_NAME / name
+
+
+def _sanitize(value: str) -> str:
+    return _UNSAFE_PATH_CHARS.sub("_", value)
+
+
+def should_announce(marker: Path, now: float, interval: float) -> bool:
+    """Report whether enough time has passed since the last banner.
+
+    An unreadable marker counts as due. Losing the rate limit costs the user one
+    duplicate line. Losing the banner costs them the link this hook exists for.
+
+    `lstat` rather than `stat`, so a planted symlink cannot decide this. That
+    matches the `O_NOFOLLOW` on the write beside it and on the PR cache.
+    """
+    try:
+        last = os.lstat(marker).st_mtime
+    except OSError:
+        # Covers both a missing marker and an unreadable one.
+        return True
+    return (now - last) >= interval
+
+
+def touch_marker(marker: Path, now: float) -> None:
+    """Stamp the marker so the next few calls stay quiet.
+
+    A marker this process cannot write costs the user one duplicate banner. An
+    escaping OSError costs them the banner itself. It also puts a traceback in
+    the result of every `gh pr` call. So this write stays advisory, like the
+    reads around it.
+
+    `O_NOFOLLOW` and mode `0600` under a `0700` directory, matching the PR cache.
+    The marker holds only an mtime, so a redirected write could at most create
+    or touch another file. Two writes into one private directory should not
+    disagree about that.
+    """
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            os.utime(fd, (now, now))
+        finally:
+            os.close(fd)
+    except OSError:
+        return
+
+
+def announce(hook: HookInput, root: Optional[Path], now: float) -> Optional[PullRequest]:
+    """Decide whether to announce, and return the PR when the answer is yes.
+
+    Returns None at every gate that does not apply, so the caller stays quiet.
+
+    The pull request comes back whole, not as a URL. The caller words the
+    banner through `pr_link`, which needs the state.
+
+    Announcing also stamps the rate-limit marker, so calling this twice in a row
+    yields the PR once. That write is the reason this is not a pure predicate.
+    """
+    if not is_trigger_command(hook.command):
+        return None
+
+    deadline = new_deadline()
+    branch = announceable_branch(make_runner(hook.cwd, GIT_TIMEOUT_SECONDS, deadline))
+    if branch is None:
+        return None
+
+    # No usable state directory means no rate limit. That costs a duplicate
+    # banner at worst, where skipping the announcement costs the link.
+    marker = None if root is None else marker_path(root, hook.session_id, branch)
+    if marker is not None and not should_announce(marker, now, ANNOUNCE_INTERVAL_SECONDS):
+        return None
+
+    # Any state announces. A link that vanishes the moment it merges is the
+    # opposite of this hook's job. `pr_link` labels a non-open one, so the
+    # banner never passes a dead PR off as live.
+    pull = find_pull_request(make_runner(hook.cwd, GH_TIMEOUT_SECONDS, deadline))
+    if pull is None:
+        # No PR yet. Leave the marker alone so the next call checks again.
+        return None
+
+    # This hook never reads the PR cache. It runs at the instant
+    # `gh pr create` changes the answer, and a stale entry would suppress the
+    # banner. It writes one, so the Stop hook can skip its own `gh` call.
+    head_sha = make_runner(hook.cwd, GIT_TIMEOUT_SECONDS, deadline)(
+        ["git", "rev-parse", "HEAD"]
+    )
+    if head_sha and root is not None:
+        write_pr_cache(pr_cache_path(root, hook.cwd, branch, head_sha), pull)
+
+    if marker is not None:
+        touch_marker(marker, now)
+    return pull
+
+
+def main() -> int:
+    hook = parse_hook_input(read_stdin())
+    if hook is None:
+        return 0
+
+    pull = announce(hook, state_root(), time.time())
+    if pull is None:
+        return 0
+
+    emit(pr_link(pull), hook.event_name, CURSOR_POST_TOOL_EVENT)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

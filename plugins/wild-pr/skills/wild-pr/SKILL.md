@@ -149,9 +149,11 @@ Notes:
 
 - `--body-file -` with a single-quoted heredoc keeps `$`, backticks, and quotes in the body literal.
 - Quote `"$TITLE"` at the `gh` call so spaces and metacharacters do not word-split.
-- Capture the PR URL from `gh pr create` output (or `gh pr view --json url -q .url` right after).
+- Capture the PR URL from `gh pr create` output. If that output carries no URL, `gh pr view --json url -q .url` is the one tool call allowed before the link message below.
 
-Print the link line from **The PR link rule**, then continue. Do not wait for the user.
+Phase 3 is not complete when `gh pr create` returns. It is complete when the user has seen the link. So emit a user-facing message whose last line is the link line from **The PR link rule**. Call no other tool between `gh pr create` and that message. The `gh pr view` lookup named above is the one exception, and only when create printed no URL.
+
+Then continue. Do not wait for the user.
 
 ---
 
@@ -196,9 +198,10 @@ After the loop (3 passes or early clean/hard-stuck stop), summarize:
 
 - **Don't print a bare PR number** in place of the URL. `PR #340 created` gives the user nothing to click.
 - **Don't end any message** without the link once the PR URL is known. Error reports and stuck reports carry it too.
+- **Don't call any other tool between `gh pr create` and the message carrying the link.** Phase 3 states that gate and its single `gh pr view` exception. Phase 4 can run for twenty minutes, and a user who interrupts it never gets a deferred link.
 - **Don't open a second PR** when one already exists for the branch.
-- **Don't commit** files that look like secrets — stop and ask the user instead.
+- **Don't commit** files that look like secrets. Stop and ask the user instead.
 - **Don't run more than three** babysit passes in this skill, even if the PR is still progressing.
-- **Don't stop after a `progressing` exit** to wait for the user or suggest `/loop` — continue to the next pass until 3 or early exit.
-- **Don't paraphrase** summary-writer or babysit from memory — Read each skill's SKILL.md (or babysit's command file) before executing it.
+- **Don't stop after a `progressing` exit** to wait for the user or suggest `/loop`. Continue to the next pass until 3 or early exit.
+- **Don't paraphrase** summary-writer or babysit from memory. Read each skill's SKILL.md (or babysit's command file) before executing it.
 - **Don't** append "Generated with Claude" footers or Co-Authored-By trailers.

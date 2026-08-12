@@ -1,9 +1,16 @@
 {
   "hooks": {
+    "postToolUse": [
+      {
+        "command": "python3 \"${CURSOR_PLUGIN_ROOT}/scripts/pr_announce.py\"",
+        "matcher": "Shell",
+        "timeout": 20
+      }
+    ],
     "stop": [
       {
-        "command": "bash \"${CURSOR_PLUGIN_ROOT}/scripts/pr-status.sh\"",
-        "timeout": 10
+        "command": "python3 \"${CURSOR_PLUGIN_ROOT}/scripts/pr_status.py\"",
+        "timeout": 20
       }
     ]
   }
