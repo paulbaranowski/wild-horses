@@ -118,11 +118,13 @@ class TestFindPullRequest(unittest.TestCase):
     def test_returns_url_and_state(self):
         pull = common.find_pull_request(runner({PR_VIEW: f"OPEN\t{PR_URL}"}))
         self.assertEqual(pull, common.PullRequest(url=PR_URL, state="OPEN"))
+        assert pull is not None
         self.assertTrue(pull.is_open)
 
     def test_a_merged_pr_is_still_returned(self):
         """The state is reported, not filtered. A merged PR keeps its link."""
         pull = common.find_pull_request(runner({PR_VIEW: f"MERGED\t{PR_URL}"}))
+        assert pull is not None
         self.assertEqual(pull.url, PR_URL)
         self.assertFalse(pull.is_open)
 
@@ -266,10 +268,13 @@ class TestStateRootIsPrivate(unittest.TestCase):
 
     def test_the_root_is_not_world_writable(self):
         root = common.state_root()
+        assert root is not None
         self.assertEqual(root.stat().st_mode & 0o077, 0, f"{root} is group/other accessible")
 
     def test_the_root_is_owned_by_this_user(self):
-        self.assertEqual(common.state_root().stat().st_uid, os.getuid())
+        root = common.state_root()
+        assert root is not None
+        self.assertEqual(root.stat().st_uid, os.getuid())
 
     def test_a_write_does_not_follow_a_symlink(self):
         with tempfile.TemporaryDirectory() as tmp:
