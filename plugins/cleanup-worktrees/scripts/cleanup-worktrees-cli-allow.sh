@@ -7,15 +7,19 @@
 # branch -D, gh pr list, du) against configured worktree paths. No subprocess
 # execution of file-supplied content.
 #
-# Outputs PreToolUse permissionDecision JSON on match. Silent no-op otherwise
-# (falls through to normal allow-list + classifier flow).
+# Outputs a PreToolUse allow decision on match. The dialect matches whichever
+# harness is running: Claude Code, Cursor, or Grok Build. Silent no-op
+# otherwise (falls through to the normal allow-list + classifier flow).
 
 set -euo pipefail
 
 command -v jq >/dev/null 2>&1 || exit 0
 
+source "$(dirname "${BASH_SOURCE[0]}")/hook_runtime.sh"
+
 input=$(cat)
-cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
+hook_runtime_init "$input"
+cmd="$HOOK_COMMAND"
 
 # Match: `python3` immediately followed by the cleanup-worktrees CLI as its
 # first positional argument, possibly wrapped in single or double quotes. The
@@ -62,12 +66,7 @@ esac
 # newline that somehow slipped past the case prefilter, etc.) can't ride
 # along after a matching prefix.
 approve() {
-    hook_event=$(echo "$input" | jq -r '.hook_event_name // empty')
-    if [[ "$hook_event" == "preToolUse" ]]; then
-        printf '%s\n' '{"permission":"allow","agent_message":"cleanup-worktrees CLI is plugin-approved"}'
-    else
-        printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"cleanup-worktrees CLI is plugin-approved"}}'
-    fi
+    hook_runtime_emit_allow "cleanup-worktrees CLI is plugin-approved"
 }
 
 # Extract the script path from one of three forms, so a legitimate plugin path

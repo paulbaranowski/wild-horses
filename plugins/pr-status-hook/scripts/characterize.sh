@@ -34,6 +34,16 @@ GH
 chmod +x "$WORK/bin/gh"
 export PATH="$WORK/bin:$PATH"
 
+# One payload per harness. The event key and its spelling pick the banner
+# channel. So the recording has to carry all three. Grok is not a Cursor
+# variant: it camelCases the key and snake_cases the value.
+declare -A PAYLOADS=(
+    [Stop]='{"hook_event_name":"Stop"}'
+    [stop]='{"hook_event_name":"stop"}'
+    [grok_stop]='{"hookEventName":"stop"}'
+)
+PAYLOAD_LABELS=(Stop stop grok_stop)
+
 # Build a repo in one named state and print the hook's output for it.
 #
 #   $1 case name.
@@ -74,15 +84,15 @@ run_case() {
     done
 
     echo "### $name"
-    for event in Stop stop; do
+    for label in "${PAYLOAD_LABELS[@]}"; do
         local rc=0
         # Redirect to a file rather than capture with $( ), which strips every
         # trailing newline. A port that changed terminal bytes would otherwise
         # be invisible to a recording that claims byte fidelity.
-        printf '{"hook_event_name":"%s"}' "$event" \
+        printf '%s' "${PAYLOADS[$label]}" \
             | FAKE_PR_URL="$pr" FAKE_PR_STATE="${state:-OPEN}" \
               "${HOOK_CMD[@]}" > "$WORK/out.bin" 2>&1 || rc=$?
-        echo "--- event=$event rc=$rc ---"
+        echo "--- event=$label rc=$rc ---"
         normalize "$WORK/out.bin"
     done
     echo
@@ -130,10 +140,10 @@ run_case  pr-closed                  feat/x   ahead    1     "https://github.com
 # Outside a work tree: no git repo at all.
 mkdir -p "$WORK/notrepo"; cd "$WORK/notrepo" || exit
 echo "### outside-a-work-tree"
-for event in Stop stop; do
+for label in "${PAYLOAD_LABELS[@]}"; do
     rc=0
-    printf '{"hook_event_name":"%s"}' "$event" \
+    printf '%s' "${PAYLOADS[$label]}" \
         | "${HOOK_CMD[@]}" > "$WORK/out.bin" 2>&1 || rc=$?
-    echo "--- event=$event rc=$rc ---"
+    echo "--- event=$label rc=$rc ---"
     normalize "$WORK/out.bin"
 done

@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import Final, Optional
 
 from pr_hook_common import (
-    CURSOR_POST_TOOL_EVENT,
     GH_TIMEOUT_SECONDS,
     GIT_TIMEOUT_SECONDS,
     HookInput,
@@ -192,7 +191,7 @@ def main() -> int:
     if pull is None:
         return 0
 
-    emit(pr_link(pull), hook.event_name, CURSOR_POST_TOOL_EVENT)
+    emit(pr_link(pull), hook.runtime)
     return 0
 
 

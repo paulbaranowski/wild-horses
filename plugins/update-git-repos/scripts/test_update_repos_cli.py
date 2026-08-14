@@ -66,7 +66,9 @@ def run_cli(
 
 def run_allow(cmd: str) -> str:
     """Pipe a fake PreToolUse JSON to the allow-script; return stdout."""
-    payload = json.dumps({"tool_input": {"command": cmd}})
+    payload = json.dumps(
+        {"hook_event_name": "PreToolUse", "tool_input": {"command": cmd}}
+    )
     result = subprocess.run(
         ["bash", str(ALLOW_SCRIPT)],
         input=payload,

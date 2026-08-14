@@ -5,6 +5,9 @@ raw-trailing: ''
 --- event=stop rc=0 ---
 
 raw-trailing: ''
+--- event=grok_stop rc=0 ---
+
+raw-trailing: ''
 
 ### no-pr-no-upstream
 --- event=Stop rc=0 ---
@@ -12,6 +15,10 @@ raw-trailing: ''
 raw-non-ascii: ·⚠
 raw-trailing: '\n'
 --- event=stop rc=0 ---
+No PR for branch 'feat/x' · ⚠ branch has no upstream (never pushed)
+
+raw-trailing: '\n'
+--- event=grok_stop rc=0 ---
 No PR for branch 'feat/x' · ⚠ branch has no upstream (never pushed)
 
 raw-trailing: '\n'
@@ -25,6 +32,10 @@ raw-trailing: '\n'
 No PR for branch 'feat/x' · ⚠ 1 commit(s) NOT pushed
 
 raw-trailing: '\n'
+--- event=grok_stop rc=0 ---
+No PR for branch 'feat/x' · ⚠ 1 commit(s) NOT pushed
+
+raw-trailing: '\n'
 
 ### no-pr-dirty
 --- event=Stop rc=0 ---
@@ -32,6 +43,10 @@ raw-trailing: '\n'
 raw-non-ascii: ·✎✓
 raw-trailing: '\n'
 --- event=stop rc=0 ---
+No PR for branch 'feat/x' · ✓ all commits pushed · ✎ 2 file(s) uncommitted
+
+raw-trailing: '\n'
+--- event=grok_stop rc=0 ---
 No PR for branch 'feat/x' · ✓ all commits pushed · ✎ 2 file(s) uncommitted
 
 raw-trailing: '\n'
@@ -45,6 +60,10 @@ raw-trailing: '\n'
 No PR for branch 'feat/x' · ⚠ 1 commit(s) NOT pushed · ✎ 3 file(s) uncommitted
 
 raw-trailing: '\n'
+--- event=grok_stop rc=0 ---
+No PR for branch 'feat/x' · ⚠ 1 commit(s) NOT pushed · ✎ 3 file(s) uncommitted
+
+raw-trailing: '\n'
 
 ### pr-clean-level
 --- event=Stop rc=0 ---
@@ -52,6 +71,10 @@ raw-trailing: '\n'
 raw-non-ascii: ·✓
 raw-trailing: '\n'
 --- event=stop rc=0 ---
+PR: https://github.com/o/r/pull/7 · ✓ all commits pushed
+
+raw-trailing: '\n'
+--- event=grok_stop rc=0 ---
 PR: https://github.com/o/r/pull/7 · ✓ all commits pushed
 
 raw-trailing: '\n'
@@ -65,6 +88,10 @@ raw-trailing: '\n'
 PR: https://github.com/o/r/pull/7 · ⚠ branch has no upstream (never pushed)
 
 raw-trailing: '\n'
+--- event=grok_stop rc=0 ---
+PR: https://github.com/o/r/pull/7 · ⚠ branch has no upstream (never pushed)
+
+raw-trailing: '\n'
 
 ### pr-ahead
 --- event=Stop rc=0 ---
@@ -72,6 +99,10 @@ raw-trailing: '\n'
 raw-non-ascii: ·⚠
 raw-trailing: '\n'
 --- event=stop rc=0 ---
+PR: https://github.com/o/r/pull/7 · ⚠ 1 commit(s) NOT pushed
+
+raw-trailing: '\n'
+--- event=grok_stop rc=0 ---
 PR: https://github.com/o/r/pull/7 · ⚠ 1 commit(s) NOT pushed
 
 raw-trailing: '\n'
@@ -85,6 +116,10 @@ raw-trailing: '\n'
 PR: https://github.com/o/r/pull/7 · ⚠ 1 commit(s) NOT pushed · ✎ 1 file(s) uncommitted
 
 raw-trailing: '\n'
+--- event=grok_stop rc=0 ---
+PR: https://github.com/o/r/pull/7 · ⚠ 1 commit(s) NOT pushed · ✎ 1 file(s) uncommitted
+
+raw-trailing: '\n'
 
 ### pr-slashy-branch
 --- event=Stop rc=0 ---
@@ -92,6 +127,10 @@ raw-trailing: '\n'
 raw-non-ascii: ·✓
 raw-trailing: '\n'
 --- event=stop rc=0 ---
+PR: https://github.com/o/r/pull/7 · ✓ all commits pushed
+
+raw-trailing: '\n'
+--- event=grok_stop rc=0 ---
 PR: https://github.com/o/r/pull/7 · ✓ all commits pushed
 
 raw-trailing: '\n'
@@ -103,12 +142,18 @@ raw-trailing: ''
 --- event=stop rc=0 ---
 
 raw-trailing: ''
+--- event=grok_stop rc=0 ---
+
+raw-trailing: ''
 
 ### skip-master
 --- event=Stop rc=0 ---
 
 raw-trailing: ''
 --- event=stop rc=0 ---
+
+raw-trailing: ''
+--- event=grok_stop rc=0 ---
 
 raw-trailing: ''
 
@@ -118,6 +163,10 @@ raw-trailing: ''
 raw-non-ascii: ·✓
 raw-trailing: '\n'
 --- event=stop rc=0 ---
+PR: https://github.com/o/r/pull/7 (merged) · ✓ all commits pushed
+
+raw-trailing: '\n'
+--- event=grok_stop rc=0 ---
 PR: https://github.com/o/r/pull/7 (merged) · ✓ all commits pushed
 
 raw-trailing: '\n'
@@ -131,11 +180,18 @@ raw-trailing: '\n'
 PR: https://github.com/o/r/pull/7 (closed) · ⚠ 1 commit(s) NOT pushed · ✎ 1 file(s) uncommitted
 
 raw-trailing: '\n'
+--- event=grok_stop rc=0 ---
+PR: https://github.com/o/r/pull/7 (closed) · ⚠ 1 commit(s) NOT pushed · ✎ 1 file(s) uncommitted
+
+raw-trailing: '\n'
 
 ### outside-a-work-tree
 --- event=Stop rc=0 ---
 
 raw-trailing: ''
 --- event=stop rc=0 ---
+
+raw-trailing: ''
+--- event=grok_stop rc=0 ---
 
 raw-trailing: ''

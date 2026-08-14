@@ -1,7 +1,7 @@
 {
   "name": "plain-language",
   "description": "Apply the plain-language writing standard to prose anywhere in a repo: code comments, docstrings, markdown, plain text, or pasted text. Check reports violations; apply rewrites them while a bundled CLI proves non-prose content stayed byte-identical.",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "author": {
     "name": "Paul Baranowski"
   },

@@ -50,10 +50,24 @@ PR_CACHE_DIR_NAME: Final = "wild-horses-pr-cache"
 # lag, which is the price. A new commit changes the key and asks again.
 PR_CACHE_TTL_SECONDS: Final = 3600.0
 
-# Cursor spells its events in camelCase and writes hook banners to stderr.
-# Claude uses PascalCase and a JSON object on stdout.
+# Three harnesses run these hooks, and each one names things its own way.
+#
+#   Claude sends `hook_event_name` in PascalCase, and reads stdout JSON.
+#   Cursor sends `hook_event_name` in camelCase, and reads stderr.
+#   Grok sends `hookEventName` in snake_case, and reads stderr.
+#
+# Grok ignores a passive hook's stdout outright. So its banner has to go to
+# stderr, the way Cursor's does. The key alone cannot tell Claude and Cursor
+# apart. Only the case of the value does. So both spellings are kept here.
 CURSOR_STOP_EVENT: Final = "stop"
 CURSOR_POST_TOOL_EVENT: Final = "postToolUse"
+GROK_STOP_EVENT: Final = "stop"
+GROK_POST_TOOL_EVENT: Final = "post_tool_use"
+
+# Which harness sent the payload. `emit` picks a channel from this.
+RUNTIME_CLAUDE: Final = "claude"
+RUNTIME_CURSOR: Final = "cursor"
+RUNTIME_GROK: Final = "grok"
 
 # Runs a command and returns its trimmed stdout, or None if it failed.
 CommandRunner = Callable[[Sequence[str]], Optional[str]]
@@ -67,6 +81,7 @@ class HookInput:
     session_id: str
     event_name: str
     cwd: str
+    runtime: str
 
 
 def parse_hook_input(raw: str) -> Optional[HookInput]:
@@ -83,16 +98,32 @@ def parse_hook_input(raw: str) -> Optional[HookInput]:
     if not isinstance(payload, dict):
         return None
 
+    # Grok camelCases every key. Read both spellings of the three fields that
+    # differ, and let the event key decide which harness sent this.
+    snake_event = str(payload.get("hook_event_name") or "")
+    camel_event = str(payload.get("hookEventName") or "")
+    if camel_event:
+        runtime = RUNTIME_GROK
+    elif snake_event in (CURSOR_STOP_EVENT, CURSOR_POST_TOOL_EVENT):
+        runtime = RUNTIME_CURSOR
+    else:
+        runtime = RUNTIME_CLAUDE
+
     tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        tool_input = payload.get("toolInput")
     command = ""
     if isinstance(tool_input, dict):
         command = str(tool_input.get("command") or "")
 
     return HookInput(
         command=command,
-        session_id=str(payload.get("session_id") or "nosession"),
-        event_name=str(payload.get("hook_event_name") or ""),
+        session_id=str(
+            payload.get("session_id") or payload.get("sessionId") or "nosession"
+        ),
+        event_name=camel_event or snake_event,
         cwd=str(payload.get("cwd") or ""),
+        runtime=runtime,
     )
 
 
@@ -286,14 +317,15 @@ def write_pr_cache(path: Path, pull: PullRequest) -> None:
         return
 
 
-def emit(banner: str, event_name: str, cursor_event: str) -> None:
+def emit(banner: str, runtime: str) -> None:
     """Send one banner out on whichever channel this harness reads.
 
-    Cursor shows a hook's stderr. Claude reads a JSON object on stdout. There
+    Cursor and Grok both show a hook's stderr, and Grok discards a passive
+    hook's stdout entirely. Claude reads a JSON object on stdout. There
     `systemMessage` is the user-facing text, and `suppressOutput` keeps the JSON
     itself out of the transcript.
     """
-    if event_name == cursor_event:
+    if runtime in (RUNTIME_CURSOR, RUNTIME_GROK):
         print(banner, file=sys.stderr)
         return
     # `ensure_ascii=False` keeps `·`, `⚠`, and `✎` as themselves. The default

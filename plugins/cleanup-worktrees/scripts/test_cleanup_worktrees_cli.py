@@ -570,7 +570,9 @@ class AllowScriptTestCase(unittest.TestCase):
     """
 
     def run_allow(self, cmd: str, plugin_root: Optional[Path] = None) -> str:
-        payload = json.dumps({"tool_input": {"command": cmd}})
+        payload = json.dumps(
+            {"hook_event_name": "PreToolUse", "tool_input": {"command": cmd}}
+        )
         env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_ROOT"}
         if plugin_root is not None:
             env["CLAUDE_PLUGIN_ROOT"] = str(plugin_root)

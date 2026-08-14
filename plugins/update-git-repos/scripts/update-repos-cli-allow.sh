@@ -6,15 +6,19 @@
 # commands (status, branch, fetch, pull, stash) against configured repo paths.
 # No subprocess execution of file-supplied content.
 #
-# Outputs PreToolUse permissionDecision JSON on match. Silent no-op otherwise
-# (falls through to normal allow-list + classifier flow).
+# Outputs a PreToolUse allow decision on match. The dialect matches whichever
+# harness is running: Claude Code, Cursor, or Grok Build. Silent no-op
+# otherwise (falls through to the normal allow-list + classifier flow).
 
 set -euo pipefail
 
 command -v jq >/dev/null 2>&1 || exit 0
 
+source "$(dirname "${BASH_SOURCE[0]}")/hook_runtime.sh"
+
 input=$(cat)
-cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
+hook_runtime_init "$input"
+cmd="$HOOK_COMMAND"
 
 # Match: `python3` immediately followed by the update-git-repos CLI as its
 # first positional argument, possibly wrapped in single or double quotes. The
@@ -54,10 +58,5 @@ esac
 # along after a matching prefix.
 if [[ "$cmd" =~ ^python3[[:space:]]+[\"\']?([^\"\'[:space:]]+/scripts/update_repos_cli\.py)[\"\']?([[:space:]].*)?$ ]] \
    && [[ "${BASH_REMATCH[1]}" == *"/update-git-repos/"* ]]; then
-    hook_event=$(echo "$input" | jq -r '.hook_event_name // empty')
-    if [[ "$hook_event" == "preToolUse" ]]; then
-        printf '%s\n' '{"permission":"allow","agent_message":"update-git-repos CLI is plugin-approved"}'
-    else
-        printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"update-git-repos CLI is plugin-approved"}}'
-    fi
+    hook_runtime_emit_allow "update-git-repos CLI is plugin-approved"
 fi

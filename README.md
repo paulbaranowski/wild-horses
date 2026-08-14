@@ -253,6 +253,22 @@ cd wild-horses
 
 Point at the repo root (the directory that contains `.claude-plugin/marketplace.json`), not the JSON file itself. Install plugins the same way: `/plugin install harness@wild-horses`.
 
+### Grok Build
+
+Grok reads the Claude Code manifests directly, so there is no separate Grok catalog to add. It resolves `.claude-plugin/marketplace.json` and each plugin's `.claude-plugin/plugin.json` as they are.
+
+```bash
+grok plugin marketplace add paulbaranowski/wild-horses
+grok plugin install harness --trust
+grok plugin enable harness
+```
+
+Three steps, not two. An installed plugin stays disabled until you enable it. `--trust` is what lets its hooks and MCP servers run. Skills and agents load without trust; hooks do not. To grant trust after the fact, run `/hooks-trust` or press `Ctrl+L` in the TUI.
+
+The allow-scripts answer Grok in its own dialect. Grok sends `hookEventName` and `toolInput`, and it accepts a two-field `{"decision", "reason"}` decision. Neither the Claude nor the Cursor shape parses there. A shape it cannot parse fails open. The permission prompts then come back, with no error to show why. See `plugins/*/scripts/hook_runtime.sh`.
+
+Verified against grok 0.1.220.
+
 ### Cursor
 
 wild-horses ships dual manifests: `.claude-plugin/` for Claude Code and `.cursor-plugin/` for Cursor. Hooks use `hooks/hooks.json` (Claude) and `hooks/cursor-hooks.json` (Cursor) side by side.
