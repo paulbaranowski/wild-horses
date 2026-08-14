@@ -69,6 +69,11 @@ RUNTIME_CLAUDE: Final = "claude"
 RUNTIME_CURSOR: Final = "cursor"
 RUNTIME_GROK: Final = "grok"
 
+# No event key at all, so no harness is identified. `emit` prints nothing for
+# this. Every harness sends one of the two keys, so the only payloads that land
+# here are malformed. Guessing would print a Claude banner into a Grok session.
+RUNTIME_UNKNOWN: Final = "unknown"
+
 # Runs a command and returns its trimmed stdout, or None if it failed.
 CommandRunner = Callable[[Sequence[str]], Optional[str]]
 
@@ -106,8 +111,10 @@ def parse_hook_input(raw: str) -> Optional[HookInput]:
         runtime = RUNTIME_GROK
     elif snake_event in (CURSOR_STOP_EVENT, CURSOR_POST_TOOL_EVENT):
         runtime = RUNTIME_CURSOR
-    else:
+    elif snake_event:
         runtime = RUNTIME_CLAUDE
+    else:
+        runtime = RUNTIME_UNKNOWN
 
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
@@ -325,6 +332,8 @@ def emit(banner: str, runtime: str) -> None:
     `systemMessage` is the user-facing text, and `suppressOutput` keeps the JSON
     itself out of the transcript.
     """
+    if runtime == RUNTIME_UNKNOWN:
+        return
     if runtime in (RUNTIME_CURSOR, RUNTIME_GROK):
         print(banner, file=sys.stderr)
         return

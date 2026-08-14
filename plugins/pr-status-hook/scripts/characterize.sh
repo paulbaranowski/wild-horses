@@ -37,12 +37,19 @@ export PATH="$WORK/bin:$PATH"
 # One payload per harness. The event key and its spelling pick the banner
 # channel. So the recording has to carry all three. Grok is not a Cursor
 # variant: it camelCases the key and snake_cases the value.
-declare -A PAYLOADS=(
-    [Stop]='{"hook_event_name":"Stop"}'
-    [stop]='{"hook_event_name":"stop"}'
-    [grok_stop]='{"hookEventName":"stop"}'
-)
+#
+# A `case` rather than an associative array, because stock macOS ships bash
+# 3.2 and `declare -A` needs bash 4. `test_pr_status.py` runs this script
+# through whichever `bash` is on PATH, so 3.2 has to work.
 PAYLOAD_LABELS=(Stop stop grok_stop)
+payload_for() {
+    case "$1" in
+        Stop)      printf '%s' '{"hook_event_name":"Stop"}' ;;
+        stop)      printf '%s' '{"hook_event_name":"stop"}' ;;
+        grok_stop) printf '%s' '{"hookEventName":"stop"}' ;;
+        *)         echo "unknown payload label: $1" >&2; return 1 ;;
+    esac
+}
 
 # Build a repo in one named state and print the hook's output for it.
 #
@@ -89,7 +96,7 @@ run_case() {
         # Redirect to a file rather than capture with $( ), which strips every
         # trailing newline. A port that changed terminal bytes would otherwise
         # be invisible to a recording that claims byte fidelity.
-        printf '%s' "${PAYLOADS[$label]}" \
+        payload_for "$label" \
             | FAKE_PR_URL="$pr" FAKE_PR_STATE="${state:-OPEN}" \
               "${HOOK_CMD[@]}" > "$WORK/out.bin" 2>&1 || rc=$?
         echo "--- event=$label rc=$rc ---"
@@ -142,7 +149,7 @@ mkdir -p "$WORK/notrepo"; cd "$WORK/notrepo" || exit
 echo "### outside-a-work-tree"
 for label in "${PAYLOAD_LABELS[@]}"; do
     rc=0
-    printf '%s' "${PAYLOADS[$label]}" \
+    payload_for "$label" \
         | "${HOOK_CMD[@]}" > "$WORK/out.bin" 2>&1 || rc=$?
     echo "--- event=$label rc=$rc ---"
     normalize "$WORK/out.bin"

@@ -287,6 +287,19 @@ class TestRuntimeDetection(unittest.TestCase):
         self.assertEqual(got.command, "git status")
         self.assertEqual(got.session_id, "s-1")
 
+    def test_a_payload_with_neither_event_key_is_unknown(self):
+        """No event key means no harness identified, so nothing is assumed."""
+        got = self.runtime({"cwd": "/repo"})
+        self.assertEqual(got.runtime, common.RUNTIME_UNKNOWN)
+
+    def test_an_unknown_runtime_prints_nothing(self):
+        """Guessing a channel would print a Claude banner into a Grok session."""
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            common.emit("PR: x", common.RUNTIME_UNKNOWN)
+        self.assertEqual(out.getvalue(), "")
+        self.assertEqual(err.getvalue(), "")
+
     def test_claude_fields_still_read_from_snake_case(self):
         got = self.runtime({
             "hook_event_name": "PostToolUse",
