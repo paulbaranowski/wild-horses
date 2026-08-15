@@ -8,15 +8,19 @@
 # Disable this hook to restore per-call permission interception for the CLI
 # (and accept many more prompts per pr-babysit run).
 #
-# Outputs a PreToolUse permission decision on match. Silent no-op otherwise
-# (falls through to the normal allow-list + classifier flow).
+# Outputs a PreToolUse allow decision on match. The dialect matches whichever
+# harness is running: Claude Code, Cursor, or Grok Build. Silent no-op
+# otherwise (falls through to the normal allow-list + classifier flow).
 
 set -euo pipefail
 
 command -v jq >/dev/null 2>&1 || exit 0
 
+source "$(dirname "${BASH_SOURCE[0]}")/hook_runtime.sh"
+
 input=$(cat)
-cmd=$(echo "$input" | jq -r '.tool_input.command // empty')
+hook_runtime_init "$input"
+cmd="$HOOK_COMMAND"
 
 # Approve only a first-line invocation of the form `python3 <path>/scripts/
 # pr_babysit_cli.py ...`, where:
@@ -50,10 +54,5 @@ if [[ "$cmd" =~ ^python3[[:space:]] ]] \
 fi
 
 if [[ "$allow" == true ]]; then
-    hook_event=$(echo "$input" | jq -r '.hook_event_name // empty')
-    if [[ "$hook_event" == "preToolUse" ]]; then
-        printf '%s\n' '{"permission":"allow","agent_message":"pr-babysit CLI is plugin-approved"}'
-    else
-        printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"pr-babysit CLI is plugin-approved"}}'
-    fi
+    hook_runtime_emit_allow "pr-babysit CLI is plugin-approved"
 fi

@@ -228,34 +228,86 @@ class TestPrLink(unittest.TestCase):
 
 
 class TestEmit(unittest.TestCase):
-    """One banner, two harnesses, two channels."""
+    """One banner, three harnesses, two channels."""
 
-    def capture(self, event_name, cursor_event):
+    def capture(self, runtime):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            common.emit("PR: x", event_name, cursor_event)
+            common.emit("PR: x", runtime)
         return out.getvalue(), err.getvalue()
 
     def test_claude_gets_json_on_stdout(self):
-        out, err = self.capture("Stop", common.CURSOR_STOP_EVENT)
+        out, err = self.capture(common.RUNTIME_CLAUDE)
         self.assertEqual(json.loads(out)["systemMessage"], "PR: x")
         self.assertEqual(err, "")
 
     def test_cursor_gets_plain_text_on_stderr(self):
-        out, err = self.capture(common.CURSOR_STOP_EVENT, common.CURSOR_STOP_EVENT)
+        out, err = self.capture(common.RUNTIME_CURSOR)
+        self.assertEqual(out, "")
+        self.assertEqual(err.strip(), "PR: x")
+
+    def test_grok_gets_plain_text_on_stderr(self):
+        """Grok discards a passive hook's stdout, so the banner must use stderr."""
+        out, err = self.capture(common.RUNTIME_GROK)
         self.assertEqual(out, "")
         self.assertEqual(err.strip(), "PR: x")
 
     def test_the_json_stays_out_of_the_transcript(self):
         """Without suppressOutput the hook's own JSON prints after every call."""
-        out, _ = self.capture("PostToolUse", common.CURSOR_POST_TOOL_EVENT)
+        out, _ = self.capture(common.RUNTIME_CLAUDE)
         self.assertTrue(json.loads(out)["suppressOutput"])
 
-    def test_each_hook_matches_only_its_own_cursor_event(self):
-        """A Stop payload must not take the PostToolUse hook's Cursor branch."""
-        out, err = self.capture(common.CURSOR_STOP_EVENT, common.CURSOR_POST_TOOL_EVENT)
-        self.assertEqual(err, "")
-        self.assertEqual(json.loads(out)["systemMessage"], "PR: x")
+
+class TestRuntimeDetection(unittest.TestCase):
+    """Which harness sent this payload, read off a field it actually sends."""
+
+    def runtime(self, payload):
+        parsed = common.parse_hook_input(json.dumps(payload))
+        assert parsed is not None
+        return parsed
+
+    def test_claude_pascal_case_event(self):
+        got = self.runtime({"hook_event_name": "Stop"})
+        self.assertEqual(got.runtime, common.RUNTIME_CLAUDE)
+
+    def test_cursor_camel_case_event(self):
+        got = self.runtime({"hook_event_name": common.CURSOR_POST_TOOL_EVENT})
+        self.assertEqual(got.runtime, common.RUNTIME_CURSOR)
+
+    def test_grok_camel_case_key(self):
+        got = self.runtime({"hookEventName": common.GROK_POST_TOOL_EVENT})
+        self.assertEqual(got.runtime, common.RUNTIME_GROK)
+
+    def test_grok_command_and_session_read_from_camel_case(self):
+        got = self.runtime({
+            "hookEventName": "pre_tool_use",
+            "sessionId": "s-1",
+            "toolInput": {"command": "git status"},
+        })
+        self.assertEqual(got.command, "git status")
+        self.assertEqual(got.session_id, "s-1")
+
+    def test_a_payload_with_neither_event_key_is_unknown(self):
+        """No event key means no harness identified, so nothing is assumed."""
+        got = self.runtime({"cwd": "/repo"})
+        self.assertEqual(got.runtime, common.RUNTIME_UNKNOWN)
+
+    def test_an_unknown_runtime_prints_nothing(self):
+        """Guessing a channel would print a Claude banner into a Grok session."""
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            common.emit("PR: x", common.RUNTIME_UNKNOWN)
+        self.assertEqual(out.getvalue(), "")
+        self.assertEqual(err.getvalue(), "")
+
+    def test_claude_fields_still_read_from_snake_case(self):
+        got = self.runtime({
+            "hook_event_name": "PostToolUse",
+            "session_id": "s-2",
+            "tool_input": {"command": "git status"},
+        })
+        self.assertEqual(got.command, "git status")
+        self.assertEqual(got.session_id, "s-2")
 
 class TestStateRootIsPrivate(unittest.TestCase):
     """The cache and marker hold data the hook prints to the user.

@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import Optional
 
 from pr_hook_common import (
-    CURSOR_STOP_EVENT,
     GH_TIMEOUT_SECONDS,
     GIT_TIMEOUT_SECONDS,
     SKIPPED_BRANCHES,
@@ -194,7 +193,7 @@ def main() -> int:
     if is_quiet(status):
         return 0
 
-    emit(build_banner(tree.branch, status), hook.event_name, CURSOR_STOP_EVENT)
+    emit(build_banner(tree.branch, status), hook.runtime)
     return 0
 
 
