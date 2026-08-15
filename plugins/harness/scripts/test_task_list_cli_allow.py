@@ -22,6 +22,9 @@ ALLOW_SCRIPT = Path(__file__).parent / "task-list-cli-allow.sh"
 HOOK_RUNTIME = Path(__file__).parent / "hook_runtime.sh"
 CLI = Path(__file__).parent.parent / "skills" / "task-list-runner" / "task_list_cli.py"
 PLUGIN_ROOT = CLI.parent.parent.parent
+BASH = shutil.which("bash")
+if BASH is None:
+    raise RuntimeError("bash is required to run hook tests")
 
 
 class AllowScriptTestCase(unittest.TestCase):
@@ -50,13 +53,14 @@ class AllowScriptTestCase(unittest.TestCase):
         if plugin_root is not None:
             env["CLAUDE_PLUGIN_ROOT"] = str(plugin_root)
         res = subprocess.run(
-            ["bash", str(allow_script or ALLOW_SCRIPT)],
+            [BASH, str(allow_script or ALLOW_SCRIPT)],
             input=payload,
             capture_output=True,
             text=True,
             timeout=5,
             env=env,
         )
+        self.assertEqual(res.returncode, 0, res.stderr)
         return res.stdout
 
     def _install_plugin_tree(self, root: Path) -> tuple[Path, Path]:
