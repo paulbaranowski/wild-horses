@@ -17,7 +17,7 @@ Also model-invoked - trigger phrases include "list", "show", or "see the saved p
 
 1. **Determines the repo** - auto-derived from the current directory, or an explicit override the user named.
 2. **Lists the plans**, grouped by status (`in-progress`, `in-review`, `todo`, `backlog`, in that order) and newest-first within each group; `--state done`/`--state deferred` list the archived/shelved plans instead.
-3. **Presents the result** as a numbered, grouped list. Reports when active plans exist with an off-list status, and offers to show them. If the current repo has no active plans at all, lists the other repos under `~/plans/` so the user can pick one.
+3. **Presents the result** as a grouped numbered list (`##` per status, continuous `1.` / `2.` / `3.` across groups). Reports when active plans exist with an off-list status, and offers to show them. If the current repo has no active plans at all, lists the other repos under `~/plans/` so the user can pick one.
 4. **Optionally groups by project** (`--group`): clusters a project's stages (idea → spec → exec-plan, sharing a slug) together instead of by status, for seeing how one project's plans relate.
 
 Never reads a plan's body, never changes status, never moves or deletes a file - purely a listing.
