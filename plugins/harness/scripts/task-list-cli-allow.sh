@@ -51,6 +51,11 @@ cmd="$HOOK_COMMAND"
 # not disqualify the invocation. `<` and `>` stay allowed on the first
 # line because a one-line `<<'EOF'` is a real call, not a chain.
 #
+# A second physical command after a newline is not a heredoc. Reject
+# multiline input unless the first line opens a quoted heredoc and the
+# matching terminator is the last non-empty line. An unquoted `<<EOF`
+# expands substitutions in the body, so it is not accepted.
+#
 # This is a prompt-reduction convenience for the agent's own CLI calls,
 # not a sandbox. It does not attempt full shell parsing.
 
@@ -61,6 +66,37 @@ case "$first_line" in
         exit 0
         ;;
 esac
+
+if [[ "$cmd" == *$'\n'* ]]; then
+    sq_pat='<<'\''([A-Za-z_][A-Za-z0-9_]*)'\''[[:space:]]*$'
+    dq_pat='<<"([A-Za-z_][A-Za-z0-9_]*)"[[:space:]]*$'
+    delim=""
+    if [[ "$first_line" =~ $sq_pat ]]; then
+        delim="${BASH_REMATCH[1]}"
+    elif [[ "$first_line" =~ $dq_pat ]]; then
+        delim="${BASH_REMATCH[1]}"
+    else
+        exit 0
+    fi
+    rest="${cmd#*$'\n'}"
+    found=0
+    leftover=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ $found -eq 1 ]]; then
+            if [[ -n "$line" ]]; then
+                leftover=1
+                break
+            fi
+            continue
+        fi
+        if [[ "$line" == "$delim" ]]; then
+            found=1
+        fi
+    done <<< "$rest"
+    if [[ $found -eq 0 || $leftover -eq 1 ]]; then
+        exit 0
+    fi
+fi
 
 approve() {
     hook_runtime_emit_allow "task-list-runner CLI is plugin-approved"
@@ -84,31 +120,20 @@ elif [[ "$first_line" =~ ^python3[[:space:]]+([^\"\'[:space:]]+/skills/task-list
 fi
 
 if [[ -n "$script" ]]; then
-    # Claude Code sets CLAUDE_PLUGIN_ROOT and Cursor sets CURSOR_PLUGIN_ROOT.
-    # Read both. Checking only the Claude variable would send every Cursor
-    # invocation down the weaker suffix fallback below.
-    plugin_root="${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT:-}}"
-    if [[ -n "$plugin_root" ]]; then
-        # Production: exact same-file match against THIS plugin's own CLI,
-        # by inode (`-ef`). A planted copy at any other path is a different
-        # file, so it is rejected. That holds even when its path string
-        # contains `/plugins/harness/skills/task-list-runner/`.
-        if [[ "$script" -ef "${plugin_root}/skills/task-list-runner/task_list_cli.py" ]]; then
-            approve
-        fi
-    else
-        # Neither host variable is set: a direct or test invocation, where
-        # the file may not exist on disk. These patterns are SUFFIX matches,
-        # not prefix anchors. A planted copy would match if its path ends in
-        # one of these shapes. That is why this branch is the fallback and
-        # never the production path.
-        #   - dev:       /...checkout.../plugins/harness/skills/task-list-runner/task_list_cli.py
-        #   - cursor:    /.../.cursor/plugins/local/harness/skills/task-list-runner/task_list_cli.py
-        #   - installed: /...cache/wild-horses/harness/<version>/skills/task-list-runner/task_list_cli.py
-        if [[ "$script" == *"/plugins/harness/skills/task-list-runner/task_list_cli.py" \
-           || "$script" == *"/.cursor/plugins/local/harness/skills/task-list-runner/task_list_cli.py" \
-           || "$script" == *"/cache/wild-horses/harness/"*"/skills/task-list-runner/task_list_cli.py" ]]; then
-            approve
-        fi
+    # Trust this hook's own plugin tree. The allow-script lives in
+    # scripts/; the CLI lives in skills/task-list-runner/. That holds
+    # in the checkout, the Claude cache, and the Cursor local layout.
+    # Claude Code sets CLAUDE_PLUGIN_ROOT and Cursor sets
+    # CURSOR_PLUGIN_ROOT. Grok and direct runs may set neither, so
+    # the script directory is the fallback root.
+    #
+    # Approval is always an inode match (`-ef`). A planted copy at
+    # any other path is a different file, even when its path string
+    # ends in a known layout suffix.
+    derived_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    plugin_root="${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT:-$derived_root}}"
+    if [[ "$script" -ef "${plugin_root}/skills/task-list-runner/task_list_cli.py" \
+       || "$script" -ef "${derived_root}/skills/task-list-runner/task_list_cli.py" ]]; then
+        approve
     fi
 fi
