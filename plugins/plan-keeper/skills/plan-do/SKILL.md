@@ -20,7 +20,7 @@ For plans that aren't execution-ready yet (idea, spec), the skill suggests the s
 ## Quick reference
 
 - **Lists:** the **not-yet-started** plans only: `Status: todo` and `Status: backlog` (`list --sections todo,backlog`). In-progress / in-review / done plans are excluded (you're picking something to _start_). Classified `.md` plans carry a `--<kind>` suffix in their filename (e.g. `…-noun-first-provider-commands--design.md`); this is expected. The picker resolves the filename from the numbered row (`N. <filename>`).
-- **Human view:** to show a project's stages clustered (design → exec-plan) rather than the flat startable list, run `list --group` (mutually exclusive with `--status`). That's a presentation aid; the `--status todo,backlog` form below is what this skill parses to pick from.
+- **Human view:** to show a project's stages clustered (design → exec-plan) rather than the flat startable list, run `list --group` (mutually exclusive with `--sections`). That's a presentation aid; the `--sections todo,backlog` form below is what this skill pastes and parses.
 - **Writes:** one frontmatter update when it starts a plan (step 7) — flips `Status` to `in-progress` and clears the `Agent` tag (so groundcrew won't claim a plan you're driving). It never moves, deletes, or rewrites the body.
 - **Worktree refresh:** before handing off (step 6), it fast-forwards the **current repo** onto its base branch (`main`/`master`) — automatically, no confirmation — but **only when the worktree is untouched** (clean tree _and_ no commits ahead of base), so the update is always a conflict-free fast-forward. Dirty or ahead branches are left as-is. This is the current repo only, not the full `update-git-repos` skill.
 - **`<repo>`:** auto-derived or override — see [../../repo-derivation.md](../../repo-derivation.md).
@@ -65,7 +65,7 @@ Add `--override <name>` if you found one. The CLI handles repo derivation. With 
 
 **If stdout has lines**, paste them as-is. Do not rebuild the headings or rows. Ask which one. If stderr carried a hidden-plans note, mention it below the list. Do not read or classify any files yet. Classification only happens on the picked plan.
 
-**Multiple roots:** the list already unions every plan root. When more than one root is configured, each filename is prefixed `root/...` (e.g. `personal/2026-…-foo.md`); keep that prefix when you resolve the pick, so a plan in `personal` isn't confused with a same-named one in `default`.
+**Multiple roots:** the list already unions every plan root. When more than one root is configured, each filename is prefixed `root/...` (e.g. `personal/2026-…-foo.md`); keep that prefix when you resolve the pick, so a plan in `personal` isn't confused with a same-named one in `default`. If you passed `--root` on the list call, keep that root even when the row has no prefix.
 
 Example (CLI stdout, plus a one-line lead-in and the pick prompt):
 

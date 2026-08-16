@@ -139,8 +139,9 @@ confirmation. Do not write anything until the user agrees.
 
 ### 4. Apply
 
-Run one call per `repo` per direction selected, passing that repo's chosen plans as **bare filenames**
-(the `file` field from the JSON — no path, no `$HOME`) after `--repo <repo>`.
+Run one call per `(root, repo)` per direction selected. Parse each numbered `--present` row into
+`{root, repo, file}` (`repo · file · agent`, or `root/repo · file · agent`). Pass the bare
+filename after `--repo <repo>`. When the row has a root, also pass `--root <root>`.
 
 Promote (writes `Agent: claude` where missing — that's the `add` default; a plan that already names an
 Agent keeps it):
@@ -155,15 +156,13 @@ Dequeue (never touches Agent):
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue drop --repo <repo> <file>.md
 ```
 
-If the user selected plans across several repos (an `--all` listing), issue one `add`/`drop` per repo —
-each call is atomic over its own repo's batch. Always pass `--repo <repo>` from the JSON row rather than
-relying on the cwd, so the call targets the listed repo regardless of where you're running from.
+If the user selected plans across several repos (an `--all` listing), issue one `add`/`drop` per
+`(root, repo)` pair. Each call is atomic over its own batch. Always pass `--repo <repo>` from the
+parsed row rather than relying on the cwd.
 
-**Multiple roots:** when more than one distinct `root` appears in the listing, also pass `--root <root>`
-from the JSON row on every `add`/`drop` call (and group calls per `(root, repo)` pair, not just per
-repo). Without it, a repo that lives in two roots resolves against the default root, so the call can
-mutate the same-named plan in the wrong tree or fail with "plan not found" despite a matching queue row.
-On a single-root install, omit `--root` as before.
+**Multiple roots:** when a numbered row starts with `root/repo`, pass `--root <root>` on that
+`add`/`drop` call. Without it, a repo that lives in two roots resolves against the default root.
+On a single-root install the row has no root prefix, so omit `--root`.
 
 ### 5. Re-show the queue
 

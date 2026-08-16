@@ -53,7 +53,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --sections in-pr
 
 (Add `--override <name>` if found.) With `--sections in-progress,todo` the CLI keeps only those two statuses, lists **in-progress first** (the plan you most likely just finished), then `todo`, newest-first within each, as CommonMark groups. Any other active plans (backlog, in-review, …) are summarized on **stderr** as a `note: N other active plan(s) hidden (...)` line.
 
-Paste stdout as-is. Do not rebuild the headings or rows. Ask the user to pick (the filename is the rest of the `N.` row). If stderr carried a hidden-plans note, mention it below the list so the user can ask to see the rest.
+Paste stdout as-is. Do not rebuild the headings or rows. Ask the user to pick (the filename is the rest of the `N.` row). If the row has a `root/` prefix, or you passed `--root` on the list call, keep that root when you build the `--file` path. If stderr carried a hidden-plans note, mention it below the list so the user can ask to see the rest.
 
 **Run this command fresh every time you reach this step — including on a re-invocation later in the same conversation.** Never reprint an earlier listing from memory: plans get saved, archived, or change status between turns, so a cached list can be stale. The numbered list you show must come from the output you just ran.
 

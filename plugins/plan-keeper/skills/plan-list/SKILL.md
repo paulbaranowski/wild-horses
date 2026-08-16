@@ -72,13 +72,16 @@ If stderr carried a `note: N other active plan(s) hidden (…)` line, mention it
 
 **If stdout is empty but stderr has the hidden-plans note**, don't say "no plans": there are active plans, just none with one of the four listed statuses. Surface the count and run `list --present` to show them.
 
-**If stdout is empty and stderr has no note**, the current repo has no active plans at all. List the alternatives so the user can pick another bucket:
+**If stdout is empty and stderr has no note**, report that the requested view is empty.
+
+- **`--state done` or `--state deferred`:** say that state has no plans. Do not claim the repo has no active plans, and do not offer `list --present`.
+- **Default active `--sections` view:** the current repo has no active plans. List the other repos so the user can pick another bucket:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" repo list
 ```
 
-Output is one repo per line with state counts (e.g., `herds: active=15 done=22 deferred=2`). Show it and let the user name a different repo (re-run step 2 with `--override`). If `repo list` is also empty, `~/plans/` doesn't exist yet — tell the user `plan-save` hasn't been used on this machine.
+  Output is one repo per line with state counts (e.g., `herds: active=15 done=22 deferred=2`). Show it and let the user name a different repo (re-run step 2 with `--override`). If `repo list` is also empty, `~/plans/` doesn't exist yet — tell the user `plan-save` hasn't been used on this machine.
 
 ### 4. Optional: group a project's stages
 
