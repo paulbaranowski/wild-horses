@@ -237,6 +237,116 @@ class TestListByStatus(IsolatedHomeTestCase):
         self.assertEqual(r.stdout.strip(), "2026-05-28-a.md")
         self.assertNotIn("\t", r.stdout)
 
+
+class TestListSections(IsolatedHomeTestCase):
+    """`list --sections` prints CommonMark groups. It does not print TSV.
+
+    A later group may start after 1. Empty groups are omitted. --status
+    output stays TSV when --sections is absent.
+    """
+
+    def _write(self, name: str, status: str | None) -> None:
+        d = self.plans_root / "scratch"
+        d.mkdir(parents=True, exist_ok=True)
+        if status is None:
+            (d / name).write_text("# no frontmatter\n", encoding="utf-8")
+        else:
+            (d / name).write_text(
+                f"---\nStatus: {status}\n---\n\n# {name}\n", encoding="utf-8"
+            )
+
+    def test_sections_prints_headings_and_continuous_numbers(self) -> None:
+        self._write("2026-05-28-a.md", "todo")
+        self._write("2026-05-29-b.md", "in-progress")
+        self._write("2026-05-27-d.md", "in-progress")
+        r = run_cli(
+            "list", "--override", "scratch",
+            "--sections", "in-progress,todo",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            r.stdout,
+            "## In progress\n"
+            "\n"
+            "1. 2026-05-29-b.md\n"
+            "2. 2026-05-27-d.md\n"
+            "\n"
+            "## Todo\n"
+            "\n"
+            "3. 2026-05-28-a.md\n",
+        )
+
+    def test_sections_omits_empty_group(self) -> None:
+        self._write("2026-05-28-a.md", "todo")
+        r = run_cli(
+            "list", "--override", "scratch",
+            "--sections", "todo,backlog",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            r.stdout,
+            "## Todo\n"
+            "\n"
+            "1. 2026-05-28-a.md\n",
+        )
+        self.assertNotIn("## Backlog", r.stdout)
+
+    def test_present_without_sections_prints_flat_plans(self) -> None:
+        self._write("2026-05-28-a.md", "todo")
+        self._write("2026-05-20-b.md", "backlog")
+        r = run_cli(
+            "list", "--override", "scratch", "--present", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            r.stdout,
+            "## Plans\n"
+            "\n"
+            "1. 2026-05-28-a.md\n"
+            "2. 2026-05-20-b.md\n",
+        )
+
+    def test_sections_keeps_hidden_note_on_stderr(self) -> None:
+        self._write("2026-05-28-a.md", "todo")
+        self._write("2026-05-29-b.md", "in-progress")
+        r = run_cli(
+            "list", "--override", "scratch",
+            "--sections", "todo,backlog",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("1 other active plan(s) hidden", r.stderr)
+        self.assertIn("in-progress\N{MULTIPLICATION SIGN}1", r.stderr)
+
+    def test_status_flag_still_prints_tsv(self) -> None:
+        self._write("2026-05-28-a.md", "todo")
+        r = run_cli(
+            "list", "--override", "scratch", "--status", "todo,backlog",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "todo\t2026-05-28-a.md")
+
+    def test_sections_and_group_are_rejected(self) -> None:
+        r = run_cli(
+            "list", "--override", "scratch",
+            "--sections", "todo", "--group",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2, r.stderr)
+
+    def test_present_and_group_are_rejected(self) -> None:
+        r = run_cli(
+            "list", "--override", "scratch",
+            "--present", "--group",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("--group", r.stderr)
+
+
 class TestListCrossRepo(IsolatedHomeTestCase):
     """`list` resolves a *scope*, not always a single repo. With no repo
     context (no --override and no git origin) — or with --all-repos — it lists

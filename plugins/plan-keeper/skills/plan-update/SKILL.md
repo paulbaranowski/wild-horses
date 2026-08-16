@@ -30,12 +30,20 @@ If the user just referenced a specific file ("this plan", "the one I just saved"
 Otherwise, list active plans:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --present
 ```
 
 **Run this command fresh every time you reach this step — including on a re-invocation later in the same conversation.** Never reprint an earlier listing from memory: plans get saved, archived, or change status between turns, so a cached list can be stale. The numbered list you show must come from the output you just ran.
 
-Present numbered to the user; they pick.
+Run `list --present` and paste stdout as-is. Do not rebuild the rows. They pick by number.
+
+```markdown
+## Plans
+
+1. 2026-05-19-plan-do-design.md
+2. 2026-05-17-task-list-runner-refactor.md
+```
+
 
 ### 2. Identify the field(s) to change
 

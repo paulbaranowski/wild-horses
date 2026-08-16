@@ -872,6 +872,148 @@ class TestQueue(IsolatedHomeTestCase):
         self.assertEqual(by_file["2026-05-01-dep.md"]["blockedBy"], [])
 
 
+class TestQueuePresent(IsolatedHomeTestCase):
+    """`crew queue list --present` prints CommonMark groups. JSON stays default."""
+
+    def _make_plan(
+        self,
+        repo: str,
+        name: str,
+        status: str = "",
+        agent: str = "",
+    ) -> Path:
+        d = self.plans_root / repo
+        d.mkdir(parents=True, exist_ok=True)
+        fm = ["---"]
+        if agent:
+            fm.append(f"Agent: {agent}")
+        if status:
+            fm.append(f"Status: {status}")
+        fm.append("---")
+        p = d / name
+        p.write_text("\n".join(fm) + f"\n\n# {name}\n", encoding="utf-8")
+        return p
+
+    def test_present_groups_actionable_rows_with_continuous_numbers(self) -> None:
+        self._make_plan("alpha", "2026-05-20-fix.md", status="todo", agent="claude")
+        self._make_plan("beta", "2026-05-19-slice.md", status="todo")
+        self._make_plan("alpha", "2026-05-18-back.md", status="backlog")
+        r = run_cli(
+            "crew", "queue", "list", "--all", "--present",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            r.stdout,
+            "## Queued\n"
+            "\n"
+            "1. alpha · 2026-05-20-fix.md · claude\n"
+            "\n"
+            "## Needs an Agent\n"
+            "\n"
+            "2. beta · 2026-05-19-slice.md · (no agent)\n"
+            "\n"
+            "## Available\n"
+            "\n"
+            "3. alpha · 2026-05-18-back.md · (no agent)\n",
+        )
+
+    def test_present_omits_empty_groups(self) -> None:
+        self._make_plan("alpha", "2026-05-20-fix.md", status="todo", agent="claude")
+        r = run_cli(
+            "crew", "queue", "list", "--all", "--present",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            r.stdout,
+            "## Queued\n"
+            "\n"
+            "1. alpha · 2026-05-20-fix.md · claude\n",
+        )
+        self.assertNotIn("## Available", r.stdout)
+        self.assertNotIn("## Needs an Agent", r.stdout)
+
+    def test_sections_selects_groups(self) -> None:
+        self._make_plan("alpha", "2026-05-20-fix.md", status="todo", agent="claude")
+        self._make_plan("beta", "2026-05-19-slice.md", status="todo")
+        self._make_plan("alpha", "2026-05-18-back.md", status="backlog")
+        r = run_cli(
+            "crew", "queue", "list", "--all", "--sections", "queued,available",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            r.stdout,
+            "## Queued\n"
+            "\n"
+            "1. alpha · 2026-05-20-fix.md · claude\n"
+            "\n"
+            "## Available\n"
+            "\n"
+            "2. alpha · 2026-05-18-back.md · (no agent)\n",
+        )
+        self.assertNotIn("Needs an Agent", r.stdout)
+
+    def test_present_prints_in_flight_and_in_review_as_prose(self) -> None:
+        self._make_plan("alpha", "2026-05-20-run.md", status="in-progress", agent="claude")
+        self._make_plan("beta", "2026-05-19-pr.md", status="in-review")
+        r = run_cli(
+            "crew", "queue", "list", "--all", "--present",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            r.stdout,
+            "In flight (in-progress): alpha/2026-05-20-run.md (read-only)\n"
+            "\n"
+            "In review (in-review): beta/2026-05-19-pr.md (read-only)\n",
+        )
+
+    def test_present_appends_blocked_marker(self) -> None:
+        self._make_plan("alpha", "2026-05-01-dep.md", status="todo")
+        dep_id = groundcrew.plankeeper_id("alpha", "2026-05-01-dep")
+        d = self.plans_root / "alpha"
+        (d / "2026-05-02-main.md").write_text(
+            f"---\nStatus: todo\nAgent: claude\nBlocked-by: {dep_id}\n---\n\n# main\n",
+            encoding="utf-8",
+        )
+        r = run_cli(
+            "crew", "queue", "list", "--all", "--present",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(
+            f"alpha · 2026-05-02-main.md · claude ⏸ blocked by {dep_id}",
+            r.stdout,
+        )
+
+    def test_without_present_still_prints_json(self) -> None:
+        self._make_plan("alpha", "2026-05-20-fix.md", status="todo", agent="claude")
+        r = run_cli("crew", "queue", "list", "--all", home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = json.loads(r.stdout)
+        self.assertEqual(rows[0]["file"], "2026-05-20-fix.md")
+
+    def test_unknown_section_is_rejected(self) -> None:
+        r = run_cli(
+            "crew", "queue", "list", "--all", "--sections", "queued,nope",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("nope", r.stderr)
+
+    def test_duplicate_sections_print_once(self) -> None:
+        self._make_plan("alpha", "2026-05-20-fix.md", status="todo", agent="claude")
+        r = run_cli(
+            "crew", "queue", "list", "--all", "--sections", "queued,queued",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.count("## Queued"), 1)
+        self.assertEqual(r.stdout.count("2026-05-20-fix.md"), 1)
+
+
 class TestQueueAdd(IsolatedHomeTestCase):
     """`crew queue add <file>...` — promote plans to Status: todo by bare name.
 

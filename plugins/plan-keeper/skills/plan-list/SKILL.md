@@ -35,10 +35,10 @@ If present, normalize it per [../../repo-derivation.md](../../repo-derivation.md
 ### 2. List the plans
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --status in-progress,in-review,todo,backlog
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --sections in-progress,in-review,todo,backlog
 ```
 
-Add `--override <name>` if step 1 found one. The CLI groups the active plans in the given status order, newest-first within each group, and prints one `status<TAB>filename` line per plan. Any active plan whose `Status` is _not_ one of those four (e.g. a `Status: deferred` plan still living in the active tree) is excluded from stdout and summarized on **stderr** as a `note: N other active plan(s) hidden (…)` line.
+Add `--override <name>` if step 1 found one. The CLI prints CommonMark groups in that order, newest-first within each group. Any active plan whose `Status` is _not_ one of those four (e.g. a `Status: deferred` plan still living in the active tree) is excluded from stdout and summarized on **stderr** as a `note: N other active plan(s) hidden (…)` line.
 
 **Run this command every time you reach this step — including on a re-invocation later in the same conversation.** Plans get saved, started, archived, and re-statused between turns, so a list you printed a moment ago may already be stale. The list you show must come from the output you just ran, never from memory.
 
@@ -53,7 +53,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --state deferred
 
 ### 3. Present the result
 
-**If stdout has lines**, display them as a grouped numbered list. Use a `##` heading per status group. Number the plans in one continuous count across groups. The heading must come first: CommonMark joins `11.` / `20.` into a `Todo:` / `Backlog:` paragraph. After `##`, a list may start at any number. The heading is the status tag (the token _before_ the tab). The filename is the part _after_ the tab. Example:
+**If stdout has lines**, paste them as-is. Do not rebuild the headings or rows. Example CLI stdout:
 
 ```markdown
 Plans in ~/plans/wild-horses/:
@@ -68,17 +68,20 @@ Plans in ~/plans/wild-horses/:
 3. 2026-05-12-pyright-skill-coercion-trap.md
 ```
 
-If stderr carried a `note: N other active plan(s) hidden (…)` line, mention it below the list (with the count) so the user knows there are active plans with an off-list `Status`. Offer to re-run with no `--status` filter — `list` alone prints **every** active plan newest-first (bare filenames, no grouping), hiding nothing.
+If stderr carried a `note: N other active plan(s) hidden (…)` line, mention it below the list (with the count) so the user knows there are active plans with an off-list `Status`. Offer `list --present` to show every active plan.
 
-**If stdout is empty but stderr has the hidden-plans note**, don't say "no plans": there are active plans, just none with one of the four listed statuses. Surface the count and run plain `list` (no `--status`) to show them.
+**If stdout is empty but stderr has the hidden-plans note**, don't say "no plans": there are active plans, just none with one of the four listed statuses. Surface the count and run `list --present` to show them.
 
-**If stdout is empty and stderr has no note**, the current repo has no active plans at all. List the alternatives so the user can pick another bucket:
+**If stdout is empty and stderr has no note**, report that the requested view is empty.
+
+- **`--state done` or `--state deferred`:** say that state has no plans. Do not claim the repo has no active plans, and do not offer `list --present`.
+- **Default active `--sections` view:** the current repo has no active plans. List the other repos so the user can pick another bucket:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" repo list
 ```
 
-Output is one repo per line with state counts (e.g., `herds: active=15 done=22 deferred=2`). Show it and let the user name a different repo (re-run step 2 with `--override`). If `repo list` is also empty, `~/plans/` doesn't exist yet — tell the user `plan-save` hasn't been used on this machine.
+  Output is one repo per line with state counts (e.g., `herds: active=15 done=22 deferred=2`). Show it and let the user name a different repo (re-run step 2 with `--override`). If `repo list` is also empty, `~/plans/` doesn't exist yet — tell the user `plan-save` hasn't been used on this machine.
 
 ### 4. Optional: group a project's stages
 
@@ -106,7 +109,6 @@ some-other-project
 - **Don't reprint a previously shown list from memory.** Step 2's command must be re-run on every invocation; the plan set changes between turns, so the list you display must always come from the command you just ran.
 - **Don't read or summarize any plan body.** This skill lists filenames and status only. Opening a plan to describe it is `plan-do`'s job (it reads the _one_ plan the user picks).
 - **Don't write anything.** `plan-list` never flips `Status`, never archives, never edits frontmatter. If the user wants to act on a plan, hand off to the sibling that does that.
-- **Don't put `11.` / `20.` flush under a `Todo:` / `Backlog:` label.** CommonMark treats that as paragraph text, not a list. Use a `##` heading, then the numbered rows.
 - **Don't say "no plans" when stdout is empty but you haven't run `repo list`.** An empty current repo doesn't mean an empty machine — show the other repos before concluding.
 
 ## Notes

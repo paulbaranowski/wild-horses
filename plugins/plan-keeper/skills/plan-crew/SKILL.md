@@ -63,78 +63,51 @@ Follow these steps in order. Do not skip the confirmation step.
 Pick the scope first (see [Choosing the scope](#choosing-the-scope)), then run the matching command. The default — the current repo — is the bare command:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue list
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue list --present
 ```
 
 For every repo, add `--all`; for a specific other repo, add `--repo <name>`:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue list --all
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue list --repo <name>
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue list --present --all
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue list --present --repo <name>
 ```
 
-**Run `crew queue list` fresh every time you reach this step — including on a re-invocation later in the same conversation, and again whenever step 5 sends you back here.** Never reprint an earlier queue from memory: plans get promoted, dequeued, or dispatched between turns, so a cached queue can be stale — and the user picks actions by the row numbers, so stale numbers target the wrong plan. The numbered queue you show must come from the output you just ran.
+**Run `crew queue list --present` fresh every time you reach this step — including on a re-invocation later in the same conversation, and again whenever step 5 sends you back here.** Never reprint an earlier queue from memory: plans get promoted, dequeued, or dispatched between turns, so a cached queue can be stale — and the user picks actions by the row numbers, so stale numbers target the wrong plan. The numbered queue you show must come from the output you just ran.
 
-Output is a JSON array of `{root, repo, file, status, agent, blocked, blockedBy}` objects (one per active
-plan). The queue **unions every plan root**; each row's `root` names the tree it came from (`"default"`
-on a single-root install). Repos are grouped in registry-then-alphabetical order, and the plans within
-each repo arrive newest-first (by each plan's `Created:` stamp, falling back to its filename date).
-Preserve that order - don't re-sort. When more than one distinct `root` appears, show it in the row
-(e.g. `personal/journal · file`) so a repo that straddles two roots stays unambiguous; with a single
-root, omit it. Group them for the user by `status` and present each ACTIONABLE plan with a global number:
+Paste stdout as-is. Do not rebuild the headings or rows. You may add one scope line above it (`Groundcrew queue (herds)` or `(all repos)`) and the reply prompt below it.
 
-Classify each plan by **both** its `status` and its `agent`, because `todo` alone does not mean
-dispatchable (see the dispatch-gates note in [Quick reference](#quick-reference)):
+The CLI numbers **Queued** (todo, has Agent), **Needs an Agent** (todo, no Agent), and **Available** (backlog or empty). In flight and In review are unnumbered prose. Empty groups are omitted. A blocked plan keeps its number and gets `⏸ blocked by <ids>`. `--sections queued,needs-agent,available,in-flight,in-review` selects groups.
 
-- **Queued (todo, has Agent)** — the live dispatch queue. Show `repo · file · agent`. These are
-  **dequeue** candidates.
-- **Needs an Agent (todo, no Agent)** — already `todo` but groundcrew skips it because it has no
-  `Agent` (typically a `plan-split` slice promoted to `todo` but never queued here). It is **not**
-  dispatchable as-is. Show `repo · file · (no agent)`. Treat these as **promote** candidates: running
-  `crew queue add` on them stamps `Agent: claude` and makes them dispatchable. (They can be dequeued
-  too, but the usual intent is to give them an Agent.)
-- **In flight (in-progress)** — groundcrew is running these now. Show as read-only context; do NOT number them for action.
-- **In review (in-review)** — read-only context; do NOT number for action.
-- **Available (backlog)** — `status` of `backlog` or empty string. Show `repo · file · agent`. These are **promote** candidates.
+Without `--present`, `crew queue list` still prints JSON `{root, repo, file, status, agent, blocked, blockedBy}`. Use that only when you need the machine rows. For pick mapping, parse the numbered `repo · file · agent` line. If the first field contains `/`, it is `root/repo`.
 
-`blocked` (bool) and `blockedBy` (the unsatisfied prerequisite ticket IDs) report dependency state: a
-plan with `Blocked-by:` prerequisites that aren't yet `done`. When `blocked` is true, append a held
-marker and its blockers to the row, e.g. `⏸ blocked by plan-849321`, and do **not** frame the plan as
-ready-to-dispatch — even a `todo` plan that has an Agent will be held back by groundcrew while it is
-`blocked`. You may still let the user dequeue it; just don't present it as "will be dispatched."
+Example CLI stdout:
 
-Number the **Available**, **Needs an Agent**, and **Queued** rows in one continuous numbered list so
-the user can refer to any actionable plan by a single number. Example:
+```markdown
+## Queued
 
-Label the heading with the scope you ran (e.g. `Groundcrew queue (herds)` for the current repo, or `(all repos)` for `--all`):
+1. herds · 2026-05-20-fix-auth.md · claude
+2. wild-horses · 2026-05-19-plan-do-crew.md · codex
 
-```text
-Groundcrew queue (all repos):
+## Needs an Agent
 
-Queued (todo) — will be dispatched:
-  1. herds      · 2026-05-20-fix-auth.md        · claude
-  2. wild-horses · 2026-05-19-plan-do-crew.md   · codex
+3. groundcrew-config · 2026-06-11-repo-templates-01--exec-plan.md · (no agent)
 
-Needs an Agent (todo, no Agent — not dispatchable until queued):
-  3. groundcrew-config · 2026-06-11-repo-templates-01--exec-plan.md · (no agent)
+## Available
 
-Available (backlog) — promote to queue:
-  4. herds      · 2026-05-22-refactor-db.md     · (no agent)
-  5. wild-horses · 2026-05-21-readme-pass.md    · claude
+4. herds · 2026-05-22-refactor-db.md · (no agent)
+5. wild-horses · 2026-05-21-readme-pass.md · claude
 
 In flight (in-progress): herds/2026-05-18-billing.md (read-only)
-
-Reply with what to change, e.g. "promote 3, 4" or "dequeue 1".
 ```
 
-If `crew queue list` returns `[]`, tell the user the current scope has no plans (for a current-repo run, name the repo and suggest `--all` / "show all repos" if they expected to see others) and stop.
+If stdout is empty, tell the user the current scope has no plans (for a current-repo run, name the repo and suggest `--all` / "show all repos" if they expected to see others) and stop.
 
 ### 2. Parse the user's actions
 
 The user replies with `promote <numbers>` and/or `dequeue <numbers>` (either or both, any order). Map
-each number back to its `{repo, file}` from the `crew queue list` output, then **group the selections by
-`repo` and direction** — `add` and `drop` each take bare filenames scoped to one `--repo`, so each repo
-gets its own call per direction. (For the default current-repo scope there is only one repo, so it's a
+each number back to its `{root, repo, file}` from the present stdout (`repo · file · agent`, or `root/repo · file · agent` when more than one root appears), then **group the selections by
+`(root, repo)` and direction**. `add` and `drop` each take bare filenames scoped to one `--repo` (and `--root` when the listing spans roots), so each `(root, repo)` pair gets its own call per direction. (For the default current-repo scope there is only one repo, so it's a
 single call each way.)
 
 - `promote` targets must currently be a promote candidate — **Available** (backlog/empty) **or**
@@ -166,8 +139,9 @@ confirmation. Do not write anything until the user agrees.
 
 ### 4. Apply
 
-Run one call per `repo` per direction selected, passing that repo's chosen plans as **bare filenames**
-(the `file` field from the JSON — no path, no `$HOME`) after `--repo <repo>`.
+Run one call per `(root, repo)` per direction selected. Parse each numbered `--present` row into
+`{root, repo, file}` (`repo · file · agent`, or `root/repo · file · agent`). Pass the bare
+filename after `--repo <repo>`. When the row has a root, also pass `--root <root>`.
 
 Promote (writes `Agent: claude` where missing — that's the `add` default; a plan that already names an
 Agent keeps it):
@@ -182,15 +156,13 @@ Dequeue (never touches Agent):
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue drop --repo <repo> <file>.md
 ```
 
-If the user selected plans across several repos (an `--all` listing), issue one `add`/`drop` per repo —
-each call is atomic over its own repo's batch. Always pass `--repo <repo>` from the JSON row rather than
-relying on the cwd, so the call targets the listed repo regardless of where you're running from.
+If the user selected plans across several repos (an `--all` listing), issue one `add`/`drop` per
+`(root, repo)` pair. Each call is atomic over its own batch. Always pass `--repo <repo>` from the
+parsed row rather than relying on the cwd.
 
-**Multiple roots:** when more than one distinct `root` appears in the listing, also pass `--root <root>`
-from the JSON row on every `add`/`drop` call (and group calls per `(root, repo)` pair, not just per
-repo). Without it, a repo that lives in two roots resolves against the default root, so the call can
-mutate the same-named plan in the wrong tree or fail with "plan not found" despite a matching queue row.
-On a single-root install, omit `--root` as before.
+**Multiple roots:** when a numbered row starts with `root/repo`, pass `--root <root>` on that
+`add`/`drop` call. Without it, a repo that lives in two roots resolves against the default root.
+On a single-root install the row has no root prefix, so omit `--root`.
 
 ### 5. Re-show the queue
 
@@ -202,11 +174,12 @@ Re-run step 1 and show the updated queue so the user sees the result.
 - **Treating a `todo` row as dispatchable without checking its Agent.** A `todo` plan with no `Agent` is **not** dispatchable — groundcrew skips it. Don't list it under "will be dispatched"; surface it as Needs-an-Agent and offer to promote it (which stamps the Agent).
 - **Writing before confirming.** Step 3 is mandatory even for a single obvious promote.
 - **Mixing repos in one `add`/`drop` call.** Each call is scoped to a single `--repo`. When an `--all` selection spans repos, group by repo and issue one call per repo per direction — don't pass another repo's filenames under the wrong `--repo`.
-- **Passing absolute paths or `$HOME/plans/...`.** `add`/`drop` take **bare filenames** (the `file` field) plus `--repo <repo>`. A path with a slash is rejected (it must resolve directly inside the repo dir). Map the chosen number back to the `{repo, file}` fields from `crew queue list` and pass `file` verbatim.
+- **Don't pass absolute paths or `$HOME/plans/...`.** `add`/`drop` take **bare filenames** plus `--repo <repo>`. A path with a slash is rejected (it must resolve directly inside the repo dir). Map the chosen number back to the `repo · file` fields on the numbered row and pass `file` verbatim.
+- **Don't rebuild the numbered queue by hand.** Paste `crew queue list --present` stdout. The CLI owns the headings and the numbers.
 
 ## Edge cases
 
-- **`crew queue list` returns `[]`** — the current scope has no plans. For a current-repo run, name the repo and offer `--all` ("show all repos") in case they expected another repo's plans; then stop.
+- **`crew queue list --present` prints nothing** — the current scope has no plans. For a current-repo run, name the repo and offer `--all` ("show all repos") in case they expected another repo's plans; then stop.
 - **A chosen plan's frontmatter is malformed** — `crew queue add`/`drop` exit non-zero with a message and write nothing for that repo's batch (all-or-nothing). Surface the error; the user can fix that plan via plan-save/plan-update and retry.
 - **User selects a `todo` plan that already has an Agent to promote (or a `backlog` plan to dequeue)** — it's already in/out of the queue; point it out and skip it rather than writing a no-op. (A `todo` plan with **no** Agent is a valid promote — it stamps the missing Agent and makes the plan dispatchable — so don't skip that one.)
 

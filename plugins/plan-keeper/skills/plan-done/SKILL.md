@@ -48,28 +48,33 @@ If exactly one candidate is identifiable, propose it:
 **If no clear candidate, or the user rejects the proposed one**, list the plans worth finishing via the CLI — the ones you're actively working (`in-progress`) or have queued (`todo`):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --status in-progress,todo
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --sections in-progress,todo
 ```
 
-(Add `--override <name>` if found.) With `--status in-progress,todo` the CLI keeps only those two statuses, lists **in-progress first** (the plan you most likely just finished), then `todo`, newest-first within each, and prints one `status<TAB>filename` line per plan. Any other active plans (backlog, in-review, …) are summarized on **stderr** as a `note: N other active plan(s) hidden (...)` line.
+(Add `--override <name>` if found.) With `--sections in-progress,todo` the CLI keeps only those two statuses, lists **in-progress first** (the plan you most likely just finished), then `todo`, newest-first within each, as CommonMark groups. Any other active plans (backlog, in-review, …) are summarized on **stderr** as a `note: N other active plan(s) hidden (...)` line.
 
-Display the output as a numbered list with each plan's status tag, and ask the user to pick (the filename is the part after the tab). If stderr carried a hidden-plans note, mention it below the list so the user can ask to see the rest.
+Paste stdout as-is. Do not rebuild the headings or rows. Ask the user to pick (the filename is the rest of the `N.` row). If the row has a `root/` prefix, or you passed `--root` on the list call, keep that root when you build the `--file` path. If stderr carried a hidden-plans note, mention it below the list so the user can ask to see the rest.
 
 **Run this command fresh every time you reach this step — including on a re-invocation later in the same conversation.** Never reprint an earlier listing from memory: plans get saved, archived, or change status between turns, so a cached list can be stale. The numbered list you show must come from the output you just ran.
 
 **If stdout is empty:**
 
-- **stderr has a hidden-plans note** → nothing is in-progress or todo, but other active plans exist (e.g. all backlog). Tell the user, and offer `list` with no `--status` to pick from everything.
+- **stderr has a hidden-plans note** → nothing is in-progress or todo, but other active plans exist (e.g. all backlog). Tell the user, and offer `list --present` to pick from everything.
 - **stderr is also empty** → there are no active plans for this repo. Say so and stop. Do not silently fall back to another folder.
 
 Example output to the user:
 
-```text
+```markdown
 Plans to finish in ~/plans/wild-horses/:
 
-  1. [in-progress] 2026-05-29-plan-do-design.md
-  2. [in-progress] 2026-05-27-task-list-runner-refactor.md
-  3. [todo]        2026-05-19-plan-save-design.md
+## In progress
+
+1. 2026-05-29-plan-do-design.md
+2. 2026-05-27-task-list-runner-refactor.md
+
+## Todo
+
+3. 2026-05-19-plan-save-design.md
 
 Which one did you finish?
 ```

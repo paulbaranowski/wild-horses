@@ -121,12 +121,20 @@ If multiple plausible candidates, ask the user which.
 #### 4.c — Mode `file`
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --state active
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --state active --present
 ```
 
 **Run this command fresh every time you reach this step — including on a re-invocation later in the same conversation.** Never reprint an earlier listing from memory: plans get saved, archived, or change status between turns, so a cached list can be stale, and the user picks by number. The numbered list you show must come from the output you just ran.
 
-Print the result as a numbered list (1-indexed). Ask the user "Which one? (1-N, or 'cancel')". Re-prompt on invalid input. On "cancel": abort.
+Run `list --present` and paste stdout as-is. Do not rebuild the rows. Ask the user "Which one? (1-N, or 'cancel')". Re-prompt on invalid input. On "cancel": abort.
+
+```markdown
+## Plans
+
+1. 2026-05-19-plan-do-design.md
+2. 2026-05-17-task-list-runner-refactor.md
+```
+
 
 ### 5. Read existing ticket reference
 

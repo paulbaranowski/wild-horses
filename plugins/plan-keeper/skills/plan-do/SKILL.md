@@ -19,8 +19,8 @@ For plans that aren't execution-ready yet (idea, spec), the skill suggests the s
 
 ## Quick reference
 
-- **Lists:** the **not-yet-started** plans only — `Status: todo` and `Status: backlog` (`list --status todo,backlog`). In-progress / in-review / done plans are excluded (you're picking something to _start_). Classified `.md` plans carry a `--<kind>` suffix in their filename (e.g. `…-noun-first-provider-commands--design.md`); this is expected — the picker still resolves the whole filename (the part after the tab) verbatim, the `--status` machine contract is unchanged.
-- **Human view:** to show a project's stages clustered (design → exec-plan) rather than the flat startable list, run `list --group` (mutually exclusive with `--status`). That's a presentation aid; the `--status todo,backlog` form below is what this skill parses to pick from.
+- **Lists:** the **not-yet-started** plans only: `Status: todo` and `Status: backlog` (`list --sections todo,backlog`). In-progress / in-review / done plans are excluded (you're picking something to _start_). Classified `.md` plans carry a `--<kind>` suffix in their filename (e.g. `…-noun-first-provider-commands--design.md`); this is expected. The picker resolves the filename from the numbered row (`N. <filename>`).
+- **Human view:** to show a project's stages clustered (design → exec-plan) rather than the flat startable list, run `list --group` (mutually exclusive with `--sections`). That's a presentation aid; the `--sections todo,backlog` form below is what this skill pastes and parses.
 - **Writes:** one frontmatter update when it starts a plan (step 7) — flips `Status` to `in-progress` and clears the `Agent` tag (so groundcrew won't claim a plan you're driving). It never moves, deletes, or rewrites the body.
 - **Worktree refresh:** before handing off (step 6), it fast-forwards the **current repo** onto its base branch (`main`/`master`) — automatically, no confirmation — but **only when the worktree is untouched** (clean tree _and_ no commits ahead of base), so the update is always a conflict-free fast-forward. Dirty or ahead branches are left as-is. This is the current repo only, not the full `update-git-repos` skill.
 - **`<repo>`:** auto-derived or override — see [../../repo-derivation.md](../../repo-derivation.md).
@@ -45,16 +45,16 @@ First, check the user's invocation for a repo override. Recognize:
 Then invoke the CLI, filtered to the plans that haven't been started yet:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --status todo,backlog
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --sections todo,backlog
 ```
 
 **Run this command every time you reach step 1 — including when you've already listed the plans earlier in this same conversation.** The plan set changes between turns (a plan saved mid-conversation, a status flipped by another skill), so a list you printed a moment ago may already be stale. Never reproduce a previously shown list from memory; the numbered list you display must come from the output of the command you _just_ ran.
 
-Add `--override <name>` if you found one. The CLI handles repo derivation. With `--status todo,backlog` it keeps only not-yet-started plans (a missing/blank `Status` counts as `backlog`), groups them `todo` then `backlog`, newest-first within each, and prints one `status<TAB>filename` line per plan. Any active plans it excluded (in-progress, in-review, …) are summarized on **stderr** as a `note: N other active plan(s) hidden (...)` line.
+Add `--override <name>` if you found one. The CLI handles repo derivation. With `--sections todo,backlog` it keeps only not-yet-started plans (a missing/blank `Status` counts as `backlog`), prints CommonMark groups in that order, and numbers rows in one continuous count. Any active plans it excluded (in-progress, in-review, …) are summarized on **stderr** as a `note: N other active plan(s) hidden (...)` line.
 
 **If stdout is empty:**
 
-- **stderr has a hidden-plans note** → there are active plans, but none are startable (they're already in-progress / in-review / etc.). Tell the user that — surface the note's counts — and offer to list everything (`list` with no `--status`) or steer manually. Do not say "no plans".
+- **stderr has a hidden-plans note** → there are active plans, but none are startable (they're already in-progress / in-review / etc.). Tell the user that — surface the note's counts — and offer to list everything (`list --present`) or steer manually. Do not say "no plans".
 - **stderr is also empty** → the current repo has no active plans at all. List alternatives:
 
   ```bash
@@ -63,27 +63,30 @@ Add `--override <name>` if you found one. The CLI handles repo derivation. With 
 
   Output is one repo per line with state counts (e.g., `herds: active=15 done=22 deferred=2`). Wait for the user to pick a different repo (re-run step 1 with `--override`) or steer manually.
 
-**If stdout has lines**, display them as a numbered list — show each plan's status tag so the user sees what's queued vs. untriaged — and ask which one. If stderr carried a hidden-plans note, mention it below the list. Do not read or classify any files yet — classification only happens on the picked plan.
+**If stdout has lines**, paste them as-is. Do not rebuild the headings or rows. Ask which one. If stderr carried a hidden-plans note, mention it below the list. Do not read or classify any files yet. Classification only happens on the picked plan.
 
-**Multiple roots:** the list already unions every plan root. When more than one root is configured, each filename is prefixed `root/...` (e.g. `personal/2026-…-foo.md`); keep that prefix in the numbered list and carry it through to step 3's path resolution, so a plan in `personal` isn't confused with a same-named one in `default`.
+**Multiple roots:** the list already unions every plan root. When more than one root is configured, each filename is prefixed `root/...` (e.g. `personal/2026-…-foo.md`); keep that prefix when you resolve the pick, so a plan in `personal` isn't confused with a same-named one in `default`. If you passed `--root` on the list call, keep that root even when the row has no prefix.
 
-Example output to the user:
+Example (CLI stdout, plus a one-line lead-in and the pick prompt):
 
-```text
+```markdown
 Not-yet-started plans in ~/plans/wild-horses/:
 
-  1. [todo]    2026-05-19-plan-do-design.md
-  2. [todo]    2026-05-17-task-list-runner-refactor.md
-  3. [backlog] 2026-05-15-harness-namespace-cleanup.md
+## Todo
 
-(2 other plans are in progress — say "show all" to see them.)
+1. 2026-05-19-plan-do-design.md
+2. 2026-05-17-task-list-runner-refactor.md
+
+## Backlog
+
+3. 2026-05-15-harness-namespace-cleanup.md
 
 Which one?
 ```
 
 ### 2. User picks a plan
 
-The user replies with a number or a filename fragment. Resolve to a single filename from the CLI's output — the filename is the part **after the tab** on each line (the leading token is the status tag). If ambiguous (a fragment matches multiple), ask the user to disambiguate.
+The user replies with a number or a filename fragment. Resolve to a single filename from the CLI stdout — the filename is the rest of the `N.` row. If ambiguous (a fragment matches multiple), ask the user to disambiguate.
 
 ### 3. Read the picked plan
 
@@ -227,7 +230,8 @@ If the user wants to steer manually, just stop the skill here. The plan is read 
 ## Common mistakes
 
 - **Don't re-display a previously shown plan list from memory.** Step 1's `list` command must be re-run on every invocation — even a re-invocation moments later. The plan set changes between turns (a plan saved mid-conversation won't appear if you reprint a cached list), so the numbered list you show must always come from the output of the command you just ran, never from recall.
-- **Reading and classifying multiple plans before the user picks.** Step 1 lists `status<TAB>filename` lines only. Reading multiple plans wastes context and biases classification toward whatever was read last.
+- **Don't read or classify multiple plans before the user picks.** Step 1 pastes the `--sections` stdout only. Reading multiple plans wastes context and biases classification toward whatever was read last.
+- **Don't rebuild the numbered list by hand.** Paste `list --sections` stdout. The CLI owns the headings and the numbers.
 - **Marking in-progress too early (or on manual-steer).** Step 7 flips `Status` to `in-progress` and clears `Agent` only _after_ the user confirms a skill handoff. Don't mark it on the manual-steer path, and don't mark it before confirmation — a plan the user hasn't committed to should stay in plan-do's not-yet-started list with its queue tag intact.
 - **Saying "no plans" when stdout is empty but stderr has a hidden-plans note.** Empty stdout with a `note: N other active plan(s) hidden` line means everything is already in-progress/in-review — surface that, don't claim the repo is empty.
 - **Auto-invoking the next skill without confirmation.** Steps 5a/5b/5c require a check-in even when the classification feels obvious. The skill's job is to _offer_ the next stage, not jump to it.
@@ -241,7 +245,7 @@ If the user wants to steer manually, just stop the skill here. The plan is read 
 
 ## Edge cases
 
-- **No _startable_ plans, but active plans exist** — `list --status todo,backlog` prints nothing on stdout but emits a hidden-plans note on stderr. Tell the user everything is already in progress (or in review), and offer `list` with no `--status` to see all of them.
+- **No _startable_ plans, but active plans exist** — `list --sections todo,backlog` prints nothing on stdout but emits a hidden-plans note on stderr. Tell the user everything is already in progress (or in review), and offer `list --present` to see all of them.
 - **No plans for the current repo at all** — both stdout and stderr empty. Show `repo list` output and let the user pick another repo. Do not silently fall back.
 - **`~/plans/` doesn't exist at all** — `repo list` returns empty. Tell the user `plan-save` hasn't been used yet on this machine.
 - **Plan fits no readiness bucket** — say so explicitly; offer to read into context and let the user steer.
