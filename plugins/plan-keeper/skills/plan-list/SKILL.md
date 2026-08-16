@@ -68,9 +68,9 @@ Plans in ~/plans/wild-horses/:
 3. 2026-05-12-pyright-skill-coercion-trap.md
 ```
 
-If stderr carried a `note: N other active plan(s) hidden (…)` line, mention it below the list (with the count) so the user knows there are active plans with an off-list `Status`. Offer to re-run with no `--status` filter — `list` alone prints **every** active plan newest-first (bare filenames, no grouping), hiding nothing.
+If stderr carried a `note: N other active plan(s) hidden (…)` line, mention it below the list (with the count) so the user knows there are active plans with an off-list `Status`. Offer `list --present` to show every active plan.
 
-**If stdout is empty but stderr has the hidden-plans note**, don't say "no plans": there are active plans, just none with one of the four listed statuses. Surface the count and run plain `list` (no `--status`) to show them.
+**If stdout is empty but stderr has the hidden-plans note**, don't say "no plans": there are active plans, just none with one of the four listed statuses. Surface the count and run `list --present` to show them.
 
 **If stdout is empty and stderr has no note**, the current repo has no active plans at all. List the alternatives so the user can pick another bucket:
 

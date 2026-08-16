@@ -318,7 +318,7 @@ class TestListSections(IsolatedHomeTestCase):
         )
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("1 other active plan(s) hidden", r.stderr)
-        self.assertIn("in-progress×1", r.stderr)
+        self.assertIn("in-progress\N{MULTIPLICATION SIGN}1", r.stderr)
 
     def test_status_flag_still_prints_tsv(self) -> None:
         self._write("2026-05-28-a.md", "todo")
@@ -336,6 +336,15 @@ class TestListSections(IsolatedHomeTestCase):
             home=self.home,
         )
         self.assertEqual(r.returncode, 2, r.stderr)
+
+    def test_present_and_group_are_rejected(self) -> None:
+        r = run_cli(
+            "list", "--override", "scratch",
+            "--present", "--group",
+            home=self.home,
+        )
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("--group", r.stderr)
 
 
 class TestListCrossRepo(IsolatedHomeTestCase):

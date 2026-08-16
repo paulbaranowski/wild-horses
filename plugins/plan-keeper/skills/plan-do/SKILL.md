@@ -19,7 +19,7 @@ For plans that aren't execution-ready yet (idea, spec), the skill suggests the s
 
 ## Quick reference
 
-- **Lists:** the **not-yet-started** plans only — `Status: todo` and `Status: backlog` (`list --sections todo,backlog`). In-progress / in-review / done plans are excluded (you're picking something to _start_). Classified `.md` plans carry a `--<kind>` suffix in their filename (e.g. `…-noun-first-provider-commands--design.md`); this is expected — the picker resolves the filename from the numbered row (`N. <filename>`).
+- **Lists:** the **not-yet-started** plans only: `Status: todo` and `Status: backlog` (`list --sections todo,backlog`). In-progress / in-review / done plans are excluded (you're picking something to _start_). Classified `.md` plans carry a `--<kind>` suffix in their filename (e.g. `…-noun-first-provider-commands--design.md`); this is expected. The picker resolves the filename from the numbered row (`N. <filename>`).
 - **Human view:** to show a project's stages clustered (design → exec-plan) rather than the flat startable list, run `list --group` (mutually exclusive with `--status`). That's a presentation aid; the `--status todo,backlog` form below is what this skill parses to pick from.
 - **Writes:** one frontmatter update when it starts a plan (step 7) — flips `Status` to `in-progress` and clears the `Agent` tag (so groundcrew won't claim a plan you're driving). It never moves, deletes, or rewrites the body.
 - **Worktree refresh:** before handing off (step 6), it fast-forwards the **current repo** onto its base branch (`main`/`master`) — automatically, no confirmation — but **only when the worktree is untouched** (clean tree _and_ no commits ahead of base), so the update is always a conflict-free fast-forward. Dirty or ahead branches are left as-is. This is the current repo only, not the full `update-git-repos` skill.
@@ -230,7 +230,7 @@ If the user wants to steer manually, just stop the skill here. The plan is read 
 ## Common mistakes
 
 - **Don't re-display a previously shown plan list from memory.** Step 1's `list` command must be re-run on every invocation — even a re-invocation moments later. The plan set changes between turns (a plan saved mid-conversation won't appear if you reprint a cached list), so the numbered list you show must always come from the output of the command you just ran, never from recall.
-- **Reading and classifying multiple plans before the user picks.** Step 1 pastes the `--sections` stdout only. Reading multiple plans wastes context and biases classification toward whatever was read last.
+- **Don't read or classify multiple plans before the user picks.** Step 1 pastes the `--sections` stdout only. Reading multiple plans wastes context and biases classification toward whatever was read last.
 - **Don't rebuild the numbered list by hand.** Paste `list --sections` stdout. The CLI owns the headings and the numbers.
 - **Marking in-progress too early (or on manual-steer).** Step 7 flips `Status` to `in-progress` and clears `Agent` only _after_ the user confirms a skill handoff. Don't mark it on the manual-steer path, and don't mark it before confirmation — a plan the user hasn't committed to should stay in plan-do's not-yet-started list with its queue tag intact.
 - **Saying "no plans" when stdout is empty but stderr has a hidden-plans note.** Empty stdout with a `note: N other active plan(s) hidden` line means everything is already in-progress/in-review — surface that, don't claim the repo is empty.

@@ -59,7 +59,7 @@ Paste stdout as-is. Do not rebuild the headings or rows. Ask the user to pick (t
 
 **If stdout is empty:**
 
-- **stderr has a hidden-plans note** → nothing is in-progress or todo, but other active plans exist (e.g. all backlog). Tell the user, and offer `list` with no `--status` to pick from everything.
+- **stderr has a hidden-plans note** → nothing is in-progress or todo, but other active plans exist (e.g. all backlog). Tell the user, and offer `list --present` to pick from everything.
 - **stderr is also empty** → there are no active plans for this repo. Say so and stop. Do not silently fall back to another folder.
 
 Example output to the user:

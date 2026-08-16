@@ -679,6 +679,11 @@ def cmd_list(args) -> int:
         items = _all_repos_items(a.state, roots_to_show, label)
     else:
         items = _single_repo_items(explicit, a.state, roots_to_show, label)
+    if a.present and a.group:
+        raise PlanKeeperCliError(
+            "list --present cannot combine with --group",
+            2,
+        )
     if a.group:
         return _render_grouped(items)
     if a.present and raw_filter:
@@ -1683,6 +1688,11 @@ def _parse_queue_sections(raw: Optional[str]) -> list[str]:
     if not raw:
         return list(_QUEUE_DEFAULT_SECTIONS)
     wanted = [s.strip().lower() for s in raw.split(",") if s.strip()]
+    deduped: list[str] = []
+    for s in wanted:
+        if s not in deduped:
+            deduped.append(s)
+    wanted = deduped
     unknown = [s for s in wanted if s not in _QUEUE_SECTION_IDS]
     if unknown:
         raise PlanKeeperCliError(

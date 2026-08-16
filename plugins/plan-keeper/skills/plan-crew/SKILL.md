@@ -106,9 +106,8 @@ If stdout is empty, tell the user the current scope has no plans (for a current-
 ### 2. Parse the user's actions
 
 The user replies with `promote <numbers>` and/or `dequeue <numbers>` (either or both, any order). Map
-each number back to its `{repo, file}` from the present stdout (`repo · file · agent`), then **group the selections by
-`repo` and direction** — `add` and `drop` each take bare filenames scoped to one `--repo`, so each repo
-gets its own call per direction. (For the default current-repo scope there is only one repo, so it's a
+each number back to its `{root, repo, file}` from the present stdout (`repo · file · agent`, or `root/repo · file · agent` when more than one root appears), then **group the selections by
+`(root, repo)` and direction**. `add` and `drop` each take bare filenames scoped to one `--repo` (and `--root` when the listing spans roots), so each `(root, repo)` pair gets its own call per direction. (For the default current-repo scope there is only one repo, so it's a
 single call each way.)
 
 - `promote` targets must currently be a promote candidate — **Available** (backlog/empty) **or**
@@ -176,7 +175,7 @@ Re-run step 1 and show the updated queue so the user sees the result.
 - **Treating a `todo` row as dispatchable without checking its Agent.** A `todo` plan with no `Agent` is **not** dispatchable — groundcrew skips it. Don't list it under "will be dispatched"; surface it as Needs-an-Agent and offer to promote it (which stamps the Agent).
 - **Writing before confirming.** Step 3 is mandatory even for a single obvious promote.
 - **Mixing repos in one `add`/`drop` call.** Each call is scoped to a single `--repo`. When an `--all` selection spans repos, group by repo and issue one call per repo per direction — don't pass another repo's filenames under the wrong `--repo`.
-- **Passing absolute paths or `$HOME/plans/...`.** `add`/`drop` take **bare filenames** plus `--repo <repo>`. A path with a slash is rejected (it must resolve directly inside the repo dir). Map the chosen number back to the `repo · file` fields on the numbered row and pass `file` verbatim.
+- **Don't pass absolute paths or `$HOME/plans/...`.** `add`/`drop` take **bare filenames** plus `--repo <repo>`. A path with a slash is rejected (it must resolve directly inside the repo dir). Map the chosen number back to the `repo · file` fields on the numbered row and pass `file` verbatim.
 - **Don't rebuild the numbered queue by hand.** Paste `crew queue list --present` stdout. The CLI owns the headings and the numbers.
 
 ## Edge cases

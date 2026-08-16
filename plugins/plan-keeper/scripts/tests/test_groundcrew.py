@@ -1003,6 +1003,16 @@ class TestQueuePresent(IsolatedHomeTestCase):
         self.assertEqual(r.returncode, 2, r.stderr)
         self.assertIn("nope", r.stderr)
 
+    def test_duplicate_sections_print_once(self) -> None:
+        self._make_plan("alpha", "2026-05-20-fix.md", status="todo", agent="claude")
+        r = run_cli(
+            "crew", "queue", "list", "--all", "--sections", "queued,queued",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.count("## Queued"), 1)
+        self.assertEqual(r.stdout.count("2026-05-20-fix.md"), 1)
+
 
 class TestQueueAdd(IsolatedHomeTestCase):
     """`crew queue add <file>...` — promote plans to Status: todo by bare name.
