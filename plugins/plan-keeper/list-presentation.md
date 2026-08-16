@@ -10,7 +10,7 @@ This file is the single source of truth, like [repo-derivation.md](repo-derivati
 - Number the rows in one continuous count across groups.
 - After `##`, CommonMark allows any start number.
 
-Status-grouped pickers (`plan-do`, `plan-done`, `plan-crew`, `plan-list`) use one `##` heading per group.
+Status-grouped pickers (`plan-do`, `plan-done`, `plan-crew`, `plan-list`) use one `##` heading per group. Title-case the status token and replace `-` with a space (`in-progress` becomes `## In progress`).
 
 Flat pickers (`plan-update`, `plan-linear`, `plan-jira`) use one `## Plans` heading, then `1.` `2.` `3.`
 

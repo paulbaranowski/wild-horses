@@ -53,7 +53,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --state deferred
 
 ### 3. Present the result
 
-**If stdout has lines**, present them as specified in [../../list-presentation.md](../../list-presentation.md). The heading is the status tag (the token _before_ the tab). The filename is the part _after_ the tab. Example:
+**If stdout has lines**, present them as specified in [../../list-presentation.md](../../list-presentation.md). The heading is the human-readable form of the status tag (the token _before_ the tab). The filename is the part _after_ the tab. Example:
 
 ```markdown
 Plans in ~/plans/wild-horses/:
