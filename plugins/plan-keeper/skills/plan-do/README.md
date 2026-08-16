@@ -30,8 +30,8 @@ execution-ready ──► menu (recommended first):
         └──► superpowers:executing-plans                     (sequential, review-gated)
 ```
 
-1. **Lists not-yet-started plans** via `plan_keeper_cli.py list --status todo,backlog` — only `todo` and `backlog` plans (you're picking something to _start_), grouped under `##` headings, newest-first within each group. Already-started plans (`in-progress`, `in-review`) are hidden, with a count on stderr.
-2. **Asks which one.** Displays `##` groups with one continuous number count, then waits. Reads only the picked plan. Never reads multiple candidates ahead of time (wastes context, biases classification).
+1. **Lists not-yet-started plans** via `plan_keeper_cli.py list --sections todo,backlog`. The CLI prints the CommonMark groups. Already-started plans (`in-progress`, `in-review`) are hidden, with a count on stderr.
+2. **Asks which one.** Pastes that stdout, then waits. Reads only the picked plan. Never reads multiple candidates ahead of time (wastes context, biases classification).
 3. **Classifies readiness (tier 1)** as **idea**, **spec**, or **execution-ready**.
 4. **For idea / spec** → suggests the single next pipeline stage (`brainstorming` / `writing-plans`) and confirms.
 5. **For execution-ready** → offers **all three execution engines at once**, recommended first. The recommendation comes from the plan's _shape_ (tier 2); the user picks how hands-off to be. All options are always listed, plus a manual escape hatch.

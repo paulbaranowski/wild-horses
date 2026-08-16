@@ -121,12 +121,12 @@ If multiple plausible candidates, ask the user which.
 #### 4.c — Mode `file`
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --state active
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --state active --present
 ```
 
 **Run this command fresh every time you reach this step — including on a re-invocation later in the same conversation.** Never reprint an earlier listing from memory: plans get saved, archived, or change status between turns, so a cached list can be stale, and the user picks by number. The numbered list you show must come from the output you just ran.
 
-Present as specified in [../../list-presentation.md](../../list-presentation.md) (flat example). Ask the user "Which one? (1-N, or 'cancel')". Re-prompt on invalid input. On "cancel": abort.
+Run `list --present` and paste stdout as specified in [../../list-presentation.md](../../list-presentation.md). Ask the user "Which one? (1-N, or 'cancel')". Re-prompt on invalid input. On "cancel": abort.
 
 ```markdown
 ## Plans

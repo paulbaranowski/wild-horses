@@ -141,6 +141,8 @@ class ListArgs:
     state: str
     status: Optional[str]
     group: bool
+    present: bool
+    sections: Optional[str]
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "ListArgs":
@@ -151,6 +153,8 @@ class ListArgs:
             state=args.state,
             status=getattr(args, "status", None),
             group=getattr(args, "group", False),
+            present=getattr(args, "present", False),
+            sections=getattr(args, "sections", None),
         )
 
 
@@ -506,28 +510,78 @@ def _render_listing(items: list[tuple[str, Path]], raw_filter: Optional[str]) ->
             print(name)
         return 0
 
+    shown, hidden = _tier_rows(items, raw_filter)
+    for name, s in shown:
+        print(f"{s}\t{name}")
+    _emit_hidden_note(hidden)
+    return 0
+
+
+def _tier_rows(
+    items: list[tuple[str, Path]], raw_filter: str
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """Split items into (name, status) rows in tier order, plus hidden statuses."""
     tiers = [s.strip().lower() for s in raw_filter.split(",") if s.strip()]
     tier_rank = {s: i for i, s in enumerate(tiers)}
     annotated = [(name, plan_status(p)) for name, p in items]
-
     shown = [(name, s) for (name, s) in annotated if s in tier_rank]
-    # `items` is already in display order; a stable sort by tier preserves that
-    # within each group.
     shown.sort(key=lambda ns: tier_rank[ns[1]])
-    for name, s in shown:
-        print(f"{s}\t{name}")
-
-    # Transparency: never silently drop active plans the filter excluded.
     hidden = [s for (_, s) in annotated if s not in tier_rank]
-    if hidden:
-        counts: dict[str, int] = {}
-        for s in hidden:
-            counts[s] = counts.get(s, 0) + 1
-        summary = ", ".join(f"{st}×{n}" for st, n in sorted(counts.items()))
-        print(
-            f"note: {len(hidden)} other active plan(s) hidden ({summary})",
-            file=sys.stderr,
-        )
+    return shown, hidden
+
+
+def _emit_hidden_note(hidden: list[str]) -> None:
+    """Write the excluded-active summary to stderr. No-op when nothing is hidden."""
+    if not hidden:
+        return
+    counts: dict[str, int] = {}
+    for s in hidden:
+        counts[s] = counts.get(s, 0) + 1
+    summary = ", ".join(f"{st}×{n}" for st, n in sorted(counts.items()))
+    print(
+        f"note: {len(hidden)} other active plan(s) hidden ({summary})",
+        file=sys.stderr,
+    )
+
+
+def _section_heading(token: str) -> str:
+    """Human-readable `##` label for a Status token (`in-progress` → `In progress`)."""
+    return token.replace("-", " ").capitalize()
+
+
+def _render_present(
+    items: list[tuple[str, Path]], sections: Optional[str]
+) -> int:
+    """Print a CommonMark inventory. Empty groups are omitted.
+
+    With ``sections``, each requested Status is a ``##`` heading and row
+    numbers continue across groups. Without it, one ``## Plans`` list.
+    """
+    if not sections:
+        names = [name for name, _ in items]
+        if names:
+            print("## Plans")
+            print()
+            for i, name in enumerate(names, 1):
+                print(f"{i}. {name}")
+        return 0
+
+    shown, hidden = _tier_rows(items, sections)
+    n = 1
+    printed = False
+    for tier in [s.strip().lower() for s in sections.split(",") if s.strip()]:
+        rows = [name for name, s in shown if s == tier]
+        if not rows:
+            continue
+        if printed:
+            print()
+        print(f"## {_section_heading(tier)}")
+        print()
+        for name in rows:
+            print(f"{n}. {name}")
+            n += 1
+        printed = True
+    _emit_hidden_note(hidden)
     return 0
 
 
@@ -619,6 +673,13 @@ def cmd_list(args) -> int:
         items = _single_repo_items(explicit, a.state, roots_to_show, label)
     if a.group:
         return _render_grouped(items)
+    if a.present and raw_filter:
+        raise PlanKeeperCliError(
+            "list --present cannot combine with --status; use --sections",
+            2,
+        )
+    if a.present or a.sections:
+        return _render_present(items, a.sections)
     return _render_listing(items, raw_filter)
 
 
@@ -1946,7 +2007,23 @@ def build_parser() -> argparse.ArgumentParser:
             "cluster plans by project (shared slug), each stage labelled by its "
             "Kind and ordered along the idea->exec-plan pipeline. Groups appear "
             "most-recently-touched first. Human-readable view; mutually "
-            "exclusive with --status."
+            "exclusive with --status and --sections."
+        ),
+    )
+    list_view.add_argument(
+        "--sections",
+        help=(
+            "comma-separated Status groups to print as CommonMark (e.g. "
+            "'todo,backlog'). Each group is a ## heading. Row numbers stay "
+            "one continuous count. Mutually exclusive with --status and --group."
+        ),
+    )
+    p_list.add_argument(
+        "--present",
+        action="store_true",
+        help=(
+            "print a flat CommonMark inventory (## Plans, then 1. 2. 3.). "
+            "Use --sections when the list must be grouped."
         ),
     )
 

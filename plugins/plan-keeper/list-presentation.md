@@ -1,18 +1,18 @@
 # Numbered list presentation
 
-How the `plan-*` skills print a numbered inventory to the user. Each listing skill's present step links here instead of restating the rule.
+How the `plan-*` skills print a numbered inventory to the user. The CLI emits the list. Each skill pastes that stdout.
 
 This file is the single source of truth, like [repo-derivation.md](repo-derivation.md) and [plan-kinds.md](plan-kinds.md).
 
 ## The rule
 
-- Put a `##` heading before each group of numbered rows.
-- Number the rows in one continuous count across groups.
-- After `##`, CommonMark allows any start number.
+- Run `list --sections <groups>` for a grouped inventory, or `list --present` for a flat one.
+- Paste stdout as-is. Do not rebuild headings or rows.
+- You may add one context line above the block and a pick prompt below it.
 
-Status-grouped pickers (`plan-do`, `plan-done`, `plan-crew`, `plan-list`) use one `##` heading per group. Title-case the status token and replace `-` with a space (`in-progress` becomes `## In progress`).
+`--sections` takes comma-separated Status values in display order. Empty groups are omitted. Row numbers stay one continuous count. `in-progress` prints as `## In progress`.
 
-Flat pickers (`plan-update`, `plan-linear`, `plan-jira`) use one `## Plans` heading, then `1.` `2.` `3.`
+`--status` still prints `status<TAB>filename`. Do not use it for chat output.
 
 This rule applies to chat output. Instructional numbered steps inside a SKILL.md body stay as they are.
 

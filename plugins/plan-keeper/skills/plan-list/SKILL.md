@@ -35,10 +35,10 @@ If present, normalize it per [../../repo-derivation.md](../../repo-derivation.md
 ### 2. List the plans
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --status in-progress,in-review,todo,backlog
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --sections in-progress,in-review,todo,backlog
 ```
 
-Add `--override <name>` if step 1 found one. The CLI groups the active plans in the given status order, newest-first within each group, and prints one `status<TAB>filename` line per plan. Any active plan whose `Status` is _not_ one of those four (e.g. a `Status: deferred` plan still living in the active tree) is excluded from stdout and summarized on **stderr** as a `note: N other active plan(s) hidden (…)` line.
+Add `--override <name>` if step 1 found one. The CLI prints CommonMark groups in that order, newest-first within each group. Any active plan whose `Status` is _not_ one of those four (e.g. a `Status: deferred` plan still living in the active tree) is excluded from stdout and summarized on **stderr** as a `note: N other active plan(s) hidden (…)` line.
 
 **Run this command every time you reach this step — including on a re-invocation later in the same conversation.** Plans get saved, started, archived, and re-statused between turns, so a list you printed a moment ago may already be stale. The list you show must come from the output you just ran, never from memory.
 
@@ -53,7 +53,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --state deferred
 
 ### 3. Present the result
 
-**If stdout has lines**, present them as specified in [../../list-presentation.md](../../list-presentation.md). The heading is the human-readable form of the status tag (the token _before_ the tab). The filename is the part _after_ the tab. Example:
+**If stdout has lines**, paste them as specified in [../../list-presentation.md](../../list-presentation.md). Do not rebuild the headings or rows. Example CLI stdout:
 
 ```markdown
 Plans in ~/plans/wild-horses/:

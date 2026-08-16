@@ -30,12 +30,12 @@ If the user just referenced a specific file ("this plan", "the one I just saved"
 Otherwise, list active plans:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --present
 ```
 
 **Run this command fresh every time you reach this step — including on a re-invocation later in the same conversation.** Never reprint an earlier listing from memory: plans get saved, archived, or change status between turns, so a cached list can be stale. The numbered list you show must come from the output you just ran.
 
-Present as specified in [../../list-presentation.md](../../list-presentation.md) (flat example). They pick by number.
+Run `list --present` and paste stdout as specified in [../../list-presentation.md](../../list-presentation.md). They pick by number.
 
 ```markdown
 ## Plans
