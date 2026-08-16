@@ -63,20 +63,25 @@ Add `--override <name>` if you found one. The CLI handles repo derivation. With 
 
   Output is one repo per line with state counts (e.g., `herds: active=15 done=22 deferred=2`). Wait for the user to pick a different repo (re-run step 1 with `--override`) or steer manually.
 
-**If stdout has lines**, display them as a numbered list — show each plan's status tag so the user sees what's queued vs. untriaged — and ask which one. If stderr carried a hidden-plans note, mention it below the list. Do not read or classify any files yet — classification only happens on the picked plan.
+**If stdout has lines**, present them as specified in [../../list-presentation.md](../../list-presentation.md). Ask which one. If stderr carried a hidden-plans note, mention it below the list. Do not read or classify any files yet. Classification only happens on the picked plan.
 
 **Multiple roots:** the list already unions every plan root. When more than one root is configured, each filename is prefixed `root/...` (e.g. `personal/2026-…-foo.md`); keep that prefix in the numbered list and carry it through to step 3's path resolution, so a plan in `personal` isn't confused with a same-named one in `default`.
 
 Example output to the user:
 
-```text
+```markdown
 Not-yet-started plans in ~/plans/wild-horses/:
 
-  1. [todo]    2026-05-19-plan-do-design.md
-  2. [todo]    2026-05-17-task-list-runner-refactor.md
-  3. [backlog] 2026-05-15-harness-namespace-cleanup.md
+## Todo
 
-(2 other plans are in progress — say "show all" to see them.)
+1. 2026-05-19-plan-do-design.md
+2. 2026-05-17-task-list-runner-refactor.md
+
+## Backlog
+
+3. 2026-05-15-harness-namespace-cleanup.md
+
+(2 other plans are in progress. Say "show all" to see them.)
 
 Which one?
 ```

@@ -53,7 +53,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --status in-prog
 
 (Add `--override <name>` if found.) With `--status in-progress,todo` the CLI keeps only those two statuses, lists **in-progress first** (the plan you most likely just finished), then `todo`, newest-first within each, and prints one `status<TAB>filename` line per plan. Any other active plans (backlog, in-review, …) are summarized on **stderr** as a `note: N other active plan(s) hidden (...)` line.
 
-Display the output as a numbered list with each plan's status tag, and ask the user to pick (the filename is the part after the tab). If stderr carried a hidden-plans note, mention it below the list so the user can ask to see the rest.
+Present the output as specified in [../../list-presentation.md](../../list-presentation.md). Ask the user to pick (the filename is the part after the tab). If stderr carried a hidden-plans note, mention it below the list so the user can ask to see the rest.
 
 **Run this command fresh every time you reach this step — including on a re-invocation later in the same conversation.** Never reprint an earlier listing from memory: plans get saved, archived, or change status between turns, so a cached list can be stale. The numbered list you show must come from the output you just ran.
 
@@ -64,12 +64,17 @@ Display the output as a numbered list with each plan's status tag, and ask the u
 
 Example output to the user:
 
-```text
+```markdown
 Plans to finish in ~/plans/wild-horses/:
 
-  1. [in-progress] 2026-05-29-plan-do-design.md
-  2. [in-progress] 2026-05-27-task-list-runner-refactor.md
-  3. [todo]        2026-05-19-plan-save-design.md
+## In progress
+
+1. 2026-05-29-plan-do-design.md
+2. 2026-05-27-task-list-runner-refactor.md
+
+## Todo
+
+3. 2026-05-19-plan-save-design.md
 
 Which one did you finish?
 ```

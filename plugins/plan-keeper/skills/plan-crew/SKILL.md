@@ -103,24 +103,28 @@ marker and its blockers to the row, e.g. `⏸ blocked by plan-849321`, and do **
 ready-to-dispatch — even a `todo` plan that has an Agent will be held back by groundcrew while it is
 `blocked`. You may still let the user dequeue it; just don't present it as "will be dispatched."
 
-Number the **Available**, **Needs an Agent**, and **Queued** rows in one continuous numbered list so
-the user can refer to any actionable plan by a single number. Example:
+Number the **Queued**, **Needs an Agent**, and **Available** rows in one continuous count.
+Present each group as specified in [../../list-presentation.md](../../list-presentation.md).
+Keep In flight and In review as unnumbered prose.
 
 Label the heading with the scope you ran (e.g. `Groundcrew queue (herds)` for the current repo, or `(all repos)` for `--all`):
 
-```text
+```markdown
 Groundcrew queue (all repos):
 
-Queued (todo) — will be dispatched:
-  1. herds      · 2026-05-20-fix-auth.md        · claude
-  2. wild-horses · 2026-05-19-plan-do-crew.md   · codex
+## Queued
 
-Needs an Agent (todo, no Agent — not dispatchable until queued):
-  3. groundcrew-config · 2026-06-11-repo-templates-01--exec-plan.md · (no agent)
+1. herds · 2026-05-20-fix-auth.md · claude
+2. wild-horses · 2026-05-19-plan-do-crew.md · codex
 
-Available (backlog) — promote to queue:
-  4. herds      · 2026-05-22-refactor-db.md     · (no agent)
-  5. wild-horses · 2026-05-21-readme-pass.md    · claude
+## Needs an Agent
+
+3. groundcrew-config · 2026-06-11-repo-templates-01--exec-plan.md · (no agent)
+
+## Available
+
+4. herds · 2026-05-22-refactor-db.md · (no agent)
+5. wild-horses · 2026-05-21-readme-pass.md · claude
 
 In flight (in-progress): herds/2026-05-18-billing.md (read-only)
 

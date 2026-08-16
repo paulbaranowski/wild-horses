@@ -14,7 +14,7 @@ Also model-invoked - trigger phrases include "change the agent on a plan", "prom
 
 ## What it does
 
-1. **Identifies the plan** - a plan already referenced in conversation, or a numbered pick from a fresh `list` call.
+1. **Identifies the plan** - a plan already referenced in conversation, or a numbered pick under `## Plans` from a fresh `list` call.
 2. **Identifies the field(s) to change** from the user's phrasing: `Status` (promote/reset), `Agent` (change model), `Kind` (reclassify), or a ticket-system id field.
 3. **Confirms** the exact old → new change per field before writing anything.
 4. **Runs the update** via `file-meta set` with one flag per field (multiple fields can land in a single call).

@@ -53,7 +53,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --state deferred
 
 ### 3. Present the result
 
-**If stdout has lines**, display them as a grouped numbered list. Use a `##` heading per status group. Number the plans in one continuous count across groups. The heading must come first: CommonMark joins `11.` / `20.` into a `Todo:` / `Backlog:` paragraph. After `##`, a list may start at any number. The heading is the status tag (the token _before_ the tab). The filename is the part _after_ the tab. Example:
+**If stdout has lines**, present them as specified in [../../list-presentation.md](../../list-presentation.md). The heading is the status tag (the token _before_ the tab). The filename is the part _after_ the tab. Example:
 
 ```markdown
 Plans in ~/plans/wild-horses/:
@@ -106,7 +106,6 @@ some-other-project
 - **Don't reprint a previously shown list from memory.** Step 2's command must be re-run on every invocation; the plan set changes between turns, so the list you display must always come from the command you just ran.
 - **Don't read or summarize any plan body.** This skill lists filenames and status only. Opening a plan to describe it is `plan-do`'s job (it reads the _one_ plan the user picks).
 - **Don't write anything.** `plan-list` never flips `Status`, never archives, never edits frontmatter. If the user wants to act on a plan, hand off to the sibling that does that.
-- **Don't put `11.` / `20.` flush under a `Todo:` / `Backlog:` label.** CommonMark treats that as paragraph text, not a list. Use a `##` heading, then the numbered rows.
 - **Don't say "no plans" when stdout is empty but you haven't run `repo list`.** An empty current repo doesn't mean an empty machine — show the other repos before concluding.
 
 ## Notes

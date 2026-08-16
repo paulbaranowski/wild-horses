@@ -14,7 +14,7 @@ Also model-invoked - trigger phrases include "see or manage the groundcrew queue
 
 ## What it does
 
-1. **Shows the queue**, scoped to the current repo by default (`--all` for every repo, `--repo <name>` for one other), grouped into Queued (`todo` with an `Agent`, ready to dispatch), Needs an Agent (`todo` but groundcrew will skip it until it has one), In flight/In review (read-only context), and Available (`backlog`, promote candidates) - numbered so the user can act by number.
+1. **Shows the queue**, scoped to the current repo by default (`--all` for every repo, `--repo <name>` for one other), grouped into Queued (`todo` with an `Agent`, ready to dispatch), Needs an Agent (`todo` but groundcrew will skip it until it has one), In flight/In review (read-only context), and Available (`backlog`, promote candidates). Each actionable group is a `##` heading. Rows share one continuous number count so the user can act by number.
 2. **Parses the user's reply** (`promote <numbers>` / `dequeue <numbers>`, either or both) and maps each number back to its `{repo, file}`.
 3. **Confirms** exactly what will change - including "will set Agent: claude" for a promote with no existing Agent - before writing anything.
 4. **Applies** one CLI call per repo per direction: `crew queue add` (promote, stamps a missing `Agent`) or `crew queue drop` (dequeue, never touches `Agent`).

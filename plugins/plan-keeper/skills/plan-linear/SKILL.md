@@ -121,7 +121,15 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --state active
 
 **Run this command fresh every time you reach this step — including on a re-invocation later in the same conversation.** Never reprint an earlier listing from memory: plans get saved, archived, or change status between turns, so a cached list can be stale, and the user picks by number. The numbered list you show must come from the output you just ran.
 
-Print the result as a numbered list (1-indexed). Ask the user "Which one? (1-N, or 'cancel')". Re-prompt on invalid input. On "cancel": abort.
+Present as specified in [../../list-presentation.md](../../list-presentation.md) (flat example). Ask the user "Which one? (1-N, or 'cancel')". Re-prompt on invalid input. On "cancel": abort.
+
+```markdown
+## Plans
+
+1. 2026-05-19-plan-do-design.md
+2. 2026-05-17-task-list-runner-refactor.md
+```
+
 
 ### 5. Read existing ticket reference
 
