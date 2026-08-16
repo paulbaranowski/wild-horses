@@ -105,40 +105,30 @@ cheap here" names no cost. Name the cost, or cut the sentence.
 
 ## The diagram rubric
 
-This applies only to a design PR. A trivial PR never reaches this decision. The
-rubric decides whether the architecture section gets a mermaid diagram. The
-default is prose alone, or a tiny inline ASCII arrow for a linear case.
+This applies only to a design PR. A trivial PR never reaches this decision.
 
-**Draw a mermaid diagram when 2 or more of these are true:**
+A design PR puts mermaid in the architecture section. That is the default.
+GitHub renders fenced `mermaid` blocks. A skip is the exception. Name the
+skip in your final message when you take it.
 
-- The change rewires a flow or dependency graph. Components are added, removed,
-  or reconnected: a new boundary, an injected dependency, a new event bus. A
-  renamed function or an added parameter does not count.
-- The change needs 4 or more named entities held in mind at once. Pipeline
-  stages, service boundaries, and state-machine states all count.
-- Call order or dispatch order changes in a way that one sentence states badly.
-  Examples: sequential to fan-out, sync to async, one path to conditional
-  routing.
-- Both the old structure and the new structure are complex and different. A
-  picture of each is faster to read than a paragraph.
+**Skip the mermaid slot when one of these is true:**
 
-**Skip the diagram when any one of these is true, even if the triggers fire:**
+- The graph has 2 or 3 named nodes and one path. A tiny fenced ASCII arrow
+  covers that.
+- The change is data or schema only, with no shift in structure or flow.
+  That belongs to the Data and contract model section.
 
-- The change reads cleanly as one sentence with 2 entities. "X now reads from Y
-  instead of Z" already carries it.
-- The relationship is linear and 2 or 3 steps long. The tiny inline ASCII arrow
-  covers that. A full diagram is too much.
-- The change is data or schema only, with no shift in structure or flow. That
-  belongs to the Data and contract model section.
+A one-sentence restatement of the idea is not a skip. Count the named
+nodes and the paths.
 
 **One side with no structure selects the shape. It does not skip the diagram.**
 A brand-new subsystem has no meaningful "before" to contrast against. Draw a
 single "After:" diagram instead of a before-and-after pair.
 
 Default to a `graph TD` or `graph LR` mermaid flowchart. Switch to
-`sequenceDiagram` when the call-order signal is the one that fired. Scope each
-diagram to the entities that changed or that the reader needs. Do not draw the
-whole system. See Diagram delivery below for file conventions.
+`sequenceDiagram` when call order or dispatch order is what changed. Scope
+each diagram to the entities that changed or that the reader needs. Do not
+draw the whole system. See Diagram delivery below for file conventions.
 
 ## The description is a translation, not a transcript
 
@@ -222,11 +212,25 @@ only when they have content. Every section has a limit; see How much to write.
    - Before and after: what the old structure assumed or hard-wired, and why
      that blocked the goal. The _why_ lives here. A refactor only makes sense
      against the constraint it removes.
-   - A diagram, when the diagram rubric fires. Embed a mermaid before-and-after
-     pair, or a single after-only diagram, as fenced `mermaid` code blocks.
-     GitHub renders these natively. A tiny fenced ASCII arrow is still fine for
-     the linear case that the rubric skips. Never use ASCII for a case the
-     rubric fires on.
+   - The mermaid slot, after the before-and-after prose. Required unless The
+     diagram rubric names a skip. Use this shape:
+
+     Before:
+
+     ```mermaid
+     graph TD
+       OldPath[old component] --> OldSink[old sink]
+     ```
+
+     After:
+
+     ```mermaid
+     graph TD
+       NewPath[new component] --> NewSink[injected sink]
+     ```
+
+     Use After: alone when only one side has structure. A tiny fenced ASCII
+     arrow is the linear skip only.
    - The decisions that shaped the design, each with its rationale. Skip any
      decision with an obvious default. To route one, ask: could a competent
      reviewer plausibly say _no_ to it, and would that no change the diff? If
@@ -407,11 +411,9 @@ title would say the same thing.
    commit history exposes churn inside the branch that the reviewer never sees.
 2. **Recover the constraint.** What did the old code assume or hard-wire that
    the goal could not live with? That is your before and after.
-3. **Apply the diagram rubric.** Use the before and after you just recovered. If
-   2 or more triggers fire and no skip signal fires, draft mermaid source. Draw
-   a before-and-after pair, or a single after-only diagram when only one side
-   has structure. Otherwise keep the before and after in prose, or use a tiny
-   ASCII arrow for the linear case.
+3. **Fill the mermaid slot.** Use the before and after you just recovered.
+   Follow The diagram rubric. Draft mermaid unless that rubric names a skip.
+   If you skip, name the skip in your final message.
 4. **Recover the requirements.** What did the change have to satisfy: needs,
    constraints, invariants, non-goals? Keep the ones a reviewer needs to judge
    whether the design answers them.
@@ -438,9 +440,9 @@ title would say the same thing.
     it. Record preconditions, steps, and the pass condition as
     you go. If you cannot, record that it is unverified. Never rebuild the steps
     from the code.
-12. **Draft in prose, architecture section first,** using the Plain language
-    rules. Write the one-idea sentence, then before and after, then the
-    decisions, then what did not change.
+12. **Draft the architecture section first,** using the Plain language
+    rules. Write the one-idea sentence, then before and after. Then write
+    the mermaid slot, the decisions, and what did not change.
 13. **Derive the title** from the one idea, per The title section. Do this every
     run. Never carry an existing title forward unexamined.
 14. **Demote detail without mercy.** If removing a line loses no _understanding_,
@@ -504,6 +506,8 @@ can detect it.
 - The manual steps repeat the Interface changes transcript. That section shows
   what the interface now is. This one says how to reach it. Keep it in Interface
   changes and cut the manual copy.
+- A design PR has no mermaid fence, and the final message names no skip:
+  fill the mermaid slot, or name the skip from The diagram rubric.
 
 ## Don't
 
@@ -573,6 +577,25 @@ refactor"), the shape a good description takes.
   `add_event(image_id=...)`. That hard-wired the assumption that an event always
   comes from an image. That assumption is what blocked reuse for URLs. The class
   now delegates to an injected sink and no longer knows the source.
+- The mermaid slot, as a before-and-after pair:
+
+  Before:
+
+  ```mermaid
+  graph TD
+    EventAlgorithmV4 --> add_event
+    add_event --> ImageRow[image row]
+  ```
+
+  After:
+
+  ```mermaid
+  graph TD
+    EventAlgorithmV4 --> EventSink
+    EventSink --> ImageRow[image row]
+    EventSink --> UrlRow[URL row]
+  ```
+
 - Three decisions that shaped the design, with their rationale. Lazy sink
   resolution keeps late wiring possible. The orchestrator owns URL persistence
   because cost and provenance belong there. Splitting extraction from persistence
@@ -588,7 +611,7 @@ the architecture themselves. The rewrite led with the one idea.
 
 ## Diagram delivery
 
-When the diagram rubric fires, embed the mermaid block or blocks inline in the
+When the architecture section includes mermaid, embed the blocks inline in the
 body, and also:
 
 1. Save each diagram's source to
@@ -745,3 +768,4 @@ body, and also:
 6. If no PR exists, hand the title and body to whatever opens the PR (or
    print them for copy/paste).
 7. In your final message, list any rationale you cut, per How much to write.
+   If you skipped the mermaid slot, name the skip from The diagram rubric.
