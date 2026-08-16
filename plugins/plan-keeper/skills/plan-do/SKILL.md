@@ -63,7 +63,7 @@ Add `--override <name>` if you found one. The CLI handles repo derivation. With 
 
   Output is one repo per line with state counts (e.g., `herds: active=15 done=22 deferred=2`). Wait for the user to pick a different repo (re-run step 1 with `--override`) or steer manually.
 
-**If stdout has lines**, paste them as specified in [../../list-presentation.md](../../list-presentation.md). Ask which one. If stderr carried a hidden-plans note, mention it below the list. Do not read or classify any files yet. Classification only happens on the picked plan.
+**If stdout has lines**, paste them as-is. Do not rebuild the headings or rows. Ask which one. If stderr carried a hidden-plans note, mention it below the list. Do not read or classify any files yet. Classification only happens on the picked plan.
 
 **Multiple roots:** the list already unions every plan root. When more than one root is configured, each filename is prefixed `root/...` (e.g. `personal/2026-…-foo.md`); keep that prefix when you resolve the pick, so a plan in `personal` isn't confused with a same-named one in `default`.
 

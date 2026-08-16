@@ -126,7 +126,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --state active -
 
 **Run this command fresh every time you reach this step — including on a re-invocation later in the same conversation.** Never reprint an earlier listing from memory: plans get saved, archived, or change status between turns, so a cached list can be stale, and the user picks by number. The numbered list you show must come from the output you just ran.
 
-Run `list --present` and paste stdout as specified in [../../list-presentation.md](../../list-presentation.md). Ask the user "Which one? (1-N, or 'cancel')". Re-prompt on invalid input. On "cancel": abort.
+Run `list --present` and paste stdout as-is. Do not rebuild the rows. Ask the user "Which one? (1-N, or 'cancel')". Re-prompt on invalid input. On "cancel": abort.
 
 ```markdown
 ## Plans

@@ -250,7 +250,6 @@ A PreToolUse hook (`hooks/hooks.json`) auto-approves `python3 .../plan_keeper_cl
 | `hooks/hooks.json`                 | PreToolUse hook registration                                                                                                         |
 | `repo-derivation.md`               | Shared algorithm - auto-derive + override normalization rules                                                                        |
 | `plan-kinds.md`                    | Shared `Kind` taxonomy - the document-type value set and how to classify it                                                          |
-| `list-presentation.md`             | Shared rule: CLI `list --sections` / `list --present` emit the inventory; skills paste stdout                                        |
 | `ticket-systems.md`                | Shared reference for the Linear/Jira per-repo config and push flow                                                                   |
 | `global-config.md`                 | Shared reference for the monorepo-subpath -> groundcrew-alias mapping                                                                |
 | `groundcrew/README.md`             | Deep reference for the groundcrew connection - `crew install`, dispatch protocol, dependencies                                       |

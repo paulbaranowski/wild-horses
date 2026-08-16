@@ -53,7 +53,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --state deferred
 
 ### 3. Present the result
 
-**If stdout has lines**, paste them as specified in [../../list-presentation.md](../../list-presentation.md). Do not rebuild the headings or rows. Example CLI stdout:
+**If stdout has lines**, paste them as-is. Do not rebuild the headings or rows. Example CLI stdout:
 
 ```markdown
 Plans in ~/plans/wild-horses/:

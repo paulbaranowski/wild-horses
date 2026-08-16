@@ -351,10 +351,18 @@ class QueueListArgs:
     all: bool
     repo: Optional[str]
     root: Optional[str]
+    present: bool
+    sections: Optional[str]
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "QueueListArgs":
-        return cls(all=args.all, repo=args.repo, root=getattr(args, "root", None))
+        return cls(
+            all=args.all,
+            repo=args.repo,
+            root=getattr(args, "root", None),
+            present=getattr(args, "present", False),
+            sections=getattr(args, "sections", None),
+        )
 
 
 @dataclass
@@ -1575,6 +1583,9 @@ def cmd_queue_list(args) -> int:
     ``--root NAME`` narrows to one root. ``--all``/``--repo`` are mutually
     exclusive at the parser. Each row carries the plan's ``root`` name so the
     plan-crew UI can disambiguate a repo that straddles two roots.
+
+    ``--present`` / ``--sections`` print CommonMark instead of JSON. JSON
+    stays the default so machine callers are unchanged.
     """
     a = QueueListArgs.from_args(args)
     if a.all:
@@ -1584,6 +1595,17 @@ def cmd_queue_list(args) -> int:
     else:
         scope = derive_repo(None)
     root_filter = roots.resolve_root_arg(a.root).name if a.root else None
+    rows = _collect_queue_rows(scope, root_filter)
+    if a.present or a.sections:
+        return _render_queue_present(rows, a.sections)
+    print(json.dumps(rows))
+    return 0
+
+
+def _collect_queue_rows(
+    scope: Optional[str], root_filter: Optional[str]
+) -> list[QueueRow]:
+    """Active-plan rows in queue-list order (repos grouped, newest-first)."""
     rows: list[QueueRow] = []
     for root, repo_entry in roots.iter_repo_dirs():
         if scope is not None and repo_entry.name != scope:
@@ -1624,7 +1646,111 @@ def cmd_queue_list(args) -> int:
             keyed.append((plan_recency_key(meta, plan.name), row))
         keyed.sort(key=lambda kr: kr[0], reverse=True)
         rows.extend(row for _, row in keyed)
-    print(json.dumps(rows))
+    return rows
+
+
+_QUEUE_NUMBERED: tuple[tuple[str, str], ...] = (
+    ("queued", "Queued"),
+    ("needs-agent", "Needs an Agent"),
+    ("available", "Available"),
+)
+_QUEUE_PROSE: tuple[tuple[str, str], ...] = (
+    ("in-flight", "In flight (in-progress)"),
+    ("in-review", "In review (in-review)"),
+)
+_QUEUE_SECTION_IDS: frozenset[str] = frozenset(
+    key for key, _ in _QUEUE_NUMBERED + _QUEUE_PROSE
+)
+_QUEUE_DEFAULT_SECTIONS: tuple[str, ...] = tuple(
+    key for key, _ in _QUEUE_NUMBERED + _QUEUE_PROSE
+)
+
+
+def _queue_section(row: QueueRow) -> str:
+    """Which present group a queue row belongs to."""
+    status = row["status"] or "backlog"
+    if status == "todo":
+        return "queued" if row["agent"] else "needs-agent"
+    if status == "in-progress":
+        return "in-flight"
+    if status == "in-review":
+        return "in-review"
+    return "available"
+
+
+def _parse_queue_sections(raw: Optional[str]) -> list[str]:
+    """Split and validate ``--sections``. Unknown names exit 2."""
+    if not raw:
+        return list(_QUEUE_DEFAULT_SECTIONS)
+    wanted = [s.strip().lower() for s in raw.split(",") if s.strip()]
+    unknown = [s for s in wanted if s not in _QUEUE_SECTION_IDS]
+    if unknown:
+        raise PlanKeeperCliError(
+            "unknown queue section: " + ", ".join(unknown),
+            2,
+        )
+    return wanted
+
+
+def _queue_label(row: QueueRow, multi_root: bool) -> str:
+    """Repo column: ``root/repo`` when the listing spans more than one root."""
+    if multi_root:
+        return f"{row['root']}/{row['repo']}"
+    return row["repo"]
+
+
+def _queue_actionable_line(row: QueueRow, multi_root: bool) -> str:
+    """One numbered crew row: ``repo · file · agent`` plus a blocked marker."""
+    agent = row["agent"] or "(no agent)"
+    line = f"{_queue_label(row, multi_root)} · {row['file']} · {agent}"
+    if row["blocked"]:
+        line += " ⏸ blocked by " + ", ".join(row["blockedBy"])
+    return line
+
+
+def _render_queue_present(rows: list[QueueRow], raw_sections: Optional[str]) -> int:
+    """Print the plan-crew CommonMark inventory. Empty groups are omitted."""
+    wanted = _parse_queue_sections(raw_sections)
+    wanted_set = set(wanted)
+    multi_root = len({row["root"] for row in rows}) > 1
+    buckets: dict[str, list[QueueRow]] = {key: [] for key in _QUEUE_SECTION_IDS}
+    for row in rows:
+        section = _queue_section(row)
+        if section in wanted_set:
+            buckets[section].append(row)
+
+    n = 1
+    printed = False
+    heading_by_id = {key: title for key, title in _QUEUE_NUMBERED}
+    for key in wanted:
+        if key not in heading_by_id:
+            continue
+        group = buckets[key]
+        if not group:
+            continue
+        if printed:
+            print()
+        print(f"## {heading_by_id[key]}")
+        print()
+        for row in group:
+            print(f"{n}. {_queue_actionable_line(row, multi_root)}")
+            n += 1
+        printed = True
+
+    prose_by_id = {key: label for key, label in _QUEUE_PROSE}
+    for key in wanted:
+        if key not in prose_by_id:
+            continue
+        group = buckets[key]
+        if not group:
+            continue
+        if printed:
+            print()
+        names = ", ".join(
+            f"{_queue_label(row, multi_root)}/{row['file']}" for row in group
+        )
+        print(f"{prose_by_id[key]}: {names} (read-only)")
+        printed = True
     return 0
 
 
@@ -2254,6 +2380,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_queue_list.add_argument(
         "--root",
         help="narrow the queue to one registered root (default: union every root)",
+    )
+    p_queue_list.add_argument(
+        "--present",
+        action="store_true",
+        help=(
+            "print a CommonMark queue (## Queued / Needs an Agent / Available; "
+            "in-flight and in-review as unnumbered prose). Default is JSON."
+        ),
+    )
+    p_queue_list.add_argument(
+        "--sections",
+        help=(
+            "comma-separated queue groups to print as CommonMark: queued, "
+            "needs-agent, available, in-flight, in-review. Implies --present."
+        ),
     )
 
     p_queue_add = crew_queue_sub.add_parser(
