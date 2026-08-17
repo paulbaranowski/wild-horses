@@ -162,7 +162,9 @@ parsed row rather than relying on the cwd.
 
 **Multiple roots:** when a numbered row starts with `root/repo`, pass `--root <root>` on that
 `add`/`drop` call. Without it, a repo that lives in two roots resolves against the default root.
-An unprefixed row is the default root (or a single-root install); omit `--root`.
+An unprefixed row is the default root, a single-root install, or a `--root`-narrowed list.
+Omit `--root` for the first two. If the list used `--root <name>`, pass that same `--root`
+on add/drop even when the row has no prefix.
 
 ### 5. Re-show the queue
 
