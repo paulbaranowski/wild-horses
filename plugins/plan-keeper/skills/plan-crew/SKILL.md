@@ -51,6 +51,7 @@ each repo's selections with one call per direction.
 - **Default — current repo.** Run the bare `crew queue list`. The CLI derives `<repo>` from the cwd's git remote (or `basename $PWD`) exactly like every other skill — see [../../repo-derivation.md](../../repo-derivation.md). This is the right scope whenever the user just says "show the queue" / "manage the crew queue" without naming a repo or asking for everything.
 - **All repos — `--all`.** When the user asks for the whole tree — "all repos", "every repo", "across repos", "everything", "the full queue" — run `crew queue list --all`.
 - **A specific other repo — `--repo <name>`.** When the user names a repo — "the queue for `herds`", "show `wild-horses`'s plans" — pass `--repo <name>` (the CLI normalizes it like any override).
+- **One plan root: `--root <name>`.** When the user names a configured root ("just personal"), add `--root <name>` to the list call. Combine it with any of the repo scopes above.
 
 `--all` and `--repo` are mutually exclusive; the CLI rejects passing both. Whichever scope you read in step 1 is the scope you mutate in step 4 — promote/dequeue only ever act on plans the user numbered from that listing.
 
