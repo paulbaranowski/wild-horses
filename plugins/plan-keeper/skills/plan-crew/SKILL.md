@@ -60,7 +60,7 @@ Follow these steps in order. Do not skip the confirmation step.
 
 ### 1. Show the queue
 
-Pick the scope first (see [Choosing the scope](#choosing-the-scope)), then run the matching command. The default — the current repo — is the bare command. If the user names a configured root (for example "just personal"), add `--root <name>`:
+Pick the scope first (see [Choosing the scope](#choosing-the-scope)), then run the matching command. The default (the current repo) is the bare command. If the user names a configured root (for example "just personal"), add `--root <name>`:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue list --present
