@@ -150,12 +150,19 @@ class TestCrossRootReads(RootTestCase):
         self._save("--topic", "Work item", "--override", "work-repo")
         self._save("--topic", "Home item", "--override", "home-repo", "--root", "personal")
 
-    def test_list_all_labels_root_when_multiple(self) -> None:
+    def test_list_all_labels_only_non_default_root(self) -> None:
         r = run_cli("list", "--all-repos", home=self.home, cwd=self.cwd)
         self.assertEqual(r.returncode, 0, r.stderr)
         lines = set(r.stdout.split())
-        self.assertIn(f"default/work-repo/{DATE}-work-item.md", lines)
+        self.assertIn(f"work-repo/{DATE}-work-item.md", lines)
         self.assertIn(f"personal/home-repo/{DATE}-home-item.md", lines)
+        self.assertNotIn(f"default/work-repo/{DATE}-work-item.md", lines)
+
+    def test_list_single_repo_omits_default_root_prefix(self) -> None:
+        r = run_cli("list", "--override", "work-repo",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), f"{DATE}-work-item.md")
 
     def test_list_root_filter_drops_label_and_narrows(self) -> None:
         r = run_cli("list", "--all-repos", "--root", "personal",
@@ -165,11 +172,64 @@ class TestCrossRootReads(RootTestCase):
         # Only personal's plan, and no 'root/' label (single root shown).
         self.assertEqual(out, f"home-repo/{DATE}-home-item.md")
 
-    def test_repo_list_unions_and_labels(self) -> None:
+    def test_repo_list_labels_only_non_default_root(self) -> None:
         r = run_cli("repo", "list", home=self.home, cwd=self.cwd)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("default/work-repo: active=1", r.stdout)
+        self.assertIn("work-repo: active=1", r.stdout)
+        self.assertNotIn("default/work-repo:", r.stdout)
         self.assertIn("personal/home-repo: active=1", r.stdout)
+
+    def test_set_default_moves_the_unlabeled_set(self) -> None:
+        # The unlabeled set follows the default flag, not the name "default".
+        r = run_cli("root", "set-default", "personal",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        listed = run_cli("list", "--all-repos", home=self.home, cwd=self.cwd)
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        lines = set(listed.stdout.split())
+        self.assertIn(f"home-repo/{DATE}-home-item.md", lines)
+        self.assertIn(f"default/work-repo/{DATE}-work-item.md", lines)
+        self.assertNotIn(f"personal/home-repo/{DATE}-home-item.md", lines)
+
+    def test_queue_present_labels_only_non_default_root(self) -> None:
+        r = run_cli("crew", "queue", "list", "--all", "--present",
+                    home=self.home, cwd=self.cwd)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(
+            f"1. work-repo · {DATE}-work-item.md · (no agent)",
+            r.stdout,
+        )
+        self.assertIn(
+            f"2. personal/home-repo · {DATE}-home-item.md · (no agent)",
+            r.stdout,
+        )
+        self.assertNotIn("default/work-repo", r.stdout)
+
+    def test_queue_present_prefixes_non_default_even_when_alone(self) -> None:
+        # Two roots configured; this listing only has personal rows.
+        # Unprefixed still means the default root, so personal stays labelled.
+        r = run_cli(
+            "crew", "queue", "list", "--present", "--repo", "home-repo",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(
+            f"personal/home-repo · {DATE}-home-item.md · (no agent)",
+            r.stdout,
+        )
+        self.assertNotIn("1. home-repo ·", r.stdout)
+
+    def test_queue_present_root_filter_drops_label(self) -> None:
+        r = run_cli(
+            "crew", "queue", "list", "--present", "--all", "--root", "personal",
+            home=self.home, cwd=self.cwd,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(
+            f"home-repo · {DATE}-home-item.md · (no agent)",
+            r.stdout,
+        )
+        self.assertNotIn("personal/home-repo", r.stdout)
 
     def test_queue_list_carries_root_and_unions(self) -> None:
         r = run_cli("crew", "queue", "list", "--all", home=self.home, cwd=self.cwd)

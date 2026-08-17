@@ -604,12 +604,14 @@ def _roots_to_show(root_arg: Optional[str]) -> list[roots.Root]:
 
 
 def _labelled(root: "roots.Root", tail: str, label: bool) -> str:
-    """Prefix ``tail`` with ``<root>/`` when a listing spans multiple roots.
+    """Prefix ``tail`` with ``<root>/`` for a non-default root in a multi-root list.
 
-    Gating on ``label`` (true only when >1 root is being shown) is what keeps a
-    single-root install's output byte-identical to the pre-multi-root tool.
+    ``label`` is true only when the listing spans more than one root, so a
+    single-root install stays byte-identical to the pre-multi-root tool. The
+    default root stays unlabeled even then: an unprefixed row is the default,
+    and the other root's name already marks the exception.
     """
-    return f"{root.name}/{tail}" if label else tail
+    return f"{root.name}/{tail}" if label and not root.default else tail
 
 
 def _all_repos_items(
@@ -620,8 +622,8 @@ def _all_repos_items(
     Roots are visited in registry order, repos alphabetically within each, plans
     newest-first within each repo (list_plans order). Display name is
     ``[root/]repo/filename`` so every line is self-labeling; the ``root/`` prefix
-    appears only when the listing spans multiple roots. Repos with no plans in
-    ``state`` contribute nothing.
+    appears only for a non-default root when the listing spans multiple roots.
+    Repos with no plans in ``state`` contribute nothing.
     """
     items: list[tuple[str, Path]] = []
     for root in roots_to_show:
@@ -641,8 +643,9 @@ def _single_repo_items(
     """The (display_name, path) list for one repo, unioned across shown roots.
 
     A repo can live in several roots (a deliberate straddle); this surfaces all
-    of them, newest-first within each root, labelled ``[root/]filename`` so two
-    same-named plans from different roots are distinguishable in the picker.
+    of them, newest-first within each root, labelled ``[root/]filename`` for
+    a non-default root so two same-named plans from different roots stay
+    distinguishable in the picker.
     """
     items: list[tuple[str, Path]] = []
     for root in roots_to_show:
@@ -658,8 +661,8 @@ def cmd_list(args) -> int:
     # nonexistent ~/plans/<cwd-basename>/ and print nothing. --all-repos and
     # --override are mutually exclusive — argparse rejects the combination
     # (exit 2) before we get here. Reads always union across roots; --root
-    # narrows the union to one, and the root label is shown only when the
-    # displayed union spans more than one root.
+    # narrows the union to one, and a non-default root is labelled only when
+    # the displayed union spans more than one root.
     #
     # `repo_from_git_aliased` (not the bare `_repo_from_git`) is the git-origin
     # step: from a monorepo-subpath-aliased cwd it resolves to the alias bucket,
@@ -706,9 +709,10 @@ def cmd_repo_list(args) -> int:
             1 for p in d.iterdir() if p.is_file() and not p.name.startswith(".")
         )
 
-    # Union every root (roots.iter_repo_dirs, registry order then alphabetical),
-    # labelling each repo `root/repo` only when more than one root exists so a
-    # single-root install's output is unchanged.
+    # Union every root (roots.iter_repo_dirs, registry order then alphabetical).
+    # Label a repo `root/repo` only when more than one root exists AND this
+    # root is not the default, so a single-root install's output is unchanged
+    # and an unprefixed name is the default root.
     label = roots.multiple_roots()
     for root, entry in roots.iter_repo_dirs():
         active = _count(entry)
@@ -723,7 +727,7 @@ def cmd_repo_list(args) -> int:
             parts.append(f"done={done}")
         if deferred:
             parts.append(f"deferred={deferred}")
-        name = f"{root.name}/{entry.name}" if label else entry.name
+        name = _labelled(root, entry.name, label)
         print(f"{name}: {' '.join(parts)}")
     return 0
 
@@ -1602,7 +1606,12 @@ def cmd_queue_list(args) -> int:
     root_filter = roots.resolve_root_arg(a.root).name if a.root else None
     rows = _collect_queue_rows(scope, root_filter)
     if a.present or a.sections:
-        return _render_queue_present(rows, a.sections)
+        # Same first-half gate as list: configured roots, unless --root
+        # narrowed the view to one. Result-set span is not the test:
+        # a personal-only listing still needs the personal/ prefix so
+        # unprefixed keeps meaning "the default root".
+        label = roots.multiple_roots() and root_filter is None
+        return _render_queue_present(rows, a.sections, label)
     print(json.dumps(rows))
     return 0
 
@@ -1702,27 +1711,35 @@ def _parse_queue_sections(raw: Optional[str]) -> list[str]:
     return wanted
 
 
-def _queue_label(row: QueueRow, multi_root: bool) -> str:
-    """Repo column: ``root/repo`` when the listing spans more than one root."""
-    if multi_root:
-        return f"{row['root']}/{row['repo']}"
-    return row["repo"]
+def _queue_label(
+    row: QueueRow,
+    multi_root: bool,
+    root_by_name: dict[str, "roots.Root"],
+) -> str:
+    """Repo column: ``root/repo`` only for a non-default root in a multi-root list."""
+    return _labelled(root_by_name[row["root"]], row["repo"], multi_root)
 
 
-def _queue_actionable_line(row: QueueRow, multi_root: bool) -> str:
+def _queue_actionable_line(
+    row: QueueRow,
+    multi_root: bool,
+    root_by_name: dict[str, "roots.Root"],
+) -> str:
     """One numbered crew row: ``repo · file · agent`` plus a blocked marker."""
     agent = row["agent"] or "(no agent)"
-    line = f"{_queue_label(row, multi_root)} · {row['file']} · {agent}"
+    line = f"{_queue_label(row, multi_root, root_by_name)} · {row['file']} · {agent}"
     if row["blocked"]:
         line += " ⏸ blocked by " + ", ".join(row["blockedBy"])
     return line
 
 
-def _render_queue_present(rows: list[QueueRow], raw_sections: Optional[str]) -> int:
+def _render_queue_present(
+    rows: list[QueueRow], raw_sections: Optional[str], label: bool
+) -> int:
     """Print the plan-crew CommonMark inventory. Empty groups are omitted."""
     wanted = _parse_queue_sections(raw_sections)
     wanted_set = set(wanted)
-    multi_root = len({row["root"] for row in rows}) > 1
+    root_by_name = {r.name: r for r in roots.load_roots()}
     buckets: dict[str, list[QueueRow]] = {key: [] for key in _QUEUE_SECTION_IDS}
     for row in rows:
         section = _queue_section(row)
@@ -1743,7 +1760,7 @@ def _render_queue_present(rows: list[QueueRow], raw_sections: Optional[str]) -> 
         print(f"## {heading_by_id[key]}")
         print()
         for row in group:
-            print(f"{n}. {_queue_actionable_line(row, multi_root)}")
+            print(f"{n}. {_queue_actionable_line(row, label, root_by_name)}")
             n += 1
         printed = True
 
@@ -1757,7 +1774,8 @@ def _render_queue_present(rows: list[QueueRow], raw_sections: Optional[str]) -> 
         if printed:
             print()
         names = ", ".join(
-            f"{_queue_label(row, multi_root)}/{row['file']}" for row in group
+            f"{_queue_label(row, label, root_by_name)}/{row['file']}"
+            for row in group
         )
         print(f"{prose_by_id[key]}: {names} (read-only)")
         printed = True
@@ -2120,8 +2138,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_list.add_argument(
         "--root",
         help="narrow the listing to one registered root (default: union every "
-             "root). Plans are labelled 'root/...' whenever the listing spans "
-             "more than one root.",
+             "root). A non-default root is labelled 'root/...' when the "
+             "listing spans more than one root.",
     )
     list_view = p_list.add_mutually_exclusive_group()
     list_view.add_argument(

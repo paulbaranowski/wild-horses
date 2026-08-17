@@ -51,6 +51,7 @@ each repo's selections with one call per direction.
 - **Default — current repo.** Run the bare `crew queue list`. The CLI derives `<repo>` from the cwd's git remote (or `basename $PWD`) exactly like every other skill — see [../../repo-derivation.md](../../repo-derivation.md). This is the right scope whenever the user just says "show the queue" / "manage the crew queue" without naming a repo or asking for everything.
 - **All repos — `--all`.** When the user asks for the whole tree — "all repos", "every repo", "across repos", "everything", "the full queue" — run `crew queue list --all`.
 - **A specific other repo — `--repo <name>`.** When the user names a repo — "the queue for `herds`", "show `wild-horses`'s plans" — pass `--repo <name>` (the CLI normalizes it like any override).
+- **One plan root: `--root <name>`.** When the user names a configured root ("just personal"), add `--root <name>` to the list call. Combine it with any of the repo scopes above.
 
 `--all` and `--repo` are mutually exclusive; the CLI rejects passing both. Whichever scope you read in step 1 is the scope you mutate in step 4 — promote/dequeue only ever act on plans the user numbered from that listing.
 
@@ -60,7 +61,7 @@ Follow these steps in order. Do not skip the confirmation step.
 
 ### 1. Show the queue
 
-Pick the scope first (see [Choosing the scope](#choosing-the-scope)), then run the matching command. The default — the current repo — is the bare command:
+Pick the scope first (see [Choosing the scope](#choosing-the-scope)), then run the matching command. The default (the current repo) is the bare command. If the user names a configured root (for example "just personal"), add `--root <name>`:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" crew queue list --present
@@ -79,7 +80,7 @@ Paste stdout as-is. Do not rebuild the headings or rows. You may add one scope l
 
 The CLI numbers **Queued** (todo, has Agent), **Needs an Agent** (todo, no Agent), and **Available** (backlog or empty). In flight and In review are unnumbered prose. Empty groups are omitted. A blocked plan keeps its number and gets `⏸ blocked by <ids>`. `--sections queued,needs-agent,available,in-flight,in-review` selects groups.
 
-Without `--present`, `crew queue list` still prints JSON `{root, repo, file, status, agent, blocked, blockedBy}`. Use that only when you need the machine rows. For pick mapping, parse the numbered `repo · file · agent` line. If the first field contains `/`, it is `root/repo`.
+Without `--present`, `crew queue list` still prints JSON `{root, repo, file, status, agent, blocked, blockedBy}`. Use that only when you need the machine rows. For pick mapping, parse the numbered `repo · file · agent` line. If the first field contains `/`, it is `root/repo` (a non-default root). An unprefixed first field is the default root unless the list used `--root <name>`. Then it is that selected root.
 
 Example CLI stdout:
 
@@ -106,7 +107,7 @@ If stdout is empty, tell the user the current scope has no plans (for a current-
 ### 2. Parse the user's actions
 
 The user replies with `promote <numbers>` and/or `dequeue <numbers>` (either or both, any order). Map
-each number back to its `{root, repo, file}` from the present stdout (`repo · file · agent`, or `root/repo · file · agent` when more than one root appears), then **group the selections by
+each number back to its `{root, repo, file}` from the present stdout (`repo · file · agent`, or `root/repo · file · agent` when the row is in a non-default root), then **group the selections by
 `(root, repo)` and direction**. `add` and `drop` each take bare filenames scoped to one `--repo` (and `--root` when the listing spans roots), so each `(root, repo)` pair gets its own call per direction. (For the default current-repo scope there is only one repo, so it's a
 single call each way.)
 
@@ -162,7 +163,9 @@ parsed row rather than relying on the cwd.
 
 **Multiple roots:** when a numbered row starts with `root/repo`, pass `--root <root>` on that
 `add`/`drop` call. Without it, a repo that lives in two roots resolves against the default root.
-On a single-root install the row has no root prefix, so omit `--root`.
+An unprefixed row is the default root, a single-root install, or a `--root`-narrowed list.
+Omit `--root` for the first two. If the list used `--root <name>`, pass that same `--root`
+on add/drop even when the row has no prefix.
 
 ### 5. Re-show the queue
 

@@ -132,7 +132,7 @@ By default there is one root, `~/plans/`. You can register more (say a `work` tr
 
 The division of labor is asymmetric:
 
-- **Reads union across every root.** `plan-do`, `plan-list`, the queue, and ticket resolution show plans from all roots at once; when more than one root exists, each plan is labelled `root/…`. Narrow to one with `--root <name>`.
+- **Reads union across every root.** `plan-do`, `plan-list`, the queue, and ticket resolution show plans from all roots at once; when more than one root exists, a plan in a non-default root is labelled `root/…`. Narrow to one with `--root <name>`.
 - **Only saves pick a root**, by routing (never prompting): the one root the repo already lives in, else the default root (this also covers a repo that straddles two roots). Name a root explicitly with `--root`, and relocate a mis-routed plan with `pk move --file <path> --root <dest>` (it preserves the plan's id, its `done/`/`deferred/` subdir, and any paired `.json`/`.md`).
 
 Roots must be disjoint subtrees - `root add` rejects a path that nests inside or contains an existing root, so plans can never be double-counted. See [`repo-derivation.md`](repo-derivation.md) for the full root-selection rules.
@@ -171,7 +171,7 @@ See [Multiple plan roots](#multiple-plan-roots):
 
 #### Listing plans
 
-- `list [--override NAME | --all-repos] [--root NAME] [--state active|done|deferred] [--status <csv> | --group]` - list plans newest-first, unioned across roots. `--root` narrows to one root; plans are labelled `root/…` whenever the listing spans more than one. `--status in-progress,todo` filters to those states and tiers the output; `--group` clusters by project along the `idea → exec-plan` Kind pipeline.
+- `list [--override NAME | --all-repos] [--root NAME] [--state active|done|deferred] [--status <csv> | --group]` - list plans newest-first, unioned across roots. `--root` narrows to one root; a non-default root is labelled `root/…` when the listing spans more than one. `--status in-progress,todo` filters to those states and tiers the output; `--group` clusters by project along the `idea → exec-plan` Kind pipeline.
 
 #### Saving plans
 

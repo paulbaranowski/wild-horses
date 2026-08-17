@@ -50,7 +50,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --sections todo,
 
 **Run this command every time you reach step 1 — including when you've already listed the plans earlier in this same conversation.** The plan set changes between turns (a plan saved mid-conversation, a status flipped by another skill), so a list you printed a moment ago may already be stale. Never reproduce a previously shown list from memory; the numbered list you display must come from the output of the command you _just_ ran.
 
-Add `--override <name>` if you found one. The CLI handles repo derivation. With `--sections todo,backlog` it keeps only not-yet-started plans (a missing/blank `Status` counts as `backlog`), prints CommonMark groups in that order, and numbers rows in one continuous count. Any active plans it excluded (in-progress, in-review, …) are summarized on **stderr** as a `note: N other active plan(s) hidden (...)` line.
+Add `--override <name>` if you found one. The CLI handles repo derivation. If the user names a configured root (for example "just personal"), pass `--root <name>` on the list call. With `--sections todo,backlog` it keeps only not-yet-started plans (a missing/blank `Status` counts as `backlog`), prints CommonMark groups in that order, and numbers rows in one continuous count. Any active plans it excluded (in-progress, in-review, …) are summarized on **stderr** as a `note: N other active plan(s) hidden (...)` line.
 
 **If stdout is empty:**
 
@@ -65,7 +65,7 @@ Add `--override <name>` if you found one. The CLI handles repo derivation. With 
 
 **If stdout has lines**, paste them as-is. Do not rebuild the headings or rows. Ask which one. If stderr carried a hidden-plans note, mention it below the list. Do not read or classify any files yet. Classification only happens on the picked plan.
 
-**Multiple roots:** the list already unions every plan root. When more than one root is configured, each filename is prefixed `root/...` (e.g. `personal/2026-…-foo.md`); keep that prefix when you resolve the pick, so a plan in `personal` isn't confused with a same-named one in `default`. If you passed `--root` on the list call, keep that root even when the row has no prefix.
+**Multiple roots:** the list already unions every plan root. When more than one root is configured, a plan in a **non-default** root is prefixed `root/...` (e.g. `personal/2026-…-foo.md`). Keep that prefix when you resolve the pick. An unprefixed row is the default root. If you passed `--root` on the list call, keep that root even when the row has no prefix.
 
 Example (CLI stdout, plus a one-line lead-in and the pick prompt):
 
@@ -92,8 +92,11 @@ The user replies with a number or a filename fragment. Resolve to a single filen
 
 Resolve the picked token to a full path, then use the `Read` tool on it. Two cases:
 
-- **No `root/` prefix** (single-root install, or a `--root`-narrowed list): the path is `~/plans/<repo>/<filename>` - the repo dir from step 1 plus the picked filename.
-- **`root/` prefix present** (multi-root install): the prefix names the plan's root, and the path is `<root-path>/<repo>/<filename>`. Map the root name to its path with `root list` (`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" root list`, a JSON array of `{name, path, default}`). Never rebuild the path as `~/plans/<repo>/<filename>` - that silently reads the same-named plan from the wrong tree.
+- **`root/` prefix present**: the prefix names the plan's root. Map it with `root list` (`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" root list`, a JSON array of `{name, path, default}`). Path is `<root-path>/<repo>/<filename>`.
+- **No `root/` prefix and you passed `--root <name>` on the list call**: use that root's path from `root list`. Path is `<that-path>/<repo>/<filename>`.
+- **No `root/` prefix otherwise** (single-root install, or a default-root plan in a multi-root union): use the entry with `"default": true` from `root list`. Path is `<default-root-path>/<repo>/<filename>`. Do not hard-code `~/plans`.
+
+Never rebuild the path as `~/plans/<repo>/<filename>`. That silently reads the same-named plan from the wrong tree. Keep the resolved absolute path for step 7.
 
 The content stays in conversation context for the rest of this skill and for whatever skill is invoked next.
 
@@ -209,16 +212,16 @@ Once the user has confirmed a route (any next skill — `brainstorming`, `writin
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set \
-  --file ~/plans/<repo>/<filename> --status in-progress --agent ''
+  --file <absolute-path-from-step-3> --status in-progress --agent ''
 ```
 
-`--agent ''` (empty value) removes the `Agent: <name>` tag entirely. The `Agent` tag is the groundcrew dispatch signal; once you start a plan locally, you are the one working it, so the tag is cleared unconditionally — even if it named a non-`claude` agent. `plan-crew` is the only path that _automatically writes_ the tag (on promote to the queue); plan-do only ever removes it (`plan-update` can still set it on explicit user request). `--file` takes the **full path** (no `--override` here — `file-meta` resolves the path directly). `--ticket <id>` is an alternative to `--file`: it locates the plan by any of its id fields (`Plan-keeper Ticket` / `Linear Ticket` / `Jira Ticket`) across all repos (exactly one of the two is required). Do this only when you are about to hand off to a skill. **Do not** mark in-progress (or clear Agent) on the manual-steer path (the user hasn't committed to working it through a skill yet) or before the user has confirmed.
+`--agent ''` (empty value) removes the `Agent: <name>` tag entirely. The `Agent` tag is the groundcrew dispatch signal; once you start a plan locally, you are the one working it, so the tag is cleared unconditionally, even if it named a non-`claude` agent. `plan-crew` is the only path that _automatically writes_ the tag (on promote to the queue); plan-do only ever removes it (`plan-update` can still set it on explicit user request). `--file` takes the **full path from step 3** (no `--override` here; `file-meta` resolves the path directly). `--ticket <id>` is an alternative to `--file`: it locates the plan by any of its id fields (`Plan-keeper Ticket` / `Linear Ticket` / `Jira Ticket`) across all repos (exactly one of the two is required). Do this only when you are about to hand off to a skill. **Do not** mark in-progress (or clear Agent) on the manual-steer path (the user hasn't committed to working it through a skill yet) or before the user has confirmed.
 
 **Then** use the `Skill` tool to invoke the chosen skill. The plan content is already in conversation context from step 3, so the invoked skill has full access — no explicit handoff payload is needed.
 
 **Handoff specifics per engine:**
 
-- **`autonomous:autonomous`** — the plan read in step 3 _is_ the Task. autonomous accepts an in-context plan as a task source (its input-resolution step 3), so no issue URL is needed — the plan content is the authoritative spec. You may also hand it the plan's file path (`~/plans/<repo>/<filename>`) explicitly. Do not look up or pass any `Ticket:` frontmatter field — the plan is the source of truth.
+- **`autonomous:autonomous`**: the plan read in step 3 _is_ the Task. autonomous accepts an in-context plan as a task source (its input-resolution step 3), so no issue URL is needed. The plan content is the authoritative spec. You may also hand it the absolute path from step 3. Do not look up or pass any `Ticket:` frontmatter field. The plan is the source of truth.
 - **`harness:task-list-builder`** — invoke it to convert the plan into the structured JSON task list; it hands off to `harness:task-list-runner` to execute the tasks.
 - **`superpowers:executing-plans`** — invoke directly; the plan in context is the implementation plan it executes.
 - **`superpowers:brainstorming` / `superpowers:writing-plans`** — invoke directly (the idea / spec paths).

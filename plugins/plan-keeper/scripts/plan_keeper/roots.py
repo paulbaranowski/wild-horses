@@ -34,7 +34,8 @@ exactly one implicit root is returned: the default root at
 ``storage.PLAN_ROOT``, named ``DEFAULT_ROOT_NAME``. Every read then unions "all
 roots" == ``[~/plans]`` and every save routes to that one default, so behavior
 is byte-identical to the pre-multi-root single-tree tool. The label a listing
-shows per plan (see ``multiple_roots``) only appears once a second root exists.
+shows per plan (see ``multiple_roots``) only appears on a non-default root
+once a second root exists.
 """
 import json
 from dataclasses import dataclass
@@ -60,8 +61,9 @@ class Root:
     """One registered plan tree: a display ``name`` and its absolute ``path``.
 
     ``default`` marks the single root that save routes to when a repo lives in
-    zero roots (or straddles more than one). Exactly one ``Root`` in a loaded
-    registry carries ``default=True`` - ``load_roots`` enforces that invariant.
+    zero roots (or straddles more than one). Listings also treat this root as
+    the unlabeled set. Exactly one ``Root`` in a loaded registry carries
+    ``default=True`` - ``load_roots`` enforces that invariant.
     """
 
     name: str
@@ -145,8 +147,12 @@ def default_root() -> Root:
 
 
 def multiple_roots() -> bool:
-    """True when more than one root is configured. Gates the per-plan ``[root]``
-    label in listings: a single-root user sees byte-identical output to today."""
+    """True when more than one root is configured.
+
+    Listings use this as the first half of the prefix test. The second
+    half lives in the listing helper: skip the prefix on the default root.
+    A single-root user sees byte-identical output to today.
+    """
     return len(load_roots()) > 1
 
 

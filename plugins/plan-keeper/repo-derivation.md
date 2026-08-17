@@ -77,7 +77,7 @@ A `<repo>` folder lives under a **root** tree. Most installs have exactly one ro
 
 The division of labor is deliberate and asymmetric:
 
-- **Reads never need a root.** `plan-do`, `plan-list`, the queue, and ticket resolution **union across every root** automatically. When more than one root exists, each plan is labelled `root/...` so two same-named plans from different trees stay distinguishable. Never ask the user which root to read from; show them all. A user who wants to narrow can pass `--root <name>`.
+- **Reads never need a root.** `plan-do`, `plan-list`, the queue, and ticket resolution **union across every root** automatically. When more than one root exists, a plan in a non-default root is labelled `root/...`. That keeps two same-named plans from different trees distinct. An unprefixed row is the default root. Never ask the user which root to read from; show them all. A user who wants to narrow can pass `--root <name>`.
 - **Only `plan-save` picks a root**, and it does so by routing, not by asking:
   1. If the repo already has a folder in **exactly one** root, save there.
   2. If the repo is new to **every** root, save to the **default** root.
