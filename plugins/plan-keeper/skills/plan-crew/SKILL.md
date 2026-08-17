@@ -79,7 +79,7 @@ Paste stdout as-is. Do not rebuild the headings or rows. You may add one scope l
 
 The CLI numbers **Queued** (todo, has Agent), **Needs an Agent** (todo, no Agent), and **Available** (backlog or empty). In flight and In review are unnumbered prose. Empty groups are omitted. A blocked plan keeps its number and gets `⏸ blocked by <ids>`. `--sections queued,needs-agent,available,in-flight,in-review` selects groups.
 
-Without `--present`, `crew queue list` still prints JSON `{root, repo, file, status, agent, blocked, blockedBy}`. Use that only when you need the machine rows. For pick mapping, parse the numbered `repo · file · agent` line. If the first field contains `/`, it is `root/repo`.
+Without `--present`, `crew queue list` still prints JSON `{root, repo, file, status, agent, blocked, blockedBy}`. Use that only when you need the machine rows. For pick mapping, parse the numbered `repo · file · agent` line. If the first field contains `/`, it is `root/repo` (a non-default root). An unprefixed first field is the default root.
 
 Example CLI stdout:
 
@@ -106,7 +106,7 @@ If stdout is empty, tell the user the current scope has no plans (for a current-
 ### 2. Parse the user's actions
 
 The user replies with `promote <numbers>` and/or `dequeue <numbers>` (either or both, any order). Map
-each number back to its `{root, repo, file}` from the present stdout (`repo · file · agent`, or `root/repo · file · agent` when more than one root appears), then **group the selections by
+each number back to its `{root, repo, file}` from the present stdout (`repo · file · agent`, or `root/repo · file · agent` when the row is in a non-default root), then **group the selections by
 `(root, repo)` and direction**. `add` and `drop` each take bare filenames scoped to one `--repo` (and `--root` when the listing spans roots), so each `(root, repo)` pair gets its own call per direction. (For the default current-repo scope there is only one repo, so it's a
 single call each way.)
 
@@ -162,7 +162,7 @@ parsed row rather than relying on the cwd.
 
 **Multiple roots:** when a numbered row starts with `root/repo`, pass `--root <root>` on that
 `add`/`drop` call. Without it, a repo that lives in two roots resolves against the default root.
-On a single-root install the row has no root prefix, so omit `--root`.
+An unprefixed row is the default root (or a single-root install); omit `--root`.
 
 ### 5. Re-show the queue
 

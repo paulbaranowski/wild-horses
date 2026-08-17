@@ -65,7 +65,7 @@ Add `--override <name>` if you found one. The CLI handles repo derivation. With 
 
 **If stdout has lines**, paste them as-is. Do not rebuild the headings or rows. Ask which one. If stderr carried a hidden-plans note, mention it below the list. Do not read or classify any files yet. Classification only happens on the picked plan.
 
-**Multiple roots:** the list already unions every plan root. When more than one root is configured, each filename is prefixed `root/...` (e.g. `personal/2026-…-foo.md`); keep that prefix when you resolve the pick, so a plan in `personal` isn't confused with a same-named one in `default`. If you passed `--root` on the list call, keep that root even when the row has no prefix.
+**Multiple roots:** the list already unions every plan root. When more than one root is configured, a plan in a **non-default** root is prefixed `root/...` (e.g. `personal/2026-…-foo.md`); keep that prefix when you resolve the pick. An unprefixed row is the default root. If you passed `--root` on the list call, keep that root even when the row has no prefix.
 
 Example (CLI stdout, plus a one-line lead-in and the pick prompt):
 
@@ -92,8 +92,8 @@ The user replies with a number or a filename fragment. Resolve to a single filen
 
 Resolve the picked token to a full path, then use the `Read` tool on it. Two cases:
 
-- **No `root/` prefix** (single-root install, or a `--root`-narrowed list): the path is `~/plans/<repo>/<filename>` - the repo dir from step 1 plus the picked filename.
-- **`root/` prefix present** (multi-root install): the prefix names the plan's root, and the path is `<root-path>/<repo>/<filename>`. Map the root name to its path with `root list` (`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" root list`, a JSON array of `{name, path, default}`). Never rebuild the path as `~/plans/<repo>/<filename>` - that silently reads the same-named plan from the wrong tree.
+- **No `root/` prefix** (single-root install, a `--root`-narrowed list, or a default-root plan): the path is `<default-root-path>/<repo>/<filename>`. Read the default root from `root list` (the entry with `"default": true`). Do not hard-code `~/plans`.
+- **`root/` prefix present**: the prefix names the plan's root, and the path is `<root-path>/<repo>/<filename>`. Map the root name to its path with `root list` (`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" root list`, a JSON array of `{name, path, default}`). Never rebuild the path as `~/plans/<repo>/<filename>` - that silently reads the same-named plan from the wrong tree.
 
 The content stays in conversation context for the rest of this skill and for whatever skill is invoked next.
 
