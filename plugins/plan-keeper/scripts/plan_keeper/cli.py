@@ -1607,7 +1607,7 @@ def cmd_queue_list(args) -> int:
     rows = _collect_queue_rows(scope, root_filter)
     if a.present or a.sections:
         # Same first-half gate as list: configured roots, unless --root
-        # narrowed the view to one. Result-set span is not the test —
+        # narrowed the view to one. Result-set span is not the test:
         # a personal-only listing still needs the personal/ prefix so
         # unprefixed keeps meaning "the default root".
         label = roots.multiple_roots() and root_filter is None

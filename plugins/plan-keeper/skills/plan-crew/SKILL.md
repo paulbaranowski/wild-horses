@@ -79,7 +79,7 @@ Paste stdout as-is. Do not rebuild the headings or rows. You may add one scope l
 
 The CLI numbers **Queued** (todo, has Agent), **Needs an Agent** (todo, no Agent), and **Available** (backlog or empty). In flight and In review are unnumbered prose. Empty groups are omitted. A blocked plan keeps its number and gets `⏸ blocked by <ids>`. `--sections queued,needs-agent,available,in-flight,in-review` selects groups.
 
-Without `--present`, `crew queue list` still prints JSON `{root, repo, file, status, agent, blocked, blockedBy}`. Use that only when you need the machine rows. For pick mapping, parse the numbered `repo · file · agent` line. If the first field contains `/`, it is `root/repo` (a non-default root). An unprefixed first field is the default root.
+Without `--present`, `crew queue list` still prints JSON `{root, repo, file, status, agent, blocked, blockedBy}`. Use that only when you need the machine rows. For pick mapping, parse the numbered `repo · file · agent` line. If the first field contains `/`, it is `root/repo` (a non-default root). An unprefixed first field is the default root unless the list used `--root <name>`. Then it is that selected root.
 
 Example CLI stdout:
 

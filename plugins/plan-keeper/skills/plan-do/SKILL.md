@@ -65,7 +65,7 @@ Add `--override <name>` if you found one. The CLI handles repo derivation. With 
 
 **If stdout has lines**, paste them as-is. Do not rebuild the headings or rows. Ask which one. If stderr carried a hidden-plans note, mention it below the list. Do not read or classify any files yet. Classification only happens on the picked plan.
 
-**Multiple roots:** the list already unions every plan root. When more than one root is configured, a plan in a **non-default** root is prefixed `root/...` (e.g. `personal/2026-…-foo.md`); keep that prefix when you resolve the pick. An unprefixed row is the default root. If you passed `--root` on the list call, keep that root even when the row has no prefix.
+**Multiple roots:** the list already unions every plan root. When more than one root is configured, a plan in a **non-default** root is prefixed `root/...` (e.g. `personal/2026-…-foo.md`). Keep that prefix when you resolve the pick. An unprefixed row is the default root. If you passed `--root` on the list call, keep that root even when the row has no prefix.
 
 Example (CLI stdout, plus a one-line lead-in and the pick prompt):
 
@@ -215,13 +215,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set \
   --file <absolute-path-from-step-3> --status in-progress --agent ''
 ```
 
-`--agent ''` (empty value) removes the `Agent: <name>` tag entirely. The `Agent` tag is the groundcrew dispatch signal; once you start a plan locally, you are the one working it, so the tag is cleared unconditionally — even if it named a non-`claude` agent. `plan-crew` is the only path that _automatically writes_ the tag (on promote to the queue); plan-do only ever removes it (`plan-update` can still set it on explicit user request). `--file` takes the **full path from step 3** (no `--override` here — `file-meta` resolves the path directly). `--ticket <id>` is an alternative to `--file`: it locates the plan by any of its id fields (`Plan-keeper Ticket` / `Linear Ticket` / `Jira Ticket`) across all repos (exactly one of the two is required). Do this only when you are about to hand off to a skill. **Do not** mark in-progress (or clear Agent) on the manual-steer path (the user hasn't committed to working it through a skill yet) or before the user has confirmed.
+`--agent ''` (empty value) removes the `Agent: <name>` tag entirely. The `Agent` tag is the groundcrew dispatch signal; once you start a plan locally, you are the one working it, so the tag is cleared unconditionally, even if it named a non-`claude` agent. `plan-crew` is the only path that _automatically writes_ the tag (on promote to the queue); plan-do only ever removes it (`plan-update` can still set it on explicit user request). `--file` takes the **full path from step 3** (no `--override` here; `file-meta` resolves the path directly). `--ticket <id>` is an alternative to `--file`: it locates the plan by any of its id fields (`Plan-keeper Ticket` / `Linear Ticket` / `Jira Ticket`) across all repos (exactly one of the two is required). Do this only when you are about to hand off to a skill. **Do not** mark in-progress (or clear Agent) on the manual-steer path (the user hasn't committed to working it through a skill yet) or before the user has confirmed.
 
 **Then** use the `Skill` tool to invoke the chosen skill. The plan content is already in conversation context from step 3, so the invoked skill has full access — no explicit handoff payload is needed.
 
 **Handoff specifics per engine:**
 
-- **`autonomous:autonomous`** — the plan read in step 3 _is_ the Task. autonomous accepts an in-context plan as a task source (its input-resolution step 3), so no issue URL is needed — the plan content is the authoritative spec. You may also hand it the absolute path from step 3. Do not look up or pass any `Ticket:` frontmatter field — the plan is the source of truth.
+- **`autonomous:autonomous`**: the plan read in step 3 _is_ the Task. autonomous accepts an in-context plan as a task source (its input-resolution step 3), so no issue URL is needed. The plan content is the authoritative spec. You may also hand it the absolute path from step 3. Do not look up or pass any `Ticket:` frontmatter field. The plan is the source of truth.
 - **`harness:task-list-builder`** — invoke it to convert the plan into the structured JSON task list; it hands off to `harness:task-list-runner` to execute the tasks.
 - **`superpowers:executing-plans`** — invoke directly; the plan in context is the implementation plan it executes.
 - **`superpowers:brainstorming` / `superpowers:writing-plans`** — invoke directly (the idea / spec paths).
