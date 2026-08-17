@@ -50,7 +50,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --sections todo,
 
 **Run this command every time you reach step 1 — including when you've already listed the plans earlier in this same conversation.** The plan set changes between turns (a plan saved mid-conversation, a status flipped by another skill), so a list you printed a moment ago may already be stale. Never reproduce a previously shown list from memory; the numbered list you display must come from the output of the command you _just_ ran.
 
-Add `--override <name>` if you found one. The CLI handles repo derivation. With `--sections todo,backlog` it keeps only not-yet-started plans (a missing/blank `Status` counts as `backlog`), prints CommonMark groups in that order, and numbers rows in one continuous count. Any active plans it excluded (in-progress, in-review, …) are summarized on **stderr** as a `note: N other active plan(s) hidden (...)` line.
+Add `--override <name>` if you found one. The CLI handles repo derivation. If the user names a configured root (for example "just personal"), pass `--root <name>` on the list call. With `--sections todo,backlog` it keeps only not-yet-started plans (a missing/blank `Status` counts as `backlog`), prints CommonMark groups in that order, and numbers rows in one continuous count. Any active plans it excluded (in-progress, in-review, …) are summarized on **stderr** as a `note: N other active plan(s) hidden (...)` line.
 
 **If stdout is empty:**
 
