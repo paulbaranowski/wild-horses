@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/pr_announce.py\"",
+            "command": "python3 \"${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/pr_announce.py\"",
             "timeout": 20
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/pr_status.py\"",
+            "command": "python3 \"${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/pr_status.py\"",
             "timeout": 20
           }
         ]
