@@ -277,7 +277,7 @@ The package and the dialect are separate. This catalog is the package. The diale
 
 ### Cursor
 
-wild-horses ships three manifests: `.claude-plugin/` for Claude Code, `.cursor-plugin/` for Cursor, and `.grok-plugin/` for Grok Build. Hooks use `hooks/hooks.json` (Claude) and `hooks/cursor-hooks.json` (Cursor) side by side.
+wild-horses ships three manifests: `.claude-plugin/` for Claude Code, `.cursor-plugin/` for Cursor, and `.grok-plugin/` for Grok Build. Grok and Claude both read `hooks/hooks.json`. Cursor reads `hooks/cursor-hooks.json`. Do not add a third hooks file for Grok.
 
 **Local install** (copy catalog plugins as real files, no symlinks):
 
