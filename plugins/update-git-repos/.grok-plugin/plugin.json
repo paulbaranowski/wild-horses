@@ -1,0 +1,8 @@
+{
+  "name": "update-git-repos",
+  "description": "Pull every configured git repo from origin in one shot, using `git fetch` + `git merge --ff-only` so diverged histories never auto-merge silently. Maintains a repo list at ~/.config/wild-horses/update-git-repos/repos.json, supports bootstrap auto-discovery under a root dir, manual add/remove, and a configurable default action for dirty working trees (ask/skip/stash) set via `set-action`, with optional per-repo overrides. Backed by a bundled update_repos_cli.py that does atomic config writes and status checks, plus a PreToolUse hook that auto-approves invocations of the bundled CLI.",
+  "version": "1.4.0",
+  "author": {
+    "name": "Paul Baranowski"
+  }
+}

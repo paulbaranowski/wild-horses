@@ -1,0 +1,8 @@
+{
+  "name": "harness",
+  "description": "Analyze code for feedback-loop blockers and AI reasoning gaps, then build, run, and inspect a structured remediation task list to fix what it finds. Ships two analysis commands (`/harness:feedback-blockers`, `/harness:reasoning-gaps`) and three task-list skills (`task-list-builder`, `task-list-runner`, `task-list-viewer`) for producing, executing, and inspecting the resulting plan. Includes a PreToolUse hook that auto-approves invocations of the bundled task_list_cli.py, which also runs each task's verifySteps as subprocesses.",
+  "version": "8.3.3",
+  "author": {
+    "name": "Paul Baranowski"
+  }
+}
