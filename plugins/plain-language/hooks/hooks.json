@@ -7,7 +7,7 @@
           {
             "type": "command",
             "if": "Bash(python3:*)",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/plain-language-cli-allow.sh\"",
+            "command": "bash \"${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/plain-language-cli-allow.sh\"",
             "timeout": 5
           }
         ]

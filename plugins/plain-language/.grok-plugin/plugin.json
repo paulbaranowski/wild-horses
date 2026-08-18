@@ -1,0 +1,8 @@
+{
+  "name": "plain-language",
+  "description": "Apply the plain-language writing standard to prose anywhere in a repo: code comments, docstrings, markdown, plain text, or pasted text. /plain-language:check reports long sentences, em-dashes, filler phrases, and figurative tokens; /plain-language:apply rewrites until the scan is clean while a bundled stdlib CLI proves non-prose content stayed byte-identical.",
+  "version": "0.3.0",
+  "author": {
+    "name": "Paul Baranowski"
+  }
+}

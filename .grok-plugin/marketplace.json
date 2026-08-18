@@ -1,0 +1,151 @@
+{
+  "name": "wild-horses",
+  "owner": {
+    "name": "Paul Baranowski"
+  },
+  "metadata": {
+    "description": "Code quality and harness-engineering plugins for Claude Code and Grok Build"
+  },
+  "plugins": [
+    {
+      "name": "harness",
+      "source": "./plugins/harness",
+      "description": "Analyze code for feedback-loop blockers and AI reasoning gaps, then build, run, and inspect a structured remediation task list to fix what it finds. Ships /harness:feedback-blockers, /harness:reasoning-gaps, and three task-list skills (task-list-builder, task-list-runner, task-list-viewer).",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "autonomous",
+      "source": "./plugins/autonomous",
+      "description": "An autonomous skill that drives a single issue/ticket link or plan file all the way to an opened pull request with no human in the loop: implements, tests, simplifies the diff, runs a bounded reasoning-gaps review (critical only), reviews via wild-pr:review (falling back to an independent sub-agent) to convergence, opens a PR following the target repo's conventions, and tends it through CI. Ships an autonomy contract (never stop to ask) plus a 10-rule code-style bar.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "linting-hooks",
+      "source": "./plugins/linting-hooks",
+      "description": "PostToolUse hooks that auto-format .md files with Prettier + markdownlint and type-check .py files with pyright on every edit. Hooks self-guard when tools are missing; /linting-hooks:install sets up the dependencies per machine.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "marketplace",
+      "source": "./plugins/marketplace",
+      "description": "Scaffold a Claude Code plugin marketplace with proper structure, schema validation, and CLAUDE.md conventions. Includes update-cursor-plugins to copy a catalog into ~/.cursor/plugins/local as real files.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "pyright",
+      "source": "./plugins/pyright",
+      "description": "Run pyright on a Python codebase and fix its findings. Supports optional strictness override (basic/standard/strict), persisting the level to config, and progressive ratcheting.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "codepath-visualizer",
+      "source": "./plugins/codepath-visualizer",
+      "description": "Map and visualize codepaths in any codebase as an interactive architecture diagram. /codepath-mapper extracts call chains from entry points into a structured JSON file; /codepath-visualizer renders the resulting graph as an interactive HTML diagram you can explore in the browser.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "documentation",
+      "license": "MIT"
+    },
+    {
+      "name": "plan-keeper",
+      "source": "./plugins/plan-keeper",
+      "description": "Organize markdown plans in ~/plans/<repo>/. plan-save captures the latest plan from a conversation; plan-do lists and routes a saved plan to the right next superpowers/harness skill based on its shape (idea / spec / impl plan / task-list); plan-done archives a completed plan into ~/plans/<repo>/done/ with a completion stamp; plan-linear and plan-jira file a plan as a Linear or Jira ticket.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "update-git-repos",
+      "source": "./plugins/update-git-repos",
+      "description": "Pull every configured git repo from origin/<branch> in one shot, using `git fetch` plus `git merge --ff-only` (never `git pull`) so diverged histories never auto-merge silently. Maintains a repo list at ~/.config/wild-horses/update-git-repos/repos.json, supports bootstrap auto-discovery under a root directory, manual add/remove, and prompts per repo when working trees are dirty (skip vs stash \u2192 fetch/merge \u2192 pop).",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "yes-no-questions-hook",
+      "source": "./plugins/yes-no-questions-hook",
+      "description": "Per-turn UserPromptSubmit hook that reminds Claude to pose decision questions as numbered yes/no questions, collapsing either/or choices into single yes/no items.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "steelman",
+      "source": "./plugins/steelman",
+      "description": "Argue the strongest good-faith case AGAINST the proposed changes in the current conversation or a named design/plan file. A built-in red-team voice that surfaces hidden costs, wrong assumptions, simpler alternatives, second-order effects, and the do-nothing option, so a plan gets stress-tested before it ships.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "pr-status-hook",
+      "source": "./plugins/pr-status-hook",
+      "description": "Prints your branch's pull-request link the moment `gh` knows it. A run that spends twenty minutes in CI can no longer finish without printing that link. Also reports at every turn end whether the last commits were actually pushed, and whether the working tree is dirty. Everything comes from real git/gh state, never from the agent's memory. Stays silent when there is nothing to report.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "wild-pr",
+      "source": "./plugins/wild-pr",
+      "description": "Open a pull request with an architecture-first description (via its bundled summary-writer skill), review it, and babysit CI and review feedback. Ships /wild-pr:review for rubric-based code review, /wild-pr:babysit for single-pass tending, /wild-pr for create-then-babysit, and the summary-writer skill for architecture-first PR descriptions.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "cleanup-worktrees",
+      "source": "./plugins/cleanup-worktrees",
+      "description": "Reclaim disk space from stale git worktrees. Scans configured roots (direct repos and parent dirs), classifies each worktree as cleanable (merged PR, upstream gone, merged into the default branch, or stale) or skipped (dirty, locked, unpushed), shows the cleanable set grouped by reason with sizes, and removes the ones you pick \u2014 re-validating before each removal, never --force, pruning the orphaned branch. Backed by a bundled cleanup_worktrees_cli.py with atomic config writes and JSON-on-stdout, plus a PreToolUse hook that auto-approves the CLI.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    },
+    {
+      "name": "plain-language",
+      "source": "./plugins/plain-language",
+      "description": "Apply the plain-language writing standard to prose anywhere in a repo: code comments, docstrings, markdown, plain text, or pasted text. /plain-language:check scans a path, PR, branch diff, or the whole repo and reports long sentences, em-dashes, filler phrases, and figurative tokens; /plain-language:apply rewrites until the scan is clean, and a bundled stdlib CLI verifies non-prose content and protected markdown regions stayed byte-identical.",
+      "author": {
+        "name": "Paul Baranowski"
+      },
+      "category": "development",
+      "license": "MIT"
+    }
+  ]
+}

@@ -255,7 +255,7 @@ Point at the repo root (the directory that contains `.claude-plugin/marketplace.
 
 ### Grok Build
 
-Grok reads the Claude Code manifests directly, so there is no separate Grok catalog to add. It resolves `.claude-plugin/marketplace.json` and each plugin's `.claude-plugin/plugin.json` as they are.
+Grok reads `.grok-plugin/marketplace.json` and each plugin's `.grok-plugin/plugin.json`. The Claude tree stays for Claude Code. Hook commands use `${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}`, so one `hooks/hooks.json` works on both harnesses.
 
 ```bash
 grok plugin marketplace add paulbaranowski/wild-horses
@@ -263,7 +263,7 @@ grok plugin install harness --trust
 grok plugin enable harness
 ```
 
-Three steps, not two. An installed plugin stays disabled until you enable it. `--trust` is what lets its hooks and MCP servers run. Skills and agents load without trust; hooks do not. To grant trust after the fact, run `/hooks-trust` or press `Ctrl+L` in the TUI.
+Three steps, not two. An installed plugin stays disabled until you enable it. `--trust` is what lets its hooks and MCP servers run. Skills and agents load without trust; hooks do not. To grant trust after the fact, place the plugin under `~/.grok/plugins/` or reinstall with `--trust`. `grok plugin install` will not grant trust on a plugin that is already installed.
 
 The allow-scripts answer Grok in its own dialect. Grok sends `hookEventName` and `toolInput`, and it accepts a two-field decision:
 
@@ -273,11 +273,11 @@ The allow-scripts answer Grok in its own dialect. Grok sends `hookEventName` and
 
 Neither the Claude nor the Cursor shape parses there. Grok discards a decision it cannot parse and does not auto-approve the call. The call then falls back to the normal permission flow, so the prompt returns with no error to show why. See `plugins/*/scripts/hook_runtime.sh`.
 
-Three things were verified against grok 0.1.220. The manifests resolve, the marketplace lists every plugin, and each allow-script emits the documented decision. Live hook execution inside a Grok session is not verified. Plugin hooks need a trust grant that only the TUI can give.
+The package and the dialect are separate. This catalog is the package. The dialect shipped in #191.
 
 ### Cursor
 
-wild-horses ships dual manifests: `.claude-plugin/` for Claude Code and `.cursor-plugin/` for Cursor. Hooks use `hooks/hooks.json` (Claude) and `hooks/cursor-hooks.json` (Cursor) side by side.
+wild-horses ships three manifests: `.claude-plugin/` for Claude Code, `.cursor-plugin/` for Cursor, and `.grok-plugin/` for Grok Build. Grok and Claude both read `hooks/hooks.json`. Cursor reads `hooks/cursor-hooks.json`. Do not add a third hooks file for Grok.
 
 **Local install** (copy catalog plugins as real files, no symlinks):
 

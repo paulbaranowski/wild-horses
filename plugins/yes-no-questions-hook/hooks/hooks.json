@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cat \"${CLAUDE_PLUGIN_ROOT}/assets/reminder.txt\"",
+            "command": "cat \"${GROK_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/assets/reminder.txt\"",
             "timeout": 5
           }
         ]
