@@ -66,7 +66,7 @@ See **[plugins/autonomous/README.md](plugins/autonomous/README.md)** for the aut
 
 ### [wild-pr](plugins/wild-pr/README.md)
 
-Open a pull request with an architecture-first description, review it against a rubric, and babysit it through CI and review feedback. Four entry points: `/wild-pr` creates the PR (via **summary-writer** for the title/body) then runs **babysit** up to three times, stopping early on a clean pass; `/wild-pr:review` posts anchored findings against a diff, branch, or PR; `/wild-pr:babysit` does a single tending pass over CI failures and review comments; `/wild-pr:summary-writer` rewrites just the description/title, bound to the net diff rather than branch history. Backed by `pr_babysit_cli.py` with a PreToolUse hook that auto-approves bounded invocations.
+Open a pull request with an architecture-first description, review it against a rubric, and babysit it through CI and review feedback. Five entry points: `/wild-pr` creates the PR (via **summary-writer** for the title/body) then runs **babysit** up to three times, stopping early on a clean pass; `/wild-pr:review` posts anchored findings against a diff, branch, or PR; `/wild-pr:babysit` does a single tending pass over CI failures and review comments; `/wild-pr:summary-writer` rewrites just the description/title, bound to the net diff rather than branch history; `/wild-pr:churn` diagnoses a PR that keeps going through review rounds and recommends keep patching, refactor, split, or relax requirements. Backed by `pr_babysit_cli.py` and `pr_churn_cli.py` with a PreToolUse hook that auto-approves bounded invocations.
 
 ```text
 /plugin install wild-pr@wild-horses
@@ -75,10 +75,11 @@ Open a pull request with an architecture-first description, review it against a 
 /wild-pr:review                          # review the current branch/PR
 /wild-pr:babysit 42                      # one tending pass on PR #42
 /wild-pr:summary-writer                  # rewrite the PR description for the current branch
+/wild-pr:churn 42                        # diagnose why PR #42 won't converge
 "write the PR description"               # model-invoked (summary-writer)
 ```
 
-See **[plugins/wild-pr/skills/wild-pr/SKILL.md](plugins/wild-pr/skills/wild-pr/SKILL.md)** for the create-then-babysit flow, **[plugins/wild-pr/skills/review/SKILL.md](plugins/wild-pr/skills/review/SKILL.md)** for the review rubric, **[plugins/wild-pr/skills/babysit/SKILL.md](plugins/wild-pr/skills/babysit/SKILL.md)** for tending behavior, and **[plugins/wild-pr/skills/summary-writer/SKILL.md](plugins/wild-pr/skills/summary-writer/SKILL.md)** for the description template and anti-patterns.
+See **[plugins/wild-pr/skills/wild-pr/SKILL.md](plugins/wild-pr/skills/wild-pr/SKILL.md)** for the create-then-babysit flow, **[plugins/wild-pr/skills/review/SKILL.md](plugins/wild-pr/skills/review/SKILL.md)** for the review rubric, **[plugins/wild-pr/skills/babysit/SKILL.md](plugins/wild-pr/skills/babysit/SKILL.md)** for tending behavior, **[plugins/wild-pr/skills/summary-writer/SKILL.md](plugins/wild-pr/skills/summary-writer/SKILL.md)** for the description template and anti-patterns, and **[plugins/wild-pr/skills/churn/SKILL.md](plugins/wild-pr/skills/churn/SKILL.md)** for the churn diagnosis.
 
 ### [steelman](plugins/steelman/README.md)
 

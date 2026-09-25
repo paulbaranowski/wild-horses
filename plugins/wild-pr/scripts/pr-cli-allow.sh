@@ -1,12 +1,15 @@
 #!/bin/bash
-# PreToolUse hook: pre-approve `python3 .../pr_babysit_cli.py ...` invocations so
-# the auto-mode classifier doesn't gate them on every pass of a pr-babysit loop.
-# The CLI's surface is GitHub read/write via `gh` (review data, failed-check
-# logs, threaded replies, PR comments) plus an explicit-file `git commit && push`
-# — no arbitrary code execution, no shell interpolation of untrusted input.
+# PreToolUse hook: pre-approve `python3 .../pr_babysit_cli.py ...` and
+# `python3 .../pr_churn_cli.py ...` invocations so the auto-mode classifier
+# doesn't gate them on every pass of a pr-babysit loop or a churn run.
+# pr_babysit_cli.py's surface is GitHub read/write via `gh` (review data,
+# failed-check logs, threaded replies, PR comments) plus an explicit-file
+# `git commit && push`. pr_churn_cli.py only reads via `gh` and writes one
+# timeline.json into the directory it is given. Neither runs arbitrary code or
+# interpolates untrusted input into a shell.
 #
-# Disable this hook to restore per-call permission interception for the CLI
-# (and accept many more prompts per pr-babysit run).
+# Disable this hook to restore per-call permission interception for both CLIs
+# (and accept many more prompts per run).
 #
 # Outputs a PreToolUse allow decision on match. The dialect matches whichever
 # harness is running: Claude Code, Cursor, or Grok Build. Silent no-op
@@ -23,7 +26,7 @@ hook_runtime_init "$input"
 cmd="$HOOK_COMMAND"
 
 # Approve only a first-line invocation of the form `python3 <path>/scripts/
-# pr_babysit_cli.py ...`, where:
+# pr_babysit_cli.py ...` (or pr_churn_cli.py), where:
 #   - `python3` is the executable (NOT `python3 -c/-m ...`, which would run
 #     arbitrary code with the CLI path riding along in a comment or string);
 #   - `/scripts/pr_babysit_cli.py` appears as a literal substring. That suffix
@@ -46,7 +49,7 @@ first_line="${cmd%%$'\n'*}"
 allow=false
 if [[ "$cmd" =~ ^python3[[:space:]] ]] \
    && [[ ! "$first_line" =~ ^python3[[:space:]]+- ]] \
-   && [[ "$cmd" == *"/scripts/pr_babysit_cli.py"* ]]; then
+   && [[ "$cmd" == *"/scripts/pr_babysit_cli.py"* || "$cmd" == *"/scripts/pr_churn_cli.py"* ]]; then
     case "$first_line" in
         *';'*|*'|'*|*'&'*|*'`'*|*'$('*) : ;;   # chaining/substitution → do not approve
         *) allow=true ;;
@@ -54,5 +57,5 @@ if [[ "$cmd" =~ ^python3[[:space:]] ]] \
 fi
 
 if [[ "$allow" == true ]]; then
-    hook_runtime_emit_allow "pr-babysit CLI is plugin-approved"
+    hook_runtime_emit_allow "wild-pr CLI is plugin-approved"
 fi

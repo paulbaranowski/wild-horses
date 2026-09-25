@@ -120,7 +120,7 @@
     {
       "name": "wild-pr",
       "source": "./plugins/wild-pr",
-      "description": "Open a pull request with an architecture-first description (via its bundled summary-writer skill), review it, and babysit CI and review feedback. Ships /wild-pr:review for rubric-based code review, /wild-pr:babysit for single-pass tending, /wild-pr for create-then-babysit, and the summary-writer skill for architecture-first PR descriptions.",
+      "description": "Open a pull request with an architecture-first description (via its bundled summary-writer skill), review it, and babysit CI and review feedback. Ships /wild-pr:review for rubric-based code review, /wild-pr:babysit for single-pass tending, /wild-pr for create-then-babysit, /wild-pr:churn to diagnose a PR that won't converge, and the summary-writer skill for architecture-first PR descriptions.",
       "author": {
         "name": "Paul Baranowski"
       },
