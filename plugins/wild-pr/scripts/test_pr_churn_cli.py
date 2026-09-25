@@ -162,8 +162,8 @@ class TestCollect(unittest.TestCase):
         def fake_gh(args):
             if args[:2] == ["api", "graphql"]:
                 return {"data": {"repository": {"pullRequest": pr}}}
-            if args[0] == "api" and "/commits/" in args[1]:
-                return {"files": [{"filename": f} for f in COMMIT_FILES[args[1].rsplit("/", 1)[1]]]}
+            if args[0] == "api" and "/commits/" in args[-1]:
+                return [{"files": [{"filename": f} for f in COMMIT_FILES[args[-1].rsplit("/", 1)[1]]]}]
             raise AssertionError(f"unexpected gh call: {args}")
 
         with tempfile.TemporaryDirectory() as out, \
@@ -176,6 +176,17 @@ class TestCollect(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(printed)["findings_per_round"], [1, 2, 1])
         self.assertEqual(len(saved["findings"]), 8)
+
+
+class TestCommitFiles(unittest.TestCase):
+    def test_every_page_of_the_file_list_is_kept(self):
+        pages = [{"files": [{"filename": "a.py"}, {"filename": "b.py"}]},
+                 {"files": [{"filename": "c.py"}]}]
+        with mock.patch.object(cli, "gh_json", return_value=pages) as gh:
+            self.assertEqual(cli.fetch_commit_files("acme", "app", oid(1)),
+                             ["a.py", "b.py", "c.py"])
+        self.assertIn("--paginate", gh.call_args.args[0])
+        self.assertIn("--slurp", gh.call_args.args[0])
 
 
 class TestCollectErrors(unittest.TestCase):
@@ -191,7 +202,7 @@ class TestCollectErrors(unittest.TestCase):
         def fake_gh(args):
             if args[:2] == ["api", "graphql"]:
                 return {"data": {"repository": {"pullRequest": pr}}}
-            return {"files": []}
+            return [{"files": []}]
 
         with tempfile.NamedTemporaryFile() as blocker, \
                 mock.patch.object(cli, "gh_json", side_effect=fake_gh), \

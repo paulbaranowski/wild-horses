@@ -35,7 +35,7 @@ Then gather the rest into the run directory:
 1. `gh pr diff <N> --repo <owner>/<repo> > "<run dir>/diff.patch"`.
 2. The requirements. Look in `~/plans/<repo>/` and `~/plans/<repo>/done/` for a plan whose title or slug matches the branch or the PR title. Then read the PR body. Write what you found to `<run dir>/requirements.md`, citing each source. When no plan exists, the PR body and the `feat` commit messages are the requirements.
 
-**Too few rounds.** If `rounds` is below 3, print the metrics, say the PR is not churning yet, and stop. Dispatch no agents.
+**Too few rounds.** If `rounds` is below 3, print the metrics, say the PR is not churning yet, and stop. Dispatch no agents. Step 2 applies the same check again after it removes noise.
 
 **Truncated.** If `truncated` is not empty, say which history is partial in the report.
 
@@ -56,6 +56,8 @@ Read `timeline.json` in full. Write `<run dir>/triage.md` with three parts.
 **Findings table.** For every remaining finding, record the id, the round, and whether it is **new** or **fix-on-fix**. A finding is fix-on-fix when it targets code that an earlier fix commit changed to answer an earlier finding. Check this against the commit files and diffs, not the titles.
 
 **Clusters.** Group findings by root cause, not by file and not by reviewer. Name each cluster by the shared thing, for example "concurrent writers to the connection row". Give each a one-sentence statement and its finding ids. A finding that shares a cause with no other finding forms its own cluster.
+
+**Too few real rounds.** Count the rounds that keep at least one finding after noise is removed. If that count is below 3, print the metrics and the noise list, say the PR is not churning yet, and stop. Dispatch no agents. A round of bot notices, nitpicks, or duplicates is not a review round.
 
 ## Step 3 - Diagnose (parallel agents)
 

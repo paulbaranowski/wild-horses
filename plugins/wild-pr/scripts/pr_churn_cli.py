@@ -130,8 +130,10 @@ def resolve_target(arg):
 
 
 def fetch_commit_files(owner, repo, oid):
-    data = gh_json(["api", f"repos/{owner}/{repo}/commits/{oid}"]) or {}
-    return [f["filename"] for f in data.get("files") or []]
+    """Every file a commit touched. The REST endpoint pages its file list,
+    so --slurp collects every page into one JSON array."""
+    pages = gh_json(["api", "--paginate", "--slurp", f"repos/{owner}/{repo}/commits/{oid}"]) or []
+    return [f["filename"] for page in pages for f in page.get("files") or []]
 
 
 # --- pure helpers ------------------------------------------------------------
