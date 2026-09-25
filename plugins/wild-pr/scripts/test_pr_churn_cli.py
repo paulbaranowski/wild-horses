@@ -99,6 +99,12 @@ class TestFindings(unittest.TestCase):
     def test_truncated_connections_are_reported(self):
         self.assertEqual(timeline()["truncated"], ["comments"])
 
+    def test_commit_at_the_rest_file_cap_is_reported(self):
+        files = dict(COMMIT_FILES)
+        files[oid(3)] = [f"f{i}.py" for i in range(cli.REST_COMMIT_FILES_CAP)]
+        self.assertEqual(cli.build_timeline(load_pr(), files)["truncated"],
+                         ["comments", "commitFiles"])
+
     def test_truncated_thread_comments_are_reported(self):
         pr = load_pr()
         pr["reviewThreads"]["nodes"][1]["comments"]["pageInfo"] = {"hasNextPage": True}

@@ -27,6 +27,10 @@ from collections import Counter
 
 GH_TIMEOUT_SECONDS = 120
 
+# The REST commit endpoint returns at most this many files, across all pages.
+# A commit that reaches it may have touched more.
+REST_COMMIT_FILES_CAP = 3000
+
 # A file is hot when at least this many fix commits touch it, or at least this
 # many findings anchor to it.
 HOT_FILE_THRESHOLD = 3
@@ -315,6 +319,8 @@ def build_timeline(pr, commit_files):
     if any(((t.get("comments") or {}).get("pageInfo") or {}).get("hasNextPage")
            for t in _nodes(pr.get("reviewThreads"))):
         truncated.append("threadComments")
+    if any(len(c["files"]) >= REST_COMMIT_FILES_CAP for c in commits):
+        truncated.append("commitFiles")
 
     return {
         "pr": {
