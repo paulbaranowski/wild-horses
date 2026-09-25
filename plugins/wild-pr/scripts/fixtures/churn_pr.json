@@ -1,0 +1,77 @@
+{
+  "number": 7,
+  "title": "feat(sync): pause a connection without deleting it",
+  "url": "https://github.com/acme/app/pull/7",
+  "body": "Adds pause and resume.",
+  "state": "OPEN",
+  "createdAt": "2026-01-01T10:00:00Z",
+  "baseRefName": "main",
+  "headRefName": "feat/pause",
+  "additions": 400,
+  "deletions": 20,
+  "changedFiles": 5,
+  "author": { "login": "dev" },
+  "commits": {
+    "pageInfo": { "hasNextPage": false },
+    "nodes": [
+      { "commit": { "oid": "a000000000000000000000000000000000000001", "committedDate": "2026-01-01T09:00:00Z", "messageHeadline": "feat(sync): pause a connection", "messageBody": "" } },
+      { "commit": { "oid": "a000000000000000000000000000000000000002", "committedDate": "2026-01-01T09:30:00Z", "messageHeadline": "feat(sync): resume a connection", "messageBody": "" } },
+      { "commit": { "oid": "a000000000000000000000000000000000000003", "committedDate": "2026-01-02T09:00:00Z", "messageHeadline": "fix(sync): lock pause against resume", "messageBody": "Race found in review." } },
+      { "commit": { "oid": "a000000000000000000000000000000000000004", "committedDate": "2026-01-03T09:00:00Z", "messageHeadline": "fix(sync): lock delete against resume", "messageBody": "" } },
+      { "commit": { "oid": "a000000000000000000000000000000000000005", "committedDate": "2026-01-04T09:00:00Z", "messageHeadline": "fix(sync): re-read the row before revoke", "messageBody": "" } },
+      { "commit": { "oid": "a000000000000000000000000000000000000006", "committedDate": "2026-01-05T09:00:00Z", "messageHeadline": "docs: note the lock order", "messageBody": "" } }
+    ]
+  },
+  "reviews": {
+    "pageInfo": { "hasNextPage": false },
+    "nodes": [
+      { "author": { "login": "coderabbitai", "__typename": "Bot" }, "state": "COMMENTED", "submittedAt": "2026-01-01T11:00:00Z", "body": "**Actionable comments posted: 1**", "url": "https://github.com/acme/app/pull/7#r1", "commit": { "oid": "a000000000000000000000000000000000000002" } },
+      { "author": { "login": "dev", "__typename": "User" }, "state": "COMMENTED", "submittedAt": "2026-01-02T10:00:00Z", "body": "", "url": "https://github.com/acme/app/pull/7#r2", "commit": { "oid": "a000000000000000000000000000000000000003" } },
+      { "author": { "login": "cursor", "__typename": "Bot" }, "state": "COMMENTED", "submittedAt": "2026-01-03T10:00:00Z", "body": "<!-- BUGBOT_REVIEW -->\nCursor Bugbot found 1 potential issue.", "url": "https://github.com/acme/app/pull/7#r3", "commit": { "oid": "a000000000000000000000000000000000000004" } }
+    ]
+  },
+  "reviewThreads": {
+    "pageInfo": { "hasNextPage": false },
+    "nodes": [
+      {
+        "isResolved": true, "isOutdated": true, "path": "app/sync.py", "line": null, "originalLine": 40,
+        "comments": { "nodes": [
+          { "author": { "login": "coderabbitai", "__typename": "Bot" }, "body": "_🎯 Functional Correctness_ | _🟠 Major_\n\n<details><summary>Script</summary>noise</details>\n\n**Pause and resume can race.**\n\nTwo writers.", "createdAt": "2026-01-01T11:00:00Z", "url": "https://github.com/acme/app/pull/7#t1", "originalCommit": { "oid": "a000000000000000000000000000000000000002" } },
+          { "author": { "login": "dev", "__typename": "User" }, "body": "Fixed in a000000.\n\n<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>", "createdAt": "2026-01-02T10:00:00Z", "url": "https://github.com/acme/app/pull/7#t1r", "originalCommit": { "oid": "a000000000000000000000000000000000000002" } }
+        ] }
+      },
+      {
+        "isResolved": false, "isOutdated": false, "path": "app/sync.py", "line": 88, "originalLine": 88,
+        "comments": { "nodes": [
+          { "author": { "login": "cursor", "__typename": "Bot" }, "body": "### Delete races resume\n\n**Medium Severity**\n\n<!-- DESCRIPTION START -->Delete and resume both write the row.<!-- DESCRIPTION END -->", "createdAt": "2026-01-03T10:00:00Z", "url": "https://github.com/acme/app/pull/7#t2", "originalCommit": { "oid": "a000000000000000000000000000000000000004" } }
+        ] }
+      },
+      {
+        "isResolved": false, "isOutdated": false, "path": "app/sync.py", "line": 120, "originalLine": 120,
+        "comments": { "nodes": [
+          { "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" }, "body": "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Revoke reads a stale row**\n\nRe-read first.", "createdAt": "2026-01-03T11:00:00Z", "url": "https://github.com/acme/app/pull/7#t3", "originalCommit": { "oid": "a000000000000000000000000000000000000004" } }
+        ] }
+      },
+      {
+        "isResolved": false, "isOutdated": false, "path": "docs/sync.md", "line": 3, "originalLine": 3,
+        "comments": { "nodes": [
+          { "author": { "login": "reviewer", "__typename": "User" }, "body": "nit: typo", "createdAt": "2026-01-04T12:00:00Z", "url": "https://github.com/acme/app/pull/7#t4", "originalCommit": { "oid": "f000000000000000000000000000000000000000" } }
+        ] }
+      },
+      {
+        "isResolved": true, "isOutdated": false, "path": "app/sync.py", "line": 5, "originalLine": 5,
+        "comments": { "nodes": [
+          { "author": { "login": "dev", "__typename": "User" }, "body": "Done.\n\n<sub>🤖 <code>pr-babysit:addressed v1 wild-horses@0.2.1</code></sub>", "createdAt": "2026-01-04T13:00:00Z", "url": "https://github.com/acme/app/pull/7#t5", "originalCommit": { "oid": "a000000000000000000000000000000000000005" } }
+        ] }
+      }
+    ]
+  },
+  "comments": {
+    "pageInfo": { "hasNextPage": true },
+    "nodes": [
+      { "author": { "login": "cursor", "__typename": "Bot" }, "body": "<h3>Bugbot couldn't run - usage limit reached</h3>", "createdAt": "2026-01-05T10:00:00Z", "url": "https://github.com/acme/app/pull/7#c1" },
+      { "author": { "login": "dev", "__typename": "User" }, "body": "@codex review", "createdAt": "2026-01-03T10:30:00Z", "url": "https://github.com/acme/app/pull/7#c2" },
+      { "author": { "login": "coderabbitai", "__typename": "Bot" }, "body": "   ", "createdAt": "2026-01-01T12:00:00Z", "url": "https://github.com/acme/app/pull/7#c3" }
+    ]
+  }
+}
