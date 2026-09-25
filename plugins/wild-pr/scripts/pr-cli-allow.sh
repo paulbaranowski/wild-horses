@@ -42,6 +42,8 @@ cmd="$HOOK_COMMAND"
 # Only the first physical line is metacharacter-checked: reply/comment bodies
 # arrive as a heredoc on subsequent lines and legitimately contain markdown
 # metacharacters (backticks, pipes) that must not disqualify the invocation.
+# pr_churn_cli.py takes no heredoc, so its command must be one line: a second
+# line would otherwise run as a separate, unchecked shell command.
 # This is a prompt-reduction convenience for the agent's own CLI calls, not a
 # sandbox; it deliberately does not attempt full shell parsing.
 first_line="${cmd%%$'\n'*}"
@@ -49,7 +51,8 @@ first_line="${cmd%%$'\n'*}"
 allow=false
 if [[ "$cmd" =~ ^python3[[:space:]] ]] \
    && [[ ! "$first_line" =~ ^python3[[:space:]]+- ]] \
-   && [[ "$cmd" == *"/scripts/pr_babysit_cli.py"* || "$cmd" == *"/scripts/pr_churn_cli.py"* ]]; then
+   && [[ "$first_line" == *"/scripts/pr_babysit_cli.py"* \
+      || ( "$first_line" == *"/scripts/pr_churn_cli.py"* && "$cmd" == "$first_line" ) ]]; then
     case "$first_line" in
         *';'*|*'|'*|*'&'*|*'`'*|*'$('*) : ;;   # chaining/substitution → do not approve
         *) allow=true ;;

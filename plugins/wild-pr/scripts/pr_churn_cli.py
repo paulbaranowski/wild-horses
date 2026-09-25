@@ -51,6 +51,7 @@ query($owner: String!, $repo: String!, $pr: Int!) {
         nodes {
           isResolved isOutdated path line originalLine
           comments(first: 50) {
+            pageInfo { hasNextPage }
             nodes { author { login __typename } body createdAt url originalCommit { oid } }
           }
         }
@@ -98,7 +99,12 @@ def gh_json(args):
         raise CollectError(f"gh timed out after {GH_TIMEOUT_SECONDS}s: gh {' '.join(args[:2])}") from e
     if proc.returncode != 0:
         raise CollectError((proc.stderr or proc.stdout or "").strip())
-    return json.loads(proc.stdout) if proc.stdout.strip() else None
+    if not proc.stdout.strip():
+        return None
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as e:
+        raise CollectError(f"gh returned non-JSON output: gh {' '.join(args[:2])}") from e
 
 
 def resolve_target(arg):
@@ -304,6 +310,9 @@ def build_timeline(pr, commit_files):
 
     truncated = [name for name in ("commits", "reviews", "reviewThreads", "comments")
                  if ((pr.get(name) or {}).get("pageInfo") or {}).get("hasNextPage")]
+    if any(((t.get("comments") or {}).get("pageInfo") or {}).get("hasNextPage")
+           for t in _nodes(pr.get("reviewThreads"))):
+        truncated.append("threadComments")
 
     return {
         "pr": {
@@ -419,7 +428,7 @@ def cmd_collect(args):
         metrics["timeline"] = path
         print(json.dumps(metrics, indent=2))
         return 0
-    except CollectError as e:
+    except (CollectError, OSError) as e:
         print(json.dumps({"error": str(e)}))
         return 1
 

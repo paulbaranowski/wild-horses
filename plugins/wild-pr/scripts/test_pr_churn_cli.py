@@ -99,6 +99,12 @@ class TestFindings(unittest.TestCase):
     def test_truncated_connections_are_reported(self):
         self.assertEqual(timeline()["truncated"], ["comments"])
 
+    def test_truncated_thread_comments_are_reported(self):
+        pr = load_pr()
+        pr["reviewThreads"]["nodes"][1]["comments"]["pageInfo"] = {"hasNextPage": True}
+        self.assertEqual(cli.build_timeline(pr, COMMIT_FILES)["truncated"],
+                         ["comments", "threadComments"])
+
 
 class TestMetrics(unittest.TestCase):
     def setUp(self):
@@ -170,6 +176,33 @@ class TestCollect(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(printed)["findings_per_round"], [1, 2, 1])
         self.assertEqual(len(saved["findings"]), 8)
+
+
+class TestCollectErrors(unittest.TestCase):
+    def test_non_json_gh_output_becomes_collect_error(self):
+        proc = subprocess.CompletedProcess([], 0, stdout="<html>", stderr="")
+        with mock.patch.object(cli.subprocess, "run", return_value=proc):
+            with self.assertRaisesRegex(cli.CollectError, "non-JSON"):
+                cli.gh_json(["api", "graphql"])
+
+    def test_unwritable_out_dir_prints_json_error(self):
+        pr = load_pr()
+
+        def fake_gh(args):
+            if args[:2] == ["api", "graphql"]:
+                return {"data": {"repository": {"pullRequest": pr}}}
+            return {"files": []}
+
+        with tempfile.NamedTemporaryFile() as blocker, \
+                mock.patch.object(cli, "gh_json", side_effect=fake_gh), \
+                mock.patch.object(cli.shutil, "which", return_value="/usr/bin/gh"), \
+                mock.patch("sys.stdout") as stdout:
+            # A regular file where the output directory should go.
+            rc = cli.main(["collect", "https://github.com/acme/app/pull/7",
+                           "--out", str(Path(blocker.name) / "run")])
+            printed = "".join(call.args[0] for call in stdout.write.call_args_list)
+        self.assertEqual(rc, 1)
+        self.assertIn("error", json.loads(printed))
 
 
 class TestCliSurface(unittest.TestCase):
