@@ -246,6 +246,7 @@ class TestBoundaries(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(summary["count"], 3)
         self.assertEqual(summary["by_kind"], {"repo": 2, "service": 1})
+        self.assertEqual(summary["skipped"], [])
         self.assertEqual([(e["kind"], e["name"]) for e in saved],
                          [("repo", "acme/api"), ("repo", "acme/web"), ("service", "stripe")])
 

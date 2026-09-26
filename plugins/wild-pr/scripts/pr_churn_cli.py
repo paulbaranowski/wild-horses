@@ -463,8 +463,9 @@ def cmd_collect(args):
 # --- boundaries subcommand ---------------------------------------------------
 
 def cmd_boundaries(args: argparse.Namespace) -> int:
-    """Write boundaries.json to --out. Print its path, the entry count, and a
-    count per kind as JSON. A --repo that is not a directory prints an error."""
+    """Write boundaries.json to --out. Print its path, the entry count, a count
+    per kind, and the sources this Python could not read, as JSON. A --repo
+    that is not a directory prints an error."""
     try:
         if not os.path.isdir(args.repo):
             raise CollectError(f"Not a directory: {args.repo}")
@@ -473,7 +474,8 @@ def cmd_boundaries(args: argparse.Namespace) -> int:
         path = os.path.join(args.out, "boundaries.json")
         write_atomic(path, json.dumps(entries, indent=2))
         by_kind = dict(sorted(Counter(e["kind"] for e in entries).items()))
-        print(json.dumps({"boundaries": path, "count": len(entries), "by_kind": by_kind}, indent=2))
+        print(json.dumps({"boundaries": path, "count": len(entries), "by_kind": by_kind,
+                          "skipped": churn_boundaries.skipped_sources(args.repo)}, indent=2))
         return 0
     except (CollectError, OSError) as e:
         print(json.dumps({"error": str(e)}))

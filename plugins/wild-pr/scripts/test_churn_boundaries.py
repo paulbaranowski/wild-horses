@@ -132,6 +132,10 @@ class TestReposFromDocs(BoundaryCase):
         web = self.entry(self.discover({"CLAUDE.md": CLAUDE_MD}), "acme/web")
         self.assertEqual(web["local_path"], str(self.repo.parent / "web"))
 
+    def test_home_path_at_the_end_of_a_sentence_is_found(self):
+        entries = self.discover({"CLAUDE.md": "The backend lives in ~/dev/api.\n"})
+        self.assertEqual(self.entry(entries, "api")["local_path"], str(self.home / "dev" / "api"))
+
     def test_missing_path_and_non_repo_directory_are_dropped(self):
         (self.home / "plans").mkdir()
         entries = self.discover({"AGENTS.md": "- `~/dev/gone`: old backend.\n- `~/plans`: notes.\n"})
@@ -209,6 +213,13 @@ class TestLibraries(BoundaryCase):
         self.assertEqual(lib["gh_slug"], "acme/lib")
         self.assertEqual(lib["doc_url"], "https://pkg.go.dev/github.com/acme/lib/v2")
         self.assertEqual(lib["sources"], ["go.mod:6"])
+
+    def test_pyproject_is_reported_as_skipped_without_tomllib(self):
+        write_tree(self.repo, {"pyproject.toml": '[project]\ndependencies = ["httpx"]\n'})
+        with mock.patch.object(cb, "tomllib", None):
+            self.assertEqual(self.names(cb.discover(self.repo, home=self.home), "library"), [])
+            self.assertEqual(cb.skipped_sources(self.repo),
+                             ["pyproject.toml: reading it needs Python 3.11 or later"])
 
     def test_malformed_manifests_are_skipped(self):
         entries = self.discover({"package.json": "{not json", "pyproject.toml": "[project\n",

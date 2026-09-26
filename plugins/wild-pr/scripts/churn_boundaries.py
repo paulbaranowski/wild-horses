@@ -281,7 +281,7 @@ def repos_from_docs(repo: Path, home: Path) -> list[Boundary]:
                     found.append(make_entry(slug, "repo", source, direction, gh_slug=slug,
                                             local_path=local_checkout(repo, home, slug)))
                 for m in HOME_PATH.finditer(line):
-                    path = home / m.group(1)
+                    path = home / m.group(1).rstrip(".")  # a sentence may end on the path
                     if not (path / ".git").exists() or path.resolve() == repo:
                         continue
                     origin = own_slug(path)
@@ -578,6 +578,14 @@ def merge(entries: list[Boundary]) -> list[Boundary]:
     for m in merged.values():
         m["sources"] = sorted(set(m["sources"]), key=source_order)
     return sorted(merged.values(), key=lambda e: (e["kind"], e["name"].lower(), e["name"]))
+
+
+def skipped_sources(repo: str | Path) -> list[str]:
+    """Sources that discover() could not read on this Python, one note each.
+    The caller reports them, so a missing kind is never mistaken for none."""
+    if tomllib is None and (Path(repo) / "pyproject.toml").is_file():
+        return ["pyproject.toml: reading it needs Python 3.11 or later"]
+    return []
 
 
 def discover(repo: str | Path, home: Path | None = None) -> list[Boundary]:

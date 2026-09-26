@@ -36,7 +36,7 @@ Then find the components the PR's repo talks to. `<repo dir>` is the current che
 python3 "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/pr_churn_cli.py" boundaries --repo "<repo dir>" --out "<run dir>"
 ```
 
-The CLI writes `<run dir>/boundaries.json` and prints a count per kind. Each entry is one component: a sibling `repo`, an HTTP `service`, a `library`, or an API `schema`. [references/boundaries.md](references/boundaries.md) describes the fields. If no checkout holds the PR's commits, skip this command and write `[]` to `<run dir>/boundaries.json`. Say in the report that boundary discovery was skipped, because no local checkout holds the PR's commits.
+The CLI writes `<run dir>/boundaries.json` and prints a count per kind. Its `skipped` list names sources it could not read, such as `pyproject.toml` on Python older than 3.11. Name each one in the report. Each entry is one component: a sibling `repo`, an HTTP `service`, a `library`, or an API `schema`. [references/boundaries.md](references/boundaries.md) describes the fields. If no checkout holds the PR's commits, skip this command and write `[]` to `<run dir>/boundaries.json`. Say in the report that boundary discovery was skipped, because no local checkout holds the PR's commits.
 
 Then gather the rest into the run directory:
 
