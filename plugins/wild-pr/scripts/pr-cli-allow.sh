@@ -4,8 +4,9 @@
 # doesn't gate them on every pass of a pr-babysit loop or a churn run.
 # pr_babysit_cli.py's surface is GitHub read/write via `gh` (review data,
 # failed-check logs, threaded replies, PR comments) plus an explicit-file
-# `git commit && push`. pr_churn_cli.py only reads via `gh` and writes one
-# timeline.json into the directory it is given. Neither runs arbitrary code or
+# `git commit && push`. pr_churn_cli.py reads via `gh` and local files only,
+# and writes timeline.json or boundaries.json into the directory it is given.
+# Neither runs arbitrary code or
 # interpolates untrusted input into a shell.
 #
 # Disable this hook to restore per-call permission interception for both CLIs

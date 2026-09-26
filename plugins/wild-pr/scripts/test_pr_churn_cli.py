@@ -10,6 +10,7 @@ three posted reviews (one empty), five threads (one all-sentinel, one anchored
 to a force-pushed commit), and three conversation comments (one blank).
 """
 import json
+import socket
 import subprocess
 import sys
 import tempfile
@@ -222,6 +223,63 @@ class TestCollectErrors(unittest.TestCase):
         self.assertIn("error", json.loads(printed))
 
 
+class TestBoundaries(unittest.TestCase):
+    def run_boundaries(self, repo, out):
+        with mock.patch("sys.stdout") as stdout:
+            rc = cli.main(["boundaries", "--repo", str(repo), "--out", str(out)])
+        printed = "".join(call.args[0] for call in stdout.write.call_args_list)
+        return rc, json.loads(printed)
+
+    def make_repo(self, root):
+        repo = root / "app"
+        (repo / "src").mkdir(parents=True)
+        (repo / "CLAUDE.md").write_text("- https://github.com/acme/api: the backend.\n"
+                                        "- https://github.com/acme/web: the frontend.\n")
+        (repo / "src" / "pay.ts").write_text('axios.create({ baseURL: "https://api.stripe.com" });\n')
+        return repo
+
+    def test_writes_sorted_boundaries_and_prints_a_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.make_repo(Path(tmp))
+            rc, summary = self.run_boundaries(repo, Path(tmp) / "run")
+            saved = json.loads((Path(tmp) / "run" / "boundaries.json").read_text())
+        self.assertEqual(rc, 0)
+        self.assertEqual(summary["count"], 3)
+        self.assertEqual(summary["by_kind"], {"repo": 2, "service": 1})
+        self.assertEqual([(e["kind"], e["name"]) for e in saved],
+                         [("repo", "acme/api"), ("repo", "acme/web"), ("service", "stripe")])
+
+    def test_two_runs_are_byte_identical(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.make_repo(Path(tmp))
+            self.run_boundaries(repo, Path(tmp) / "a")
+            self.run_boundaries(repo, Path(tmp) / "b")
+            first = (Path(tmp) / "a" / "boundaries.json").read_bytes()
+            second = (Path(tmp) / "b" / "boundaries.json").read_bytes()
+        self.assertEqual(first, second)
+
+    def test_repo_with_nothing_to_find_gives_an_empty_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "app").mkdir()
+            rc, summary = self.run_boundaries(Path(tmp) / "app", Path(tmp) / "run")
+            saved = json.loads((Path(tmp) / "run" / "boundaries.json").read_text())
+        self.assertEqual((rc, summary["count"], saved), (0, 0, []))
+
+    def test_discovery_opens_no_socket(self):
+        blocked = AssertionError("discovery made a network call")
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(socket, "socket", side_effect=blocked), \
+                mock.patch.object(socket, "create_connection", side_effect=blocked):
+            rc, _ = self.run_boundaries(self.make_repo(Path(tmp)), Path(tmp) / "run")
+        self.assertEqual(rc, 0)
+
+    def test_missing_repo_prints_json_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, printed = self.run_boundaries(Path(tmp) / "nope", Path(tmp) / "run")
+        self.assertEqual(rc, 1)
+        self.assertIn("Not a directory", printed["error"])
+
+
 class TestCliSurface(unittest.TestCase):
     def run_cli(self, args):
         return subprocess.run([sys.executable, str(CLI), *args],
@@ -232,6 +290,9 @@ class TestCliSurface(unittest.TestCase):
 
     def test_missing_out_exits_2(self):
         self.assertEqual(self.run_cli(["collect", "7"]).returncode, 2)
+
+    def test_boundaries_without_repo_exits_2(self):
+        self.assertEqual(self.run_cli(["boundaries", "--out", "run"]).returncode, 2)
 
     def test_bad_pr_error_on_stdout(self):
         with tempfile.TemporaryDirectory() as out:
