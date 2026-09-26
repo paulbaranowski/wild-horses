@@ -7,7 +7,7 @@ argument-hint: "[pr-number-or-url]"
 
 # churn - diagnose a PR that won't converge
 
-A PR that needs many review rounds usually has one structural cause under many separate findings. This skill finds that cause from the review history and recommends one way forward. It proposes. It never edits code, pushes, replies to comments, or applies its own verdict.
+A PR that needs many review rounds usually has one structural cause under many separate findings. This skill finds that cause from the review history and recommends one way forward. It proposes. It never edits code in any repo, pushes, replies to comments, or applies its own verdict.
 
 ## Invocation
 
@@ -30,10 +30,19 @@ The CLI writes `<run dir>/timeline.json` and prints the churn metrics as JSON. S
 - **Round:** all posted review activity against one reviewed commit. `commits_since_previous` lists what that round reviewed.
 - **Metrics:** `findings_per_round`, fix commits by type, `after_last_review`, and `hot_files`.
 
+Then find the components the PR's repo talks to. `<repo dir>` is the current checkout when it holds the PR's commits.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/pr_churn_cli.py" boundaries --repo "<repo dir>" --out "<run dir>"
+```
+
+The CLI writes `<run dir>/boundaries.json` and prints a count per kind. Each entry is one component: a sibling `repo`, an HTTP `service`, a `library`, or an API `schema`. Its `direction` is `provider` when the PR's code calls it, and `consumer` when it calls the PR's code. Its `local_path`, `gh_slug`, and `doc_url` say how to read it. If no checkout holds the PR's commits, write `[]` to `<run dir>/boundaries.json`. Say in the report that no boundaries were found.
+
 Then gather the rest into the run directory:
 
 1. `gh pr diff <N> --repo <owner>/<repo> > "<run dir>/diff.patch"`.
 2. The requirements. Look in `~/plans/<repo>/` and `~/plans/<repo>/done/` for a plan whose title or slug matches the branch or the PR title. Then read the PR body. Write what you found to `<run dir>/requirements.md`, citing each source. When no plan exists, the PR body and the `feat` commit messages are the requirements.
+3. The standing rules. Read the Related Repos section, or its equivalent, in the repo's `CLAUDE.md`, `AGENTS.md`, and `ARCHITECTURE.md`. A standing rule says which component should own a fix, for example "fix it there first rather than working around it here". Quote each one into `requirements.md` under a `## Standing rules` heading, with its `file:line`.
 
 **Too few rounds.** If `rounds` is below 3, print the metrics, say the PR is not churning yet, and stop. Dispatch no agents. Step 2 applies the same check again after it removes noise.
 
@@ -56,6 +65,10 @@ Read `timeline.json` in full. Write `<run dir>/triage.md` with three parts.
 **Findings table.** For every remaining finding, record the id, the round, and whether it is **new** or **fix-on-fix**. A finding is fix-on-fix when it targets code that an earlier fix commit changed to answer an earlier finding. Check this against the commit files and diffs, not the titles.
 
 **Clusters.** Group findings by root cause, not by file and not by reviewer. Name each cluster by the shared thing, for example "concurrent writers to the connection row". Give each a one-sentence statement and its finding ids. A finding that shares a cause with no other finding forms its own cluster.
+
+**Belongs to.** Give each cluster a **Belongs to** line. It names the component that owns the behavior the fix commits keep rebuilding, or it says "this repo". Examples of such behavior are an order, a version, an atomic write, and an idempotency key. Others are a uniqueness rule, input validation, an authorization check, a display format, and a retry policy. Look up each component a cluster names in `boundaries.json`, and read it.
+
+**Claims about other components.** Each cluster's cause is a hypothesis. A sentence that says another component lacks a field, an order, a guarantee, or a feature must cite evidence. Source code with `file:line` counts. For a component with no readable source, a documentation URL counts. Otherwise end the sentence with `(unverified)`.
 
 **Too few real rounds.** Count the rounds that keep at least one finding after noise is removed. If that count is below 3, print the metrics and the noise list, say the PR is not churning yet, and stop. Dispatch no agents. A round of bot notices, nitpicks, or duplicates is not a review round.
 
@@ -95,8 +108,9 @@ Every claim cites evidence: a comment URL, a commit SHA, or `file:line`. Save th
 
 ## Never
 
-- **Don't edit code, commit, push, or reply to review comments.** The verdict is a proposal for the user.
+- **Don't edit code, commit, push, or reply to review comments, in this repo or any other.** The verdict is a proposal for the user.
 - **Don't ask the user questions before the verdict.** Requirement changes go in the report as proposals.
 - **Don't count noise as churn.** A round of bot notices is not a review round.
 - **Don't diagnose from finding titles alone.** Read the bodies, the commit messages, and the diff.
+- **Don't claim another component lacks a capability without citing its source or its documentation.** Write `(unverified)` when you could read neither.
 - **Don't run a code review.** New defects are out of scope. `/wild-pr:review` does that.
