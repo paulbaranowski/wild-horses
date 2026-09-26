@@ -125,6 +125,12 @@ class TestReposFromDocs(BoundaryCase):
         self.assertEqual(self.entry(entries, "acme/web")["direction"], "consumer")
         self.assertEqual(self.entry(entries, "acme/api")["direction"], "provider")
 
+    def test_a_slug_that_prefixes_an_earlier_slug_keeps_its_own_sentence(self):
+        entries = self.discover({"CLAUDE.md": "https://github.com/acme/api-web is the frontend. "
+                                              "https://github.com/acme/api is the backend.\n"})
+        self.assertEqual(self.entry(entries, "acme/api-web")["direction"], "consumer")
+        self.assertEqual(self.entry(entries, "acme/api")["direction"], "provider")
+
     def test_first_sentence_decides_over_later_sentences(self):
         entries = self.discover({"CLAUDE.md": "- https://github.com/acme/api: the backend. "
                                               "Adapting the client to its defects locks bugs in.\n"})

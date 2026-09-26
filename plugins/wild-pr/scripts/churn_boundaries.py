@@ -203,8 +203,18 @@ def blocks(text: str) -> list[tuple[str, list[tuple[int, str]]]]:
     return out
 
 
-def direction_of(block_text: str, heading: str, link: str) -> Direction:
-    """provider, consumer, or unknown, from the words around `link`.
+def sentence_at(text: str, offset: int) -> str:
+    """The sentence of `text` that holds the character at `offset`."""
+    start = 0
+    for m in SENTENCE_END.finditer(text):
+        if m.start() >= offset:
+            return text[start:m.start()]
+        start = m.end()
+    return text[start:]
+
+
+def direction_of(block_text: str, heading: str, offset: int) -> Direction:
+    """provider, consumer, or unknown, for the link at `offset` in the block.
 
     The sentence that holds the link decides first. It usually says what the
     component is ("the backend", "the iOS client"). Other sentences may name
@@ -212,9 +222,9 @@ def direction_of(block_text: str, heading: str, link: str) -> Direction:
     whole block, then the heading, decide only when the text before them names
     neither direction, or both.
     """
-    # Split before PATH_TOKEN runs: it would also remove a link's final period.
-    sentences = SENTENCE_END.split(block_text.strip())
-    own_sentence = next((s for s in sentences if link in s), sentences[0])
+    # Find the sentence before PATH_TOKEN runs: it would also remove a link's
+    # final period.
+    own_sentence = sentence_at(block_text, offset)
     for text in (own_sentence, block_text, heading):
         text = PATH_TOKEN.sub(" ", text)
         provider = bool(PROVIDER_WORDS.search(text))
@@ -282,6 +292,7 @@ def repos_from_docs(repo: Path, home: Path) -> list[Boundary]:
             continue
         for heading, lines in blocks(text):
             block_text = "\n".join(line for _, line in lines)
+            line_start = 0  # where `line` begins in block_text
             for n, line in lines:
                 source = f"{doc}:{n}"
                 for m in GITHUB_LINK.finditer(line):
@@ -290,7 +301,7 @@ def repos_from_docs(repo: Path, home: Path) -> list[Boundary]:
                     slug = f"{owner}/{name}"
                     if owner.lower() in GITHUB_NON_OWNERS or slug.lower() == skip:
                         continue
-                    direction = direction_of(block_text, heading, m.group(0))
+                    direction = direction_of(block_text, heading, line_start + m.start())
                     found.append(make_entry(slug, "repo", source, direction, gh_slug=slug,
                                             local_path=local_checkout(repo, home, slug)))
                 for m in HOME_PATH.finditer(line):
@@ -300,9 +311,10 @@ def repos_from_docs(repo: Path, home: Path) -> list[Boundary]:
                     if path is None or path.resolve() == repo:
                         continue
                     origin = own_slug(path)
-                    direction = direction_of(block_text, heading, m.group(0))
+                    direction = direction_of(block_text, heading, line_start + m.start())
                     found.append(make_entry(origin or path.name, "repo", source, direction,
                                             local_path=str(path), gh_slug=origin))
+                line_start += len(line) + 1
     return found
 
 
