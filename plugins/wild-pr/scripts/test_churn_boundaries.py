@@ -278,6 +278,11 @@ class TestSchemas(BoundaryCase):
         entries = self.discover({"openapi.json": doc})
         self.assertEqual(self.entry(entries, "openapi.json")["describes"], "stripe")
 
+    def test_hostless_server_url_is_skipped(self):
+        entries = self.discover({"openapi.yaml": "servers:\n  - url: https:///v1\n"})
+        self.assertEqual(self.names(entries, "service"), [])
+        self.assertIsNone(self.entry(entries, "openapi.yaml")["describes"])
+
     def test_graphql_files_and_generated_client_dirs(self):
         entries = self.discover({"schema.graphql": "type Query { me: User }\n",
                                  "src/generated/client.ts": "export {};\n",

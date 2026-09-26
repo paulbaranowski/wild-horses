@@ -1,6 +1,6 @@
 ---
 name: churn
-description: Diagnose why a PR keeps going through review rounds without converging, then recommend one way forward - keep patching, refactor in this PR, split the PR, restart with relaxed requirements, or move the change to the backend, frontend, external API, or library that should own it. Use when a PR has had many review rounds, fixes keep producing new findings, or the user asks why a PR won't settle, or runs /wild-pr:churn [pr-number-or-url].
+description: Diagnose why a PR keeps going through review rounds without converging, then recommend one way forward - keep patching, refactor in this PR, split the PR, restart with new requirements, or move the change to the backend, frontend, external API, or library that should own it. Use when a PR has had many review rounds, fixes keep producing new findings, or the user asks why a PR won't settle, or runs /wild-pr:churn [pr-number-or-url].
 user-invocable: true
 argument-hint: "[pr-number-or-url]"
 ---
@@ -36,7 +36,7 @@ Then find the components the PR's repo talks to. `<repo dir>` is the current che
 python3 "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/pr_churn_cli.py" boundaries --repo "<repo dir>" --out "<run dir>"
 ```
 
-The CLI writes `<run dir>/boundaries.json` and prints a count per kind. Each entry is one component: a sibling `repo`, an HTTP `service`, a `library`, or an API `schema`. Its `direction` is `provider` when the PR's code calls it, and `consumer` when it calls the PR's code. Its `local_path`, `gh_slug`, and `doc_url` say how to read it. If no checkout holds the PR's commits, write `[]` to `<run dir>/boundaries.json`. Say in the report that no boundaries were found.
+The CLI writes `<run dir>/boundaries.json` and prints a count per kind. Each entry is one component: a sibling `repo`, an HTTP `service`, a `library`, or an API `schema`. Its `direction` is `provider` when the PR's code calls it, and `consumer` when it calls the PR's code. Its `local_path`, `gh_slug`, and `doc_url` say how to read it. If no checkout holds the PR's commits, skip this command and write `[]` to `<run dir>/boundaries.json`. Say in the report that boundary discovery was skipped, because no local checkout holds the PR's commits.
 
 Then gather the rest into the run directory:
 
