@@ -389,6 +389,12 @@ class TestSchemas(BoundaryCase):
         self.assertEqual(self.entry(entries, "swagger.yaml")["describes"], "payments")
         self.assertEqual(self.entry(entries, "payments")["sources"], ["swagger.yaml:2"])
 
+    def test_minified_openapi_json_names_its_server(self):
+        doc = '{"openapi":"3.0.0","servers":[{"url":"https://api.payments.io/v1"}],"paths":{}}'
+        entries = self.discover({"openapi.json": doc})
+        self.assertEqual(self.entry(entries, "openapi.json")["describes"], "payments")
+        self.assertEqual(self.entry(entries, "payments")["sources"], ["openapi.json:1"])
+
     def test_graphql_files_and_generated_client_dirs(self):
         entries = self.discover({"schema.graphql": "type Query { me: User }\n",
                                  "src/generated/client.ts": "export {};\n",

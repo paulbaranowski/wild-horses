@@ -508,12 +508,37 @@ def services_from_code(repo: Path, tree: Tree, providers: list[Provider]) -> lis
 
 # --- schemas -----------------------------------------------------------------
 
+def json_servers(text: str, rel: str, providers: list[Provider]) -> list[Boundary]:
+    """Server hosts from an OpenAPI or Swagger JSON file. It parses the JSON,
+    so a minified file with everything on one line works too."""
+    try:
+        doc = as_table(json.loads(text))
+    except json.JSONDecodeError:
+        return []
+    hosts: list[str] = []
+    servers = doc.get("servers")
+    for server in servers if isinstance(servers, list) else []:
+        url = as_table(server).get("url")
+        m = URL_HOST.match(url) if isinstance(url, str) else None
+        if m:
+            hosts.append(m.group(1))
+    swagger_host = doc.get("host")
+    if isinstance(swagger_host, str):
+        hosts.append(swagger_host)
+    return [service(*host_service(h, providers), f"{rel}:{line_of(text, h)}")
+            for h in hosts if is_public_host(h)]
+
+
 def openapi_servers(path: Path, rel: str, providers: list[Provider]) -> list[Boundary]:
     """The services an OpenAPI file names, in file order. They come from the
-    `servers` list, or from a Swagger 2.0 top-level `host`."""
+    `servers` list, or from a Swagger 2.0 top-level `host`. A YAML file is
+    read line by line; a JSON file is parsed."""
+    text = read_text(path) or ""
+    if path.suffix == ".json":
+        return json_servers(text, rel, providers)
     found: list[Boundary] = []
     servers_line = None
-    for n, line in enumerate((read_text(path) or "").splitlines(), 1):
+    for n, line in enumerate(text.splitlines(), 1):
         if SERVERS_KEY.match(line):
             servers_line = n
             continue
