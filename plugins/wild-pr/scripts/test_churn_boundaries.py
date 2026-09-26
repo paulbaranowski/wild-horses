@@ -430,6 +430,11 @@ class TestSchemas(BoundaryCase):
         self.assertEqual(self.names(entries, "service"), ["payments"])
         self.assertEqual(self.entry(entries, "openapi.yaml")["describes"], "payments")
 
+    def test_a_server_under_a_bare_list_marker_counts(self):
+        doc = "servers:\n  -\n    url: https://api.payments.io\n"
+        entries = self.discover({"openapi.yaml": doc})
+        self.assertEqual(self.entry(entries, "openapi.yaml")["describes"], "payments")
+
     def test_graphql_files_and_generated_client_dirs(self):
         entries = self.discover({"schema.graphql": "type Query { me: User }\n",
                                  "src/generated/client.ts": "export {};\n",

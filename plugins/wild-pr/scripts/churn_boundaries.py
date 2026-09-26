@@ -570,7 +570,11 @@ def openapi_servers(path: Path, rel: str, providers: list[Provider]) -> list[Bou
             servers_indent = None
         stripped = line.lstrip()
         if servers_indent is not None and stripped.startswith("-"):
-            item_indent = len(line) - len(stripped[1:].lstrip())
+            rest = stripped[1:].lstrip()
+            # A bare "-" puts the item's first key on the next line.
+            item_indent = len(line) - len(rest) if rest else None
+        elif servers_indent is not None and item_indent is None and stripped:
+            item_indent = len(line) - len(stripped)
         swagger = SWAGGER_HOST.match(line)
         if swagger and is_public_host(swagger.group(1)):
             found.append(schema_service(swagger.group(1), f"{rel}:{n}", providers))
