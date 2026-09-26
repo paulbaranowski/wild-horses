@@ -119,6 +119,12 @@ class TestReposFromDocs(BoundaryCase):
                                               "Adapting the client to its defects locks bugs in.\n"})
         self.assertEqual(self.entry(entries, "acme/api")["direction"], "provider")
 
+    def test_each_link_takes_direction_from_its_own_sentence(self):
+        entries = self.discover({"CLAUDE.md": "The frontend is https://github.com/acme/web. "
+                                              "The backend is https://github.com/acme/api.\n"})
+        self.assertEqual(self.entry(entries, "acme/web")["direction"], "consumer")
+        self.assertEqual(self.entry(entries, "acme/api")["direction"], "provider")
+
     def test_first_sentence_decides_over_later_sentences(self):
         entries = self.discover({"CLAUDE.md": "- https://github.com/acme/api: the backend. "
                                               "Adapting the client to its defects locks bugs in.\n"})
@@ -163,6 +169,15 @@ class TestReposFromDocs(BoundaryCase):
         api = self.entry(self.discover({"CLAUDE.md": "- https://github.com/acme/api: the backend.\n"}),
                          "acme/api")
         self.assertEqual(api["local_path"], str(self.home / "dev" / "api"))
+
+    def test_checkout_with_a_github_ssh_alias_origin_is_used_for_a_link(self):
+        sibling = self.repo.parent / "api"
+        subprocess.run(["git", "init", "-q", str(sibling)], check=True)
+        subprocess.run(["git", "-C", str(sibling), "remote", "add", "origin",
+                        "git@github-work:acme/api.git"], check=True)
+        api = self.entry(self.discover({"CLAUDE.md": "- https://github.com/acme/api: the backend.\n"}),
+                         "acme/api")
+        self.assertEqual(api["local_path"], str(sibling))
 
     def test_checkout_with_a_non_github_origin_is_not_used_for_a_link(self):
         sibling = self.repo.parent / "api"

@@ -71,7 +71,8 @@ MAX_FILE_BYTES = 1_000_000
 
 DOC_FILES = ("CLAUDE.md", "AGENTS.md", "ARCHITECTURE.md")
 GITHUB_LINK = re.compile(r"github\.com/([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)")
-GITHUB_REMOTE = re.compile(r"github\.com[:/]([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?$")
+# The host part also accepts SSH aliases such as git@github-work:acme/api.git.
+GITHUB_REMOTE = re.compile(r"github[A-Za-z0-9.-]*[:/]([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?$")
 # GitHub path segments that name a site page, not an owner.
 GITHUB_NON_OWNERS = {"about", "apps", "features", "login", "marketplace", "orgs",
                      "settings", "sponsors", "topics"}
@@ -202,18 +203,19 @@ def blocks(text: str) -> list[tuple[str, list[tuple[int, str]]]]:
     return out
 
 
-def direction_of(block_text: str, heading: str) -> Direction:
-    """provider, consumer, or unknown, from the words around a link.
+def direction_of(block_text: str, heading: str, link: str) -> Direction:
+    """provider, consumer, or unknown, from the words around `link`.
 
-    The block's first sentence decides first. A link is usually followed by
-    what the component is ("the backend", "the iOS client"). Later
-    sentences often name the other side ("adapting the client to it..."). The
+    The sentence that holds the link decides first. It usually says what the
+    component is ("the backend", "the iOS client"). Other sentences may name
+    another repo, or the other side ("adapting the client to it..."). The
     whole block, then the heading, decide only when the text before them names
     neither direction, or both.
     """
     # Split before PATH_TOKEN runs: it would also remove a link's final period.
-    first_sentence = SENTENCE_END.split(block_text.strip(), maxsplit=1)[0]
-    for text in (first_sentence, block_text, heading):
+    sentences = SENTENCE_END.split(block_text.strip())
+    own_sentence = next((s for s in sentences if link in s), sentences[0])
+    for text in (own_sentence, block_text, heading):
         text = PATH_TOKEN.sub(" ", text)
         provider = bool(PROVIDER_WORDS.search(text))
         consumer = bool(CONSUMER_WORDS.search(text))
@@ -279,7 +281,7 @@ def repos_from_docs(repo: Path, home: Path) -> list[Boundary]:
         if text is None:
             continue
         for heading, lines in blocks(text):
-            direction = direction_of("\n".join(line for _, line in lines), heading)
+            block_text = "\n".join(line for _, line in lines)
             for n, line in lines:
                 source = f"{doc}:{n}"
                 for m in GITHUB_LINK.finditer(line):
@@ -288,6 +290,7 @@ def repos_from_docs(repo: Path, home: Path) -> list[Boundary]:
                     slug = f"{owner}/{name}"
                     if owner.lower() in GITHUB_NON_OWNERS or slug.lower() == skip:
                         continue
+                    direction = direction_of(block_text, heading, m.group(0))
                     found.append(make_entry(slug, "repo", source, direction, gh_slug=slug,
                                             local_path=local_checkout(repo, home, slug)))
                 for m in HOME_PATH.finditer(line):
@@ -297,6 +300,7 @@ def repos_from_docs(repo: Path, home: Path) -> list[Boundary]:
                     if path is None or path.resolve() == repo:
                         continue
                     origin = own_slug(path)
+                    direction = direction_of(block_text, heading, m.group(0))
                     found.append(make_entry(origin or path.name, "repo", source, direction,
                                             local_path=str(path), gh_slug=origin))
     return found
