@@ -27,7 +27,7 @@
 
 ## state-ownership
 
-> **Lens: state ownership.** Do several code paths write the same state with no single owner? Look for findings about races, ordering, stale reads, or one write undoing another. For each such cluster, name the state, and list every writer with `file:line`. Then say what single owner would make the races impossible. Examples of an owner are one locked transition function, a state machine, a queue, a database constraint, or a version or sequence that another component assigns. Say how many of the cluster's findings that owner would have prevented.
+> **Lens: state ownership.** Do several code paths write the same state with no single owner? Look for findings about races, ordering, stale reads, or one write undoing another. For each such cluster, name the state, and list every writer with `file:line`. Then say what single owner would make the races impossible. Examples of an owner are one locked transition function, a state machine, a queue, and a database constraint. Another is a version or sequence that another component assigns. Say how many of the cluster's findings that owner would have prevented.
 
 ## encapsulation
 

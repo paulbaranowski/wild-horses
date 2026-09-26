@@ -14,10 +14,14 @@ Stdlib only. GitHub access is via the `gh` CLI. Errors go to stdout as
 {"error": ...} with exit 1, so the skill reads `.error` from the same JSON it
 parses. Usage errors exit 2 (argparse).
 
-The CLI computes only what needs no judgment: which review round each finding
-belongs to, findings per round, and which files the fix commits keep touching.
-Deciding what is noise, what a later fix caused, and what the root causes are
-is the skill's job.
+collect computes only what needs no judgment. That is each finding's review
+round, the findings per round, and the files the fix commits keep touching. Deciding what is noise, what a later fix caused, and what the
+root causes are is the skill's job.
+
+boundaries needs no gh and makes no network call. It imports
+churn_boundaries.py from this directory, which Python puts on sys.path when it
+runs this script. Each direction it reports is a keyword guess from the agent
+docs. The skill reads a component before it trusts that guess.
 """
 
 import argparse
@@ -415,7 +419,7 @@ def compute_metrics(timeline):
 
 # --- output ------------------------------------------------------------------
 
-def write_atomic(path, text):
+def write_atomic(path: str, text: str) -> None:
     """Write `text` to `path` through a tmp file, fsync, and os.replace, so a
     reader never sees a half-written file."""
     tmp = path + ".tmp"
@@ -457,7 +461,9 @@ def cmd_collect(args):
 
 # --- boundaries subcommand ---------------------------------------------------
 
-def cmd_boundaries(args):
+def cmd_boundaries(args: argparse.Namespace) -> int:
+    """Write boundaries.json to --out. Print its path, the entry count, and a
+    count per kind as JSON. A --repo that is not a directory prints an error."""
     try:
         if not os.path.isdir(args.repo):
             raise CollectError(f"Not a directory: {args.repo}")
@@ -468,6 +474,8 @@ def cmd_boundaries(args):
         by_kind = dict(sorted(Counter(e["kind"] for e in entries).items()))
         print(json.dumps({"boundaries": path, "count": len(entries), "by_kind": by_kind}, indent=2))
         return 0
+    # ValueError covers a malformed churn_known_providers.json, including bad
+    # JSON: json.JSONDecodeError is a subclass.
     except (CollectError, OSError, ValueError) as e:
         print(json.dumps({"error": str(e)}))
         return 1
@@ -483,7 +491,7 @@ def build_parser():
     c.set_defaults(func=cmd_collect)
 
     b = sub.add_parser("boundaries", help="write boundaries.json: the components this repo talks to")
-    b.add_argument("--repo", required=True, help="local checkout to read")
+    b.add_argument("--repo", required=True, help="local checkout that holds the PR's commits")
     b.add_argument("--out", required=True, help="directory to write boundaries.json into")
     b.set_defaults(func=cmd_boundaries)
 

@@ -36,13 +36,13 @@ Then find the components the PR's repo talks to. `<repo dir>` is the current che
 python3 "${CLAUDE_PLUGIN_ROOT:-${CURSOR_PLUGIN_ROOT}}/scripts/pr_churn_cli.py" boundaries --repo "<repo dir>" --out "<run dir>"
 ```
 
-The CLI writes `<run dir>/boundaries.json` and prints a count per kind. Each entry is one component: a sibling `repo`, an HTTP `service`, a `library`, or an API `schema`. Its `direction` is `provider` when the PR's code calls it, and `consumer` when it calls the PR's code. Its `local_path`, `gh_slug`, and `doc_url` say how to read it. If no checkout holds the PR's commits, skip this command and write `[]` to `<run dir>/boundaries.json`. Say in the report that boundary discovery was skipped, because no local checkout holds the PR's commits.
+The CLI writes `<run dir>/boundaries.json` and prints a count per kind. Each entry is one component: a sibling `repo`, an HTTP `service`, a `library`, or an API `schema`. [references/boundaries.md](references/boundaries.md) describes the fields. If no checkout holds the PR's commits, skip this command and write `[]` to `<run dir>/boundaries.json`. Say in the report that boundary discovery was skipped, because no local checkout holds the PR's commits.
 
 Then gather the rest into the run directory:
 
 1. `gh pr diff <N> --repo <owner>/<repo> > "<run dir>/diff.patch"`.
 2. The requirements. Look in `~/plans/<repo>/` and `~/plans/<repo>/done/` for a plan whose title or slug matches the branch or the PR title. Then read the PR body. Write what you found to `<run dir>/requirements.md`, citing each source. When no plan exists, the PR body and the `feat` commit messages are the requirements.
-3. The standing rules. Read the Related Repos section, or its equivalent, in the repo's `CLAUDE.md`, `AGENTS.md`, and `ARCHITECTURE.md`. A standing rule says which component should own a fix, for example "fix it there first rather than working around it here". Quote each one into `requirements.md` under a `## Standing rules` heading, with its `file:line`.
+3. The standing rules. Read the Related Repos section, or its equivalent, in the repo's `CLAUDE.md`, `AGENTS.md`, and `ARCHITECTURE.md`. A standing rule says which component should own a fix. An example is "fix it there first rather than working around it here". Quote each one into `requirements.md` under a `## Standing rules` heading, with its `file:line`.
 
 **Too few rounds.** If `rounds` is below 3, print the metrics, say the PR is not churning yet, and stop. Dispatch no agents. Step 2 applies the same check again after it removes noise.
 
@@ -105,7 +105,7 @@ Weigh the claims with these rules:
 - A claim that needs work in another component is not weaker for that reason. Compare its cost with the findings and rounds it removes.
 - A verified claim outranks an unverified one on the same cluster.
 - A standing rule in `requirements.md` that prefers the other component breaks a tie in its favor.
-- "Use what exists" beats "change the provider" when both remove the same findings, because it needs no release in another component.
+- "Use what exists" beats "change the provider" when both remove the same findings. It needs no release in another component.
 
 Name the runner-up and state why it lost.
 
@@ -116,7 +116,7 @@ Write the report in this shape:
 1. **Verdict** and a one-paragraph reason.
 2. **Churn numbers:** rounds, findings per round, the fix-on-fix share, hot files, and unposted findings.
 3. **Clusters:** each with its findings, the lens claims, and the diagnosis.
-4. **Proposed changes:** each requirement change with the requirement, the cost of keeping it, what relaxing it removes, and what the user loses. Each change in another component names the target, its direction, what exists today (`file:line` or URL), what is missing, and the release order.
+4. **Proposed changes:** each requirement change names the requirement and the cost of keeping it. It also names what relaxing it removes, and what the user loses. Each change in another component names the target and its direction. It also names what exists today (`file:line` or URL), what is missing, and the release order.
 5. **Runner-up verdict** and why it lost.
 6. **Excluded noise:** a count per reviewer.
 

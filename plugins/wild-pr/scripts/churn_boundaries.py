@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """churn_boundaries.py - find the components a repo talks to across a boundary.
 
-The churn skill's placement lens reads this list. It asks whether the behavior
-a review cluster keeps fixing belongs in another component: a backend, a
-frontend, an external API, or a library.
+The churn skill's placement lens reads this list. It asks whether a review
+cluster's behavior belongs in another component. That component can be a
+backend, a frontend, an external API, or a library.
 
-Discovery reads only local files: the repo's agent docs, its dependency
-manifests, env var names, HTTP client base URLs, and API schema files. It
-never makes a network call, and it never reads a real `.env` file.
+Discovery reads only local files. They are the repo's agent docs, its
+dependency manifests, env var names, HTTP client base URLs, and API schemas. Its one
+subprocess is a local `git remote get-url`. It never makes a network call, and
+it never reads a real `.env` file.
 
 Every entry is a Boundary. Entries for one component merge, and the list is
-sorted, so two runs over one tree give byte-identical output.
+sorted. Two runs give byte-identical output when the tree, the sibling
+checkouts, and the installed dependencies are unchanged.
+
+The entry point is discover(). `pr_churn_cli.py boundaries` calls it and
+writes the result to boundaries.json. The sections below run in the order
+discover() calls them: repos, libraries, services, and schemas.
 """
 
 import fnmatch
@@ -36,11 +42,15 @@ class Boundary(TypedDict):
     gh_slug: str | None
     doc_url: str | None
     describes: str | None  # schemas only: the service the schema describes
-    sources: list[str]  # "file:line" locations that named the component
+    # "file:line" locations that named the component. A generated client
+    # directory is named by its path alone, with no line.
+    sources: list[str]
 
 
 class Provider(TypedDict):
-    host: str  # an fnmatch pattern
+    """One entry of churn_known_providers.json. load_providers rejects an
+    entry with any other key."""
+    host: str  # an fnmatch pattern, so *.sentry.io matches every subdomain
     name: str
     doc_url: str
 
@@ -48,6 +58,8 @@ class Provider(TypedDict):
 # (directory, sorted file names), as walk() yields them.
 Tree = list[tuple[Path, list[str]]]
 
+# The output key order. make_entry builds entries in this order, and the tests
+# check that the two match.
 FIELDS = tuple(Boundary.__annotations__)
 
 # Files larger than this are skipped: bundles, lockfiles, and data dumps.
@@ -77,8 +89,9 @@ GO_REQUIRE = re.compile(
     r"^(?:require\s+)?([A-Za-z0-9._~/-]+\.[A-Za-z0-9._~/-]+)\s+v[0-9]\S*(\s*//\s*indirect)?")
 PROVIDERS_FILE = Path(__file__).with_name("churn_known_providers.json")
 
-# Pruned during the code scan. Their hosts are fakes or other people's
-# services, and vendored trees hold thousands of them.
+# Pruned by walk(), so both the code scan and the schema scan skip them.
+# Their hosts are fakes or other people's services, and vendored trees hold
+# thousands of them.
 SKIP_DIRS = {"__mocks__", "__pycache__", "__tests__", "android", "build", "coverage", "dist",
              "e2e", "env", "fixtures", "ios", "mocks", "node_modules", "Pods", "site-packages",
              "test", "tests", "vendor", "venv"}
@@ -89,6 +102,8 @@ ENV_TEMPLATES = {".env.example", ".env.sample", ".env.template"}
 
 ENV_TOKEN = re.compile(r"\b[A-Z][A-Z0-9_]*_(?:URL|ENDPOINT|HOST)\b")
 ENV_SUFFIXES = ("_API_URL", "_BASE_URL", "_API_ENDPOINT", "_ENDPOINT", "_API_HOST", "_HOST", "_URL")
+# Framework prefixes that expose a variable to client code. TEST_ names a test
+# copy of a real service, so TEST_SUPABASE_URL names supabase.
 ENV_PREFIXES = ("EXPO_PUBLIC_", "NEXT_PUBLIC_", "NUXT_PUBLIC_", "REACT_APP_", "VITE_", "TEST_")
 URL_HOST = re.compile(r"https?://([A-Za-z0-9.-]+)")
 # A URL counts only on a line that makes an HTTP call or sets a base URL.
@@ -113,6 +128,9 @@ SERVER_URL_WINDOW = 5
 def make_entry(name: str, kind: Kind, source: str, direction: Direction = "provider", *,
                local_path: str | None = None, gh_slug: str | None = None,
                doc_url: str | None = None) -> Boundary:
+    """A Boundary with one source. Direction defaults to provider, because this
+    repo calls its libraries, services, and schemas. Only repos_from_docs reads
+    a direction from text. schemas() sets `describes` after it reads servers."""
     return Boundary(name=name, kind=kind, direction=direction, local_path=local_path,
                     gh_slug=gh_slug, doc_url=doc_url, describes=None, sources=[source])
 
@@ -189,16 +207,20 @@ def own_slug(repo: Path) -> str | None:
     return f"{m.group(1)}/{m.group(2)}".lower() if m else None
 
 
-def local_checkout(repo: Path, home: Path, name: str) -> str | None:
-    """A git checkout named `name` next to the repo or under ~/dev, or None."""
+def local_checkout(repo: Path, home: Path, slug: str) -> str | None:
+    """A git checkout of `slug` next to the repo or under ~/dev, or None.
+    A checkout whose origin names another repo is skipped. A checkout with no
+    origin is accepted, since nothing says it is a different repo."""
+    name = slug.rsplit("/", 1)[-1]
     for candidate in (repo.parent / name, home / "dev" / name):
-        if (candidate / ".git").exists():
+        if (candidate / ".git").exists() and own_slug(candidate) in (None, slug.lower()):
             return str(candidate)
     return None
 
 
 def repos_from_docs(repo: Path, home: Path) -> list[Boundary]:
-    """Sibling repos named by GitHub links or ~/ paths in the agent docs."""
+    """Sibling repos named by GitHub links or ~/ paths in the agent docs.
+    `repo` must be resolved, so the repo never lists itself."""
     found: list[Boundary] = []
     skip = own_slug(repo)
     for doc in DOC_FILES:
@@ -216,17 +238,24 @@ def repos_from_docs(repo: Path, home: Path) -> list[Boundary]:
                     if owner.lower() in GITHUB_NON_OWNERS or slug.lower() == skip:
                         continue
                     found.append(make_entry(slug, "repo", source, direction, gh_slug=slug,
-                                            local_path=local_checkout(repo, home, name)))
+                                            local_path=local_checkout(repo, home, slug)))
                 for m in HOME_PATH.finditer(line):
                     path = home / m.group(1)
                     if not (path / ".git").exists() or path.resolve() == repo:
                         continue
-                    found.append(make_entry(path.name, "repo", source, direction,
-                                            local_path=str(path)))
+                    origin = own_slug(path)
+                    found.append(make_entry(origin or path.name, "repo", source, direction,
+                                            local_path=str(path), gh_slug=origin))
     return found
 
 
 # --- libraries from manifests ------------------------------------------------
+
+def as_table(value: object) -> dict[str, object]:
+    """`value` when it is a JSON object or TOML table, else an empty one.
+    Manifests are untrusted input: `project = "x"` is valid TOML."""
+    return value if isinstance(value, dict) else {}
+
 
 def line_of(text: str, needle: str, after: str | None = None) -> int:
     """1-based line of the first `needle` at or below the first line holding
@@ -245,8 +274,8 @@ def npm_libraries(repo: Path) -> list[Boundary]:
     if text is None:
         return []
     try:
-        deps = json.loads(text).get("dependencies") or {}
-    except (json.JSONDecodeError, AttributeError):
+        deps = as_table(as_table(json.loads(text)).get("dependencies"))
+    except json.JSONDecodeError:
         return []
     out: list[Boundary] = []
     for name in sorted(deps):
@@ -275,11 +304,12 @@ def python_libraries(repo: Path) -> list[Boundary]:
     except tomllib.TOMLDecodeError:
         return []
     names: set[str] = set()
-    for spec in (data.get("project") or {}).get("dependencies") or []:
+    specs = as_table(data.get("project")).get("dependencies")
+    for spec in specs if isinstance(specs, list) else []:
         m = REQUIREMENT_NAME.match(spec.strip()) if isinstance(spec, str) else None
         if m:
             names.add(m.group(0))
-    poetry = ((data.get("tool") or {}).get("poetry") or {}).get("dependencies") or {}
+    poetry = as_table(as_table(as_table(data.get("tool")).get("poetry")).get("dependencies"))
     names.update(name for name in poetry if name.lower() != "python")
     return [make_entry(name, "library", f"pyproject.toml:{line_of(text, name, after='dependencies')}",
                        local_path=site_package(repo, name),
@@ -323,11 +353,15 @@ def libraries_from_manifests(repo: Path) -> list[Boundary]:
 def load_providers(path: Path = PROVIDERS_FILE) -> list[Provider]:
     """The known-provider table. Raise ValueError when an entry is malformed."""
     table = json.loads(Path(path).read_text())
+    if not isinstance(table, list):
+        raise ValueError(f"{path} must hold a JSON list of providers")
+    providers: list[Provider] = []
     for entry in table:
         if (not isinstance(entry, dict) or set(entry) != {"host", "name", "doc_url"}
                 or not all(isinstance(v, str) for v in entry.values())):
             raise ValueError(f"bad provider entry in {path}: {entry!r}")
-    return table
+        providers.append(Provider(host=entry["host"], name=entry["name"], doc_url=entry["doc_url"]))
+    return providers
 
 
 def walk(repo: Path) -> Tree:
@@ -446,11 +480,28 @@ def schemas(repo: Path, tree: Tree, providers: list[Provider]) -> list[Boundary]
 # --- merge -------------------------------------------------------------------
 
 def merge_key(entry: Boundary) -> tuple[Kind, str]:
-    """Repos merge on their last path part, so `acme/api` and `~/dev/api` meet."""
-    name = entry["name"]
-    if entry["kind"] == "repo":
-        name = name.rsplit("/", 1)[-1]
-    return (entry["kind"], name.lower())
+    """Repos with a slug merge on the full slug, so acme/api and other/api stay
+    apart. fold_checkouts() handles repos found only as a checkout path."""
+    if entry["kind"] == "repo" and entry["gh_slug"]:
+        return ("repo", entry["gh_slug"].lower())
+    return (entry["kind"], entry["name"].lower())
+
+
+def fold_checkouts(merged: dict[tuple[Kind, str], Boundary]) -> None:
+    """Fold each slug-less repo into the one slug repo with its last path part.
+    With two or more candidates, the checkout stays its own entry."""
+    for key, entry in list(merged.items()):
+        if entry["kind"] != "repo" or entry["gh_slug"]:
+            continue
+        matches = [m for m in merged.values() if m["kind"] == "repo" and m["gh_slug"]
+                   and m["gh_slug"].rsplit("/", 1)[-1].lower() == entry["name"].lower()]
+        if len(matches) != 1:
+            continue
+        target = matches[0]
+        target["local_path"] = target["local_path"] or entry["local_path"]
+        target["direction"] = merge_direction(target["direction"], entry["direction"])
+        target["sources"] += entry["sources"]
+        del merged[key]
 
 
 def merge_direction(a: Direction, b: Direction) -> Direction:
@@ -471,14 +522,13 @@ def merge(entries: list[Boundary]) -> list[Boundary]:
             merged[key] = Boundary(**{**e, "sources": list(e["sources"])})
             continue
         m = merged[key]
-        if "/" in e["name"] and "/" not in m["name"]:
-            m["name"] = e["name"]
         m["local_path"] = m["local_path"] or e["local_path"]
         m["gh_slug"] = m["gh_slug"] or e["gh_slug"]
         m["doc_url"] = m["doc_url"] or e["doc_url"]
         m["describes"] = m["describes"] or e["describes"]
         m["direction"] = merge_direction(m["direction"], e["direction"])
         m["sources"] += e["sources"]
+    fold_checkouts(merged)
     for m in merged.values():
         m["sources"] = sorted(set(m["sources"]), key=source_order)
     return sorted(merged.values(), key=lambda e: (e["kind"], e["name"].lower(), e["name"]))
@@ -492,6 +542,7 @@ def discover(repo: str | Path, home: Path | None = None,
     home = home or Path.home()
     providers = load_providers() if providers is None else providers
     tree = walk(root)
+    # The order matters: merge() keeps the first non-null value of each field.
     return merge(repos_from_docs(root, home)
                  + libraries_from_manifests(root)
                  + services_from_code(root, tree, providers)

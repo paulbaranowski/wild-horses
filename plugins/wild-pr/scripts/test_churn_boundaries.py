@@ -126,6 +126,20 @@ class TestReposFromDocs(BoundaryCase):
         entries = self.discover({"AGENTS.md": "- `~/dev/gone`: old backend.\n- `~/plans`: notes.\n"})
         self.assertEqual(entries, [])
 
+    def test_same_named_repos_from_two_owners_stay_apart(self):
+        entries = self.discover({"CLAUDE.md": "- https://github.com/acme/api: the backend.\n"
+                                              "- https://github.com/other/api: a vendor service.\n"})
+        self.assertEqual(self.names(entries, "repo"), ["acme/api", "other/api"])
+
+    def test_checkout_with_another_origin_is_not_used_for_a_link(self):
+        sibling = self.repo.parent / "api"
+        subprocess.run(["git", "init", "-q", str(sibling)], check=True)
+        subprocess.run(["git", "-C", str(sibling), "remote", "add", "origin",
+                        "https://github.com/other/api.git"], check=True)
+        api = self.entry(self.discover({"CLAUDE.md": "- https://github.com/acme/api: the backend.\n"}),
+                         "acme/api")
+        self.assertEqual(api["local_path"], str(self.home / "dev" / "api"))
+
     def test_links_to_this_repo_and_to_github_site_pages_are_not_boundaries(self):
         subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
         subprocess.run(["git", "-C", str(self.repo), "remote", "add", "origin",
@@ -180,6 +194,11 @@ class TestLibraries(BoundaryCase):
                                  "go.mod": ""})
         self.assertEqual(entries, [])
 
+    def test_manifests_with_unexpected_shapes_are_skipped(self):
+        entries = self.discover({"package.json": '{"dependencies": ["zod"]}',
+                                 "pyproject.toml": 'project = "x"\ntool = 3\n'})
+        self.assertEqual(entries, [])
+
     def test_package_json_that_is_not_an_object_is_skipped(self):
         self.assertEqual(self.discover({"package.json": "[]"}), [])
 
@@ -192,6 +211,14 @@ class TestProviderTable(unittest.TestCase):
     def test_malformed_table_raises_value_error(self):
         with tempfile.NamedTemporaryFile("w", suffix=".json") as fh:
             fh.write('[{"host": "x"}]')
+            fh.flush()
+            with self.assertRaises(ValueError):
+                cb.load_providers(Path(fh.name))
+
+
+    def test_table_that_is_not_a_list_raises_value_error(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as fh:
+            fh.write("3")
             fh.flush()
             with self.assertRaises(ValueError):
                 cb.load_providers(Path(fh.name))
