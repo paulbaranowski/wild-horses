@@ -129,6 +129,11 @@ LOCAL_HOST = re.compile(
     r"|\.(?:local|localhost|test|example|invalid|internal)$"
     r"|(?:^|\.)example\.(?:com|net|org)$", re.IGNORECASE)
 REAL_TLD = re.compile(r"\.[A-Za-z]{2,}$")
+# A trailing line comment. It must follow whitespace or start the line. So the
+# // in https:// and the # in a URL fragment are not comments.
+HASH_COMMENT = re.compile(r"(?:^|\s)#.*$")
+SLASH_COMMENT = re.compile(r"(?:^|\s)//.*$")
+HASH_COMMENT_SUFFIXES = {".py", ".rb"}
 # Two-part public suffixes: the name is the label before them, so
 # api.acme.co.uk names acme.
 TWO_PART_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "com.au", "net.au", "co.nz", "co.jp",
@@ -492,7 +497,10 @@ def services_from_code(repo: Path, tree: Tree, providers: list[Provider]) -> lis
         if text is None or not (env_file or ENV_TOKEN.search(text) or CLIENT_CALL.search(text)):
             continue
         rel = path.relative_to(repo).as_posix()
-        for n, line in enumerate(text.splitlines(), 1):
+        # A URL in a comment is documentation, not a call.
+        comment = HASH_COMMENT if env_file or path.suffix in HASH_COMMENT_SUFFIXES else SLASH_COMMENT
+        for n, raw in enumerate(text.splitlines(), 1):
+            line = comment.sub("", raw)
             for token in ENV_TOKEN.findall(line) if env_file or ENV_READ.search(line) else []:
                 name = env_service_name(token)
                 found.append(service(name, doc_by_name.get(name), f"{rel}:{n}"))
@@ -553,18 +561,26 @@ def openapi_servers(path: Path, rel: str, providers: list[Provider]) -> list[Bou
     # Only `url` keys inside the `servers` block count. Other `url` keys
     # (contact, license, externalDocs) are not servers.
     servers_indent = None
+    item_indent = None  # column of a Server Object's own keys
     for n, line in enumerate(text.splitlines(), 1):
         if SERVERS_KEY.match(line):
             servers_indent = len(line) - len(line.lstrip())
             continue
         if servers_indent is not None and line.strip() and not in_block(line, servers_indent):
             servers_indent = None
+        stripped = line.lstrip()
+        if servers_indent is not None and stripped.startswith("-"):
+            item_indent = len(line) - len(stripped[1:].lstrip())
         swagger = SWAGGER_HOST.match(line)
         if swagger and is_public_host(swagger.group(1)):
             found.append(schema_service(swagger.group(1), f"{rel}:{n}", providers))
             continue
         m = SERVER_URL.match(line)
         if not m or servers_indent is None:
+            continue
+        # Only the Server Object's own `url` counts, not one nested in an
+        # extension such as x-reference.
+        if not stripped.startswith("-") and len(line) - len(stripped) != item_indent:
             continue
         host = URL_HOST.match(m.group(1))  # None for a hostless URL such as https:///v1
         if host and is_public_host(host.group(1)):

@@ -347,8 +347,14 @@ class TestServicesFromCode(BoundaryCase):
 
     def test_native_mobile_source_is_scanned(self):
         entries = self.discover({"android/app/src/main/Api.kt": 'val c = URL("https://api.stripe.com")\n',
-                                 "ios/App/Api.swift": 'let s = URLSession.shared // https://api.openai.com\n'})
+                                 "ios/App/Api.swift": 'let u = URL(string: "https://api.openai.com")!\n'})
         self.assertEqual(self.names(entries, "service"), ["openai", "stripe"])
+
+    def test_a_url_in_a_comment_is_not_a_service(self):
+        entries = self.discover({"ios/App/Api.swift": "let s = URLSession.shared // https://api.openai.com\n",
+                                 "app/client.py": "client = httpx.Client()  # https://api.stripe.com\n",
+                                 "src/api.ts": 'fetch("https://api.resend.com/emails");\n'})
+        self.assertEqual(self.names(entries, "service"), ["resend"])
 
     def test_undecodable_and_oversized_files_do_not_crash(self):
         entries = self.discover({"src/bin.ts": b"\xff\xfe" + b'fetch("https://api.stripe.com");\n',
@@ -413,6 +419,13 @@ class TestSchemas(BoundaryCase):
                "  description: a templated server\n  variables:\n    region:\n"
                "      default: eu\n      enum: [eu, us]\n- url: https://api.payments.io\n"
                "externalDocs:\n  url: https://docs.acme.io\n")
+        entries = self.discover({"openapi.yaml": doc})
+        self.assertEqual(self.names(entries, "service"), ["payments"])
+        self.assertEqual(self.entry(entries, "openapi.yaml")["describes"], "payments")
+
+    def test_a_url_nested_in_a_server_extension_is_skipped(self):
+        doc = ("servers:\n  - x-reference:\n      url: https://docs.acme.io\n"
+               "    url: https://api.payments.io\n")
         entries = self.discover({"openapi.yaml": doc})
         self.assertEqual(self.names(entries, "service"), ["payments"])
         self.assertEqual(self.entry(entries, "openapi.yaml")["describes"], "payments")
