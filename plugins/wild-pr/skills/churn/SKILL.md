@@ -1,6 +1,6 @@
 ---
 name: churn
-description: Diagnose why a PR keeps going through review rounds without converging, then recommend one way forward - keep patching, refactor in this PR, split the PR, or restart with relaxed requirements. Use when a PR has had many review rounds, fixes keep producing new findings, or the user asks why a PR won't settle, or runs /wild-pr:churn [pr-number-or-url].
+description: Diagnose why a PR keeps going through review rounds without converging, then recommend one way forward - keep patching, refactor in this PR, split the PR, restart with relaxed requirements, or move the change to the backend, frontend, external API, or library that should own it. Use when a PR has had many review rounds, fixes keep producing new findings, or the user asks why a PR won't settle, or runs /wild-pr:churn [pr-number-or-url].
 user-invocable: true
 argument-hint: "[pr-number-or-url]"
 ---
@@ -74,9 +74,9 @@ Read `timeline.json` in full. Write `<run dir>/triage.md` with three parts.
 
 ## Step 3 - Diagnose (parallel agents)
 
-Dispatch the five lens agents in [references/lenses.md](references/lenses.md) in one message, so they run in parallel. Use the host's subagent mechanism (in Claude Code, the `Agent` tool with `subagent_type: general-purpose`). Each agent gets its lens prompt verbatim, with the run directory and the repo directory filled in. The repo directory is the current checkout when it holds the PR's commits, and `none` otherwise. Agents never see each other's output.
+Dispatch the six lens agents in [references/lenses.md](references/lenses.md) in one message, so they run in parallel. Use the host's subagent mechanism (in Claude Code, the `Agent` tool with `subagent_type: general-purpose`). Each agent gets its lens prompt verbatim, with the run directory and the repo directory filled in. The repo directory is the current checkout when it holds the PR's commits, and `none` otherwise. Agents never see each other's output.
 
-If one agent fails or returns malformed output, re-dispatch that agent only. If the host cannot run subagents, run the five lenses inline, one after another, and say so in the report.
+If one agent fails or returns malformed output, re-dispatch that agent only. If the host cannot run subagents, run the six lenses inline, one after another, and say so in the report.
 
 ## Step 4 - Synthesize (main agent)
 
@@ -84,12 +84,28 @@ Merge the lens claims per cluster. When two lenses disagree, keep the claim with
 
 Pick one verdict:
 
-| Verdict                       | Signals                                                                                                  |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------- |
-| keep patching                 | Findings per round are falling. Few findings are fix-on-fix. Clusters are unrelated edge cases.          |
-| refactor in this PR           | One or two clusters share one structural cause. A contained refactor removes the whole class of finding. |
-| split the PR                  | Clusters map to separate concerns. Each part could converge alone.                                       |
-| restart with new requirements | One requirement drives most clusters, and relaxing it removes them.                                      |
+| Verdict                              | Signals                                                                                                                                                                        |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| keep patching                        | Findings per round are falling. Few findings are fix-on-fix. Clusters are unrelated edge cases.                                                                                |
+| refactor in this PR                  | One or two clusters share one structural cause. A contained refactor removes the whole class of finding.                                                                       |
+| split the PR                         | Clusters map to separate concerns. Each part could converge alone.                                                                                                             |
+| restart with new requirements        | One requirement drives most clusters, and relaxing it removes them.                                                                                                            |
+| move the change to another component | One or more clusters fight over behavior that another component owns or should own. Using or adding it there removes those clusters, at a cost below the rounds already spent. |
+
+The "move the change to another component" verdict names its target and one of three forms:
+
+- **use what exists:** this PR calls a capability the other component already has. No other component releases anything.
+- **change the provider:** a backend, external API, or library gains or exposes the behavior. This PR waits for that release, or ships behind it.
+- **change the consumer:** a frontend or other client takes over the behavior, and this PR drops it.
+
+It may combine with another verdict, for example "move the change to another component, then restart with new requirements". Name both verdicts, and the order.
+
+Weigh the claims with these rules:
+
+- A claim that needs work in another component is not weaker for that reason. Compare its cost with the findings and rounds it removes.
+- A verified claim outranks an unverified one on the same cluster.
+- A standing rule in `requirements.md` that prefers the other component breaks a tie in its favor.
+- "Use what exists" beats "change the provider" when both remove the same findings, because it needs no release in another component.
 
 Name the runner-up and state why it lost.
 
@@ -100,11 +116,11 @@ Write the report in this shape:
 1. **Verdict** and a one-paragraph reason.
 2. **Churn numbers:** rounds, findings per round, the fix-on-fix share, hot files, and unposted findings.
 3. **Clusters:** each with its findings, the lens claims, and the diagnosis.
-4. **Proposed requirement changes:** each with the requirement, the cost of keeping it, what relaxing it removes, and what the user loses.
+4. **Proposed changes:** each requirement change with the requirement, the cost of keeping it, what relaxing it removes, and what the user loses. Each change in another component names the target, its direction, what exists today (`file:line` or URL), what is missing, and the release order.
 5. **Runner-up verdict** and why it lost.
 6. **Excluded noise:** a count per reviewer.
 
-Every claim cites evidence: a comment URL, a commit SHA, or `file:line`. Save the report with the `plan-keeper:plan-save` skill as `Kind: design`. If plan-keeper is not installed, write it to `<run dir>/report.md`. Print the verdict and the saved path.
+Every claim cites evidence: a comment URL, a commit SHA, or `file:line`. Every sentence that says another component lacks something cites its evidence, or says `(unverified)`. Save the report with the `plan-keeper:plan-save` skill as `Kind: design`. If plan-keeper is not installed, write it to `<run dir>/report.md`. Print the verdict and the saved path.
 
 ## Never
 
