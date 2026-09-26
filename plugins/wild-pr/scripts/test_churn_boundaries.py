@@ -114,6 +114,11 @@ class TestReposFromDocs(BoundaryCase):
         self.assertEqual(self.entry(entries, "acme/ios")["direction"], "consumer")
         self.assertEqual(self.entry(entries, "acme/rn")["direction"], "unknown")
 
+    def test_a_link_that_ends_the_first_sentence_still_decides(self):
+        entries = self.discover({"CLAUDE.md": "The backend is https://github.com/acme/api. "
+                                              "Adapting the client to its defects locks bugs in.\n"})
+        self.assertEqual(self.entry(entries, "acme/api")["direction"], "provider")
+
     def test_first_sentence_decides_over_later_sentences(self):
         entries = self.discover({"CLAUDE.md": "- https://github.com/acme/api: the backend. "
                                               "Adapting the client to its defects locks bugs in.\n"})
@@ -135,6 +140,10 @@ class TestReposFromDocs(BoundaryCase):
     def test_home_path_at_the_end_of_a_sentence_is_found(self):
         entries = self.discover({"CLAUDE.md": "The backend lives in ~/dev/api.\n"})
         self.assertEqual(self.entry(entries, "api")["local_path"], str(self.home / "dev" / "api"))
+
+    def test_home_path_to_a_file_inside_a_checkout_names_the_checkout(self):
+        entries = self.discover({"CLAUDE.md": "Read `~/dev/api/CLAUDE.md` for the backend.\n"})
+        self.assertEqual(self.names(entries, "repo"), ["api"])
 
     def test_missing_path_and_non_repo_directory_are_dropped(self):
         (self.home / "plans").mkdir()

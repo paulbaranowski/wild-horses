@@ -211,7 +211,7 @@ def direction_of(block_text: str, heading: str) -> Direction:
     whole block, then the heading, decide only when the text before them names
     neither direction, or both.
     """
-    block_text = PATH_TOKEN.sub(" ", block_text)
+    # Split before PATH_TOKEN runs: it would also remove a link's final period.
     first_sentence = SENTENCE_END.split(block_text.strip(), maxsplit=1)[0]
     for text in (first_sentence, block_text, heading):
         text = PATH_TOKEN.sub(" ", text)
@@ -259,6 +259,16 @@ def local_checkout(repo: Path, home: Path, slug: str) -> str | None:
     return None
 
 
+def checkout_root(path: Path, home: Path) -> Path | None:
+    """The nearest directory at or above `path`, below `home`, holding .git."""
+    for candidate in (path, *path.parents):
+        if candidate == home or home not in candidate.parents:
+            return None
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
 def repos_from_docs(repo: Path, home: Path) -> list[Boundary]:
     """Sibling repos named by GitHub links or ~/ paths in the agent docs.
     `repo` must be resolved, so the repo never lists itself."""
@@ -281,8 +291,10 @@ def repos_from_docs(repo: Path, home: Path) -> list[Boundary]:
                     found.append(make_entry(slug, "repo", source, direction, gh_slug=slug,
                                             local_path=local_checkout(repo, home, slug)))
                 for m in HOME_PATH.finditer(line):
-                    path = home / m.group(1).rstrip(".")  # a sentence may end on the path
-                    if not (path / ".git").exists() or path.resolve() == repo:
+                    # A sentence may end on the path, and the path may name a
+                    # file inside the checkout, such as ~/dev/api/CLAUDE.md.
+                    path = checkout_root(home / m.group(1).rstrip("."), home)
+                    if path is None or path.resolve() == repo:
                         continue
                     origin = own_slug(path)
                     found.append(make_entry(origin or path.name, "repo", source, direction,
