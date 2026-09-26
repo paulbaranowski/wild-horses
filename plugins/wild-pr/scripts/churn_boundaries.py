@@ -73,6 +73,13 @@ LOCAL_HOST = re.compile(
     r"|\.(?:local|localhost|test|example|invalid|internal)$"
     r"|(?:^|\.)example\.(?:com|net|org)$", re.IGNORECASE)
 REAL_TLD = re.compile(r"\.[A-Za-z]{2,}$")
+SCHEMA_FILE = re.compile(r"^(?:openapi|swagger)\.(?:json|ya?ml)$|\.(?:graphql|gql)$")
+GENERATED_DIRS = {"__generated__", "generated", "openapi-client"}
+SERVERS_KEY = re.compile(r"""^\s*["']?servers["']?\s*:""")
+SERVER_URL = re.compile(r"""^\s*-?\s*["']?url["']?\s*:\s*["']?(https?://[^\s"',]+)""")
+# A server URL must sit this close below the `servers` key. Other `url`
+# keys (contact, license, externalDocs) are not servers.
+SERVER_URL_WINDOW = 5
 
 
 def empty(name, kind, direction="unknown"):
@@ -375,6 +382,45 @@ def services_from_code(repo, providers):
     return found
 
 
+# --- schemas -----------------------------------------------------------------
+
+def schema_entry(name, path, source):
+    entry = empty(name, "schema", "provider")
+    entry.update(local_path=str(path), sources=[source])
+    return entry
+
+
+def schemas(repo, providers):
+    """OpenAPI and GraphQL schema files, and generated client directories.
+    An OpenAPI server URL also yields the service the schema describes."""
+    found = []
+    for root, files in walk(repo):
+        rel_dir = root.relative_to(repo).as_posix()
+        if root.name in GENERATED_DIRS:
+            found.append(schema_entry(rel_dir, root, rel_dir))
+        for name in files:
+            if not SCHEMA_FILE.search(name):
+                continue
+            path = root / name
+            rel = path.relative_to(repo).as_posix()
+            entry = schema_entry(rel, path, f"{rel}:1")
+            found.append(entry)
+            servers_line = None
+            for n, line in enumerate((read_text(path) or "").splitlines(), 1):
+                if SERVERS_KEY.match(line):
+                    servers_line = n
+                    continue
+                m = SERVER_URL.match(line)
+                if not m or servers_line is None or n - servers_line > SERVER_URL_WINDOW:
+                    continue
+                host = URL_HOST.match(m.group(1)).group(1)
+                if is_public_host(host):
+                    name_, doc_url = host_service(host, providers)
+                    entry["describes"] = entry["describes"] or name_
+                    found.append(service(name_, doc_url, f"{rel}:{n}"))
+    return found
+
+
 # --- merge -------------------------------------------------------------------
 
 def merge_key(entry):
@@ -421,4 +467,5 @@ def discover(repo, home=None, providers=None):
     providers = load_providers() if providers is None else providers
     return merge(repos_from_docs(repo, home)
                  + libraries_from_manifests(repo)
-                 + services_from_code(repo, providers))
+                 + services_from_code(repo, providers)
+                 + schemas(repo, providers))

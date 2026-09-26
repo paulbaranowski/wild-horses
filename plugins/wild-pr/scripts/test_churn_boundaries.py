@@ -249,5 +249,42 @@ class TestServicesFromCode(BoundaryCase):
         self.assertEqual(self.names(entries, "service"), ["stripe"])
 
 
+OPENAPI = """\
+openapi: 3.0.0
+info:
+  title: Payments
+  contact:
+    url: https://acme.io/support
+servers:
+  - url: https://api.payments.io/v1
+paths: {}
+"""
+
+
+class TestSchemas(BoundaryCase):
+    def test_openapi_file_describes_its_server(self):
+        entries = self.discover({"api/openapi.yaml": OPENAPI})
+        schema = self.entry(entries, "api/openapi.yaml")
+        self.assertEqual((schema["kind"], schema["describes"]), ("schema", "payments"))
+        self.assertEqual(schema["local_path"], str(self.repo / "api" / "openapi.yaml"))
+        self.assertEqual(self.entry(entries, "payments")["sources"], ["api/openapi.yaml:7"])
+
+    def test_contact_url_outside_servers_is_not_a_service(self):
+        entries = self.discover({"api/openapi.yaml": OPENAPI})
+        self.assertEqual(self.names(entries, "service"), ["payments"])
+
+    def test_openapi_json_server_url(self):
+        doc = json.dumps({"openapi": "3.0.0", "servers": [{"url": "https://api.stripe.com"}]}, indent=2)
+        entries = self.discover({"openapi.json": doc})
+        self.assertEqual(self.entry(entries, "openapi.json")["describes"], "stripe")
+
+    def test_graphql_files_and_generated_client_dirs(self):
+        entries = self.discover({"schema.graphql": "type Query { me: User }\n",
+                                 "src/generated/client.ts": "export {};\n",
+                                 "src/generated/types.ts": "export {};\n"})
+        self.assertEqual(self.names(entries, "schema"), ["schema.graphql", "src/generated"])
+        self.assertIsNone(self.entry(entries, "schema.graphql")["describes"])
+
+
 if __name__ == "__main__":
     unittest.main()
