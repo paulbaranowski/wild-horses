@@ -135,5 +135,54 @@ class TestReposFromDocs(BoundaryCase):
         self.assertEqual(entries, [])
 
 
+class TestLibraries(BoundaryCase):
+    def test_npm_dependencies_with_and_without_an_install(self):
+        (self.repo / "node_modules" / "@tanstack" / "react-query").mkdir(parents=True)
+        manifest = {"name": "app",
+                    "dependencies": {"@tanstack/react-query": "^5", "zod": "^3"},
+                    "devDependencies": {"jest": "^29"}}
+        entries = self.discover({"package.json": json.dumps(manifest, indent=2)})
+        self.assertEqual(self.names(entries, "library"), ["@tanstack/react-query", "zod"])
+        rq = self.entry(entries, "@tanstack/react-query")
+        self.assertEqual(rq["local_path"], str(self.repo / "node_modules" / "@tanstack" / "react-query"))
+        self.assertEqual(rq["doc_url"], "https://www.npmjs.com/package/@tanstack/react-query")
+        self.assertEqual(rq["direction"], "provider")
+        self.assertEqual(rq["sources"], ["package.json:4"])
+        self.assertIsNone(self.entry(entries, "zod")["local_path"])
+
+    def test_pyproject_pep621_and_poetry_dependencies(self):
+        pyproject = ('[project]\nname = "app"\ndependencies = [\n  "httpx>=0.27",\n'
+                     '  "pydantic[email]",\n]\n\n[tool.poetry.dependencies]\n'
+                     'python = "^3.12"\nrich = "^13"\n')
+        entries = self.discover({"pyproject.toml": pyproject,
+                                 ".venv/lib/python3.12/site-packages/httpx/__init__.py": ""})
+        self.assertEqual(self.names(entries, "library"), ["httpx", "pydantic", "rich"])
+        httpx = self.entry(entries, "httpx")
+        self.assertEqual(httpx["local_path"],
+                         str(self.repo / ".venv" / "lib" / "python3.12" / "site-packages" / "httpx"))
+        self.assertEqual(httpx["doc_url"], "https://pypi.org/project/httpx/")
+        self.assertEqual(httpx["sources"], ["pyproject.toml:4"])
+        self.assertEqual(self.entry(entries, "rich")["sources"], ["pyproject.toml:10"])
+
+    def test_go_mod_direct_requirements_only(self):
+        gomod = ("module example.com/app\n\ngo 1.22\n\nrequire (\n"
+                 "\tgithub.com/acme/lib/v2 v2.1.0\n\tgolang.org/x/sync v0.7.0 // indirect\n)\n\n"
+                 "require gopkg.in/yaml.v3 v3.0.1\n")
+        entries = self.discover({"go.mod": gomod})
+        self.assertEqual(self.names(entries, "library"), ["github.com/acme/lib/v2", "gopkg.in/yaml.v3"])
+        lib = self.entry(entries, "github.com/acme/lib/v2")
+        self.assertEqual(lib["gh_slug"], "acme/lib")
+        self.assertEqual(lib["doc_url"], "https://pkg.go.dev/github.com/acme/lib/v2")
+        self.assertEqual(lib["sources"], ["go.mod:6"])
+
+    def test_malformed_manifests_are_skipped(self):
+        entries = self.discover({"package.json": "{not json", "pyproject.toml": "[project\n",
+                                 "go.mod": ""})
+        self.assertEqual(entries, [])
+
+    def test_package_json_that_is_not_an_object_is_skipped(self):
+        self.assertEqual(self.discover({"package.json": "[]"}), [])
+
+
 if __name__ == "__main__":
     unittest.main()

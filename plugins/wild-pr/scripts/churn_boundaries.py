@@ -13,9 +13,11 @@ Every entry has the keys in FIELDS. Entries for one component merge, and the
 list is sorted, so two runs over one tree give byte-identical output.
 """
 
+import json
 import os
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 
 FIELDS = ("name", "kind", "direction", "local_path", "gh_slug", "doc_url", "describes", "sources")
@@ -42,6 +44,9 @@ CONSUMER_WORDS = re.compile(
     r"\b(frontend|front-end|web app|mobile app|downstream|consumed by|consumers?|calls this"
     r"|clients|client repos?)\b",
     re.IGNORECASE)
+REQUIREMENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+GO_REQUIRE = re.compile(
+    r"^(?:require\s+)?([A-Za-z0-9._~/-]+\.[A-Za-z0-9._~/-]+)\s+v[0-9]\S*(\s*//\s*indirect)?")
 
 
 def empty(name, kind, direction="unknown"):
@@ -163,6 +168,103 @@ def repos_from_docs(repo, home):
     return found
 
 
+# --- libraries from manifests ------------------------------------------------
+
+def line_of(text, needle, after=None):
+    """1-based line of the first `needle` at or below the first line holding
+    `after`. Line 1 when it is not found."""
+    lines = text.splitlines()
+    start = next((i for i, line in enumerate(lines) if after in line), 0) if after else 0
+    for i in range(start, len(lines)):
+        if needle in lines[i]:
+            return i + 1
+    return 1
+
+
+def library(name, source, local_path=None, doc_url=None, gh_slug=None):
+    entry = empty(name, "library", "provider")
+    entry.update(local_path=local_path, doc_url=doc_url, gh_slug=gh_slug, sources=[source])
+    return entry
+
+
+def npm_libraries(repo):
+    """`dependencies` from package.json. Dev dependencies are not boundaries."""
+    text = read_text(repo / "package.json")
+    if text is None:
+        return []
+    try:
+        deps = json.loads(text).get("dependencies") or {}
+    except (json.JSONDecodeError, AttributeError):
+        return []
+    out = []
+    for name in sorted(deps):
+        path = repo / "node_modules" / name
+        line = line_of(text, json.dumps(name), after='"dependencies"')
+        out.append(library(name, f"package.json:{line}",
+                           local_path=str(path) if path.is_dir() else None,
+                           doc_url=f"https://www.npmjs.com/package/{name}"))
+    return out
+
+
+def site_package(repo, name):
+    """The package's directory in the repo's .venv, or None."""
+    module = name.lower().replace("-", "_")
+    hits = sorted((repo / ".venv" / "lib").glob(f"python*/site-packages/{module}"))
+    return str(hits[0]) if hits else None
+
+
+def python_libraries(repo):
+    """PEP 621 `project.dependencies` and Poetry dependencies from pyproject.toml."""
+    text = read_text(repo / "pyproject.toml")
+    if text is None:
+        return []
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return []
+    names = set()
+    for spec in (data.get("project") or {}).get("dependencies") or []:
+        m = REQUIREMENT_NAME.match(spec.strip()) if isinstance(spec, str) else None
+        if m:
+            names.add(m.group(0))
+    poetry = ((data.get("tool") or {}).get("poetry") or {}).get("dependencies") or {}
+    names.update(name for name in poetry if name.lower() != "python")
+    return [library(name, f"pyproject.toml:{line_of(text, name, after='dependencies')}",
+                    local_path=site_package(repo, name),
+                    doc_url=f"https://pypi.org/project/{name}/")
+            for name in sorted(names, key=str.lower)]
+
+
+def go_libraries(repo):
+    """Direct `require` lines from go.mod. `// indirect` lines are skipped."""
+    text = read_text(repo / "go.mod")
+    if text is None:
+        return []
+    out, in_block = [], False
+    for n, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if stripped.startswith("require ("):
+            in_block = True
+            continue
+        if in_block and stripped == ")":
+            in_block = False
+            continue
+        if not (in_block or stripped.startswith("require ")):
+            continue
+        m = GO_REQUIRE.match(stripped)
+        if not m or m.group(2):
+            continue
+        module = m.group(1)
+        gh = GITHUB_LINK.match(module) if module.startswith("github.com/") else None
+        out.append(library(module, f"go.mod:{n}", doc_url=f"https://pkg.go.dev/{module}",
+                           gh_slug=f"{gh.group(1)}/{gh.group(2)}" if gh else None))
+    return out
+
+
+def libraries_from_manifests(repo):
+    return npm_libraries(repo) + python_libraries(repo) + go_libraries(repo)
+
+
 # --- merge -------------------------------------------------------------------
 
 def merge_key(entry):
@@ -206,4 +308,4 @@ def discover(repo, home=None):
     """Every boundary component of `repo`, merged and sorted."""
     repo = Path(repo).resolve()
     home = Path(home) if home else Path.home()
-    return merge(repos_from_docs(repo, home))
+    return merge(repos_from_docs(repo, home) + libraries_from_manifests(repo))
