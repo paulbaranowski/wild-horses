@@ -184,5 +184,70 @@ class TestLibraries(BoundaryCase):
         self.assertEqual(self.discover({"package.json": "[]"}), [])
 
 
+class TestProviderTable(unittest.TestCase):
+    def test_every_entry_has_host_name_and_doc_url(self):
+        for provider in cb.load_providers():
+            self.assertEqual(set(provider), {"host", "name", "doc_url"})
+
+    def test_malformed_table_raises_value_error(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as fh:
+            fh.write('[{"host": "x"}]')
+            fh.flush()
+            with self.assertRaises(ValueError):
+                cb.load_providers(Path(fh.name))
+
+
+class TestServicesFromCode(BoundaryCase):
+    def test_env_template_names_become_services(self):
+        entries = self.discover({".env.example": "PAYMENTS_API_URL=\nEXPO_PUBLIC_API_URL=\nSUPABASE_URL=\n"})
+        self.assertEqual(self.names(entries, "service"), ["api", "payments", "supabase"])
+        self.assertEqual(self.entry(entries, "payments")["sources"], [".env.example:1"])
+        self.assertEqual(self.entry(entries, "supabase")["doc_url"], "https://supabase.com/docs/reference")
+
+    def test_client_base_url_maps_to_a_known_provider(self):
+        entries = self.discover({"src/pay.ts": 'export const stripe = axios.create({ baseURL: "https://api.stripe.com/v1" });\n'})
+        stripe = self.entry(entries, "stripe")
+        self.assertEqual((stripe["kind"], stripe["direction"], stripe["doc_url"]),
+                         ("service", "provider", "https://docs.stripe.com/api"))
+        self.assertEqual(stripe["sources"], ["src/pay.ts:1"])
+
+    def test_unknown_host_is_named_by_its_domain(self):
+        entries = self.discover({"app/client.py": 'client = httpx.Client(base_url="https://api-staging.herds.events")\n'})
+        self.assertEqual(self.names(entries, "service"), ["herds"])
+        self.assertIsNone(self.entry(entries, "herds")["doc_url"])
+
+    def test_local_placeholder_and_uncalled_urls_are_dropped(self):
+        entries = self.discover({"src/a.ts": 'fetch("http://localhost:3000/x");\n'
+                                             'fetch("https://example.com/y");\n'
+                                             'fetch(`https://${HOST}/z`);\n'
+                                             "// docs: https://docs.acme.io/guide\n"})
+        self.assertEqual(entries, [])
+
+    def test_env_name_and_base_url_merge_into_one_service(self):
+        entries = self.discover({".env.example": "STRIPE_API_URL=https://api.stripe.com\n",
+                                 "src/pay.ts": 'axios.create({ baseURL: "https://api.stripe.com" });\n'})
+        self.assertEqual(self.names(entries, "service"), ["stripe"])
+        self.assertEqual(self.entry(entries, "stripe")["sources"], [".env.example:1", "src/pay.ts:1"])
+
+    def test_real_env_file_is_never_read(self):
+        with mock.patch.object(cb, "read_text", wraps=cb.read_text) as reader:
+            entries = self.discover({".env": "SECRET_API_URL=https://vault.acme.io\n"})
+        self.assertEqual(entries, [])
+        self.assertNotIn(".env", [call.args[0].name for call in reader.call_args_list])
+
+    def test_vendored_build_and_test_trees_are_skipped(self):
+        call = 'fetch("https://api.stripe.com");\n'
+        entries = self.discover({"node_modules/sdk/index.js": call, "dist/app.js": call,
+                                 ".next/server.js": call, "tests/test_pay.py": call,
+                                 "src/__tests__/pay.ts": call, "src/pay.test.ts": call,
+                                 "src/pay.min.js": call})
+        self.assertEqual(entries, [])
+
+    def test_undecodable_and_oversized_files_do_not_crash(self):
+        entries = self.discover({"src/bin.ts": b"\xff\xfe" + b'fetch("https://api.stripe.com");\n',
+                                 "src/big.ts": 'fetch("https://api.openai.com");\n' + "x" * cb.MAX_FILE_BYTES})
+        self.assertEqual(self.names(entries, "service"), ["stripe"])
+
+
 if __name__ == "__main__":
     unittest.main()

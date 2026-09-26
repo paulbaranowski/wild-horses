@@ -13,6 +13,7 @@ Every entry has the keys in FIELDS. Entries for one component merge, and the
 list is sorted, so two runs over one tree give byte-identical output.
 """
 
+import fnmatch
 import json
 import os
 import re
@@ -47,6 +48,31 @@ CONSUMER_WORDS = re.compile(
 REQUIREMENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 GO_REQUIRE = re.compile(
     r"^(?:require\s+)?([A-Za-z0-9._~/-]+\.[A-Za-z0-9._~/-]+)\s+v[0-9]\S*(\s*//\s*indirect)?")
+PROVIDERS_FILE = Path(__file__).with_name("churn_known_providers.json")
+
+# Pruned during the code scan. Their hosts are fakes or other people's
+# services, and vendored trees hold thousands of them.
+SKIP_DIRS = {"__mocks__", "__pycache__", "__tests__", "android", "build", "coverage", "dist",
+             "e2e", "env", "fixtures", "ios", "mocks", "node_modules", "Pods", "site-packages",
+             "test", "tests", "vendor", "venv"}
+TEST_FILE = re.compile(r"\.(?:test|spec)\.[a-z]+$|^test_.*\.py$|_test\.(?:py|go)$")
+SOURCE_SUFFIXES = {".cjs", ".go", ".js", ".jsx", ".kt", ".mjs", ".py", ".rb", ".swift", ".ts", ".tsx"}
+# Env templates only. A real `.env` can hold secrets and is never read.
+ENV_TEMPLATES = {".env.example", ".env.sample", ".env.template"}
+
+ENV_TOKEN = re.compile(r"\b[A-Z][A-Z0-9_]*_(?:URL|ENDPOINT|HOST)\b")
+ENV_SUFFIXES = ("_API_URL", "_BASE_URL", "_API_ENDPOINT", "_ENDPOINT", "_API_HOST", "_HOST", "_URL")
+ENV_PREFIXES = ("EXPO_PUBLIC_", "NEXT_PUBLIC_", "NUXT_PUBLIC_", "REACT_APP_", "VITE_", "TEST_")
+URL_HOST = re.compile(r"https?://([A-Za-z0-9.-]+)")
+# A URL counts only on a line that makes an HTTP call or sets a base URL.
+CLIENT_CALL = re.compile(
+    r"fetch\(|axios|httpx\.|requests\.|aiohttp|createClient\(|base_?url|new URL\(|\bky\.|\bgot\("
+    r"|urllib|http\.(?:Get|Post|NewRequest)|URLSession", re.IGNORECASE)
+LOCAL_HOST = re.compile(
+    r"^(?:localhost|0\.0\.0\.0|127\.|10\.|192\.168\.)"
+    r"|\.(?:local|localhost|test|example|invalid|internal)$"
+    r"|(?:^|\.)example\.(?:com|net|org)$", re.IGNORECASE)
+REAL_TLD = re.compile(r"\.[A-Za-z]{2,}$")
 
 
 def empty(name, kind, direction="unknown"):
@@ -265,6 +291,90 @@ def libraries_from_manifests(repo):
     return npm_libraries(repo) + python_libraries(repo) + go_libraries(repo)
 
 
+# --- services from code ------------------------------------------------------
+
+def load_providers(path=PROVIDERS_FILE):
+    """The known-provider table. Raise ValueError when an entry is malformed."""
+    table = json.loads(Path(path).read_text())
+    for entry in table:
+        if (not isinstance(entry, dict) or set(entry) != {"host", "name", "doc_url"}
+                or not all(isinstance(v, str) for v in entry.values())):
+            raise ValueError(f"bad provider entry in {path}: {entry!r}")
+    return table
+
+
+def walk(repo):
+    """(directory, sorted file names) for each directory discovery reads.
+    Hidden directories and SKIP_DIRS are pruned. The order is fixed."""
+    for root, dirs, files in os.walk(repo):
+        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
+        yield Path(root), sorted(files)
+
+
+def scanned_files(repo):
+    """Source files and env templates, in walk order."""
+    for root, files in walk(repo):
+        for name in files:
+            if name in ENV_TEMPLATES or (Path(name).suffix in SOURCE_SUFFIXES
+                                         and not TEST_FILE.search(name)
+                                         and not name.endswith(".min.js")):
+                yield root / name
+
+
+def env_service_name(token):
+    """PAYMENTS_API_URL -> payments. A bare API_URL or BASE_URL -> api."""
+    for prefix in ENV_PREFIXES:
+        token = token.removeprefix(prefix)
+    for suffix in ENV_SUFFIXES:
+        if token.endswith(suffix):
+            token = token[: -len(suffix)]
+            break
+    name = token.lower().replace("_", "-")
+    return "api" if name in ("", "api", "base") else name
+
+
+def is_public_host(host):
+    return bool(REAL_TLD.search(host)) and not LOCAL_HOST.search(host)
+
+
+def host_service(host, providers):
+    """(name, doc_url) for a host. Unknown hosts are named by their
+    second-to-last label: api.payments.io -> payments."""
+    host = host.lower()
+    for provider in providers:
+        if fnmatch.fnmatch(host, provider["host"]):
+            return provider["name"], provider["doc_url"]
+    return host.split(".")[-2], None
+
+
+def service(name, doc_url, source):
+    entry = empty(name, "service", "provider")
+    entry.update(doc_url=doc_url, sources=[source])
+    return entry
+
+
+def services_from_code(repo, providers):
+    """Services named by env var names, and by URLs on HTTP client lines."""
+    doc_by_name = {p["name"]: p["doc_url"] for p in providers}
+    found = []
+    for path in scanned_files(repo):
+        text = read_text(path)
+        if text is None:
+            continue
+        rel = path.relative_to(repo).as_posix()
+        env_file = path.name in ENV_TEMPLATES
+        for n, line in enumerate(text.splitlines(), 1):
+            source = f"{rel}:{n}"
+            for token in ENV_TOKEN.findall(line):
+                name = env_service_name(token)
+                found.append(service(name, doc_by_name.get(name), source))
+            if env_file or CLIENT_CALL.search(line):
+                for host in URL_HOST.findall(line):
+                    if is_public_host(host):
+                        found.append(service(*host_service(host, providers), source))
+    return found
+
+
 # --- merge -------------------------------------------------------------------
 
 def merge_key(entry):
@@ -304,8 +414,11 @@ def merge(entries):
     return sorted(merged.values(), key=lambda e: (e["kind"], e["name"].lower(), e["name"]))
 
 
-def discover(repo, home=None):
+def discover(repo, home=None, providers=None):
     """Every boundary component of `repo`, merged and sorted."""
     repo = Path(repo).resolve()
     home = Path(home) if home else Path.home()
-    return merge(repos_from_docs(repo, home) + libraries_from_manifests(repo))
+    providers = load_providers() if providers is None else providers
+    return merge(repos_from_docs(repo, home)
+                 + libraries_from_manifests(repo)
+                 + services_from_code(repo, providers))

@@ -1,0 +1,48 @@
+[
+  {
+    "host": "api.anthropic.com",
+    "name": "anthropic",
+    "doc_url": "https://docs.anthropic.com/en/api"
+  },
+  {
+    "host": "api.expo.dev",
+    "name": "expo",
+    "doc_url": "https://docs.expo.dev"
+  },
+  { "host": "exp.host", "name": "expo", "doc_url": "https://docs.expo.dev" },
+  {
+    "host": "api.github.com",
+    "name": "github",
+    "doc_url": "https://docs.github.com/en/rest"
+  },
+  {
+    "host": "api.openai.com",
+    "name": "openai",
+    "doc_url": "https://platform.openai.com/docs/api-reference"
+  },
+  {
+    "host": "api.resend.com",
+    "name": "resend",
+    "doc_url": "https://resend.com/docs/api-reference"
+  },
+  {
+    "host": "api.revenuecat.com",
+    "name": "revenuecat",
+    "doc_url": "https://www.revenuecat.com/docs/api-v2"
+  },
+  {
+    "host": "*.sentry.io",
+    "name": "sentry",
+    "doc_url": "https://docs.sentry.io"
+  },
+  {
+    "host": "api.stripe.com",
+    "name": "stripe",
+    "doc_url": "https://docs.stripe.com/api"
+  },
+  {
+    "host": "*.supabase.co",
+    "name": "supabase",
+    "doc_url": "https://supabase.com/docs/reference"
+  }
+]
