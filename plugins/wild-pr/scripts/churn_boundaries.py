@@ -98,8 +98,10 @@ PROVIDERS_FILE = Path(__file__).with_name("churn_known_providers.json")
 # Pruned by walk(), so both the code scan and the schema scan skip them.
 # Their hosts are fakes or other people's services, and vendored trees hold
 # thousands of them.
-SKIP_DIRS = {"__mocks__", "__pycache__", "__tests__", "android", "build", "coverage", "dist",
-             "e2e", "env", "fixtures", "ios", "mocks", "node_modules", "Pods", "site-packages",
+# android/ and ios/ stay in: native Kotlin and Swift code lives there. Their
+# generated parts (build/, Pods/, DerivedData/) are pruned by name.
+SKIP_DIRS = {"__mocks__", "__pycache__", "__tests__", "build", "coverage", "DerivedData", "dist",
+             "e2e", "env", "fixtures", "mocks", "node_modules", "Pods", "site-packages",
              "test", "tests", "vendor", "venv"}
 TEST_FILE = re.compile(r"\.(?:test|spec)\.[a-z]+$|^test_.*\.py$|_test\.(?:py|go)$")
 SOURCE_SUFFIXES = {".cjs", ".go", ".js", ".jsx", ".kt", ".mjs", ".py", ".rb", ".swift", ".ts", ".tsx"}
@@ -120,7 +122,7 @@ ENV_PREFIXES = ("EXPO_PUBLIC_", "NEXT_PUBLIC_", "NUXT_PUBLIC_", "REACT_APP_", "V
 URL_HOST = re.compile(r"https?://([A-Za-z0-9.-]+)")
 # A URL counts only on a line that makes an HTTP call or sets a base URL.
 CLIENT_CALL = re.compile(
-    r"fetch\(|axios|httpx\.|requests\.|aiohttp|createClient\(|base_?url|new URL\(|\bky\.|\bgot\("
+    r"fetch\(|axios|httpx\.|requests\.|aiohttp|createClient\(|base_?url|\bURL\(|\bky\.|\bgot\("
     r"|urllib|http\.(?:Get|Post|NewRequest)|URLSession", re.IGNORECASE)
 LOCAL_HOST = re.compile(
     r"^(?:localhost|0\.0\.0\.0|127\.|10\.|192\.168\.)"
@@ -141,9 +143,6 @@ GRAPHQL_FILE = re.compile(r"\.(?:graphql|gql)$")
 GENERATED_DIRS = {"__generated__", "generated", "openapi-client"}
 SERVERS_KEY = re.compile(r"""^\s*["']?servers["']?\s*:""")
 SERVER_URL = re.compile(r"""^\s*-?\s*["']?url["']?\s*:\s*["']?(https?://[^\s"',]+)""")
-# A server URL must sit this close below the `servers` key. Other `url`
-# keys (contact, license, externalDocs) are not servers.
-SERVER_URL_WINDOW = 5
 # Swagger 2.0 names its server with a top-level `host`, not `servers`.
 SWAGGER_HOST = re.compile(r"""^\s{0,2}["']?host["']?\s*:\s*["']?([A-Za-z0-9.-]+)""")
 
@@ -508,6 +507,20 @@ def services_from_code(repo: Path, tree: Tree, providers: list[Provider]) -> lis
 
 # --- schemas -----------------------------------------------------------------
 
+def schema_service(host: str, source: str, providers: list[Provider]) -> Boundary:
+    """A service an API schema names. Its direction is unknown. The repo may
+    call that API, or it may serve the API and ship its own schema."""
+    name, doc_url = host_service(host, providers)
+    return make_entry(name, "service", source, "unknown", doc_url=doc_url)
+
+
+def in_block(line: str, key_indent: int) -> bool:
+    """Whether a non-blank YAML line still belongs to the block of a key
+    indented `key_indent` spaces. A list item may sit at the key's own indent."""
+    indent = len(line) - len(line.lstrip())
+    return indent > key_indent or (indent == key_indent and line.lstrip().startswith("-"))
+
+
 def json_servers(text: str, rel: str, providers: list[Provider]) -> list[Boundary]:
     """Server hosts from an OpenAPI or Swagger JSON file. It parses the JSON,
     so a minified file with everything on one line works too."""
@@ -525,7 +538,7 @@ def json_servers(text: str, rel: str, providers: list[Provider]) -> list[Boundar
     swagger_host = doc.get("host")
     if isinstance(swagger_host, str):
         hosts.append(swagger_host)
-    return [service(*host_service(h, providers), f"{rel}:{line_of(text, h)}")
+    return [schema_service(h, f"{rel}:{line_of(text, h)}", providers)
             for h in hosts if is_public_host(h)]
 
 
@@ -537,27 +550,33 @@ def openapi_servers(path: Path, rel: str, providers: list[Provider]) -> list[Bou
     if path.suffix == ".json":
         return json_servers(text, rel, providers)
     found: list[Boundary] = []
-    servers_line = None
+    # Only `url` keys inside the `servers` block count. Other `url` keys
+    # (contact, license, externalDocs) are not servers.
+    servers_indent = None
     for n, line in enumerate(text.splitlines(), 1):
         if SERVERS_KEY.match(line):
-            servers_line = n
+            servers_indent = len(line) - len(line.lstrip())
             continue
+        if servers_indent is not None and line.strip() and not in_block(line, servers_indent):
+            servers_indent = None
         swagger = SWAGGER_HOST.match(line)
         if swagger and is_public_host(swagger.group(1)):
-            found.append(service(*host_service(swagger.group(1), providers), f"{rel}:{n}"))
+            found.append(schema_service(swagger.group(1), f"{rel}:{n}", providers))
             continue
         m = SERVER_URL.match(line)
-        if not m or servers_line is None or n - servers_line > SERVER_URL_WINDOW:
+        if not m or servers_indent is None:
             continue
         host = URL_HOST.match(m.group(1))  # None for a hostless URL such as https:///v1
         if host and is_public_host(host.group(1)):
-            found.append(service(*host_service(host.group(1), providers), f"{rel}:{n}"))
+            found.append(schema_service(host.group(1), f"{rel}:{n}", providers))
     return found
 
 
 def schemas(repo: Path, tree: Tree, providers: list[Provider]) -> list[Boundary]:
     """OpenAPI and GraphQL schema files, and generated client directories.
-    An OpenAPI server URL also yields the service the schema describes."""
+    An OpenAPI server URL also yields the service the schema describes. A
+    schema file's direction is unknown, since the repo may serve that API. A
+    generated client directory is a provider: the repo calls that API."""
     found: list[Boundary] = []
     for root, files in tree:
         rel_dir = root.relative_to(repo).as_posix()
@@ -567,9 +586,9 @@ def schemas(repo: Path, tree: Tree, providers: list[Provider]) -> list[Boundary]
             path = root / file_name
             rel = path.relative_to(repo).as_posix()
             if GRAPHQL_FILE.search(file_name):
-                found.append(make_entry(rel, "schema", f"{rel}:1", local_path=str(path)))
+                found.append(make_entry(rel, "schema", f"{rel}:1", "unknown", local_path=str(path)))
             elif OPENAPI_FILE.search(file_name):
-                entry = make_entry(rel, "schema", f"{rel}:1", local_path=str(path))
+                entry = make_entry(rel, "schema", f"{rel}:1", "unknown", local_path=str(path))
                 servers = openapi_servers(path, rel, providers)
                 entry["describes"] = servers[0]["name"] if servers else None
                 found += [entry, *servers]

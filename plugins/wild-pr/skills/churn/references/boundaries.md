@@ -13,4 +13,4 @@
 | `describes`  | For a schema: the name of the service its server URL names. `null` for every other entry.                                                                               |
 | `sources`    | Where discovery found the component, as `file:line`. A generated client directory appears as its path alone. Cite these when a claim depends on the component existing. |
 
-Only repos get their direction from text: the words in the agent docs around the link. Libraries, services, and schemas are always `provider`. Treat a repo's direction as a guess, and read the component before you rely on it.
+Only repos get their direction from text: the words in the agent docs around the link. Libraries, services found in code, and generated clients are `provider`. Schema files, and services named only in a schema, are `unknown`, because the repo may serve that API. Treat a repo's direction as a guess, and read the component before you rely on it.

@@ -339,10 +339,16 @@ class TestServicesFromCode(BoundaryCase):
     def test_vendored_build_and_test_trees_are_skipped(self):
         call = 'fetch("https://api.stripe.com");\n'
         entries = self.discover({"node_modules/sdk/index.js": call, "dist/app.js": call,
+                                 "ios/Pods/SDK/Client.swift": call, "android/app/build/Gen.kt": call,
                                  ".next/server.js": call, "tests/test_pay.py": call,
                                  "src/__tests__/pay.ts": call, "src/pay.test.ts": call,
                                  "src/pay.min.js": call})
         self.assertEqual(entries, [])
+
+    def test_native_mobile_source_is_scanned(self):
+        entries = self.discover({"android/app/src/main/Api.kt": 'val c = URL("https://api.stripe.com")\n',
+                                 "ios/App/Api.swift": 'let s = URLSession.shared // https://api.openai.com\n'})
+        self.assertEqual(self.names(entries, "service"), ["openai", "stripe"])
 
     def test_undecodable_and_oversized_files_do_not_crash(self):
         entries = self.discover({"src/bin.ts": b"\xff\xfe" + b'fetch("https://api.stripe.com");\n',
@@ -394,6 +400,22 @@ class TestSchemas(BoundaryCase):
         entries = self.discover({"openapi.json": doc})
         self.assertEqual(self.entry(entries, "openapi.json")["describes"], "payments")
         self.assertEqual(self.entry(entries, "payments")["sources"], ["openapi.json:1"])
+
+    def test_schema_services_have_unknown_direction_until_code_calls_them(self):
+        entries = self.discover({"openapi.yaml": OPENAPI})
+        self.assertEqual(self.entry(entries, "openapi.yaml")["direction"], "unknown")
+        self.assertEqual(self.entry(entries, "payments")["direction"], "unknown")
+        entries = self.discover({"src/pay.ts": 'fetch("https://api.payments.io/v1/charges");\n'})
+        self.assertEqual(self.entry(entries, "payments")["direction"], "provider")
+
+    def test_every_url_in_the_yaml_servers_block_counts(self):
+        doc = ("openapi: 3.0.0\nservers:\n- url: https://{region}.example.test\n"
+               "  description: a templated server\n  variables:\n    region:\n"
+               "      default: eu\n      enum: [eu, us]\n- url: https://api.payments.io\n"
+               "externalDocs:\n  url: https://docs.acme.io\n")
+        entries = self.discover({"openapi.yaml": doc})
+        self.assertEqual(self.names(entries, "service"), ["payments"])
+        self.assertEqual(self.entry(entries, "openapi.yaml")["describes"], "payments")
 
     def test_graphql_files_and_generated_client_dirs(self):
         entries = self.discover({"schema.graphql": "type Query { me: User }\n",
