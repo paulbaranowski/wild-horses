@@ -57,7 +57,7 @@
 
 > **Lens: placement.** For each cluster, which component should own the behavior it keeps fixing? Read `boundaries.json`, then the source or documentation of each component the cluster touches. Check providers (backends, external APIs, libraries) and consumers (frontends, other clients) alike. For each cluster that belongs somewhere else, state:
 >
-> - the owning component and its direction;
+> - the owning component and its direction. A repo's `direction` in `boundaries.json` is a guess from words in the agent docs, so confirm it from the component's source;
 > - whether the owner already provides the behavior (**use what exists**), or would need to gain it (**change the provider** or **change the consumer**), citing `file:line` or a documentation URL for what exists today;
 > - what the change removes from this PR, and which findings it would have prevented;
 > - what it costs: a migration, the release order, other clients of that component, or a new dependency;

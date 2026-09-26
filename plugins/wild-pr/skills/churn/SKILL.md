@@ -103,8 +103,8 @@ It may combine with another verdict, for example "move the change to another com
 Weigh the claims with these rules:
 
 - A claim that needs work in another component is not weaker for that reason. Compare its cost with the findings and rounds it removes.
-- A verified claim outranks an unverified one on the same cluster.
-- A standing rule in `requirements.md` that prefers the other component breaks a tie in its favor.
+- A verified claim outranks an unverified one. This holds on one cluster and when you choose the verdict. An unverified claim never decides the verdict over a verified one.
+- A standing rule in `requirements.md` may prefer the other component. Then a verified claim for that component beats an in-repo workaround that removes the same findings. This holds even when the workaround costs less.
 - "Use what exists" beats "change the provider" when both remove the same findings. It needs no release in another component.
 
 Name the runner-up and state why it lost.

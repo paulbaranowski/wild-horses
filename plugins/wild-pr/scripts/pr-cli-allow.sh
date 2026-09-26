@@ -6,8 +6,7 @@
 # failed-check logs, threaded replies, PR comments) plus an explicit-file
 # `git commit && push`. pr_churn_cli.py reads via `gh` and local files only,
 # and writes timeline.json or boundaries.json into the directory it is given.
-# Neither runs arbitrary code or
-# interpolates untrusted input into a shell.
+# Neither runs arbitrary code or interpolates untrusted input into a shell.
 #
 # Disable this hook to restore per-call permission interception for both CLIs
 # (and accept many more prompts per run).

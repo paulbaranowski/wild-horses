@@ -6,9 +6,9 @@ cluster's behavior belongs in another component. That component can be a
 backend, a frontend, an external API, or a library.
 
 Discovery reads only local files. They are the repo's agent docs, its
-dependency manifests, env var names, HTTP client base URLs, and API schemas. Its one
-subprocess is a local `git remote get-url`. It never makes a network call, and
-it never reads a real `.env` file.
+dependency manifests, env var names, HTTP client base URLs, and API schemas.
+Its one subprocess is a local `git remote get-url`. It never makes a network
+call, and it never reads a real `.env` file.
 
 Every entry is a Boundary. Entries for one component merge, and the list is
 sorted. Two runs give byte-identical output when the tree, the sibling
@@ -19,15 +19,23 @@ writes the result to boundaries.json. The sections below run in the order
 discover() calls them: repos, libraries, services, and schemas.
 """
 
+from __future__ import annotations
+
 import fnmatch
 import json
 import os
 import re
 import subprocess
-import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Literal, TypedDict
+
+# tomllib is stdlib from Python 3.11. macOS still ships 3.9 as python3, and the
+# churn CLI's `collect` imports this module, so its absence must not crash.
+try:
+    import tomllib
+except ModuleNotFoundError:
+    tomllib = None
 
 Kind = Literal["repo", "service", "library", "schema"]
 Direction = Literal["provider", "consumer", "unknown"]
@@ -48,8 +56,7 @@ class Boundary(TypedDict):
 
 
 class Provider(TypedDict):
-    """One entry of churn_known_providers.json. load_providers rejects an
-    entry with any other key."""
+    """One entry of churn_known_providers.json."""
     host: str  # an fnmatch pattern, so *.sentry.io matches every subdomain
     name: str
     doc_url: str
@@ -58,9 +65,6 @@ class Provider(TypedDict):
 # (directory, sorted file names), as walk() yields them.
 Tree = list[tuple[Path, list[str]]]
 
-# The output key order. make_entry builds entries in this order, and the tests
-# check that the two match.
-FIELDS = tuple(Boundary.__annotations__)
 
 # Files larger than this are skipped: bundles, lockfiles, and data dumps.
 MAX_FILE_BYTES = 1_000_000
@@ -78,11 +82,12 @@ TABLE_ROW = re.compile(r"^\s*\|")
 # A token with a slash or a tilde is a link, a path, or a slug. Its words
 # ("acme/api") say nothing about direction, so they are removed first.
 PATH_TOKEN = re.compile(r"\S*[/~]\S*")
+SENTENCE_END = re.compile(r"(?<=[.!?])\s")
 PROVIDER_WORDS = re.compile(
     r"\b(backend|api|server|service|upstream|depends on|source of truth)\b", re.IGNORECASE)
 CONSUMER_WORDS = re.compile(
     r"\b(frontend|front-end|web app|mobile app|downstream|consumed by|consumers?|calls this"
-    r"|clients|client repos?)\b",
+    r"|clients?|client repos?)\b",
     re.IGNORECASE)
 REQUIREMENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 GO_REQUIRE = re.compile(
@@ -101,6 +106,12 @@ SOURCE_SUFFIXES = {".cjs", ".go", ".js", ".jsx", ".kt", ".mjs", ".py", ".rb", ".
 ENV_TEMPLATES = {".env.example", ".env.sample", ".env.template"}
 
 ENV_TOKEN = re.compile(r"\b[A-Z][A-Z0-9_]*_(?:URL|ENDPOINT|HOST)\b")
+# In source files an env name counts only on a line that reads configuration.
+# Otherwise every constant such as SERVER_URL = re.compile(...) is a service.
+# The last branch is a settings-class field: `SUPABASE_URL: str`.
+ENV_READ = re.compile(
+    r"process\.env|import\.meta\.env|os\.environ|getenv\(|os\.Getenv|ENV\[|expoConfig"
+    r"|\bsettings\.|\bconfig\.|^\s*[A-Z][A-Z0-9_]*\s*:\s*[A-Za-z]")
 ENV_SUFFIXES = ("_API_URL", "_BASE_URL", "_API_ENDPOINT", "_ENDPOINT", "_API_HOST", "_HOST", "_URL")
 # Framework prefixes that expose a variable to client code. TEST_ names a test
 # copy of a real service, so TEST_SUPABASE_URL names supabase.
@@ -115,6 +126,15 @@ LOCAL_HOST = re.compile(
     r"|\.(?:local|localhost|test|example|invalid|internal)$"
     r"|(?:^|\.)example\.(?:com|net|org)$", re.IGNORECASE)
 REAL_TLD = re.compile(r"\.[A-Za-z]{2,}$")
+# Two-part public suffixes: the name is the label before them, so
+# api.acme.co.uk names acme.
+TWO_PART_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "com.au", "net.au", "co.nz", "co.jp",
+                     "com.br", "co.in", "com.mx", "co.za"}
+# Shared hosting domains: every tenant is a different service, so the name is
+# the full host.
+SHARED_HOSTS = {"amazonaws.com", "herokuapp.com", "vercel.app", "netlify.app", "onrender.com",
+                "azurewebsites.net", "cloudfunctions.net", "appspot.com", "workers.dev",
+                "github.io", "fly.dev", "pages.dev", "run.app"}
 OPENAPI_FILE = re.compile(r"^(?:openapi|swagger)\.(?:json|ya?ml)$")
 GRAPHQL_FILE = re.compile(r"\.(?:graphql|gql)$")
 GENERATED_DIRS = {"__generated__", "generated", "openapi-client"}
@@ -123,6 +143,8 @@ SERVER_URL = re.compile(r"""^\s*-?\s*["']?url["']?\s*:\s*["']?(https?://[^\s"',]
 # A server URL must sit this close below the `servers` key. Other `url`
 # keys (contact, license, externalDocs) are not servers.
 SERVER_URL_WINDOW = 5
+# Swagger 2.0 names its server with a top-level `host`, not `servers`.
+SWAGGER_HOST = re.compile(r"""^\s{0,2}["']?host["']?\s*:\s*["']?([A-Za-z0-9.-]+)""")
 
 
 def make_entry(name: str, kind: Kind, source: str, direction: Direction = "provider", *,
@@ -183,10 +205,15 @@ def blocks(text: str) -> list[tuple[str, list[tuple[int, str]]]]:
 def direction_of(block_text: str, heading: str) -> Direction:
     """provider, consumer, or unknown, from the words around a link.
 
-    The block decides first. The heading decides only when the block names
+    The block's first sentence decides first. A link is usually followed by
+    what the component is ("the backend", "the iOS client"). Later
+    sentences often name the other side ("adapting the client to it..."). The
+    whole block, then the heading, decide only when the text before them names
     neither direction, or both.
     """
-    for text in (block_text, heading):
+    block_text = PATH_TOKEN.sub(" ", block_text)
+    first_sentence = SENTENCE_END.split(block_text.strip(), maxsplit=1)[0]
+    for text in (first_sentence, block_text, heading):
         text = PATH_TOKEN.sub(" ", text)
         provider = bool(PROVIDER_WORDS.search(text))
         consumer = bool(CONSUMER_WORDS.search(text))
@@ -195,25 +222,39 @@ def direction_of(block_text: str, heading: str) -> Direction:
     return "unknown"
 
 
-def own_slug(repo: Path) -> str | None:
-    """owner/repo of the origin remote, lowercased, or None. A local git call."""
+def origin_url(repo: Path) -> str | None:
+    """The origin remote's URL, or None when there is none. A local git call."""
     try:
         proc = subprocess.run(["git", "-C", str(repo), "remote", "get-url", "origin"],
                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                               text=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return None
-    m = GITHUB_REMOTE.search(proc.stdout.strip())
+    return proc.stdout.strip() or None
+
+
+def github_slug(url: str | None) -> str | None:
+    """owner/repo, lowercased, when `url` is a GitHub remote. Else None."""
+    m = GITHUB_REMOTE.search(url or "")
     return f"{m.group(1)}/{m.group(2)}".lower() if m else None
+
+
+def own_slug(repo: Path) -> str | None:
+    """owner/repo of the origin remote when it is on GitHub, else None."""
+    return github_slug(origin_url(repo))
 
 
 def local_checkout(repo: Path, home: Path, slug: str) -> str | None:
     """A git checkout of `slug` next to the repo or under ~/dev, or None.
-    A checkout whose origin names another repo is skipped. A checkout with no
-    origin is accepted, since nothing says it is a different repo."""
+    A checkout whose origin names another repo, on GitHub or elsewhere, is
+    skipped. A checkout with no origin is accepted, since nothing says it is a
+    different repo."""
     name = slug.rsplit("/", 1)[-1]
     for candidate in (repo.parent / name, home / "dev" / name):
-        if (candidate / ".git").exists() and own_slug(candidate) in (None, slug.lower()):
+        if not (candidate / ".git").exists():
+            continue
+        url = origin_url(candidate)
+        if url is None or github_slug(url) == slug.lower():
             return str(candidate)
     return None
 
@@ -297,7 +338,7 @@ def site_package(repo: Path, name: str) -> str | None:
 def python_libraries(repo: Path) -> list[Boundary]:
     """PEP 621 `project.dependencies` and Poetry dependencies from pyproject.toml."""
     text = read_text(repo / "pyproject.toml")
-    if text is None:
+    if text is None or tomllib is None:
         return []
     try:
         data = tomllib.loads(text)
@@ -350,17 +391,10 @@ def libraries_from_manifests(repo: Path) -> list[Boundary]:
 
 # --- services from code ------------------------------------------------------
 
-def load_providers(path: Path = PROVIDERS_FILE) -> list[Provider]:
-    """The known-provider table. Raise ValueError when an entry is malformed."""
-    table = json.loads(Path(path).read_text())
-    if not isinstance(table, list):
-        raise ValueError(f"{path} must hold a JSON list of providers")
-    providers: list[Provider] = []
-    for entry in table:
-        if (not isinstance(entry, dict) or set(entry) != {"host", "name", "doc_url"}
-                or not all(isinstance(v, str) for v in entry.values())):
-            raise ValueError(f"bad provider entry in {path}: {entry!r}")
-        providers.append(Provider(host=entry["host"], name=entry["name"], doc_url=entry["doc_url"]))
+def load_providers() -> list[Provider]:
+    """The known-provider table. It ships with the plugin, so a test checks its
+    shape instead of this function."""
+    providers: list[Provider] = json.loads(PROVIDERS_FILE.read_text())
     return providers
 
 
@@ -401,13 +435,18 @@ def is_public_host(host: str) -> bool:
 
 
 def host_service(host: str, providers: list[Provider]) -> tuple[str, str | None]:
-    """(name, doc_url) for a host. Unknown hosts are named by their
-    second-to-last label: api.payments.io -> payments."""
+    """(name, doc_url) for a host. An unknown host is named by the label
+    before its public suffix (api.payments.io -> payments). A host on a
+    shared hosting domain keeps its full name."""
     host = host.lower()
     for provider in providers:
         if fnmatch.fnmatch(host, provider["host"]):
             return provider["name"], provider["doc_url"]
-    return host.split(".")[-2], None
+    labels = host.split(".")
+    if any(host == d or host.endswith("." + d) for d in SHARED_HOSTS):
+        return host, None
+    suffix_size = 2 if ".".join(labels[-2:]) in TWO_PART_SUFFIXES else 1
+    return labels[max(len(labels) - suffix_size - 1, 0)], None
 
 
 def service(name: str, doc_url: str | None, source: str) -> Boundary:
@@ -427,10 +466,12 @@ def services_from_code(repo: Path, tree: Tree, providers: list[Provider]) -> lis
             continue
         rel = path.relative_to(repo).as_posix()
         for n, line in enumerate(text.splitlines(), 1):
-            for token in ENV_TOKEN.findall(line):
+            for token in ENV_TOKEN.findall(line) if env_file or ENV_READ.search(line) else []:
                 name = env_service_name(token)
                 found.append(service(name, doc_by_name.get(name), f"{rel}:{n}"))
-            if env_file or CLIENT_CALL.search(line):
+            # A URL counts on an HTTP client line. It also counts on a line that
+            # names a *_URL constant, as a config module does.
+            if env_file or CLIENT_CALL.search(line) or ENV_TOKEN.search(line):
                 for host in URL_HOST.findall(line):
                     if is_public_host(host):
                         found.append(service(*host_service(host, providers), f"{rel}:{n}"))
@@ -440,12 +481,17 @@ def services_from_code(repo: Path, tree: Tree, providers: list[Provider]) -> lis
 # --- schemas -----------------------------------------------------------------
 
 def openapi_servers(path: Path, rel: str, providers: list[Provider]) -> list[Boundary]:
-    """The services an OpenAPI file's `servers` list names, in file order."""
+    """The services an OpenAPI file names, in file order. They come from the
+    `servers` list, or from a Swagger 2.0 top-level `host`."""
     found: list[Boundary] = []
     servers_line = None
     for n, line in enumerate((read_text(path) or "").splitlines(), 1):
         if SERVERS_KEY.match(line):
             servers_line = n
+            continue
+        swagger = SWAGGER_HOST.match(line)
+        if swagger and is_public_host(swagger.group(1)):
+            found.append(service(*host_service(swagger.group(1), providers), f"{rel}:{n}"))
             continue
         m = SERVER_URL.match(line)
         if not m or servers_line is None or n - servers_line > SERVER_URL_WINDOW:
@@ -534,13 +580,12 @@ def merge(entries: list[Boundary]) -> list[Boundary]:
     return sorted(merged.values(), key=lambda e: (e["kind"], e["name"].lower(), e["name"]))
 
 
-def discover(repo: str | Path, home: Path | None = None,
-             providers: list[Provider] | None = None) -> list[Boundary]:
-    """Every boundary component of `repo`, merged and sorted. `home` and
-    `providers` default to the user's home and the bundled table."""
+def discover(repo: str | Path, home: Path | None = None) -> list[Boundary]:
+    """Every boundary component of `repo`, merged and sorted. `home` defaults
+    to the user's home directory."""
     root = Path(repo).resolve()
     home = home or Path.home()
-    providers = load_providers() if providers is None else providers
+    providers = load_providers()
     tree = walk(root)
     # The order matters: merge() keeps the first non-null value of each field.
     return merge(repos_from_docs(root, home)

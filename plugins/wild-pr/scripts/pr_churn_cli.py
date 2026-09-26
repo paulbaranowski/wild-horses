@@ -15,8 +15,9 @@ Stdlib only. GitHub access is via the `gh` CLI. Errors go to stdout as
 parses. Usage errors exit 2 (argparse).
 
 collect computes only what needs no judgment. That is each finding's review
-round, the findings per round, and the files the fix commits keep touching. Deciding what is noise, what a later fix caused, and what the
-root causes are is the skill's job.
+round, the findings per round, and the files the fix commits keep touching.
+Deciding what is noise, what a later fix caused, and what the root causes are
+is the skill's job.
 
 boundaries needs no gh and makes no network call. It imports
 churn_boundaries.py from this directory, which Python puts on sys.path when it
@@ -474,9 +475,7 @@ def cmd_boundaries(args: argparse.Namespace) -> int:
         by_kind = dict(sorted(Counter(e["kind"] for e in entries).items()))
         print(json.dumps({"boundaries": path, "count": len(entries), "by_kind": by_kind}, indent=2))
         return 0
-    # ValueError covers a malformed churn_known_providers.json, including bad
-    # JSON: json.JSONDecodeError is a subclass.
-    except (CollectError, OSError, ValueError) as e:
+    except (CollectError, OSError) as e:
         print(json.dumps({"error": str(e)}))
         return 1
 

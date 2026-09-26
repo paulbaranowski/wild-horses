@@ -89,7 +89,7 @@ class TestReposFromDocs(BoundaryCase):
         self.assertEqual(api["gh_slug"], "acme/api")
         self.assertEqual(api["local_path"], str(self.home / "dev" / "api"))
         self.assertEqual(api["sources"], ["CLAUDE.md:5", "CLAUDE.md:6"])
-        self.assertEqual(list(api), list(cb.FIELDS))
+        self.assertEqual(list(api), list(cb.Boundary.__annotations__))
 
     def test_direction_comes_from_the_whole_list_item(self):
         entries = self.discover({"CLAUDE.md": CLAUDE_MD})
@@ -106,6 +106,17 @@ class TestReposFromDocs(BoundaryCase):
         entries = self.discover({"CLAUDE.md": table})
         self.assertEqual(self.entry(entries, "acme/mobile")["direction"], "consumer")
         self.assertEqual(self.entry(entries, "acme/shell")["direction"], "consumer")
+        self.assertEqual(self.entry(entries, "acme/api")["direction"], "provider")
+
+    def test_a_client_is_a_consumer_and_mixed_words_give_unknown(self):
+        entries = self.discover({"CLAUDE.md": "- https://github.com/acme/ios: the iOS client.\n"
+                                              "- https://github.com/acme/rn: the client that talks to our API.\n"})
+        self.assertEqual(self.entry(entries, "acme/ios")["direction"], "consumer")
+        self.assertEqual(self.entry(entries, "acme/rn")["direction"], "unknown")
+
+    def test_first_sentence_decides_over_later_sentences(self):
+        entries = self.discover({"CLAUDE.md": "- https://github.com/acme/api: the backend. "
+                                              "Adapting the client to its defects locks bugs in.\n"})
         self.assertEqual(self.entry(entries, "acme/api")["direction"], "provider")
 
     def test_direction_words_do_not_cross_a_blank_line(self):
@@ -140,6 +151,15 @@ class TestReposFromDocs(BoundaryCase):
                          "acme/api")
         self.assertEqual(api["local_path"], str(self.home / "dev" / "api"))
 
+    def test_checkout_with_a_non_github_origin_is_not_used_for_a_link(self):
+        sibling = self.repo.parent / "api"
+        subprocess.run(["git", "init", "-q", str(sibling)], check=True)
+        subprocess.run(["git", "-C", str(sibling), "remote", "add", "origin",
+                        "https://gitlab.com/other/api.git"], check=True)
+        api = self.entry(self.discover({"CLAUDE.md": "- https://github.com/acme/api: the backend.\n"}),
+                         "acme/api")
+        self.assertEqual(api["local_path"], str(self.home / "dev" / "api"))
+
     def test_links_to_this_repo_and_to_github_site_pages_are_not_boundaries(self):
         subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
         subprocess.run(["git", "-C", str(self.repo), "remote", "add", "origin",
@@ -164,6 +184,7 @@ class TestLibraries(BoundaryCase):
         self.assertEqual(rq["sources"], ["package.json:4"])
         self.assertIsNone(self.entry(entries, "zod")["local_path"])
 
+    @unittest.skipIf(cb.tomllib is None, "tomllib needs Python 3.11")
     def test_pyproject_pep621_and_poetry_dependencies(self):
         pyproject = ('[project]\nname = "app"\ndependencies = [\n  "httpx>=0.27",\n'
                      '  "pydantic[email]",\n]\n\n[tool.poetry.dependencies]\n'
@@ -208,20 +229,16 @@ class TestProviderTable(unittest.TestCase):
         for provider in cb.load_providers():
             self.assertEqual(set(provider), {"host", "name", "doc_url"})
 
-    def test_malformed_table_raises_value_error(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".json") as fh:
-            fh.write('[{"host": "x"}]')
-            fh.flush()
-            with self.assertRaises(ValueError):
-                cb.load_providers(Path(fh.name))
+    def test_every_entry_names_a_host_and_an_https_doc_url(self):
+        for provider in cb.load_providers():
+            self.assertTrue(provider["host"] and provider["name"])
+            self.assertTrue(provider["doc_url"].startswith("https://"))
 
+    def test_unknown_host_under_a_two_part_suffix_is_named_by_its_domain(self):
+        self.assertEqual(cb.host_service("api.acme.co.uk", []), ("acme", None))
 
-    def test_table_that_is_not_a_list_raises_value_error(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".json") as fh:
-            fh.write("3")
-            fh.flush()
-            with self.assertRaises(ValueError):
-                cb.load_providers(Path(fh.name))
+    def test_host_on_a_shared_hosting_domain_keeps_its_full_name(self):
+        self.assertEqual(cb.host_service("billing.herokuapp.com", [])[0], "billing.herokuapp.com")
 
 
 class TestServicesFromCode(BoundaryCase):
@@ -230,6 +247,22 @@ class TestServicesFromCode(BoundaryCase):
         self.assertEqual(self.names(entries, "service"), ["api", "payments", "supabase"])
         self.assertEqual(self.entry(entries, "payments")["sources"], [".env.example:1"])
         self.assertEqual(self.entry(entries, "supabase")["doc_url"], "https://supabase.com/docs/reference")
+
+    def test_url_constant_that_reads_no_config_is_not_a_service(self):
+        entries = self.discover({"src/parse.py": 'SERVER_URL = re.compile(r"^url:")\n'
+                                                 "# Names PAYMENTS_API_URL in a comment.\n"})
+        self.assertEqual(entries, [])
+
+    def test_env_names_on_config_reading_lines_become_services(self):
+        entries = self.discover({"app/config.py": 'base = os.environ["PAYMENTS_API_URL"]\n'
+                                                  "class Settings(BaseSettings):\n"
+                                                  "    SUPABASE_URL: str\n",
+                                 "src/api.ts": "const url = process.env.EXPO_PUBLIC_API_URL;\n"})
+        self.assertEqual(self.names(entries, "service"), ["api", "payments", "supabase"])
+
+    def test_url_constant_holding_a_url_names_its_host(self):
+        entries = self.discover({"src/config.ts": 'export const API_URL = "https://api.herds.events/api"\n'})
+        self.assertEqual(self.names(entries, "service"), ["herds"])
 
     def test_client_base_url_maps_to_a_known_provider(self):
         entries = self.discover({"src/pay.ts": 'export const stripe = axios.create({ baseURL: "https://api.stripe.com/v1" });\n'})
@@ -309,6 +342,11 @@ class TestSchemas(BoundaryCase):
         entries = self.discover({"openapi.yaml": "servers:\n  - url: https:///v1\n"})
         self.assertEqual(self.names(entries, "service"), [])
         self.assertIsNone(self.entry(entries, "openapi.yaml")["describes"])
+
+    def test_swagger_2_host_names_its_service(self):
+        entries = self.discover({"swagger.yaml": 'swagger: "2.0"\nhost: api.payments.io\nbasePath: /v1\n'})
+        self.assertEqual(self.entry(entries, "swagger.yaml")["describes"], "payments")
+        self.assertEqual(self.entry(entries, "payments")["sources"], ["swagger.yaml:2"])
 
     def test_graphql_files_and_generated_client_dirs(self):
         entries = self.discover({"schema.graphql": "type Query { me: User }\n",
