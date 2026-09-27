@@ -1114,8 +1114,12 @@ def cmd_file_meta_set(args) -> int:
     MUTATES DISK — RELOCATES AND STAMPS: a terminal ``--status`` (done /
     deferred) does not rewrite in place. It writes the plan to the matching
     terminal subdir (done/ or deferred/) and unlinks the source, so the plan's
-    on-disk path moves. A ``done`` status additionally stamps ``Completed on``
-    with today's date (unless the caller already supplied ``--completed-on``).
+    on-disk path moves. Every file that shares a ``.md`` plan's base name (a
+    task-list ``.json``, for one) moves with it as raw bytes. Each one takes
+    the plan's new base name. ``--on-collision`` covers the whole set. A non-``.md`` file
+    with a terminal status moves alone. A
+    ``done`` status additionally stamps ``Completed on`` with today's date
+    (unless the caller already supplied ``--completed-on``).
     Active statuses are a pure in-place rewrite.
     """
     a = FileMetaSetArgs.from_args(args)
@@ -1210,6 +1214,16 @@ def cmd_file_meta_set(args) -> int:
     if normalized_kind is not None and path.suffix.lower() == ".md":
         target_name = rename_for_kind(path.name, cast(Kind, normalized_kind))
 
+    new_text = serialize_frontmatter(meta, body)
+    if not new_text.endswith("\n"):
+        new_text += "\n"
+
+    # A terminal status on a .md plan moves its whole same-base-name set. An
+    # in-place edit, or a non-.md file, moves one file on the path below.
+    if target_dir != path.parent and path.suffix.lower() == ".md":
+        return _relocate_plan_set(path, target_dir, target_name, new_text,
+                                  a.on_collision)
+
     target = target_dir / target_name
     if target != path and target.exists():
         if a.on_collision == "fail":
@@ -1219,12 +1233,50 @@ def cmd_file_meta_set(args) -> int:
             target = find_unused_suffix(target)
         # "overwrite" → write_atomic replaces it below
 
-    new_text = serialize_frontmatter(meta, body)
-    if not new_text.endswith("\n"):
-        new_text += "\n"
     write_atomic(target, new_text)
     if target.resolve() != path.resolve():
         path.unlink()  # relocation: drop the source only after the dest write
+    print(target)
+    return 0
+
+
+def _relocate_plan_set(
+    path: Path, target_dir: Path, target_name: str, new_text: str,
+    on_collision: str,
+) -> int:
+    """Move a ``.md`` plan and its same-base-name siblings to ``target_dir``.
+
+    A terminal status must take the task-list ``.json`` along, or it stays in
+    the active listing. The plan gets ``new_text``; each sibling moves as raw
+    bytes. Every file takes the base name of ``target_name``. The collision
+    check covers the whole set and runs before the first write, so ``fail``
+    moves nothing. The later writes are not one transaction: an I/O error
+    partway through can leave files in both directories.
+    """
+    # Every file takes the plan's destination base name. A Kind change renames
+    # the plan, and the sibling must follow or the pair splits.
+    new_base = os.path.splitext(target_name)[0]
+    move_set = _paired_move_set(path)
+    # Match the plan by name: `path` may be spelled differently from the
+    # directory listing. A case-only mismatch leaves the plan out of the set.
+    if not any(p.name == path.name for p in move_set):
+        raise PlanKeeperCliError(
+            f"plan {path.name!r} is not listed in {path.parent}; "
+            f"pass the path with the file's exact spelling",
+            code=3,
+        )
+    items = [(p, new_base + os.path.splitext(p.name)[1]) for p in move_set]
+    pairs, collision = _plan_move_targets(target_dir, items, on_collision)
+    if pairs is None:
+        emit_collision(collision)  # type: ignore[arg-type]  # non-None on fail
+        return 2
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = next(dest for src, dest in pairs if src.name == path.name)
+    write_atomic(target, new_text)
+    for src, dest in pairs:
+        if src.name != path.name:
+            shutil.move(str(src), str(dest))
+    path.unlink()  # drop the source only after the dest write
     print(target)
     return 0
 
@@ -1801,32 +1853,34 @@ def _paired_move_set(source: Path) -> list[Path]:
 
 
 def _plan_move_targets(
-    dest_dir: Path, move_set: list[Path], on_collision: str
+    dest_dir: Path, items: "list[tuple[Path, str]]", on_collision: str
 ) -> "tuple[Optional[list[tuple[Path, Path]]], Optional[Path]]":
     """Compute (src, dest) pairs for a move, applying the collision policy.
 
+    Each item is ``(source, dest_name)``. The name is usually the source's own
+    name; ``file-meta set`` passes a Kind-renamed name for the ``.md`` plan.
     Returns ``(pairs, None)`` to proceed, or ``(None, colliding_dest)`` when the
     policy is ``fail`` and a target exists (the caller emits the structured
     collision and exits 2). ``suffix`` finds one shared ``-N`` applied to every
     file so a ``.json`` + ``.md`` pair stays matched; ``overwrite`` keeps the
     base names and replaces. Raises ``code 4`` if no shared suffix is free.
     """
-    names = [p.name for p in move_set]
+    names = [name for _, name in items]
     if not any((dest_dir / n).exists() for n in names):
-        return [(p, dest_dir / p.name) for p in move_set], None
+        return [(src, dest_dir / name) for src, name in items], None
     if on_collision == "fail":
         first = next(dest_dir / n for n in names if (dest_dir / n).exists())
         return None, first
     if on_collision == "overwrite":
-        return [(p, dest_dir / p.name) for p in move_set], None
+        return [(src, dest_dir / name) for src, name in items], None
     # suffix: one shared N across the whole (same-base-name) set.
     for n in range(2, MAX_SUFFIX + 1):
         cand = [
-            dest_dir / f"{os.path.splitext(p.name)[0]}-{n}{os.path.splitext(p.name)[1]}"
-            for p in move_set
+            dest_dir / f"{os.path.splitext(name)[0]}-{n}{os.path.splitext(name)[1]}"
+            for name in names
         ]
         if all(not c.exists() for c in cand):
-            return list(zip(move_set, cand)), None
+            return list(zip((src for src, _ in items), cand)), None
     raise PlanKeeperCliError(
         f"all -N variants up to -{MAX_SUFFIX} are taken in {dest_dir}", code=4
     )
@@ -1862,7 +1916,9 @@ def cmd_move(args) -> int:
         )
     move_set = _paired_move_set(source)
     dest_dir.mkdir(parents=True, exist_ok=True)
-    pairs, collision = _plan_move_targets(dest_dir, move_set, a.on_collision)
+    pairs, collision = _plan_move_targets(
+        dest_dir, [(p, p.name) for p in move_set], a.on_collision
+    )
     if pairs is None:
         # Critical: emit before any file is touched, so a retry is safe.
         emit_collision(collision)  # type: ignore[arg-type]  # non-None on fail
