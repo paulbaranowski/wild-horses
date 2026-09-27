@@ -1116,10 +1116,10 @@ def cmd_file_meta_set(args) -> int:
     terminal subdir (done/ or deferred/) and unlinks the source, so the plan's
     on-disk path moves. Every file that shares a ``.md`` plan's base name (a
     task-list ``.json``, for one) moves with it as raw bytes. Each one takes
-    the plan's new base name. ``--on-collision`` covers the whole set. A non-``.md`` file
-    with a terminal status moves alone. A
-    ``done`` status additionally stamps ``Completed on`` with today's date
-    (unless the caller already supplied ``--completed-on``).
+    the plan's new base name. ``--on-collision`` covers the whole set. A
+    non-``.md`` file with a terminal status moves alone. A ``done`` status
+    additionally stamps ``Completed on`` with today's date (unless the caller
+    already supplied ``--completed-on``).
     Active statuses are a pure in-place rewrite.
     """
     a = FileMetaSetArgs.from_args(args)
