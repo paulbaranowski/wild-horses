@@ -1,6 +1,6 @@
 # plan-clean
 
-Find this repo's complete, partial, and irrelevant plans, and archive the complete ones.
+Find this repo's complete, partial, irrelevant, and open plans, and archive the complete ones.
 
 The full instructions Claude follows when this skill runs are in [`SKILL.md`](./SKILL.md). This README is a pointer for people browsing the repo.
 
@@ -8,7 +8,7 @@ The full instructions Claude follows when this skill runs are in [`SKILL.md`](./
 
 ```text
 /plan-clean
-/plan-clean herds        # a named repo instead of the current one
+/plan-clean herds        # a named repo; asks for its checkout when you run it elsewhere
 /plan-clean dry run      # judge and report, write nothing
 ```
 

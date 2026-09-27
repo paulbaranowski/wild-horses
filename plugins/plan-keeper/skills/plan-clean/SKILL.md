@@ -55,6 +55,18 @@ Its stdout is `<name>`. If stdout is empty, say so and stop.
 Add `--override <name>` to every `list` call below.
 Without it, `list` in a directory with no git `origin` lists every repo's plans.
 
+The **checkout** is the git working tree that the verdicts read.
+When the user named no repo, the checkout is the current directory.
+When the user named a repo, run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" repo name` in the current directory.
+If it prints `<name>`, the checkout is the current directory.
+Otherwise ask the user for the path of a local checkout of `<name>`.
+Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" repo name` inside that path.
+If it does not print `<name>`, say so and stop.
+Never judge one repo's plans against another repo's history.
+
+Run every `git` command in steps 3 and 4 as `git -C <checkout> ...`.
+Run every `gh` command with `--repo <owner>/<repo>`, taken from `git -C <checkout> remote get-url origin`.
+
 ### 2. List the plans
 
 Run all four listings on every invocation. Plans change between turns.
@@ -215,6 +227,7 @@ To shelve one, point the user to `plan-done` or `plan-update`.
 ## Common mistakes
 
 - **Don't reprint a plan list from memory.** Run step 2 on every invocation.
+- **Don't judge a named repo's plans against another repo's history.** Use that repo's checkout, or stop.
 - **Don't switch repos when this repo has no plans to scan.** Report the empty scan and stop.
 - **Don't scan an in-review plan.** Its pull request is still under review.
 - **Don't treat CLI exit 2 as a crash.** A collision is exit 2, and nothing moved.
