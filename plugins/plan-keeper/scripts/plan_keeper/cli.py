@@ -1253,8 +1253,6 @@ def _relocate_plan_set(
     moves nothing. The later writes are not one transaction: an I/O error
     partway through can leave files in both directories.
     """
-    # Every file takes the plan's destination base name. A Kind change renames
-    # the plan, and the sibling must follow or the pair splits.
     new_base = os.path.splitext(target_name)[0]
     move_set = _paired_move_set(path)
     # Match the plan by name: `path` may be spelled differently from the

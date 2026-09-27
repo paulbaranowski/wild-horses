@@ -1,14 +1,13 @@
 ---
 name: plan-clean
 description: >
-  Find this repo's complete, partial, and irrelevant plans, and archive the complete ones.
-  Partial and irrelevant plans are listed and left in place.
+  Find this repo's complete, partial, irrelevant, and open plans, and archive the complete ones.
+  The other plans are listed and left in place.
   Use when the user asks to clean plans, archive complete plans, or find plans that no longer apply.
 ---
 
 # plan-clean
 
-Complete plans leave the active list on their own.
 This skill checks every `backlog`, `todo`, and `in-progress` plan for one repo against the default branch.
 It gives each plan one verdict: complete, partial, irrelevant, or open.
 It archives the complete plans to `done/` and prints the four lists.
@@ -21,13 +20,13 @@ The bundled `plan_keeper_cli.py` does every write. This skill does the judging.
 - **Input.** The current repo, or one repo the user names. An optional dry-run phrase.
 - **Return.** The four lists, with one evidence line per plan. The archived path of each complete plan.
 - **Does alone.** Reads every `backlog`, `todo`, and `in-progress` plan. Assigns one verdict each. Archives the complete plans with no second confirm.
-- **Never.** Scans a second repo. Edits a plan body. Moves a partial or irrelevant plan. Archives on a guess.
+- **Never.** Never scans a second repo. Never edits a plan body. Never moves a partial, irrelevant, or open plan. Never archives on a guess.
 
 ## Quick reference
 
 - **Scan set:** active plans whose Status is `backlog`, `todo`, or `in-progress`. A missing Status counts as `backlog`.
 - **Out of scope:** `in-review` plans, and everything in `done/` and `deferred/`.
-- **`<repo>`:** auto-derived from the current repo, or an explicit override. See [../../repo-derivation.md](../../repo-derivation.md).
+- **`<repo>`:** resolved once in step 1 and passed as `--override` to every `list` call. See [../../repo-derivation.md](../../repo-derivation.md).
 - **Writes:** `file-meta set --status done` on each complete plan. Nothing else.
 - **Pairs:** a `.md` plan and its same-base-name siblings (usually a task-list `.json`) are one plan. The CLI moves the siblings with the plan, byte for byte.
 - **Dry run:** "dry run", "just show", or "don't archive yet". The report appears and nothing is written.
@@ -35,25 +34,41 @@ The bundled `plan_keeper_cli.py` does every write. This skill does the judging.
 
 ## Procedure
 
-`$CLI` below means `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py"`.
+Write every CLI call with the literal `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py"` prefix.
+The plugin's approval hook matches only that prefix.
+A shell variable does not survive to the next Bash call.
 
 ### 1. Determine the repo
 
 Look for an explicit repo in the request.
 Examples: "plan-clean herds", "clean plans in herds", "clean up the herds plans".
-If there is one, normalize it per [../../repo-derivation.md](../../repo-derivation.md) and add `--override <name>` to every `list` call.
-Otherwise the CLI derives the repo from the current directory.
+If there is one, normalize it per [../../repo-derivation.md](../../repo-derivation.md). That is `<name>`.
+
+Otherwise run:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" repo name
+```
+
+Its stdout is `<name>`. If stdout is empty, say so and stop.
+
+Add `--override <name>` to every `list` call below.
+Without it, `list` in a directory with no git `origin` lists every repo's plans.
 
 ### 2. List the plans
 
-Run all three listings on every invocation. Plans change between turns.
+Run all four listings on every invocation. Plans change between turns.
 
 ```bash
-$CLI list --status backlog,todo,in-progress   # the scan set: status<TAB>filename
-$CLI list                                     # every active file, including .json siblings
-$CLI list --group                             # active project slugs, for the successor check
-$CLI list --state done --group                # archived project slugs, for the successor check
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --override <name> --status backlog,todo,in-progress
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --override <name>
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --override <name> --group
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" list --override <name> --state done --group
 ```
+
+- The `--status` call gives the scan set, as `status<TAB>filename` rows.
+- The bare call gives every active file, including `.json` siblings and `in-review` plans.
+- The two `--group` calls give the active and archived project slugs for the successor check.
 
 `--status` and `--group` cannot combine, so these are separate calls.
 
@@ -61,12 +76,16 @@ If the scan set is empty, say so and stop.
 Do not switch to another repo.
 
 Resolve each filename to an absolute path the way `plan-do` step 3 does.
-A `root/` prefix names the plan's root; map it with `$CLI root list`.
+A `root/` prefix names the plan's root; map it with `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" root list`.
 No prefix means the root with `"default": true`.
 Never rebuild the path as `~/plans/<repo>/<filename>`.
 
-Group files by base name (the filename without its last extension).
+Group the bare listing's files by base name (the filename without its last extension).
 A group with a `.md` file is one plan.
+Keep a group only when its `.md` is in the scan set.
+This drops an `in-review` plan together with its `.json`.
+A `.json` has no Status, so the `--status` call lists it as `backlog`.
+Use the grouping, not that row, to decide its scope.
 A group with no `.md` file is open, with the reason "no markdown sibling".
 
 ### 3. Resolve the default branch
@@ -74,15 +93,13 @@ A group with no `.md` file is open, with the reason "no markdown sibling".
 Resolve the base branch once, in this order:
 
 1. `git symbolic-ref --quiet --short refs/remotes/origin/HEAD`, with the `origin/` prefix stripped.
-2. `main`, when `git rev-parse --verify --quiet main` succeeds.
+2. `main`, when `git rev-parse --verify --quiet refs/remotes/origin/main` succeeds.
 3. `master`.
 
 Use `origin/<base>` when `git rev-parse --verify --quiet origin/<base>` succeeds.
 Otherwise use the local `<base>`.
 This is the **base ref**.
 Record its commit date with `git log -1 --format=%cs <base ref>`.
-
-Use the local ref as it is.
 
 ### 4. Judge each plan
 
@@ -142,7 +159,7 @@ Skip this step on a dry run.
 For each complete plan, run:
 
 ```bash
-$CLI file-meta set --file <absolute .md path> --status done
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set --file <absolute .md path> --status done
 ```
 
 The CLI sets `Status: done`, stamps `Completed on`, and moves the plan and its siblings to `done/`.

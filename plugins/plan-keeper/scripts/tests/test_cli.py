@@ -1177,21 +1177,19 @@ class TestVersion(IsolatedHomeTestCase):
             "(bump both together when releasing)",
         )
 
-    def test_version_matches_sibling_manifests(self) -> None:
-        # The Cursor and Grok manifests ship the same plugin, so they drift
-        # silently unless a test pins them to the same version.
+    def test_version_matches_cursor_manifest(self) -> None:
+        # The Cursor manifest ships the same plugin. The repo's Grok package
+        # test already pins the Grok manifest; nothing else pins this one.
         module = _import_cli_module()
-        for manifest_dir in (".cursor-plugin", ".grok-plugin"):
-            with self.subTest(manifest_dir=manifest_dir):
-                manifest = json.loads(
-                    (CLI.parent.parent / manifest_dir / "plugin.json").read_text()
-                )
-                self.assertEqual(
-                    module.__version__,
-                    manifest["version"],
-                    f"plan_keeper.__version__ must match {manifest_dir}/"
-                    "plugin.json version (bump every manifest together)",
-                )
+        manifest = json.loads(
+            (CLI.parent.parent / ".cursor-plugin" / "plugin.json").read_text()
+        )
+        self.assertEqual(
+            module.__version__,
+            manifest["version"],
+            "plan_keeper.__version__ must match .cursor-plugin/plugin.json "
+            "version (bump every manifest together)",
+        )
 
     def test_top_level_help_banner_includes_version(self) -> None:
         module = _import_cli_module()

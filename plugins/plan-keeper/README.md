@@ -186,7 +186,7 @@ See [Multiple plan roots](#multiple-plan-roots):
 Locate by `--file PATH` or `--ticket ID` (any of the plan's id fields, across repos):
 
 - `file-meta get …` — print frontmatter as JSON.
-- `file-meta set … [--status … --agent … --kind … --completed-on … --blocked-by … --plankeeper-ticket … --linear-ticket … --jira-ticket …]` — edit fields. Setting `--status done|deferred` relocates the plan into `done/`/`deferred/` (`done` also stamps `Completed on`).
+- `file-meta set … [--status … --agent … --kind … --completed-on … --blocked-by … --plankeeper-ticket … --linear-ticket … --jira-ticket …]`: edit fields. Setting `--status done|deferred` relocates the plan into `done/`/`deferred/` (`done` also stamps `Completed on`). On a `.md` plan, every file with the same base name (a task-list `.json`, for one) moves with it, unchanged.
 - `file-meta strip …` — print the body with the frontmatter removed.
 
 #### Ticket systems: `linear` / `jira`
