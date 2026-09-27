@@ -106,11 +106,13 @@ Resolve the base branch once, in this order:
 
 1. `git symbolic-ref --quiet --short refs/remotes/origin/HEAD`, with the `origin/` prefix stripped.
 2. `main`, when `git rev-parse --verify --quiet refs/remotes/origin/main` succeeds.
-3. `master`.
+3. `main`, when `git rev-parse --verify --quiet refs/heads/main` succeeds.
+4. `master`.
 
 Use `origin/<base>` when `git rev-parse --verify --quiet origin/<base>` succeeds.
-Otherwise use the local `<base>`.
+Otherwise use the local `<base>` when `git rev-parse --verify --quiet <base>` succeeds.
 This is the **base ref**.
+If neither ref exists, say that no default branch was found and stop.
 Record its commit date with `git log -1 --format=%cs <base ref>`.
 
 ### 4. Judge each plan
@@ -149,7 +151,8 @@ Apply these checks in order. The first match wins.
    - It has no checkable outcome.
    - The evidence is weak.
 
-Only check 1 or check 2 can archive a plan.
+On the skill's own judgment, only check 1 or check 2 can archive a plan.
+The one exception is an explicit user override in step 7.
 
 Take the Kind from frontmatter.
 When frontmatter has none, use the filename's `--<kind>` segment.
@@ -221,7 +224,9 @@ Add an `## Errors` group only when a plan was malformed or a collision is waitin
 ### 7. Stop
 
 Leave partial, irrelevant, and open plans in place.
-If the user then names one of them and says done, run step 5 for that plan only.
+The user can override one verdict: they name a listed plan and say it is done.
+That is the user's decision, not a verdict, so say so in the reply.
+Then run step 5 for that plan only.
 To shelve one, point the user to `plan-done` or `plan-update`.
 
 ## Common mistakes

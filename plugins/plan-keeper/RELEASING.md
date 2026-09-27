@@ -53,7 +53,11 @@ fallback for when the workflow is unavailable.
 
    ```bash
    python3 -m unittest discover -s plugins/plan-keeper/scripts/tests
+   python3 -m unittest discover -s tests -p 'test_grok_plugin_package.py'
    ```
+
+   The second command checks the Grok manifest version, which lives outside
+   the plan-keeper suite.
 
 4. Open a PR and **merge it to `main`**.
 
