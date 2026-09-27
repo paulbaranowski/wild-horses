@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
 """pr_churn_cli.py - evidence collector backing the churn skill.
 
-One subcommand:
+Two subcommands:
 
-    collect [pr]   fetch a PR's review history, write timeline.json to --out,
-                   print the churn metrics as JSON on stdout
+    collect [pr]                  fetch a PR's review history, write
+                                  timeline.json to --out, print the churn
+                                  metrics as JSON on stdout
+    boundaries --repo <dir>       find the components the repo talks to,
+                                  write boundaries.json to --out, print a
+                                  count per kind as JSON on stdout
 
 Stdlib only. GitHub access is via the `gh` CLI. Errors go to stdout as
 {"error": ...} with exit 1, so the skill reads `.error` from the same JSON it
 parses. Usage errors exit 2 (argparse).
 
-The CLI computes only what needs no judgment: which review round each finding
-belongs to, findings per round, and which files the fix commits keep touching.
+collect computes only what needs no judgment. That is each finding's review
+round, the findings per round, and the files the fix commits keep touching.
 Deciding what is noise, what a later fix caused, and what the root causes are
 is the skill's job.
+
+boundaries needs no gh and makes no network call. It imports
+churn_boundaries.py from this directory, which Python puts on sys.path when it
+runs this script. Each direction it reports is a keyword guess from the agent
+docs. The skill reads a component before it trusts that guess.
 """
 
 import argparse
@@ -24,6 +33,8 @@ import shutil
 import subprocess
 import sys
 from collections import Counter
+
+import churn_boundaries
 
 GH_TIMEOUT_SECONDS = 120
 
@@ -407,6 +418,19 @@ def compute_metrics(timeline):
     }
 
 
+# --- output ------------------------------------------------------------------
+
+def write_atomic(path: str, text: str) -> None:
+    """Write `text` to `path` through a tmp file, fsync, and os.replace, so a
+    reader never sees a half-written file."""
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write(text)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+
+
 # --- collect subcommand ------------------------------------------------------
 
 def cmd_collect(args):
@@ -425,16 +449,33 @@ def cmd_collect(args):
         timeline = build_timeline(pr, commit_files)
         os.makedirs(args.out, exist_ok=True)
         path = os.path.join(args.out, "timeline.json")
-        tmp = path + ".tmp"
-        with open(tmp, "w") as fh:
-            json.dump(timeline, fh, indent=2)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, path)
+        write_atomic(path, json.dumps(timeline, indent=2))
 
         metrics = compute_metrics(timeline)
         metrics["timeline"] = path
         print(json.dumps(metrics, indent=2))
+        return 0
+    except (CollectError, OSError) as e:
+        print(json.dumps({"error": str(e)}))
+        return 1
+
+
+# --- boundaries subcommand ---------------------------------------------------
+
+def cmd_boundaries(args: argparse.Namespace) -> int:
+    """Write boundaries.json to --out. Print its path, the entry count, a count
+    per kind, and the sources this Python could not read, as JSON. A --repo
+    that is not a directory prints an error."""
+    try:
+        if not os.path.isdir(args.repo):
+            raise CollectError(f"Not a directory: {args.repo}")
+        entries = churn_boundaries.discover(args.repo)
+        os.makedirs(args.out, exist_ok=True)
+        path = os.path.join(args.out, "boundaries.json")
+        write_atomic(path, json.dumps(entries, indent=2))
+        by_kind = dict(sorted(Counter(e["kind"] for e in entries).items()))
+        print(json.dumps({"boundaries": path, "count": len(entries), "by_kind": by_kind,
+                          "skipped": churn_boundaries.skipped_sources(args.repo)}, indent=2))
         return 0
     except (CollectError, OSError) as e:
         print(json.dumps({"error": str(e)}))
@@ -449,6 +490,11 @@ def build_parser():
     c.add_argument("pr", nargs="?", default=None, help="PR number or URL (default: current branch)")
     c.add_argument("--out", required=True, help="directory to write timeline.json into")
     c.set_defaults(func=cmd_collect)
+
+    b = sub.add_parser("boundaries", help="write boundaries.json: the components this repo talks to")
+    b.add_argument("--repo", required=True, help="local checkout that holds the PR's commits")
+    b.add_argument("--out", required=True, help="directory to write boundaries.json into")
+    b.set_defaults(func=cmd_boundaries)
 
     return p
 
