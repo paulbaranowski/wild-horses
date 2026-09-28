@@ -93,12 +93,14 @@ No prefix means the root with `"default": true`.
 Never rebuild the path as `~/plans/<repo>/<filename>`.
 
 Group the bare listing's files by base name (the filename without its last extension).
-A group with a `.md` file is one plan.
-Keep a group only when its `.md` is in the scan set.
-This drops an `in-review` plan together with its `.json`.
+Sort each group in this order:
+
+1. A group with no `.md` file is open, with the reason "no markdown sibling". Report it; never archive it.
+2. A group with a `.md` file is one plan. Keep it only when its `.md` is in the scan set.
+
+Rule 2 drops an `in-review` plan together with its `.json`.
 A `.json` has no Status, so the `--status` call lists it as `backlog`.
 Use the grouping, not that row, to decide its scope.
-A group with no `.md` file is open, with the reason "no markdown sibling".
 
 ### 3. Resolve the default branch
 
@@ -125,7 +127,11 @@ Search the base ref, not the worktree:
 - `git grep -n <pattern> <base ref> -- <path>` finds text.
 - `git show <base ref>:<path>` reads a file.
 - `git log --oneline <base ref> -- <path>` shows history.
-- `gh pr view <number> --json state` checks a pull request the plan names.
+- `gh pr view <number> --json state,baseRefName,mergeCommit` checks a pull request the plan names.
+
+A merged pull request counts as evidence only when its merge commit is on the base ref.
+Check with `git merge-base --is-ancestor <mergeCommit oid> <base ref>`.
+A pull request merged into another branch is not evidence.
 
 A worktree hit counts only when the same path is on the base ref.
 
@@ -158,7 +164,7 @@ Take the Kind from frontmatter.
 When frontmatter has none, use the filename's `--<kind>` segment.
 
 Every verdict gets one evidence line.
-A complete line names something concrete: a file, a symbol, a test, a merged pull request, or a successor plan.
+A complete line names something concrete: a file, a symbol, a test, a pull request merged into the base ref, or a successor plan.
 
 For more than 30 plans, judge in batches of 10.
 Append each batch's verdict lines to a scratch file from `mktemp`, so no verdict is lost.
