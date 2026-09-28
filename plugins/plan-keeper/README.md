@@ -2,7 +2,7 @@
 
 plan-keeper is a local **task-management system** built around plans. A task _is_ a plan file, living in `~/plans/<repo>/` — outside every checkout of the repo, so it's tied to the repo's identity rather than to any one worktree. That decoupling is the whole point: spin up a fresh `git worktree add` to work a plan, delete it once the PR lands, and the plan itself (its status, its history) never moved. plan-keeper supports a variety of plan types, capturing, routing, and archiving each one as it moves from idea to shipped code. Everything is tracked locally in markdown on your machine, never committed to any repo; filing a plan out to Linear or Jira is an occasional export, not the system of record.
 
-Nine skills cover the lifecycle: list a repo's plans read-only (`plan-list`), capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), split one plan into dependency-wired slices (`plan-split`), archive with a completion stamp (`plan-done`), edit frontmatter (`plan-update`), manage the groundcrew dispatch queue (`plan-crew`), and file plans as Linear or Jira tickets (`plan-linear`, `plan-jira`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine — nothing is committed to any repo.
+Ten skills cover the lifecycle: list a repo's plans read-only (`plan-list`), capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), split one plan into dependency-wired slices (`plan-split`), archive with a completion stamp (`plan-done`), archive every plan that already shipped (`plan-clean`), edit frontmatter (`plan-update`), manage the groundcrew dispatch queue (`plan-crew`), and file plans as Linear or Jira tickets (`plan-linear`, `plan-jira`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine. Nothing is committed to any repo.
 
 ## The model
 
@@ -26,7 +26,7 @@ plan-keeper is the system of record for these tasks — they live in `~/plans/<r
 
 Two install paths — pick by what you need:
 
-**Plugin** — the nine skills plus the bundled CLI script, loaded into Claude Code:
+**Plugin**: the ten skills plus the bundled CLI script, loaded into Claude Code:
 
 ```text
 /plugin install plan-keeper@wild-horses
@@ -49,6 +49,7 @@ The binary is the same tool the plugin's bundled CLI script provides, just deliv
 | **[`plan-do`](skills/plan-do/)**         | Routes   | Lists not-yet-started plans for the current repo, classifies readiness (idea / spec / execution-ready), and routes to the matching next skill. Execution-ready plans get all three execution engines (autonomous / task-list-builder / executing-plans), recommended-first by plan shape. Before handing off, it fast-forwards an _untouched_ worktree (clean + no commits ahead) onto its base branch so work starts on the latest `main`/`master`. |
 | **[`plan-split`](skills/plan-split/)**   | Splits   | Decomposes one plan into N independently-grabbable vertical-slice plans (tracer bullets), wired with native `Blocked-by:` dependencies and staged at `todo` (queue them via `plan-crew` to stamp each one's `Agent:` tag — then groundcrew dispatches the wave in dependency order). Marks the source plan `done` when it was a saved file.                                                                                                          |
 | **[`plan-done`](skills/plan-done/)**     | Archives | Moves a completed plan to `~/plans/<repo>/done/` and appends a `*Completed: YYYY-MM-DD*` stamp.                                                                                                                                                                                                                                                                                                                                                      |
+| **[`plan-clean`](skills/plan-clean/)**   | Cleans   | Checks every backlog, todo, and in-progress plan for this repo, archives the complete ones, and lists partial and irrelevant ones.                                                                                                                                                                                                                                                                                                                   |
 | **[`plan-update`](skills/plan-update/)** | Edits    | Mutates frontmatter fields (`Agent`, `Status`, `Ticket`) for a single plan in the current repo.                                                                                                                                                                                                                                                                                                                                                      |
 | **[`plan-crew`](skills/plan-crew/)**     | Queues   | Shows the groundcrew dispatch queue — the current repo by default, or every repo with `--all` ("all repos") — and bulk-promotes/dequeues plans (`Status todo/backlog`). Multi-select; the bulk counterpart to plan-update.                                                                                                                                                                                                                           |
 | **[`plan-linear`](skills/plan-linear/)** | Files    | Files the plan as a Linear ticket and stamps `Linear Ticket:` in frontmatter.                                                                                                                                                                                                                                                                                                                                                                        |
@@ -68,6 +69,7 @@ conversation ──► plan-save ──► ~/plans/<repo>/*.md ──► plan-do
                                 └─► superpowers:executing-plans                     (sequential, review-gated)
 
                                                        plan-done ──► ~/plans/<repo>/done/<file>.md
+~/plans/<repo>/*.md ──► plan-clean ──► ~/plans/<repo>/done/  (complete plans only)
 ```
 
 `plan-do` is the entry point that joins the [superpowers](https://github.com/obra/superpowers) brainstorming → writing-plans → executing-plans pipeline (plus the [autonomous](../autonomous/skills/autonomous/) and [task-list-builder](../harness/skills/task-list-builder/) engines) at the right stage. It classifies in two tiers: **readiness** (idea / spec / execution-ready) picks the path; for execution-ready plans, **shape** (single-ticket vs. independent task list vs. sequential phases) picks which execution engine is recommended first — though all three are always offered.
@@ -184,7 +186,7 @@ See [Multiple plan roots](#multiple-plan-roots):
 Locate by `--file PATH` or `--ticket ID` (any of the plan's id fields, across repos):
 
 - `file-meta get …` — print frontmatter as JSON.
-- `file-meta set … [--status … --agent … --kind … --completed-on … --blocked-by … --plankeeper-ticket … --linear-ticket … --jira-ticket …]` — edit fields. Setting `--status done|deferred` relocates the plan into `done/`/`deferred/` (`done` also stamps `Completed on`).
+- `file-meta set … [--status … --agent … --kind … --completed-on … --blocked-by … --plankeeper-ticket … --linear-ticket … --jira-ticket …]`: edit fields. Setting `--status done|deferred` relocates the plan into `done/`/`deferred/` (`done` also stamps `Completed on`). On a `.md` plan, every file with the same base name (a task-list `.json`, for one) moves with it, unchanged.
 - `file-meta strip …` — print the body with the frontmatter removed.
 
 #### Ticket systems: `linear` / `jira`
@@ -238,6 +240,7 @@ A PreToolUse hook (`hooks/hooks.json`) auto-approves `python3 .../plan_keeper_cl
 | `skills/plan-save/SKILL.md`        | Instructions for the save flow                                                                                                       |
 | `skills/plan-do/SKILL.md`          | Instructions for the list-and-route flow                                                                                             |
 | `skills/plan-split/SKILL.md`       | Instructions for the decompose-into-dependency-wired-slices flow                                                                     |
+| `skills/plan-clean/SKILL.md`       | Instructions for the check-every-plan-and-archive-the-complete-ones flow                                                             |
 | `skills/plan-done/SKILL.md`        | Instructions for the archive flow                                                                                                    |
 | `skills/plan-update/SKILL.md`      | Instructions for the frontmatter-edit flow                                                                                           |
 | `skills/plan-crew/SKILL.md`        | Instructions for the groundcrew dispatch-queue flow                                                                                  |

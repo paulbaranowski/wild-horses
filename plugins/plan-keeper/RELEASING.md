@@ -28,11 +28,13 @@ The version lives in exactly one place — `__version__` in
 - `pyproject.toml` reads it dynamically (`dynamic = ["version"]` +
   `[tool.setuptools.dynamic] version = { attr = "plan_keeper.__version__" }`),
   so the built wheel/`--version` output always agrees with the module.
-- It is kept **in lockstep with `plugin.json`'s `version`**. `TestVersion` in
-  `tests/test_cli.py` fails the suite if the two diverge.
+- It is kept **in lockstep with every plugin manifest's `version`**:
+  `.claude-plugin/`, `.cursor-plugin/`, and `.grok-plugin/plugin.json`.
+  `TestVersion` in `tests/test_cli.py` and the repo's Grok package test fail
+  the suite if any of them diverge.
 
-So a release bumps two numbers that must be equal: `__version__` and the
-plugin.json `version`. Use the plugin bump rule (patch = fix, minor = feature,
+So a release bumps four numbers that must be equal: `__version__` and the
+`version` in each of the three manifests. Use the plugin bump rule (patch = fix, minor = feature,
 major = breaking).
 
 ## Procedure
@@ -44,12 +46,18 @@ fallback for when the workflow is unavailable.
 ### Automated (default)
 
 1. Edit `__version__` in `plugins/plan-keeper/scripts/plan_keeper/__init__.py`.
-2. Set the matching `version` in `plugins/plan-keeper/.claude-plugin/plugin.json`.
+2. Set the matching `version` in `plugins/plan-keeper/.claude-plugin/plugin.json`,
+   `plugins/plan-keeper/.cursor-plugin/plugin.json`, and
+   `plugins/plan-keeper/.grok-plugin/plugin.json`.
 3. Run the tests locally — `TestVersion` enforces the lockstep:
 
    ```bash
    python3 -m unittest discover -s plugins/plan-keeper/scripts/tests
+   python3 -m unittest discover -s tests -p 'test_grok_plugin_package.py'
    ```
+
+   The second command checks the Grok manifest version, which lives outside
+   the plan-keeper suite.
 
 4. Open a PR and **merge it to `main`**.
 

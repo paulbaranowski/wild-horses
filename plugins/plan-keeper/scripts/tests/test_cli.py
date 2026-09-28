@@ -730,6 +730,108 @@ class TestFileMetaSetStatus(IsolatedHomeTestCase):
             "overwrite must not create a -2 variant",
         )
 
+    # A task-list-builder save is a `.md` plan plus a `.json` sibling with the
+    # same base name. A terminal status must relocate the pair together, or the
+    # `.json` is left behind in the active listing.
+    _SIBLING_BYTES = b'{"tasks": [{"id": 1}]}\n'
+
+    def _save_pair(self, topic: str = "paired plan") -> "tuple[Path, Path]":
+        source = self._save_one(topic)
+        sibling = source.with_suffix(".json")
+        sibling.write_bytes(self._SIBLING_BYTES)
+        return source, sibling
+
+    def test_done_relocates_json_sibling_unchanged(self) -> None:
+        source, sibling = self._save_pair()
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        done_dir = self.plans_root / "scratch" / "done"
+        self.assertEqual(r.stdout.strip(), str(done_dir / source.name))
+        self.assertFalse(sibling.exists(), "sibling must leave the active dir")
+        self.assertEqual((done_dir / sibling.name).read_bytes(), self._SIBLING_BYTES)
+
+    def test_deferred_relocates_json_sibling_unchanged(self) -> None:
+        source, sibling = self._save_pair()
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "deferred",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        deferred_dir = self.plans_root / "scratch" / "deferred"
+        self.assertFalse(sibling.exists())
+        self.assertEqual(
+            (deferred_dir / sibling.name).read_bytes(), self._SIBLING_BYTES
+        )
+
+    def test_sibling_collision_fail_leaves_pair_in_place(self) -> None:
+        # Only the sibling collides. Nothing may be written: the plan and its
+        # sibling both stay active, and the plan keeps its old status.
+        source, sibling = self._save_pair()
+        done_dir = self.plans_root / "scratch" / "done"
+        done_dir.mkdir(parents=True, exist_ok=True)
+        (done_dir / sibling.name).write_bytes(b"older\n")
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                    home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("existing:", r.stderr)
+        self.assertTrue(source.exists())
+        self.assertEqual(sibling.read_bytes(), self._SIBLING_BYTES)
+        self.assertFalse((done_dir / source.name).exists())
+        self.assertIn("Status: backlog", source.read_text().split("\n---\n", 1)[0])
+
+    def test_sibling_collision_suffix_shares_one_n(self) -> None:
+        source, sibling = self._save_pair()
+        done_dir = self.plans_root / "scratch" / "done"
+        done_dir.mkdir(parents=True, exist_ok=True)
+        (done_dir / sibling.name).write_bytes(b"older\n")
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                    "--on-collision", "suffix", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), str(done_dir / f"{source.stem}-2.md"))
+        self.assertEqual(
+            (done_dir / f"{sibling.stem}-2.json").read_bytes(), self._SIBLING_BYTES
+        )
+        self.assertEqual((done_dir / sibling.name).read_bytes(), b"older\n")
+
+    def test_sibling_collision_overwrite_replaces_set(self) -> None:
+        source, sibling = self._save_pair()
+        done_dir = self.plans_root / "scratch" / "done"
+        done_dir.mkdir(parents=True, exist_ok=True)
+        (done_dir / sibling.name).write_bytes(b"older\n")
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                    "--on-collision", "overwrite", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((done_dir / sibling.name).read_bytes(), self._SIBLING_BYTES)
+        self.assertEqual(
+            sorted(p.name for p in done_dir.iterdir()),
+            sorted([source.name, sibling.name]),
+        )
+
+    def test_kind_and_done_keeps_pair_base_name(self) -> None:
+        # A Kind change re-stamps the plan's `--<kind>` segment. The sibling
+        # must take the same new base name, or the pair splits in done/.
+        r = run_cli(
+            "save", "--override", "scratch", "--topic", "renamed pair",
+            "--kind", "spec", stdin="# Body\n", home=self.home,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        source = Path(r.stdout.strip())
+        source.with_suffix(".json").write_bytes(self._SIBLING_BYTES)
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "done",
+                    "--kind", "exec-plan", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        moved = Path(r.stdout.strip())
+        self.assertTrue(moved.name.endswith("--exec-plan.md"), moved.name)
+        self.assertEqual(
+            moved.with_suffix(".json").read_bytes(), self._SIBLING_BYTES
+        )
+
+    def test_active_status_leaves_sibling_in_place(self) -> None:
+        source, sibling = self._save_pair()
+        r = run_cli("file-meta", "set", "--file", str(source), "--status", "todo",
+                    home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(sibling.read_bytes(), self._SIBLING_BYTES)
+
     def test_invalid_status_rejected(self) -> None:
         source = self._save_one()
         r = run_cli("file-meta", "set", "--file", str(source), "--status", "bogus",
@@ -1073,6 +1175,20 @@ class TestVersion(IsolatedHomeTestCase):
             manifest["version"],
             "plan_keeper.__version__ must match plugin.json version "
             "(bump both together when releasing)",
+        )
+
+    def test_version_matches_cursor_manifest(self) -> None:
+        # The Cursor manifest ships the same plugin. The repo's Grok package
+        # test already pins the Grok manifest; nothing else pins this one.
+        module = _import_cli_module()
+        manifest = json.loads(
+            (CLI.parent.parent / ".cursor-plugin" / "plugin.json").read_text()
+        )
+        self.assertEqual(
+            module.__version__,
+            manifest["version"],
+            "plan_keeper.__version__ must match .cursor-plugin/plugin.json "
+            "version (bump every manifest together)",
         )
 
     def test_top_level_help_banner_includes_version(self) -> None:
