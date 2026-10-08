@@ -51,6 +51,13 @@ On Linux `TMPDIR` is often `/tmp`, which is world-writable. Both the cache and t
 **8. Nothing here blocks or fails a tool call.**
 Every gate returns quietly. That covers a missing binary, an unreadable marker, and a malformed payload. It also covers an unwritable cache, and a state directory that cannot be created. Losing state costs a `gh` call at every turn end. It also drops the rate limit. Every matching `gh pr` call then announces. Raising would cost the banner itself, plus a traceback after every turn end.
 
+**9. A hook never takes a lock in the repository it reports on.**
+Plain `git status` is not read-only. It takes `.git/index.lock` to save refreshed stat data. A call killed on timeout left that lock behind, and every later git write in the repository failed until someone deleted it. That happened weekly in a monorepo, where `git status` after a large fast-forward ran past the 5 second timeout. So every command the runner starts gets `GIT_OPTIONAL_LOCKS=0`, including the git processes `gh` starts. That only turns off optional locks. A command that writes still locks, so the hooks run only commands that read.
+
+The cost: the hook never saves refreshed stat data, so after a large checkout its `git status` stays slow until another git command rewrites the index.
+
+A timed-out call also gets SIGTERM first, with `TERMINATE_GRACE_SECONDS` to exit, so a future command that does lock can still clean up. The grace comes out of the shared deadline, so a call the deadline timed out goes straight to SIGKILL. Only the direct child gets either signal. The git processes `gh` starts are not signalled; `GIT_OPTIONAL_LOCKS=0` is what keeps them from leaving a lock.
+
 ## Facts that are easy to get wrong
 
 Four things cost real debugging time. Read them before changing a query or a gate.

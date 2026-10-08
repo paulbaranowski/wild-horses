@@ -4,9 +4,10 @@
 `pr_announce.py` answers "has the PR link reached the user yet". `pr_status.py`
 answers "what is this branch's state right now". They run on different events
 and print different text. Everything below is what they must not disagree on.
-That covers reading the harness payload and running a command. It also covers
-which branches can own a PR. Next comes the `gh` query for that branch's pull
-request, and how to spell the link. Last comes the channel a banner goes out on.
+That covers reading the harness payload, and running a command without taking
+git's optional locks. It also covers which branches can own a PR. Next comes the
+`gh` query for that branch's pull request, and how to spell the link. Last comes
+the channel a banner goes out on.
 
 The `gh` query is the reason this module exists. It lived twice before, once in
 `jq` and once in Python, and the two drifted on the state filter. The query now
@@ -26,13 +27,34 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Final, Optional, Sequence
+from typing import Callable, Dict, Final, Optional, Sequence
 
 # Branches that never have a PR of their own. A detached HEAD answers `HEAD`.
 SKIPPED_BRANCHES: Final = frozenset({"HEAD", "main", "master"})
 
 GIT_TIMEOUT_SECONDS: Final = 5.0
 GH_TIMEOUT_SECONDS: Final = 10.0
+
+# Added to every child's environment. Plain `git status` takes `.git/index.lock`
+# to write refreshed stat data back, and a call killed on timeout leaves that
+# lock behind. Every later git write in the repository then fails. With optional
+# locks off, git never takes the lock to begin with. The variable also reaches
+# the git processes `gh` starts.
+#
+# It turns off optional locks only. A command that writes still locks, so these
+# hooks must only ever run commands that read.
+NO_OPTIONAL_LOCKS_ENV: Final = {"GIT_OPTIONAL_LOCKS": "0"}
+
+# How long a timed-out child gets to exit on SIGTERM before SIGKILL. git removes
+# its lockfiles on SIGTERM. It cannot on SIGKILL. Half a second is plenty to
+# unlink a lockfile, and small next to the shared budget.
+#
+# The grace comes out of the shared deadline, so it never stretches a run past
+# it. When the deadline is what timed the call out, no grace is left, and the
+# child goes straight to SIGKILL. Only the direct child gets either signal. The
+# git processes `gh` starts are not signalled; `NO_OPTIONAL_LOCKS_ENV` is what
+# keeps them from leaving a lock.
+TERMINATE_GRACE_SECONDS: Final = 0.5
 
 # What one hook run may spend in total, across every subprocess it starts. It
 # sits well under the 20 second wrapper timeout in hooks.json. So the wrapper
@@ -157,7 +179,11 @@ def make_runner(cwd: str, timeout: float, deadline: float) -> CommandRunner:
 
     `timeout` caps one call. `deadline` caps the whole run, and the shorter of
     the two wins. Every caller passes a deadline, so no run can outlive it.
+
+    Every call runs with `NO_OPTIONAL_LOCKS_ENV`, so a read such as `status`
+    never takes `.git/index.lock`. Pass only commands that read.
     """
+    env = {**os.environ, **NO_OPTIONAL_LOCKS_ENV}
 
     def run(argv: Sequence[str]) -> Optional[str]:
         limit = min(timeout, deadline - time.monotonic())
@@ -166,22 +192,59 @@ def make_runner(cwd: str, timeout: float, deadline: float) -> CommandRunner:
             # wrapper would kill mid-flight.
             return None
         try:
-            done = subprocess.run(
-                list(argv),
-                cwd=cwd or None,
-                capture_output=True,
-                text=True,
-                timeout=limit,
-            )
+            return _run_bounded(argv, cwd, env, limit, deadline)
         except (OSError, subprocess.SubprocessError):
-            # A missing or hanging `git`/`gh` leaves nothing to report. These
-            # hooks are advisory, so they stay silent instead of failing a turn.
+            # A missing `git`/`gh` leaves nothing to report. These hooks are
+            # advisory, so they stay silent instead of failing a turn.
             return None
-        if done.returncode != 0:
-            return None
-        return done.stdout.strip() or None
 
     return run
+
+
+def _run_bounded(
+    argv: Sequence[str], cwd: str, env: Dict[str, str], limit: float, deadline: float
+) -> Optional[str]:
+    """Run one command for at most `limit` seconds, returning trimmed stdout.
+
+    Returns None on timeout, a non-zero exit, or empty output. `deadline` caps
+    the SIGTERM grace, so stopping a child never outlasts the run.
+
+    Not `subprocess.run(timeout=...)`. That kills a timed-out child with
+    SIGKILL, which gives git no chance to remove a lockfile it holds.
+    """
+    with subprocess.Popen(
+        list(argv),
+        cwd=cwd or None,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        # Undecodable output must cost the banner at most, never a traceback.
+        errors="replace",
+    ) as child:
+        try:
+            stdout = child.communicate(timeout=limit)[0]
+        except subprocess.TimeoutExpired:
+            _stop(child, deadline)
+            return None
+    if child.returncode != 0:
+        return None
+    return stdout.strip() or None
+
+
+def _stop(child: "subprocess.Popen[str]", deadline: float) -> None:
+    """SIGTERM a child, then SIGKILL it once the grace or the deadline runs out.
+
+    `wait`, not `communicate`. After a SIGKILL, `communicate` would keep reading
+    a pipe that a grandchild, such as git under `gh`, may still hold open.
+    """
+    child.terminate()
+    try:
+        # A grace at or below zero still checks once, then raises.
+        child.wait(timeout=min(TERMINATE_GRACE_SECONDS, deadline - time.monotonic()))
+    except subprocess.TimeoutExpired:
+        child.kill()
+        child.wait()
 
 
 def announceable_branch(run: CommandRunner) -> Optional[str]:

@@ -13,6 +13,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -171,6 +172,90 @@ class TestMakeRunner(unittest.TestCase):
         run = common.make_runner("/", common.GIT_TIMEOUT_SECONDS, common.new_deadline())
         self.assertEqual(run(["pwd"]), "/")
 
+    def test_git_runs_without_optional_locks(self):
+        """Every child sees the variable, including the git that `gh` starts."""
+        run = common.make_runner("", common.GIT_TIMEOUT_SECONDS, common.new_deadline())
+        probe = "import os; print(os.environ.get('GIT_OPTIONAL_LOCKS', ''))"
+        self.assertEqual(run([sys.executable, "-c", probe]), "0")
+
+    def test_a_timed_out_child_gets_sigterm_first(self):
+        """SIGKILL skips git's lockfile cleanup. SIGTERM lets it run."""
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "terminated"
+            child = (
+                "import signal, sys, time\n"
+                "def stop(*_):\n"
+                f"    open({str(marker)!r}, 'w').close()\n"
+                "    sys.exit(0)\n"
+                "signal.signal(signal.SIGTERM, stop)\n"
+                "time.sleep(10)\n"
+            )
+            started = time.monotonic()
+            # Long enough for the interpreter to install its handler first.
+            run = common.make_runner("", 1.0, common.new_deadline())
+            self.assertIsNone(run([sys.executable, "-c", child]))
+            self.assertLess(time.monotonic() - started, 3.0)
+            self.assertTrue(marker.exists(), "the child was killed without a SIGTERM")
+
+
+def git(repo: Path, *args: str) -> None:
+    """Run a plain `git` command in `repo`, failing the test if it fails.
+
+    The user's own git config stays out, and so does any inherited
+    `GIT_OPTIONAL_LOCKS`. A setting such as `core.fsmonitor` or that variable
+    would stop plain `status` from refreshing the index, and the test would skip.
+    """
+    env = {k: v for k, v in os.environ.items() if k != "GIT_OPTIONAL_LOCKS"}
+    env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, env=env)
+
+
+def index_snapshot(repo: Path) -> Tuple[bytes, int]:
+    index = repo / ".git" / "index"
+    return index.read_bytes(), index.stat().st_mtime_ns
+
+
+class TestStatusNeverWritesTheIndex(unittest.TestCase):
+    """A status hook observes the repository. It must never change it.
+
+    Plain `git status` takes `.git/index.lock` to write refreshed stat data
+    back. A hook that is killed mid-write leaves that lock behind, and every
+    later git write in the repository then fails until someone deletes it.
+    """
+
+    def stale_repo(self) -> Path:
+        """A repository whose index holds out-of-date stat data for one file.
+
+        The file's mtime moves a day into the past with its content unchanged.
+        That is stale rather than racy, so a locking status refreshes the entry
+        and rewrites the index.
+        """
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        repo = Path(scratch.name)
+        git(repo, "init", "-q")
+        (repo / "tracked.txt").write_text("content\n")
+        git(repo, "add", "tracked.txt")
+        git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init")
+        day_ago = time.time() - 86400
+        os.utime(repo / "tracked.txt", (day_ago, day_ago))
+        return repo
+
+    def test_status_never_rewrites_the_index(self):
+        # First prove the setup can fail: plain status rewrites a stale index.
+        control = self.stale_repo()
+        before = index_snapshot(control)
+        git(control, "status", "--porcelain=v2", "--branch")
+        if index_snapshot(control) == before:
+            self.skipTest("this git does not refresh a stale index on status")
+
+        repo = self.stale_repo()
+        before = index_snapshot(repo)
+        run = common.make_runner(str(repo), common.GIT_TIMEOUT_SECONDS, common.new_deadline())
+        self.assertIsNotNone(run(["git", "status", "--porcelain=v2", "--branch"]))
+        self.assertEqual(index_snapshot(repo), before)
+        self.assertFalse((repo / ".git" / "index.lock").exists())
+
 
 class TestSharedDeadline(unittest.TestCase):
     """One run's calls share a budget, so the wrapper never has to kill them.
@@ -198,6 +283,26 @@ class TestSharedDeadline(unittest.TestCase):
         run = common.make_runner("", 10.0, time.monotonic() + 0.3)
         self.assertIsNone(run([sys.executable, "-c", "import time; time.sleep(5)"]))
         self.assertLess(time.monotonic() - started, 3.0)
+
+    IGNORES_SIGTERM = (
+        "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(10)"
+    )
+
+    def test_a_child_that_ignores_sigterm_is_still_killed(self):
+        started = time.monotonic()
+        run = common.make_runner("", 0.3, common.new_deadline())
+        self.assertIsNone(run([sys.executable, "-c", self.IGNORES_SIGTERM]))
+        self.assertLess(time.monotonic() - started, 3.0)
+
+    def test_the_sigterm_grace_never_outlasts_the_deadline(self):
+        """With no budget left at the timeout, there is no grace to give."""
+        budget = 0.3
+        started = time.monotonic()
+        run = common.make_runner("", 10.0, time.monotonic() + budget)
+        self.assertIsNone(run([sys.executable, "-c", self.IGNORES_SIGTERM]))
+        elapsed = time.monotonic() - started
+        # A full grace would land past budget + grace. Half of it is slack.
+        self.assertLess(elapsed, budget + common.TERMINATE_GRACE_SECONDS / 2)
 
 
 class TestPrLink(unittest.TestCase):
