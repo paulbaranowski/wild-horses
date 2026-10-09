@@ -56,7 +56,7 @@ Plain `git status` is not read-only. It takes `.git/index.lock` to save refreshe
 
 The cost: the hook never saves refreshed stat data, so after a large checkout its `git status` stays slow until another git command rewrites the index.
 
-A timed-out call also gets SIGTERM first, with `TERMINATE_GRACE_SECONDS` to exit, so a future command that does lock can still clean up. The grace comes out of the shared deadline, so a call the deadline timed out goes straight to SIGKILL. Only the direct child gets either signal. The git processes `gh` starts are not signalled; `GIT_OPTIONAL_LOCKS=0` is what keeps them from leaving a lock.
+A timed-out call also gets SIGTERM first, with `TERMINATE_GRACE_SECONDS` to exit, so a command that does lock can still clean up. That covers git older than 2.15, which ignores `GIT_OPTIONAL_LOCKS`, and any future command that writes. The grace comes out of the shared deadline, so a call the deadline timed out gets SIGKILL right after SIGTERM, with no time to exit. Only the direct child gets either signal. The git processes `gh` starts are not signalled; `GIT_OPTIONAL_LOCKS=0` is what keeps them from leaving a lock.
 
 ## Facts that are easy to get wrong
 
@@ -79,7 +79,7 @@ Four things cost real debugging time. Read them before changing a query or a gat
 python3 -m unittest discover -s plugins/pr-status-hook/scripts -p 'test_*.py'
 ```
 
-`characterize.sh` builds one repository state per case it lists, and records what the hook prints for each into `golden-banners.txt`. It began as proof that the Python port matched the shell script it replaced, which it did byte for byte. It is kept for a second reason. It is the only test here that uses real git repositories rather than a fake runner.
+`characterize.sh` builds one repository state per case it lists, and records what the hook prints for each into `golden-banners.txt`. It began as proof that the Python port matched the shell script it replaced, which it did byte for byte. It is kept for a second reason. It is the only test that checks a hook's banner end to end against real git repositories. `TestStatusNeverWritesTheIndex` also uses a real repository, to prove the runner never rewrites the index or leaves `.git/index.lock`.
 
 To change a banner on purpose, run `characterize.sh` and commit the new recording with the code change. The fixture diff is then the reviewable statement of what users will see differently.
 

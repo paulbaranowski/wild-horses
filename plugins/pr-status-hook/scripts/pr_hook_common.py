@@ -35,25 +35,16 @@ SKIPPED_BRANCHES: Final = frozenset({"HEAD", "main", "master"})
 GIT_TIMEOUT_SECONDS: Final = 5.0
 GH_TIMEOUT_SECONDS: Final = 10.0
 
-# Added to every child's environment. Plain `git status` takes `.git/index.lock`
-# to write refreshed stat data back, and a call killed on timeout leaves that
-# lock behind. Every later git write in the repository then fails. With optional
-# locks off, git never takes the lock to begin with. The variable also reaches
-# the git processes `gh` starts.
-#
-# It turns off optional locks only. A command that writes still locks, so these
-# hooks must only ever run commands that read.
+# Added to every child's environment, including the git processes `gh` starts,
+# so plain `git status` never takes `.git/index.lock`. A killed call cannot leave
+# a lock it never took. See README invariant 9. Writes still lock, so these hooks
+# must only ever run commands that read.
 NO_OPTIONAL_LOCKS_ENV: Final = {"GIT_OPTIONAL_LOCKS": "0"}
 
 # How long a timed-out child gets to exit on SIGTERM before SIGKILL. git removes
-# its lockfiles on SIGTERM. It cannot on SIGKILL. Half a second is plenty to
-# unlink a lockfile, and small next to the shared budget.
-#
-# The grace comes out of the shared deadline, so it never stretches a run past
-# it. When the deadline is what timed the call out, no grace is left, and the
-# child goes straight to SIGKILL. Only the direct child gets either signal. The
-# git processes `gh` starts are not signalled; `NO_OPTIONAL_LOCKS_ENV` is what
-# keeps them from leaving a lock.
+# its lockfiles on SIGTERM, not on SIGKILL. That still matters on git older than
+# 2.15, which ignores `GIT_OPTIONAL_LOCKS`. The grace comes out of the shared
+# deadline, so with none left, SIGKILL follows SIGTERM at once.
 TERMINATE_GRACE_SECONDS: Final = 0.5
 
 # What one hook run may spend in total, across every subprocess it starts. It
