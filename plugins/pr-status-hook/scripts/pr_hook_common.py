@@ -27,7 +27,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Final, Optional, Sequence
+from typing import Callable, Final, Mapping, Optional, Sequence
 
 # Branches that never have a PR of their own. A detached HEAD answers `HEAD`.
 SKIPPED_BRANCHES: Final = frozenset({"HEAD", "main", "master"})
@@ -39,7 +39,7 @@ GH_TIMEOUT_SECONDS: Final = 10.0
 # so plain `git status` never takes `.git/index.lock`. A killed call cannot leave
 # a lock it never took. See README invariant 9. Writes still lock, so these hooks
 # must only ever run commands that read.
-NO_OPTIONAL_LOCKS_ENV: Final = {"GIT_OPTIONAL_LOCKS": "0"}
+NO_OPTIONAL_LOCKS_ENV: Final[Mapping[str, str]] = {"GIT_OPTIONAL_LOCKS": "0"}
 
 # How long a timed-out child gets to exit on SIGTERM before SIGKILL. git removes
 # its lockfiles on SIGTERM, not on SIGKILL. That still matters on git older than
@@ -183,7 +183,7 @@ def make_runner(cwd: str, timeout: float, deadline: float) -> CommandRunner:
             # wrapper would kill mid-flight.
             return None
         try:
-            return _run_bounded(argv, cwd, env, limit, deadline)
+            return _run_bounded(argv, cwd, env, limit=limit, deadline=deadline)
         except (OSError, subprocess.SubprocessError):
             # A missing `git`/`gh` leaves nothing to report. These hooks are
             # advisory, so they stay silent instead of failing a turn.
@@ -193,12 +193,21 @@ def make_runner(cwd: str, timeout: float, deadline: float) -> CommandRunner:
 
 
 def _run_bounded(
-    argv: Sequence[str], cwd: str, env: Dict[str, str], limit: float, deadline: float
+    argv: Sequence[str],
+    cwd: str,
+    env: Mapping[str, str],
+    *,
+    limit: float,
+    deadline: float,
 ) -> Optional[str]:
     """Run one command for at most `limit` seconds, returning trimmed stdout.
 
-    Returns None on timeout, a non-zero exit, or empty output. `deadline` caps
-    the SIGTERM grace, so stopping a child never outlasts the run.
+    Returns None on timeout, a non-zero exit, or empty output. Raises when the
+    command cannot start; `make_runner` turns that into None too.
+
+    `limit` is a duration in seconds. `deadline` is a `time.monotonic()` reading
+    that caps the SIGTERM grace, so stopping a child never outlasts the run.
+    Both are keyword-only because a swap would silently cancel the grace.
 
     Not `subprocess.run(timeout=...)`. That kills a timed-out child with
     SIGKILL, which gives git no chance to remove a lockfile it holds.
@@ -216,14 +225,14 @@ def _run_bounded(
         try:
             stdout = child.communicate(timeout=limit)[0]
         except subprocess.TimeoutExpired:
-            _stop(child, deadline)
+            _stop(child, deadline=deadline)
             return None
     if child.returncode != 0:
         return None
     return stdout.strip() or None
 
 
-def _stop(child: "subprocess.Popen[str]", deadline: float) -> None:
+def _stop(child: "subprocess.Popen[str]", *, deadline: float) -> None:
     """SIGTERM a child, then SIGKILL it once the grace or the deadline runs out.
 
     `wait`, not `communicate`. After a SIGKILL, `communicate` would keep reading
