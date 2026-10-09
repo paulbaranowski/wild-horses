@@ -19,6 +19,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 from typing import Dict, Tuple
 
 HERE = Path(__file__).parent
@@ -173,8 +174,9 @@ class TestMakeRunner(unittest.TestCase):
         self.assertEqual(run(["pwd"]), "/")
 
     def test_git_runs_without_optional_locks(self):
-        """Every child sees the variable, including the git that `gh` starts."""
-        run = common.make_runner("", common.GIT_TIMEOUT_SECONDS, common.new_deadline())
+        """The runner's value beats an inherited one, and grandchildren inherit it."""
+        with mock.patch.dict(os.environ, {"GIT_OPTIONAL_LOCKS": "1"}):
+            run = common.make_runner("", common.GIT_TIMEOUT_SECONDS, common.new_deadline())
         probe = "import os; print(os.environ.get('GIT_OPTIONAL_LOCKS', ''))"
         self.assertEqual(run([sys.executable, "-c", probe]), "0")
 
@@ -198,16 +200,23 @@ class TestMakeRunner(unittest.TestCase):
             self.assertTrue(marker.exists(), "the child was killed without a SIGTERM")
 
 
-def git(repo: Path, *args: str) -> None:
-    """Run a plain `git` command in `repo`, failing the test if it fails.
+def clean_git_env() -> Dict[str, str]:
+    """This process's environment without the user's git config or lock setting.
 
-    The user's own git config stays out, and so does any inherited
-    `GIT_OPTIONAL_LOCKS`. A setting such as `core.fsmonitor` or that variable
-    would stop plain `status` from refreshing the index, and the test would skip.
+    A setting such as `core.fsmonitor`, or an inherited `GIT_OPTIONAL_LOCKS`,
+    stops plain `status` from refreshing the index. Left in, it would make the
+    control skip, or let the runner pass with the fix removed.
     """
     env = {k: v for k, v in os.environ.items() if k != "GIT_OPTIONAL_LOCKS"}
     env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
-    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, env=env)
+    return env
+
+
+def git(repo: Path, *args: str) -> None:
+    """Run a plain `git` command in `repo`, failing the test if it fails."""
+    subprocess.run(
+        ["git", *args], cwd=repo, check=True, capture_output=True, env=clean_git_env()
+    )
 
 
 def index_snapshot(repo: Path) -> Tuple[bytes, int]:
@@ -249,9 +258,11 @@ class TestStatusNeverWritesTheIndex(unittest.TestCase):
         if index_snapshot(control) == before:
             self.skipTest("this git does not refresh a stale index on status")
 
+        # The runner copies the environment when built, so the patch wraps that.
         repo = self.stale_repo()
         before = index_snapshot(repo)
-        run = common.make_runner(str(repo), common.GIT_TIMEOUT_SECONDS, common.new_deadline())
+        with mock.patch.dict(os.environ, clean_git_env(), clear=True):
+            run = common.make_runner(str(repo), common.GIT_TIMEOUT_SECONDS, common.new_deadline())
         self.assertIsNotNone(run(["git", "status", "--porcelain=v2", "--branch"]))
         self.assertEqual(index_snapshot(repo), before)
         self.assertFalse((repo / ".git" / "index.lock").exists())
