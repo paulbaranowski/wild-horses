@@ -103,6 +103,7 @@ def parse_work_tree(porcelain: Optional[str]) -> WorkTree:
 
 def read_work_tree(run: CommandRunner) -> WorkTree:
     """Ask `git` once for every local fact the banner needs."""
+    # Lock-free despite plain `status`: the runner sets `NO_OPTIONAL_LOCKS_ENV`.
     return parse_work_tree(run(["git", "status", "--porcelain=v2", "--branch"]))
 
 
