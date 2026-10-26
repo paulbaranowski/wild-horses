@@ -1,6 +1,7 @@
 ---
 name: plan-design
-description: Write a structured, code-grounded design document — TLDR, goals, non-goals, requirements, paired before/after architecture and data-flow diagrams, DB and RPC/API deltas, touch points, trade-offs, risks, rollout, and verification — and save it as a `Kind: design` plan file in `~/plans/<repo>/`. Use after `grill-me` has settled the decisions, or when the user asks to turn a PRD or requirements into a design.
+description: >-
+  Write a structured, code-grounded design document — TLDR, goals, non-goals, requirements, paired before/after architecture and data-flow diagrams, DB and RPC/API deltas, touch points, trade-offs, risks, rollout, and verification — and save it as a `Kind: design` plan file in `~/plans/<repo>/`. Use after `grill-me` has settled the decisions, or when the user asks to turn a PRD or requirements into a design.
 ---
 
 # plan-design

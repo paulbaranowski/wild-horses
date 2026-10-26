@@ -142,7 +142,7 @@ Which planner depends on the `Kind`:
 - **`prd` / `reqs` → `plan-design`**, which turns them into a structured design doc.
 - **`design` / `spec` → `superpowers:writing-plans`**, which turns them into a phased implementation plan.
 
-When `Kind` is absent (step 4b inferred "spec" from the content), suggest `superpowers:writing-plans`, the route such plans took before `plan-design` existed.
+When `Kind` is absent or unrecognized (step 4b inferred "spec" from the content), suggest `superpowers:writing-plans`, the route such plans took before `plan-design` existed.
 
 > I read `<filename>` as a **spec** (`Kind: <kind>`). Suggested next: `<plan-keeper:plan-design | superpowers:writing-plans>` to turn it into <a structured design document | a phased implementation plan>. Proceed? (Or steer manually.)
 
