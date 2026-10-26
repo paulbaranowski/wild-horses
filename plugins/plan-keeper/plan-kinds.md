@@ -42,7 +42,8 @@ The `prd` / `reqs` / `design` boundary sits earlier on the same axis. All three 
 | `Kind`                             | Readiness       | plan-do route                                                               |
 | ---------------------------------- | --------------- | --------------------------------------------------------------------------- |
 | `idea`                             | idea            | `superpowers:brainstorming` (turn it into a reviewed spec)                  |
-| `prd` / `reqs` / `design` / `spec` | spec            | `superpowers:writing-plans` (turn it into a phased implementation plan)     |
+| `prd` / `reqs`                     | spec            | `plan-design` (turn it into a structured design doc)                        |
+| `design` / `spec`                  | spec            | `superpowers:writing-plans` (turn it into a phased implementation plan)     |
 | `exec-plan`                        | execution-ready | the execution menu (`autonomous` / `task-list-builder` / `executing-plans`) |
 
 When `Kind` is present it is the authoritative signal (still confirmable by the user). When it is absent, `plan-do` infers readiness from the content as before.
@@ -51,6 +52,6 @@ When `Kind` is present it is the authoritative signal (still confirmable by the 
 
 - **Value set:** `VALID_KINDS` in `scripts/plan_keeper_cli.py` (and `validate_kind`).
 - **Written by:** `plan_keeper_cli.py save --kind <value>` (fill-if-absent on `.md` saves only) and `file-meta set --kind <value>` (validated).
-- **Set / inferred by:** the `plan-save` skill (infer-and-confirm at save time).
+- **Set / inferred by:** the `plan-save` skill (infer-and-confirm at save time) and the `plan-design` skill (which authors a `design` document and passes `--kind design`).
 - **Read by:** the `plan-do` skill (routing) and `plan-update` (editing).
 - **Surfaced in the filename:** a classified `.md` save is named `<date>-<slug>--<kind>.md` (`plan_filename` in `scripts/plan_keeper/naming.py`); the grouped listing (`list --group`) recovers the project slug via `plan_group_key`. Frontmatter `Kind` is the source of truth (`_kind_of` reads it, not the filename); the `--<kind>` segment is a display/sort convenience. A later Kind change via `file-meta set --kind` (or `plan-update`) **re-stamps that segment** (`rename_for_kind`) so the name and frontmatter stay in sync, printing the new path. Only dated plan names carry the segment; a hand-named no-date `.md` keeps its name and only its frontmatter updates.

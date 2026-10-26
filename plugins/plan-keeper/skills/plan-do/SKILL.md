@@ -26,7 +26,7 @@ For plans that aren't execution-ready yet (idea, spec), the skill suggests the s
 - **`<repo>`:** auto-derived or override — see [../../repo-derivation.md](../../repo-derivation.md).
 - **Classification (tier 1, readiness):** idea / spec / execution-ready. Read the plan's `Kind:` frontmatter first (authoritative — see [../../plan-kinds.md](../../plan-kinds.md)); infer from content only when `Kind` is absent.
 - **Classification (tier 2, shape — only for execution-ready):** picks which of the three execution engines to recommend first; all three are always offered.
-- **Routing:** `superpowers:brainstorming` (idea), `superpowers:writing-plans` (spec). Execution-ready → menu of `autonomous:autonomous`, `harness:task-list-builder`→`task-list-runner`, `superpowers:executing-plans`.
+- **Routing:** `superpowers:brainstorming` (idea), `plan-design` (`prd` / `reqs`), `superpowers:writing-plans` (`design` / `spec`). Execution-ready → menu of `autonomous:autonomous`, `harness:task-list-builder`→`task-list-runner`, `superpowers:executing-plans`.
 - **Confirmation:** required before reading any plan file and before invoking any next skill.
 
 ## Procedure
@@ -109,7 +109,8 @@ Decide whether the plan is an idea, a spec, or _execution-ready_. There are two 
 | `Kind` (from frontmatter)          | Readiness       | Next                |
 | ---------------------------------- | --------------- | ------------------- |
 | `idea`                             | idea            | step 5a             |
-| `prd` / `reqs` / `design` / `spec` | spec            | step 5b             |
+| `prd` / `reqs`                     | spec            | step 5b (plan-design) |
+| `design` / `spec`                  | spec            | step 5b (writing-plans) |
 | `exec-plan`                        | execution-ready | step 5c (exec menu) |
 
 The user can still override at the confirmation gate — `Kind` is a strong prior, not a lock. If the file's content flatly contradicts its `Kind` (e.g. `Kind: idea` on a detailed task list), note the mismatch to the user instead of blindly following the tag.
@@ -134,9 +135,16 @@ The user can still override at the confirmation gate — `Kind` is a strong prio
 
 Wait for confirmation, then jump to step 6.
 
-### 5b. Spec → suggest writing-plans
+### 5b. Spec readiness → suggest the matching planner
 
-> I read `<filename>` as a **spec**. Suggested next: `superpowers:writing-plans` to turn it into a phased implementation plan. Proceed? (Or steer manually.)
+Which planner depends on the `Kind`:
+
+- **`prd` / `reqs` → `plan-design`**, which turns them into a structured design doc.
+- **`design` / `spec` → `superpowers:writing-plans`**, which turns them into a phased implementation plan.
+
+When `Kind` is absent (step 4b inferred "spec" from the content), suggest `superpowers:writing-plans`, the route such plans took before `plan-design` existed.
+
+> I read `<filename>` as a **spec** (`Kind: <kind>`). Suggested next: `<plan-design | superpowers:writing-plans>` to turn it into <a structured design document | a phased implementation plan>. Proceed? (Or steer manually.)
 
 Wait for confirmation, then jump to step 6.
 
@@ -208,7 +216,7 @@ Only `refreshed` mutates the repo (a pure fast-forward — never a merge commit 
 
 ### 7. Mark the plan in-progress, then invoke the chosen skill
 
-Once the user has confirmed a route (any next skill — `brainstorming`, `writing-plans`, or an execution engine), **first** flip the plan's status so it stops showing up as "to start" and starts showing up in `plan-done`'s finish list — and in the same call clear the `Agent` field so groundcrew won't also claim a plan you're now driving yourself:
+Once the user has confirmed a route (any next skill — `brainstorming`, `plan-design`, `writing-plans`, or an execution engine), **first** flip the plan's status so it stops showing up as "to start" and starts showing up in `plan-done`'s finish list — and in the same call clear the `Agent` field so groundcrew won't also claim a plan you're now driving yourself:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set \
@@ -225,6 +233,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set \
 - **`harness:task-list-builder`** — invoke it to convert the plan into the structured JSON task list; it hands off to `harness:task-list-runner` to execute the tasks.
 - **`superpowers:executing-plans`** — invoke directly; the plan in context is the implementation plan it executes.
 - **`superpowers:brainstorming` / `superpowers:writing-plans`** — invoke directly (the idea / spec paths).
+- **`plan-design`** — invoke directly (the `prd` / `reqs` path); the plan read in step 3 is its brief.
 
 If the user picked a different skill than the suggestion or the recommended engine, invoke that one instead.
 

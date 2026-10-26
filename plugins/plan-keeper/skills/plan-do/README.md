@@ -22,8 +22,9 @@ Pairs with [`plan-save`](../plan-save/) (which wrote the files this skill reads)
 ## What it does
 
 ```text
-idea  ──► superpowers:brainstorming    ──► spec
-spec  ──► superpowers:writing-plans    ──► impl plan
+idea          ──► superpowers:brainstorming    ──► spec
+prd / reqs    ──► plan-design                  ──► design
+design / spec ──► superpowers:writing-plans    ──► impl plan
 execution-ready ──► menu (recommended first):
         ├──► autonomous:autonomous                           (AFK, no human, ──► PR)
         ├──► harness:task-list-builder ──► task-list-runner  (dispatched tasks)
@@ -33,7 +34,7 @@ execution-ready ──► menu (recommended first):
 1. **Lists not-yet-started plans** via `plan_keeper_cli.py list --sections todo,backlog`. The CLI prints the CommonMark groups. Already-started plans (`in-progress`, `in-review`) are hidden, with a count on stderr.
 2. **Asks which one.** Pastes that stdout, then waits. Reads only the picked plan. Never reads multiple candidates ahead of time (wastes context, biases classification).
 3. **Classifies readiness (tier 1)** as **idea**, **spec**, or **execution-ready**.
-4. **For idea / spec** → suggests the single next pipeline stage (`brainstorming` / `writing-plans`) and confirms.
+4. **For idea / spec** → suggests the single next pipeline stage (`brainstorming` for an idea; `plan-design` for a `prd` / `reqs`; `writing-plans` for a `design` / `spec`) and confirms.
 5. **For execution-ready** → offers **all three execution engines at once**, recommended first. The recommendation comes from the plan's _shape_ (tier 2); the user picks how hands-off to be. All options are always listed, plus a manual escape hatch.
 6. **Marks the plan `in-progress`** (`file-meta set --status in-progress --agent ''`) when it hands off to any skill — not on manual-steer — so it leaves this list and enters `plan-done`'s finish list. Clearing `Agent` in the same call keeps groundcrew from also claiming a plan you're now driving yourself. **Then hands off** via the `Skill` tool. The plan content is already in conversation context, so no explicit payload is needed. For `autonomous:autonomous`, the in-context plan _is_ the Task — no issue URL or `Ticket:` lookup.
 
