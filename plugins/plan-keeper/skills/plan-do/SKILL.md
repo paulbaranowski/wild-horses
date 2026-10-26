@@ -144,7 +144,7 @@ Which planner depends on the `Kind`:
 
 When `Kind` is absent (step 4b inferred "spec" from the content), suggest `superpowers:writing-plans`, the route such plans took before `plan-design` existed.
 
-> I read `<filename>` as a **spec** (`Kind: <kind>`). Suggested next: `<plan-design | superpowers:writing-plans>` to turn it into <a structured design document | a phased implementation plan>. Proceed? (Or steer manually.)
+> I read `<filename>` as a **spec** (`Kind: <kind>`). Suggested next: `<plan-keeper:plan-design | superpowers:writing-plans>` to turn it into <a structured design document | a phased implementation plan>. Proceed? (Or steer manually.)
 
 Wait for confirmation, then jump to step 6.
 
@@ -233,7 +233,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" file-meta set \
 - **`harness:task-list-builder`** — invoke it to convert the plan into the structured JSON task list; it hands off to `harness:task-list-runner` to execute the tasks.
 - **`superpowers:executing-plans`** — invoke directly; the plan in context is the implementation plan it executes.
 - **`superpowers:brainstorming` / `superpowers:writing-plans`** — invoke directly (the idea / spec paths).
-- **`plan-design`** — invoke directly (the `prd` / `reqs` path); the plan read in step 3 is its brief.
+- **`plan-keeper:plan-design`** — invoke directly (the `prd` / `reqs` path); the plan read in step 3 is its brief.
 
 If the user picked a different skill than the suggestion or the recommended engine, invoke that one instead.
 

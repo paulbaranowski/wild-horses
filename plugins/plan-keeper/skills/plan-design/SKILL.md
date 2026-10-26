@@ -66,7 +66,7 @@ Read the draft once with fresh eyes and check:
 
 - **Placeholders.** No "TBD", no "fill in later", no section that describes what it should contain instead of containing it.
 - **Before/after symmetry.** Every "after" diagram answers the same question as its "before" — same components, same flow, same schema — or the difference is explained.
-- **Touch points exist.** Every path named in section 10 is a real file in the repository.
+- **Touch points exist.** Every path section 10 names as modified is a real file in the repository. Paths the change creates are labelled new, and their parent directory exists. This is what catches a stale or renamed path from the `Explore` digest.
 - **Deltas are complete.** Every column added, dropped, or changed appears in section 8; every method added, dropped, or changed appears in section 9.
 - **Omitted sections.** Sections 8 and 9 are absent rather than empty when they do not apply.
 
@@ -81,7 +81,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/plan_keeper_cli.py" save \
   --topic "<the document's H1>" \
   --kind design \
   <<'EOF'
-<the document, verbatim — no preamble, no footer>
+<the document, verbatim — no frontmatter, no preamble, no footer; the CLI writes the frontmatter>
 EOF
 ```
 
@@ -91,7 +91,7 @@ Report the path and the `Kind` you assigned, so the user can correct the Kind in
 
 ## Section contract
 
-Ahead of the numbered sections the document opens with **Decisions to make** — unnumbered, because it is conditional and a number would shift every other section's number depending on whether it is present. One entry per open fork: the question in product terms, the options with what a reader would see under each, a recommendation, what follows from it, and a **Mechanics** block. Omitted entirely when nothing is open.
+**Decisions to make** sits between the TLDR and section 2 — unnumbered, because it is conditional and a number would shift every other section's number depending on whether it is present. One entry per open fork: the question in product terms, the options with what a reader would see under each, a recommendation, what follows from it, and a **Mechanics** block. Omitted entirely when nothing is open.
 
 | #  | Section                     | Rule                                                          |
 | -- | --------------------------- | ------------------------------------------------------------- |
