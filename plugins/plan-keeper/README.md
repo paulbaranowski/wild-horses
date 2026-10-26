@@ -2,7 +2,7 @@
 
 plan-keeper is a local **task-management system** built around plans. A task _is_ a plan file, living in `~/plans/<repo>/` — outside every checkout of the repo, so it's tied to the repo's identity rather than to any one worktree. That decoupling is the whole point: spin up a fresh `git worktree add` to work a plan, delete it once the PR lands, and the plan itself (its status, its history) never moved. plan-keeper supports a variety of plan types, capturing, routing, and archiving each one as it moves from idea to shipped code. Everything is tracked locally in markdown on your machine, never committed to any repo; filing a plan out to Linear or Jira is an occasional export, not the system of record.
 
-Ten skills cover the lifecycle: list a repo's plans read-only (`plan-list`), capture from conversation (`plan-save`), pick up and route to the next step (`plan-do`), split one plan into dependency-wired slices (`plan-split`), archive with a completion stamp (`plan-done`), archive every plan that already shipped (`plan-clean`), edit frontmatter (`plan-update`), manage the groundcrew dispatch queue (`plan-crew`), and file plans as Linear or Jira tickets (`plan-linear`, `plan-jira`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine. Nothing is committed to any repo.
+Eleven skills cover the lifecycle: list a repo's plans read-only (`plan-list`), capture from conversation (`plan-save`), author a structured design document (`plan-design`), pick up and route to the next step (`plan-do`), split one plan into dependency-wired slices (`plan-split`), archive with a completion stamp (`plan-done`), archive every plan that already shipped (`plan-clean`), edit frontmatter (`plan-update`), manage the groundcrew dispatch queue (`plan-crew`), and file plans as Linear or Jira tickets (`plan-linear`, `plan-jira`). All share a bundled CLI and a `~/plans/<repo>/` tree that's local to your machine. Nothing is committed to any repo.
 
 ## The model
 
@@ -26,7 +26,7 @@ plan-keeper is the system of record for these tasks — they live in `~/plans/<r
 
 Two install paths — pick by what you need:
 
-**Plugin**: the ten skills plus the bundled CLI script, loaded into Claude Code:
+**Plugin**: the eleven skills plus the bundled CLI script, loaded into Claude Code:
 
 ```text
 /plugin install plan-keeper@wild-horses
@@ -46,6 +46,7 @@ The binary is the same tool the plugin's bundled CLI script provides, just deliv
 | ---------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **[`plan-list`](skills/plan-list/)**     | Lists    | Read-only inventory of a repo's plans, grouped by `Status` (in-progress / in-review / todo / backlog), newest-first. Shows what's there and stops — no body read, no mutation. `--state done`/`deferred` for the archives.                                                                                                                                                                                                                           |
 | **[`plan-save`](skills/plan-save/)**     | Captures | Writes the latest plan from the current conversation to `~/plans/<repo>/<YYYY-MM-DD>-<topic>.md`.                                                                                                                                                                                                                                                                                                                                                    |
+| **[`plan-design`](skills/plan-design/)** | Designs  | Authors a structured, code-grounded design document — TLDR, goals, non-goals, requirements, paired before/after architecture and data-flow diagrams, DB and RPC/API deltas, touch points, trade-offs, risks, rollout, verification — and saves it as a `Kind: design` plan. Dispatches an `Explore` agent so the "before" halves come from real code. Documents decisions rather than making them: `grill-me` decides. |
 | **[`plan-do`](skills/plan-do/)**         | Routes   | Lists not-yet-started plans for the current repo, classifies readiness (idea / spec / execution-ready), and routes to the matching next skill. Execution-ready plans get all three execution engines (autonomous / task-list-builder / executing-plans), recommended-first by plan shape. Before handing off, it fast-forwards an _untouched_ worktree (clean + no commits ahead) onto its base branch so work starts on the latest `main`/`master`. |
 | **[`plan-split`](skills/plan-split/)**   | Splits   | Decomposes one plan into N independently-grabbable vertical-slice plans (tracer bullets), wired with native `Blocked-by:` dependencies and staged at `todo` (queue them via `plan-crew` to stamp each one's `Agent:` tag — then groundcrew dispatches the wave in dependency order). Marks the source plan `done` when it was a saved file.                                                                                                          |
 | **[`plan-done`](skills/plan-done/)**     | Archives | Moves a completed plan to `~/plans/<repo>/done/` and appends a `*Completed: YYYY-MM-DD*` stamp.                                                                                                                                                                                                                                                                                                                                                      |
@@ -62,7 +63,8 @@ All skills are model-invoked by description — no slash command is required. Tr
 ```text
 conversation ──► plan-save ──► ~/plans/<repo>/*.md ──► plan-do ──► (next skill)
                           idea            ─► superpowers:brainstorming
-                          spec            ─► superpowers:writing-plans
+                          prd / reqs      ─► plan-design ──► design ──► superpowers:writing-plans
+                          design / spec   ─► superpowers:writing-plans
                           execution-ready ─► menu (recommended first):
                                 ├─► autonomous:autonomous                           (AFK ──► PR)
                                 ├─► harness:task-list-builder ──► task-list-runner  (dispatched tasks)
@@ -238,6 +240,7 @@ A PreToolUse hook (`hooks/hooks.json`) auto-approves `python3 .../plan_keeper_cl
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `skills/plan-list/SKILL.md`        | Instructions for the read-only listing flow                                                                                          |
 | `skills/plan-save/SKILL.md`        | Instructions for the save flow                                                                                                       |
+| `skills/plan-design/SKILL.md`      | Instructions for the author-a-design-document flow                                                                                   |
 | `skills/plan-do/SKILL.md`          | Instructions for the list-and-route flow                                                                                             |
 | `skills/plan-split/SKILL.md`       | Instructions for the decompose-into-dependency-wired-slices flow                                                                     |
 | `skills/plan-clean/SKILL.md`       | Instructions for the check-every-plan-and-archive-the-complete-ones flow                                                             |
